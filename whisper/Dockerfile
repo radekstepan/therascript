@@ -28,8 +28,9 @@ RUN python3 -m venv /app/env \
 # Copy application code
 COPY index.js whisperRunner.js transcribe.py ./
 
-# Set environment to use virtualenv's Python
-ENV PATH="/app/env/bin:$PATH"
+# Set environment to use virtualenv's Python and Whisper cache
+ENV PATH="/app/env/bin:$PATH" \
+    XDG_CACHE_HOME="/root/.cache"
 
 # Command to run the app
 ENTRYPOINT ["node", "index.js"]

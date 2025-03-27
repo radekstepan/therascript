@@ -21,7 +21,11 @@ Then build and run the command.
 
 ```sh
 docker build -t therascript/whisper .
-docker run --gpus all --rm -v $(pwd)/demo/session.mp3:/input.mp3 -v $(pwd)/output:/app/output therascript/whisper --file /input.mp3 --model tiny
+docker run --gpus all --rm \
+  -v $(pwd)/demo/session.mp3:/input.mp3 \
+  -v $(pwd)/output:/app/output \
+  -v $(pwd)/models:/root/.cache \
+  therascript/whisper --file /input.mp3 --model tiny
 ```
 
 ### Debug
