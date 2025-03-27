@@ -1,9 +1,10 @@
 const WhisperRunner = require("./whisperRunner");
 const path = require("path");
+
 const argv = require("minimist")(process.argv.slice(2));
 
 // Parse command-line arguments
-const audioFile = argv.file ? path.resolve(argv.file) : path.resolve(__dirname, "session.mp3");
+const audioFile = path.resolve(argv.file);
 const modelName = argv.model || "medium";
 const outputDir = argv.output ? path.resolve(argv.output) : path.resolve(__dirname, "output");
 

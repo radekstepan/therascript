@@ -1,9 +1,15 @@
 {
-  "name": "whisper",
+  "name": "@therascript/whisper",
   "version": "1.0.0",
+  "description": "A Node.js wrapper for Whisper audio transcription",
   "main": "index.js",
   "license": "MIT",
   "dependencies": {
     "minimist": "^1.2.8"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "setup": "yarn && ./setup.sh",
+    "test": "node index.js --file ./demo/session.mp3 --model medium --output ./output"
   }
 }

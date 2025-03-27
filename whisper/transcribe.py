@@ -8,7 +8,7 @@ def transcribe_audio(file_path, model_name, output_dir):
     print(f"Loading model: {model_name}", flush=True)
     model = whisper.load_model(model_name)
     print("Transcription started...", flush=True)
-    result = model.transcribe(file_path, verbose=True)
+    result = model.transcribe(file_path, language="en", verbose=True)
     output_file = os.path.join(output_dir, f"{os.path.splitext(os.path.basename(file_path))[0]}.json")
     with open(output_file, "w") as f:
         json.dump(result, f, indent=4)
