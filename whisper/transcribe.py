@@ -23,9 +23,12 @@ def get_audio_duration(file_path):
     result = subprocess.run(cmd, capture_output=True, text=True)
     return float(result.stdout.strip()) if result.returncode == 0 else 0
 
-def transcribe_audio(file_path, model_name, output_dir):
+def transcribe_audio(file_path, output_file, model_name):
     global should_exit
-    os.makedirs(output_dir, exist_ok=True)
+
+    output_dir = os.path.dirname(output_file)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
 
     # Get audio duration
     duration = get_audio_duration(file_path)
@@ -50,7 +53,6 @@ def transcribe_audio(file_path, model_name, output_dir):
         sys.exit(1)
     
     # Save result
-    output_file = os.path.join(output_dir, f"{os.path.splitext(os.path.basename(file_path))[0]}.json")
     with open(output_file, "w") as f:
         json.dump(result, f, indent=4)
     
@@ -73,7 +75,7 @@ if __name__ == "__main__":
         print(json.dumps(error_message), file=sys.stderr, flush=True)
         sys.exit(1)
     else:
-        gpu_name = torch.cuda.get_device_name(0) #
+        gpu_name = torch.cuda.get_device_name(0)
         print(json.dumps({
             "status": "info",
             "code": "cuda_available",
@@ -83,15 +85,15 @@ if __name__ == "__main__":
     if len(sys.argv) != 4:
         print(json.dumps({
             "status": "error",
-            "message": "Please provide audio file path, model name, and output directory",
-            "usage": "python3 transcribe.py <audio_file> <model_name> <output_dir>"
+            "message": "Please provide input audio file path, output file path, and model name",
+            "usage": "python3 transcribe.py <input_audio_file> <output_file> <model_name>"
         }), file=sys.stderr, flush=True)
         sys.exit(1)
     
     audio_file = sys.argv[1]
-    model_name = sys.argv[2]
-    output_dir = sys.argv[3]
-    
+    output_file = sys.argv[2]
+    model_name = sys.argv[3]
+
     if not os.path.isfile(audio_file):
         print(json.dumps({
             "status": "error",
@@ -99,4 +101,4 @@ if __name__ == "__main__":
         }), file=sys.stderr, flush=True)
         sys.exit(1)
     
-    transcribe_audio(audio_file, model_name, output_dir)
+    transcribe_audio(audio_file, output_file, model_name)

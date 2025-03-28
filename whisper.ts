@@ -1,12 +1,12 @@
 import { spawn, ChildProcess } from "node:child_process";
-import { resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { exec } from "node:child_process";
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync, unlinkSync } from "node:fs";
 
 interface JobConfig {
   audioFile: string;
+  outputFile: string;
   modelName: string;
-  outputDir: string;
 }
 
 interface JobStatus {
@@ -54,16 +54,22 @@ class WhisperAPI {
     });
   }
 
-  public async startJob({ audioFile, modelName, outputDir }: JobConfig): Promise<JobHandle> {
+  public async startJob({ audioFile, outputFile, modelName }: JobConfig): Promise<JobHandle> {
     this.gpuErrorDetected = false;
 
-    if (!audioFile || !modelName || !outputDir) {
-      throw new Error("Missing required arguments: audioFile, modelName, or outputDir");
+    if (!audioFile || !outputFile || !modelName) {
+      throw new Error("Missing required arguments: audioFile, outputFile, or modelName");
     }
 
     const audioPath: string = resolve(audioFile);
-    const outputPath: string = resolve(outputDir);
+    const outputPath: string = resolve(outputFile);
     const cachePath: string = resolve("./whisper/models");
+
+    const outputDirOnHost = dirname(outputPath);
+    if (outputDirOnHost && !existsSync(outputDirOnHost)) {
+        console.log(`Creating output directory on host: ${outputDirOnHost}`);
+        mkdirSync(outputDirOnHost, { recursive: true });
+    }
 
     // Check for existing container_id.txt and clean up if necessary
     if (existsSync(this.cidFile)) {
@@ -77,13 +83,18 @@ class WhisperAPI {
       unlinkSync(this.cidFile);
     }
 
+    const outputFilenameInContainer = basename(outputPath);
+    const outputDirMountPath = "/app/output"; // Target directory *inside* container
+
     const args = [
       "run", "--gpus", "all", "--init", "--rm", "--cidfile", "container_id.txt",
       "-v", `${audioPath}:/input.mp3`,
-      "-v", `${outputPath}:/app/output`,
+      "-v", `${outputDirOnHost}:${outputDirMountPath}`,
       "-v", `${cachePath}:/root/.cache`,
       "therascript/whisper",
-      "/input.mp3", modelName, "/app/output"
+      "/input.mp3",
+      `${outputDirMountPath}/${outputFilenameInContainer}`,
+      modelName
     ];
 
     const process: ChildProcess = spawn("docker", args, { stdio: ["ignore", "pipe", "pipe"] });
@@ -213,10 +224,16 @@ const demo = async () => {
   // Example usage
   try {
     const api = new WhisperAPI();
-    const { promise, cancel, onStatus } = await api.startJob({
-      audioFile: "/home/radek/dev/therascript/whisper/demo/session.mp3",
+
+    // Path relative from project root (where whisper.ts is) to the demo audio file
+    const relativeAudioPath = "whisper/demo/session.mp3";
+    // Path relative from project root to the desired output file
+    const relativeOutputPath = "whisper/output/transcript.json";
+
+    const {promise, cancel, onStatus} = await api.startJob({
+      audioFile: resolve(__dirname, relativeAudioPath),
+      outputFile: resolve(__dirname, relativeOutputPath),
       modelName: "tiny",
-      outputDir: "/home/radek/dev/therascript/whisper/output",
     });
 
     onStatus((status: JobStatus) => {

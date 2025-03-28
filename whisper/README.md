@@ -21,10 +21,9 @@ Then build and run the command.
 docker build -t therascript/whisper .
 docker run --gpus all --rm \
   -v $(pwd)/demo/session.mp3:/input.mp3 \
-  -v $(pwd)/output:/app/output \
+  -v $(pwd)/output/transcript.json:/transcript.json \
   -v $(pwd)/models:/root/.cache \
-  # args: audio_file, model_name, output_dir
-  therascript/whisper /input.mp3 tiny /app/output
+  therascript/whisper /input.mp3 /transcript.json tiny
 ```
 
 ### Debug
