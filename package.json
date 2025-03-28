@@ -1,0 +1,16 @@
+{
+  "name": "therascript",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "repository": "git@github.com:radekstepan/therascript.git",
+  "author": "Radek Stepan <dev@radekstepan.com>",
+  "license": "MIT",
+  "scripts": {
+    "demo": "npx ts-node whisper.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.14",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.2"
+  }
+}

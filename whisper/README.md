@@ -1,10 +1,8 @@
 # Whisper Transcription
 
-A Node.js wrapper for running OpenAI's Whisper audio transcription, packaged as a Docker container.
+A Python-based Docker container for running OpenAI's Whisper audio transcription.
 
-https://grok.com/chat/bc019118-683d-4e6c-b743-5e877c577523
-
-Install GPU support inside WSL.
+Install NVIDIA Container Toolkit for GPU support inside WSL.
 
 ```sh
 curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
@@ -25,7 +23,8 @@ docker run --gpus all --rm \
   -v $(pwd)/demo/session.mp3:/input.mp3 \
   -v $(pwd)/output:/app/output \
   -v $(pwd)/models:/root/.cache \
-  therascript/whisper --file /input.mp3 --model tiny
+  # args: audio_file, model_name, output_dir
+  therascript/whisper /input.mp3 tiny /app/output
 ```
 
 ### Debug
