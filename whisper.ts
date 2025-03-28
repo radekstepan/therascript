@@ -11,9 +11,9 @@ interface JobConfig {
 
 interface JobStatus {
   status: "info" | "loading" | "started" | "progress" | "completed" | "canceled" | "error";
+  code?: string;
   message?: string;
   progress?: number;
-  duration?: number;
   result?: any;
 }
 
@@ -25,6 +25,7 @@ interface JobHandle {
 
 class WhisperAPI {
   private readonly cidFile: string = "container_id.txt";
+  private gpuErrorDetected: boolean = false;
 
   private isContainerRunning(containerId: string): Promise<boolean> {
     return new Promise((resolve) => {
@@ -54,6 +55,8 @@ class WhisperAPI {
   }
 
   public async startJob({ audioFile, modelName, outputDir }: JobConfig): Promise<JobHandle> {
+    this.gpuErrorDetected = false;
+
     if (!audioFile || !modelName || !outputDir) {
       throw new Error("Missing required arguments: audioFile, modelName, or outputDir");
     }
@@ -121,8 +124,8 @@ class WhisperAPI {
       for (const line of lines) {
         try {
           const status: JobStatus = JSON.parse(line);
-          if (status.status === "info" && status.duration) {
-            audioDuration = status.duration;
+          if (status.status === "info" && status.code === "audio_duration" && status.message?.length) {
+            audioDuration = parseInt(status.message, 10);
           }
           statusCallbacks.forEach((cb) => cb(status));
         } catch (e) {
@@ -137,7 +140,25 @@ class WhisperAPI {
     });
 
     process.stderr?.on("data", (data: Buffer) => {
-      console.error("STDERR:", data.toString("utf8").trim());
+      const errorText = data.toString("utf8").trim();
+    
+      // Attempt to parse the error text as JSON
+      try {
+        const errorStatus: JobStatus = JSON.parse(errorText);
+        if (errorStatus.status === "error") {
+          // If it's the specific GPU error, set the flag
+          if (errorStatus.code === "cuda_not_available") {
+            this.gpuErrorDetected = true;
+            return;
+          }
+          // Emit the specific error status through callbacks
+          statusCallbacks.forEach((cb) => cb(errorStatus));
+        }
+      } catch (e) {
+        // If it's not JSON, ignore the parsing error (it's just regular stderr output)
+      }
+
+      console.error("STDERR:", errorText); // Keep logging raw stderr
     });
 
     const promise: Promise<string> = new Promise((resolve, reject) => {
@@ -145,8 +166,13 @@ class WhisperAPI {
         if (existsSync(this.cidFile)) {
           unlinkSync(this.cidFile); // Clean up after completion
         }
-        if (code === 0) resolve(outputData);
-        else reject(new Error(`Exited with code ${code}`));
+        if (code === 0) {
+          resolve(outputData);
+        } else if (this.gpuErrorDetected) {
+          reject(new Error("CUDA (GPU) is not available"));
+        } else {
+          reject(new Error(`Exited with code ${code}`));
+        }
       });
     });
 
@@ -194,23 +220,29 @@ const demo = async () => {
     });
 
     onStatus((status: JobStatus) => {
-      switch (status.status) {
-        case "info":
-          console.log(`Audio duration: ${status.duration}s`);
+      switch (true) {
+        case status.status === "info" && status.code === "audio_duration":
+          console.log(`Audio duration: ${status.message}s`);
           break;
-        case "loading":
+        case status.status === "info" && status.code === "cuda_available":
+          console.log(`CUDA (GPU) is available: ${status.message}`);
+          break;
+        case status.status === "info":
+          console.log(status.message);
+          break;
+        case status.status === "loading":
           console.log("Model is loading...");
           break;
-        case "progress":
+        case status.status === "progress":
           console.log(`Transcription progress: ${status.progress}%`);
           break;
-        case "completed":
+        case status.status === "completed":
           console.log("Transcription done!");
           break;
-        case "canceled":
+        case status.status === "canceled":
           console.log("Job was canceled.");
           break;
-        case "error":
+        case status.status === "error":
           console.error("Error:", status.message);
           break;
       }

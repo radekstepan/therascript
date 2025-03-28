@@ -4,6 +4,7 @@ import json
 import signal
 import subprocess
 import whisper
+import torch
 
 # Global flag for cancellation
 should_exit = False
@@ -28,7 +29,11 @@ def transcribe_audio(file_path, model_name, output_dir):
 
     # Get audio duration
     duration = get_audio_duration(file_path)
-    print(json.dumps({"status": "info", "duration": duration, "message": f"Audio duration: {duration}s"}), flush=True)
+    print(json.dumps({
+        "status": "info",
+        "code": "audio_duration",
+        "message": str(duration)
+    }), flush=True)
 
     # Notify model loading start
     print(json.dumps({"status": "loading", "message": f"Loading model: {model_name}"}), flush=True)
@@ -58,6 +63,23 @@ def transcribe_audio(file_path, model_name, output_dir):
 if __name__ == "__main__":
     signal.signal(signal.SIGTERM, signal_handler)
     
+    # Check that we have a GPU
+    if not torch.cuda.is_available():
+        error_message = {
+            "status": "error",
+            "code": "cuda_not_available",
+            "message": "CUDA (GPU) is not available. Exiting. Ensure NVIDIA drivers and CUDA-enabled PyTorch are installed.",
+        }
+        print(json.dumps(error_message), file=sys.stderr, flush=True)
+        sys.exit(1)
+    else:
+        gpu_name = torch.cuda.get_device_name(0) #
+        print(json.dumps({
+            "status": "info",
+            "code": "cuda_available",
+            "message": gpu_name
+        }), flush=True)
+
     if len(sys.argv) != 4:
         print(json.dumps({
             "status": "error",
