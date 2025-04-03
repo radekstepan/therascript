@@ -1,4 +1,4 @@
-// src/types.ts
+export type View = 'landing' | 'session';
 
 export interface ChatMessage {
   id: number;
@@ -7,10 +7,29 @@ export interface ChatMessage {
   starred?: boolean; // Optional property
 }
 
+
 export interface ChatSession {
   id: number;
   timestamp: number; // Unix timestamp (milliseconds)
+  name?: string; // Optional user-defined name for the chat
   messages: ChatMessage[];
+}
+
+// Add new handler props to SessionViewProps
+export interface SessionViewProps {
+    sessionId: number;
+    activeChatId: number | null;
+    setActiveChatIdHandler: (chatId: number | null) => void;
+    pastSessions: Session[];
+    navigateBack: () => void;
+    chatHandlers: ChatHandlers;
+    onSaveMetadata: (sessionId: number, updatedMetadata: Omit<Session, 'id' | 'fileName' | 'transcription' | 'chats'>) => void;
+    onSaveTranscript: (sessionId: number, newTranscript: string) => void;
+    starredMessages: Pick<ChatMessage, 'id' | 'text'>[];
+    onStarMessage: (chatId: number, messageId: number, messageText: string, shouldStar: boolean) => void;
+    // Add new props
+    onStartNewChat: (sessionId: number) => void;
+    onRenameChat: (sessionId: number, chatId: number, newName: string) => void;
 }
 
 export interface SessionMetadata {

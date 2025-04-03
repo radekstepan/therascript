@@ -1,25 +1,21 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 
-// Import Components (using alias defined in tsconfig/webpack)
+// Import Components
 import { LandingPage } from './components/LandingPage';
 import { SessionView } from './components/SessionView';
 import { UploadModal } from './components/UploadModal';
 
 // Import Data, Types, Constants, Helpers
-import { SAMPLE_SESSIONS } from './sampleData'; // Import sample data
-import type { Session, ChatMessage, ChatSession, SessionMetadata, ChatHandlers } from './types';
-// Constants and helpers are not directly used in App render, but needed for logic below
-// import { SESSION_TYPES, THERAPY_TYPES } from './constants';
-// import { getTodayDateString, formatTimestamp } from './helpers';
+import { SAMPLE_SESSIONS } from './sampleData';
+// Make sure View type is imported or defined here
+import type { Session, ChatMessage, ChatSession, SessionMetadata, ChatHandlers, View, SessionViewProps } from './types'; // Add View, SessionViewProps
 
 function App() {
-    type View = 'landing' | 'session';
-
-    // --- State ---
+    // Use the imported View type for state
     const [view, setView] = useState<View>('landing');
     const [activeSessionId, setActiveSessionId] = useState<number | null>(null);
     const [activeChatId, setActiveChatId] = useState<number | null>(null);
-    const [pastSessions, setPastSessions] = useState<Session[]>(SAMPLE_SESSIONS); // Initialize with sample data
+    const [pastSessions, setPastSessions] = useState<Session[]>(SAMPLE_SESSIONS);
     const [isTranscribing, setIsTranscribing] = useState(false);
     const [transcriptionError, setTranscriptionError] = useState('');
     const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
@@ -34,7 +30,6 @@ function App() {
     const [starredMessages, setStarredMessages] = useState<Pick<ChatMessage, 'id' | 'text'>[]>([]);
 
     // --- Effects ---
-
     // Effect to initialize the global starred messages list from pastSessions data on mount
     useEffect(() => {
         const allStarred: Pick<ChatMessage, 'id' | 'text'>[] = [];
@@ -57,7 +52,7 @@ function App() {
 
     // --- Navigation Callbacks ---
     const navigateBack = useCallback(() => {
-        setView('landing');
+        setView('landing'); // Always go back to landing page from Session view
         setActiveSessionId(null);
         setActiveChatId(null);
         // Reset chat state when navigating back to the landing page
@@ -164,6 +159,64 @@ function App() {
          console.log(`Messages saved for chat ${chatId} in session ${sessionId}`);
     }, []);
 
+    // --- NEW: Start New Chat Handler ---
+    const handleStartNewChat = useCallback((sessionId: number) => {
+        const session = pastSessions.find(s => s.id === sessionId);
+        if (!session) {
+            console.error("Cannot start new chat: Session not found.");
+            setChatError("Error: Could not find the current session.");
+            return;
+        }
+
+        const newChatId = Date.now();
+        const initialMessageId = newChatId + 1;
+        const newChat: ChatSession = {
+            id: newChatId,
+            timestamp: Date.now(),
+            // name: "New Chat", // Optionally set a default name
+            messages: [
+                { id: initialMessageId, sender: 'ai', text: "New chat started." }
+            ]
+        };
+
+        // Add the new chat structure to the session
+        setPastSessions(prevSessions =>
+            prevSessions.map(s =>
+                s.id === sessionId
+                    ? { ...s, chats: [...(s.chats || []), newChat] }
+                    : s
+            )
+        );
+
+        // Switch to the new chat
+        setActiveChatId(newChatId);
+        // Reset chat state for the new chat
+        setCurrentChatMessages(newChat.messages); // Show the initial message
+        setCurrentQuery('');
+        setChatError('');
+        setIsChatting(false);
+        console.log(`Started new chat (${newChatId}) for session ${sessionId}`);
+
+    }, [pastSessions]); // Dependency on pastSessions to find the session
+
+    // --- NEW: Rename Chat Handler ---
+    const handleRenameChat = useCallback((sessionId: number, chatId: number, newName: string) => {
+        setPastSessions(prevSessions =>
+            prevSessions.map(session => {
+                if (session.id === sessionId) {
+                    const updatedChats = (session.chats || []).map(chat =>
+                        chat.id === chatId
+                            ? { ...chat, name: newName.trim() || undefined } // Set name, or undefined if empty after trim
+                            : chat
+                    );
+                    return { ...session, chats: updatedChats };
+                }
+                return session;
+            })
+        );
+        console.log(`Renamed chat ${chatId} in session ${sessionId} to: ${newName.trim()}`);
+    }, []); // No dependencies needed
+
     // Handle starting the transcription process (simulated)
     const handleStartTranscription = useCallback(async (file: File, metadata: SessionMetadata): Promise<void> => {
         setIsTranscribing(true);
@@ -221,60 +274,30 @@ function App() {
 
     // --- Chat Interaction Callbacks ---
 
-    // Handle submitting a message from the chat input
+    // --- MODIFIED: handleChatSubmit ---
     const handleChatSubmit = useCallback(async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
-        event.preventDefault(); // Prevent default form submission
+        event.preventDefault();
         const session = pastSessions.find(s => s.id === activeSessionId);
 
         // --- Input Validation ---
-        if (!currentQuery.trim()) {
-            setChatError("Cannot send an empty message.");
-            return;
-        }
-        if (isChatting) {
-            setChatError("Please wait for the previous response to complete.");
-            return;
-        }
-        if (!session) {
-             setChatError("Error: No active session found.");
+        if (!currentQuery.trim()) { setChatError("Cannot send an empty message."); return; }
+        if (isChatting) { setChatError("Please wait for the previous response."); return; }
+        if (!session) { setChatError("Error: No active session found."); return; }
+        // --- Ensure a chat is active ---
+        if (activeChatId === null) {
+             setChatError("Please start a new chat or select a past chat before sending a message.");
              return;
+         }
+
+        // Find the existing active chat
+        const existingChat = session.chats?.find(c => c.id === activeChatId);
+        if (!existingChat) {
+            setChatError(`Error: Active chat (ID: ${activeChatId}) not found in session. Please select another chat or start a new one.`);
+            setActiveChatId(null); // Reset active chat ID as it's invalid
+            return;
         }
 
-        let targetChatId = activeChatId;
-        let currentMessages: ChatMessage[] = [];
-        let isNewChat = false;
-
-        // --- Determine Target Chat and Messages ---
-        if (targetChatId !== null) {
-            // Find the existing active chat
-            const existingChat = session.chats?.find(c => c.id === targetChatId);
-            if (existingChat) {
-                currentMessages = existingChat.messages || [];
-            } else {
-                 console.warn(`Active chat ID ${targetChatId} set, but chat not found in session ${session.id}. Creating new chat.`);
-                 targetChatId = null; // Force creation of a new chat
-            }
-        }
-
-        if (targetChatId === null) {
-            // Create a new chat session if none is active
-            isNewChat = true;
-            targetChatId = Date.now(); // Generate new ID for the chat
-            console.log(`Creating new chat session with ID: ${targetChatId}`);
-            const newChatStructure: ChatSession = { id: targetChatId, timestamp: Date.now(), messages: [] };
-
-            // Immediately add the *structure* of the new chat to the session state
-            // This ensures saveChatMessagesInternal finds the chat later
-            setPastSessions(prevSessions =>
-                prevSessions.map(s =>
-                    s.id === activeSessionId
-                        ? { ...s, chats: [...(s.chats || []), newChatStructure] }
-                        : s
-                )
-            );
-            setActiveChatId(targetChatId); // Set the new chat as active *after* updating state
-            currentMessages = []; // Start with empty messages for the new chat
-        }
+        const currentMessages = existingChat.messages || [];
 
         // --- Prepare and Send User Message ---
         const userMessageId = Date.now() + 1; // Simple unique ID generation
@@ -302,7 +325,8 @@ function App() {
             setCurrentChatMessages(finalMessages);
 
             // Save the complete conversation (user + AI) to the main state
-            saveChatMessagesInternal(activeSessionId!, targetChatId, finalMessages);
+            // Use non-null assertion as we checked activeChatId and activeSessionId above
+            saveChatMessagesInternal(activeSessionId!, activeChatId!, finalMessages);
 
         } catch (error) {
             console.error("Chat API simulation error:", error);
@@ -315,7 +339,7 @@ function App() {
 
     }, [
         currentQuery, isChatting, activeSessionId, activeChatId, pastSessions,
-        setActiveChatId, saveChatMessagesInternal // Include all dependencies
+        saveChatMessagesInternal // Dependencies
     ]);
 
     // Handle starring or unstarring a message
@@ -396,7 +420,7 @@ function App() {
             {/* Header */}
             <header style={{ padding: '1rem 1.5rem', borderBottom: '1px solid #e5e7eb', backgroundColor: '#ffffff', flexShrink: 0 }}>
                 <h1 style={{ fontSize: '1.5rem', fontWeight: 'bold', textAlign: 'center', color: '#111827' }}>
-                     Therapy Session Analyzer (Webpack)
+                     Therapy Session Analyzer
                  </h1>
             </header>
 
@@ -426,11 +450,14 @@ function App() {
                         onSaveTranscript={saveTranscript}
                         starredMessages={starredMessages} // Pass global list
                         onStarMessage={handleStarMessage} // Pass star handler
+                        // Pass new handlers
+                        onStartNewChat={handleStartNewChat}
+                        onRenameChat={handleRenameChat}
                     />
                 )}
                  {/* Handle case where view is 'session' but ID is null (shouldn't normally happen) */}
                  {view === 'session' && activeSessionId === null && (
-                    <div className="text-center text-red-500 p-10">Error: Session view requested but no session ID is active.</div>
+                    <div className="text-center text-red-500 p-10">Error: Session view requested but no session ID is active. <button onClick={navigateBack} className="text-blue-600 underline">Go Back</button></div>
                  )}
             </main>
 
