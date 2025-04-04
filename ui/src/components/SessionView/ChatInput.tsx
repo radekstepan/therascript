@@ -1,4 +1,3 @@
-// src/components/SessionView/ChatInput.tsx
 import React, { useState } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { Button } from '../ui/Button';
@@ -28,7 +27,8 @@ export function ChatInput() {
 
     return (
         <>
-            <form onSubmit={onSubmit} className="relative flex space-x-2 flex-shrink-0 pt-2 border-t">
+            {/* FIX: Removed border-t class from the form */}
+            <form onSubmit={onSubmit} className="relative flex space-x-2 flex-shrink-0 pt-2">
                 <div className="relative">
                     <Button
                         type="button" variant="outline" size="icon"

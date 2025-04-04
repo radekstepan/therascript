@@ -1,4 +1,3 @@
-// src/components/SessionView/ChatHeader.tsx
 import React, { useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { CardHeader, CardTitle } from '../ui/Card';
@@ -41,7 +40,6 @@ export function ChatHeader({ activeChatId, onNewChatClick }: ChatHeaderProps) {
     const handleSaveRename = () => {
         if (renamingChatId !== null) {
             const trimmedName = editChatName.trim();
-             // Allow saving if name is non-empty OR if clearing an existing name
              if (trimmedName || activeChat?.name) {
                  renameChatAction({ chatId: renamingChatId, newName: trimmedName });
              }
@@ -52,7 +50,8 @@ export function ChatHeader({ activeChatId, onNewChatClick }: ChatHeaderProps) {
 
 
     return (
-        <CardHeader className="flex-shrink-0 flex flex-row justify-between items-center border-b gap-2">
+        // 6. Remove border-b
+        <CardHeader className="flex-shrink-0 flex flex-row justify-between items-center gap-2">
             {/* Title/Rename Section */}
             <div className="flex items-center gap-2 flex-grow min-w-0">
                 <MessageSquare className="h-5 w-5 text-blue-600 flex-shrink-0" />

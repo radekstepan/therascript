@@ -1,4 +1,3 @@
-// src/components/SessionView/Transcription.tsx
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
@@ -27,7 +26,8 @@ export function Transcription({
 
     return (
         <Card className="flex-grow flex flex-col min-h-0">
-            <CardHeader className="flex-shrink-0 flex flex-row items-center justify-between border-b">
+             {/* 6. Remove border-b */}
+            <CardHeader className="flex-shrink-0 flex flex-row items-center justify-between">
                 <CardTitle>Transcription</CardTitle>
                 <div className="space-x-2">
                     {!isEditing ? (
@@ -40,6 +40,8 @@ export function Transcription({
                     )}
                 </div>
             </CardHeader>
+             {/* Add border manually if needed between header and content */}
+             <hr className="border-gray-200" />
             <CardContent className="flex-grow pt-4 flex flex-col min-h-0">
                 {isEditing ? (
                     <Textarea

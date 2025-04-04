@@ -1,4 +1,3 @@
-// src/components/SessionView/SessionMetadata.tsx
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/Card';
 import { Input } from '../ui/Input';
@@ -32,7 +31,8 @@ export function SessionMetadata({
 
     return (
         <Card className="flex-shrink-0">
-            <CardHeader className="border-b">
+             {/* 6. Remove border-b */}
+            <CardHeader className="">
                 <CardTitle className="flex items-center">
                     Details: 
                     {isEditing ? (
@@ -47,6 +47,8 @@ export function SessionMetadata({
                     )}
                 </CardTitle>
             </CardHeader>
+            {/* Add border manually if needed between header and content */}
+            <hr className="border-gray-200" />
             <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3 pt-4 text-sm">
                 {/* Client Name */}
                 <div className="flex items-center space-x-2">

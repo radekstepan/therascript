@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useSetAtom } from 'jotai';
-import { useNavigate } from 'react-router-dom'; // Import useNavigate
+import { useNavigate } from 'react-router-dom';
 
 // Import UI components
 import { Button } from './ui/Button';
@@ -13,19 +13,19 @@ import { UploadCloud, Loader2, X } from './icons/Icons';
 import { SESSION_TYPES, THERAPY_TYPES } from '../constants';
 import { getTodayDateString } from '../helpers';
 // Import Types
-import type { SessionMetadata, UploadModalProps } from '../types'; // Use UploadModalProps
+import type { SessionMetadata, UploadModalProps } from '../types';
 // Import Atoms
 import {
     closeUploadModalAtom,
     handleStartTranscriptionAtom,
 } from '../store';
 
-export function UploadModal({ isOpen, isTranscribing, transcriptionError }: UploadModalProps) { // Use UploadModalProps
+export function UploadModal({ isOpen, isTranscribing, transcriptionError }: UploadModalProps) {
     const closeModal = useSetAtom(closeUploadModalAtom);
     const startTranscriptionAction = useSetAtom(handleStartTranscriptionAtom);
-    const navigate = useNavigate(); // Get navigate function
+    const navigate = useNavigate();
 
-    // --- Local UI State (useState is appropriate here) ---
+    // --- Local UI State ---
     const [dragActive, setDragActive] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [modalFile, setModalFile] = useState<File | null>(null);
@@ -50,12 +50,12 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
 
     useEffect(() => {
         if (isOpen) {
-            resetModal(); // Reset local form state when modal becomes visible
+            resetModal();
         }
     }, [isOpen, resetModal]);
 
 
-    // --- Event Handlers (Mostly managing local state or triggering atom actions) ---
+    // --- Event Handlers ---
 
     const handleDrag = (e: React.DragEvent<HTMLDivElement>) => {
         e.preventDefault();
@@ -71,7 +71,7 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
             setSessionNameInput(file.name.replace(/\.[^/.]+$/, ""));
         } else {
             setModalFile(null);
-            setSessionNameInput(''); // Clear name if file is invalid/removed
+            setSessionNameInput('');
             if (file) alert('Invalid file type. Please upload an MP3 audio file.');
         }
         if (fileInputRef.current) fileInputRef.current.value = '';
@@ -95,38 +95,30 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
         if (!modalFile && !isTranscribing) fileInputRef.current?.click();
     };
 
-    const handleStartClick = async () => { // Make async
+    const handleStartClick = async () => {
         if (modalFile && clientNameInput.trim() && sessionNameInput.trim() && sessionDate && sessionTypeInput && therapyInput) {
             const metadata: SessionMetadata = {
                 clientName: clientNameInput.trim(), sessionName: sessionNameInput.trim(),
                 date: sessionDate, sessionType: sessionTypeInput, therapy: therapyInput
             };
-            // Call the Jotai action atom and wait for result
             const result = await startTranscriptionAction({ file: modalFile, metadata });
 
-            // Navigate on success
             if (result.success) {
-                // Navigate to the new session, specifically its first chat
                 navigate(`/sessions/${result.newSessionId}/chats/${result.newChatId}`);
-                // Modal closing is handled within the atom now
             }
-            // Error display is handled by transcriptionErrorAtom read by the component
         } else {
              let missingFields = [];
              if (!modalFile) missingFields.push("Audio File (.mp3)");
              if (!clientNameInput.trim()) missingFields.push("Client Name");
              if (!sessionNameInput.trim()) missingFields.push("Session Name");
-             // Add checks for date, type, therapy if needed
              alert(`Please fill in all required fields: ${missingFields.join(', ')}`);
         }
     };
 
-    // Use the Jotai action atom for closing
     const handleCloseAttempt = useCallback(() => {
-         closeModal(); // This atom's logic already checks isTranscribing
+         closeModal();
     }, [closeModal]);
 
-    // Close modal on Escape key
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
             if (event.key === 'Escape') handleCloseAttempt();
@@ -136,10 +128,8 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
     }, [isOpen, handleCloseAttempt]);
 
 
-    // Return null if the modal is not open (controlled by prop from App -> atom value)
     if (!isOpen) return null;
 
-    // --- Dynamic classes (no change needed) ---
     const dropAreaClasses = `border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors duration-200 ease-in-out flex flex-col items-center justify-center space-y-2 min-h-[10rem] ${
         isTranscribing ? 'bg-gray-100 cursor-not-allowed' :
         dragActive ? 'border-blue-500 bg-blue-50' :
@@ -149,23 +139,20 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
 
 
     return (
-        // Modal backdrop
         <div
             className="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center p-4"
-            onClick={handleCloseAttempt} // Uses atom action
+            onClick={handleCloseAttempt}
         >
-            {/* Modal content */}
             <div
-                className="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 relative space-y-4"
+                className="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 relative space-y-4" // Existing space-y-4
                 onClick={(e) => e.stopPropagation()}
                 onDragEnter={handleDrag}
             >
-                {/* Close Button */}
                 <Button
                     variant="ghost" size="icon"
                     className="absolute top-2 right-2 text-gray-500 hover:text-gray-800"
-                    onClick={handleCloseAttempt} // Uses atom action
-                    disabled={isTranscribing} // Use prop value
+                    onClick={handleCloseAttempt}
+                    disabled={isTranscribing}
                     aria-label="Close upload modal"
                  >
                     <X size={20} />
@@ -173,7 +160,6 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
 
                 <h2 className="text-xl font-semibold mb-4 text-center">Upload New Session</h2>
 
-                {/* Drag and Drop Area (uses local state + isTranscribing prop) */}
                 <div
                     className={dropAreaClasses.trim()}
                     onDragEnter={handleDrag} onDragLeave={handleDrag}
@@ -195,15 +181,14 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
                         <Button variant="link" size="sm" className="text-xs text-red-600 mt-1 h-auto p-0"
                             onClick={(e: any) => {
                                 e.stopPropagation();
-                                setModalFile(null); // Local state
-                                setSessionNameInput(''); // Local state
-                                // handleFileSelection(null); // No need to call this again
+                                setModalFile(null);
+                                setSessionNameInput('');
                             }} > Change file </Button>
                     )}
                 </div>
 
-                {/* Metadata Input Fields (uses local state) */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* 5. Add padding around the grid (e.g., pt-4) or adjust overall space-y */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2"> {/* Added pt-2 */}
                     <div>
                         <Label htmlFor="clientNameModal" className="mb-1 block">Client Name</Label>
                         <Input id="clientNameModal" type="text" placeholder="Client's Full Name" value={clientNameInput} onChange={(e: any) => setClientNameInput(e.target.value)} disabled={isTranscribing} required />
@@ -230,16 +215,14 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
                     </div>
                 </div>
 
-                {/* Submit Button (triggers atom action) */}
                 <Button
                     className="w-full"
-                    onClick={handleStartClick} // Triggers startTranscription atom
+                    onClick={handleStartClick}
                     disabled={!modalFile || !clientNameInput.trim() || !sessionNameInput.trim() || !sessionDate || !sessionTypeInput || !therapyInput || isTranscribing}
                 >
                     {isTranscribing ? ( <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Transcribing...</> ) : ( 'Upload & Transcribe Session' )}
                 </Button>
 
-                {/* Error Message Area (uses prop) */}
                 {transcriptionError && (
                     <div className="mt-2 text-center text-red-600 text-sm">
                         Error: {transcriptionError}
