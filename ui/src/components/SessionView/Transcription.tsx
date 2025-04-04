@@ -1,54 +1,45 @@
-import React from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '../ui/Card';
-import { Button } from '../ui/Button';
+import React from 'react'; // Add explicit React import
+// Use standard UI components
 import { Textarea } from '../ui/Textarea';
 import { ScrollArea } from '../ui/ScrollArea';
-import { Edit, Save } from '../icons/Icons';
+// Import types
 import type { Session } from '../../types';
 
+// Props interface
 interface TranscriptionProps {
     session: Session;
     isEditing: boolean;
     editTranscriptContent: string;
-    onEditToggle: () => void;
-    onSave: () => void;
     onContentChange: (value: string) => void;
+    onEditToggle: () => void; // Keep props from parent
+    onSave: () => void;       // Keep props from parent
 }
 
 export function Transcription({
     session,
     isEditing,
     editTranscriptContent,
-    onEditToggle,
-    onSave,
-    onContentChange
+    onContentChange,
+    // onEditToggle and onSave are passed but not directly used here
+    // The buttons controlling them are in the parent SessionView
 }: TranscriptionProps) {
 
+    // Add check for session prop
+     if (!session) {
+        return <div className="text-gray-500 italic">Loading transcript...</div>; // Or null
+    }
+
     return (
-        <Card className="flex-grow flex flex-col min-h-0">
-             {/* 6. Remove border-b */}
-            <CardHeader className="flex-shrink-0 flex flex-row items-center justify-between">
-                <CardTitle>Transcription</CardTitle>
-                <div className="space-x-2">
-                    {!isEditing ? (
-                        <Button onClick={onEditToggle} variant="outline" size="sm"><Edit className="mr-2 h-4 w-4" /> Edit</Button>
-                    ) : (
-                        <>
-                            <Button onClick={onSave} variant="default" size="sm"><Save className="mr-2 h-4 w-4" /> Save</Button>
-                            <Button onClick={onEditToggle} variant="secondary" size="sm">Cancel</Button>
-                        </>
-                    )}
-                </div>
-            </CardHeader>
-             {/* Add border manually if needed between header and content */}
-             <hr className="border-gray-200" />
-            <CardContent className="flex-grow pt-4 flex flex-col min-h-0">
+        <div className="flex-grow flex flex-col min-h-0 space-y-4">
+             <h2 className="text-xl font-semibold flex-shrink-0">Transcription</h2>
+            <div className="flex-grow flex flex-col min-h-0">
                 {isEditing ? (
                     <Textarea
                         value={editTranscriptContent}
                         onChange={(e: any) => onContentChange(e.target.value)}
-                        className="flex-grow w-full whitespace-pre-wrap text-sm font-mono"
+                        className="flex-grow w-full whitespace-pre-wrap text-sm font-mono border border-gray-300 rounded-md p-3"
                         placeholder="Enter or paste transcription here..."
+                        autoFocus
                     />
                 ) : (
                     <ScrollArea className="flex-grow border rounded-md">
@@ -57,7 +48,7 @@ export function Transcription({
                         </pre>
                     </ScrollArea>
                 )}
-            </CardContent>
-        </Card>
+            </div>
+        </div>
     );
 }

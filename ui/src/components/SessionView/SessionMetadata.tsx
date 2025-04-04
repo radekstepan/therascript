@@ -1,12 +1,15 @@
-import React from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '../ui/Card';
+import React from 'react'; // Add explicit React import
+// Use standard UI components directly
 import { Input } from '../ui/Input';
 import { Label } from '../ui/Label';
 import { Select } from '../ui/Select';
+// Import icons
 import { User, CalendarDays, Tag, BookMarked, FileText } from '../icons/Icons';
+// Import constants and types
 import { SESSION_TYPES, THERAPY_TYPES } from '../../constants';
 import type { Session } from '../../types';
 
+// Props interface
 interface SessionMetadataProps {
     session: Session;
     isEditing: boolean;
@@ -29,27 +32,29 @@ export function SessionMetadata({
     onEditNameChange, onEditClientNameChange, onEditDateChange, onEditTypeChange, onEditTherapyChange
 }: SessionMetadataProps) {
 
+    // It's possible the error occurs if derivedSession is null initially.
+    // Add a check, although SessionView should handle this.
+    if (!session) {
+        return <div className="text-gray-500 italic">Loading details...</div>; // Or null
+    }
+
     return (
-        <Card className="flex-shrink-0">
-             {/* 6. Remove border-b */}
-            <CardHeader className="">
-                <CardTitle className="flex items-center">
-                    Details: 
-                    {isEditing ? (
-                        <Input
-                            value={editName}
-                            onChange={(e: any) => onEditNameChange(e.target.value)}
-                            placeholder="Session Name"
-                            className="text-lg font-semibold leading-none tracking-tight h-9 inline-block w-auto ml-1 flex-grow"
-                        />
-                    ) : (
-                        <span className="ml-1">{session.sessionName || session.fileName}</span>
-                    )}
-                </CardTitle>
-            </CardHeader>
-            {/* Add border manually if needed between header and content */}
-            <hr className="border-gray-200" />
-            <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3 pt-4 text-sm">
+        <div className="space-y-4">
+             <h2 className="text-xl font-semibold flex items-center">
+                Details: 
+                {isEditing ? (
+                    <Input
+                        value={editName}
+                        onChange={(e: any) => onEditNameChange(e.target.value)}
+                        placeholder="Session Name"
+                        className="text-xl font-semibold h-auto inline-block w-auto ml-1 flex-grow p-0 border-0 focus-visible:ring-0 focus-visible:outline-none"
+                        autoFocus
+                    />
+                ) : (
+                    <span className="ml-1 font-semibold">{session.sessionName || session.fileName}</span>
+                )}
+             </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 text-sm pt-2">
                 {/* Client Name */}
                 <div className="flex items-center space-x-2">
                     <User className="h-4 w-4 text-gray-500 flex-shrink-0" />
@@ -58,8 +63,8 @@ export function SessionMetadata({
                         <Input id="clientNameEditView" value={editClientName} onChange={(e: any) => onEditClientNameChange(e.target.value)} placeholder="Client Name" className="text-sm h-8 flex-grow" />
                     ) : (<span className="font-medium">{session.clientName || 'N/A'}</span>)}
                 </div>
-                {/* Date */}
-                <div className="flex items-center space-x-2">
+                 {/* Date */}
+                 <div className="flex items-center space-x-2">
                     <CalendarDays className="h-4 w-4 text-gray-500 flex-shrink-0" />
                     <Label htmlFor="sessionDateEditView" className="w-16 flex-shrink-0">Date:</Label>
                     {isEditing ? (
@@ -93,7 +98,7 @@ export function SessionMetadata({
                         <span>Original file: {session.fileName}</span>
                     </div>
                 )}
-            </CardContent>
-        </Card>
+            </div>
+        </div>
     );
 }

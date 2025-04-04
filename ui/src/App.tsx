@@ -1,28 +1,25 @@
+// src/App.tsx
 import React from 'react';
 import { useAtomValue } from 'jotai';
-import { Routes, Route, Navigate } from 'react-router-dom'; // Import routing components
+import { Routes, Route, Navigate } from 'react-router-dom'; // No Outlet needed
 
 // Import Components
 import { LandingPage } from './components/LandingPage';
-import { SessionView } from './components/SessionView';
+import { SessionView } from './components/SessionView'; // Renders all sections
+// Remove sub-component imports here
 import { UploadModal } from './components/UploadModal';
 
-// Import Atoms (only those needed by App itself, like modal state)
+// Import Atoms
 import {
-    // viewAtom, // No longer needed for routing
-    // activeSessionIdAtom, // SessionView will handle this via params
     isUploadModalOpenAtom,
     isTranscribingAtom,
     transcriptionErrorAtom
 } from './store';
 
 function App() {
-    // Read state needed directly by App (like modal state)
     const isModalOpen = useAtomValue(isUploadModalOpenAtom);
     const isTranscribing = useAtomValue(isTranscribingAtom);
     const transcriptionError = useAtomValue(transcriptionErrorAtom);
-
-    // Logic previously handled by viewAtom is now managed by Routes
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', backgroundColor: '#f8fafc' }}>
@@ -33,25 +30,21 @@ function App() {
                  </h1>
             </header>
 
-            {/* Main Content Area using Routes */}
-            <main style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', padding: '1.5rem', overflowY: 'auto' }}>
+            {/* Main Content Area */}
+            <main style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
                 <Routes>
-                    {/* Route for the landing page */}
                     <Route path="/" element={<LandingPage />} />
 
-                    {/* Route for a specific session (defaults to latest chat or no chat if none exist) */}
+                    {/* Route for session, defaulting to latest chat (handled in SessionView) */}
                     <Route path="/sessions/:sessionId" element={<SessionView />} />
-
-                    {/* Route for a specific session AND a specific chat */}
+                    {/* Route for specific session and chat */}
                     <Route path="/sessions/:sessionId/chats/:chatId" element={<SessionView />} />
 
-                    {/* Optional: Redirect any unknown paths back to landing */}
+                    {/* Redirect any other unknown paths back to landing */}
                     <Route path="*" element={<Navigate replace to="/" />} />
                 </Routes>
             </main>
 
-            {/* Upload Modal - state managed by atoms, rendered conditionally */}
-            {/* Pass props needed for display */}
             <UploadModal
                 isOpen={isModalOpen}
                 isTranscribing={isTranscribing}
