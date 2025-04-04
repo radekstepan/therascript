@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useSetAtom } from 'jotai';
+import { useNavigate } from 'react-router-dom'; // Import useNavigate
 
 // Import UI components
 import { Button } from './ui/Button';
@@ -12,28 +13,17 @@ import { UploadCloud, Loader2, X } from './icons/Icons';
 import { SESSION_TYPES, THERAPY_TYPES } from '../constants';
 import { getTodayDateString } from '../helpers';
 // Import Types
-import type { SessionMetadata } from '../types';
+import type { SessionMetadata, UploadModalProps } from '../types'; // Use UploadModalProps
 // Import Atoms
 import {
     closeUploadModalAtom,
     handleStartTranscriptionAtom,
-    // Removed isOpen, isTranscribing, transcriptionError from imports
-} from '../store'; // Adjust path
+} from '../store';
 
-// Props type UploadModalProps is removed
-
-// Add props back for state read from App.tsx (or read directly via useAtomValue)
-interface UploadModalDisplayProps {
-    isOpen: boolean;
-    isTranscribing: boolean;
-    transcriptionError: string;
-}
-
-
-export function UploadModal({ isOpen, isTranscribing, transcriptionError }: UploadModalDisplayProps) { // Keep display props
-    // Get setters for actions
+export function UploadModal({ isOpen, isTranscribing, transcriptionError }: UploadModalProps) { // Use UploadModalProps
     const closeModal = useSetAtom(closeUploadModalAtom);
-    const startTranscription = useSetAtom(handleStartTranscriptionAtom);
+    const startTranscriptionAction = useSetAtom(handleStartTranscriptionAtom);
+    const navigate = useNavigate(); // Get navigate function
 
     // --- Local UI State (useState is appropriate here) ---
     const [dragActive, setDragActive] = useState(false);
@@ -81,6 +71,7 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
             setSessionNameInput(file.name.replace(/\.[^/.]+$/, ""));
         } else {
             setModalFile(null);
+            setSessionNameInput(''); // Clear name if file is invalid/removed
             if (file) alert('Invalid file type. Please upload an MP3 audio file.');
         }
         if (fileInputRef.current) fileInputRef.current.value = '';
@@ -104,20 +95,28 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
         if (!modalFile && !isTranscribing) fileInputRef.current?.click();
     };
 
-    const handleStartClick = () => {
+    const handleStartClick = async () => { // Make async
         if (modalFile && clientNameInput.trim() && sessionNameInput.trim() && sessionDate && sessionTypeInput && therapyInput) {
             const metadata: SessionMetadata = {
                 clientName: clientNameInput.trim(), sessionName: sessionNameInput.trim(),
                 date: sessionDate, sessionType: sessionTypeInput, therapy: therapyInput
             };
-            // Call the Jotai action atom
-            startTranscription({ file: modalFile, metadata });
+            // Call the Jotai action atom and wait for result
+            const result = await startTranscriptionAction({ file: modalFile, metadata });
+
+            // Navigate on success
+            if (result.success) {
+                // Navigate to the new session, specifically its first chat
+                navigate(`/sessions/${result.newSessionId}/chats/${result.newChatId}`);
+                // Modal closing is handled within the atom now
+            }
+            // Error display is handled by transcriptionErrorAtom read by the component
         } else {
              let missingFields = [];
              if (!modalFile) missingFields.push("Audio File (.mp3)");
              if (!clientNameInput.trim()) missingFields.push("Client Name");
              if (!sessionNameInput.trim()) missingFields.push("Session Name");
-             // ... etc ...
+             // Add checks for date, type, therapy if needed
              alert(`Please fill in all required fields: ${missingFields.join(', ')}`);
         }
     };
@@ -141,7 +140,12 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
     if (!isOpen) return null;
 
     // --- Dynamic classes (no change needed) ---
-    const dropAreaClasses = `...`; // Keep existing logic based on props/local state
+    const dropAreaClasses = `border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors duration-200 ease-in-out flex flex-col items-center justify-center space-y-2 min-h-[10rem] ${
+        isTranscribing ? 'bg-gray-100 cursor-not-allowed' :
+        dragActive ? 'border-blue-500 bg-blue-50' :
+        modalFile ? 'border-green-500 bg-green-50' :
+        'border-gray-300 hover:border-gray-400'
+    }`;
 
 
     return (
@@ -176,7 +180,6 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
                     onDragOver={handleDrag} onDrop={handleDrop}
                     onClick={handleUploadAreaClick}
                 >
-                     {/* ... unchanged inner content using local state (modalFile, dragActive) and prop (isTranscribing) ... */}
                      <input
                         ref={fileInputRef} type="file" accept="audio/mpeg" className="hidden"
                         onChange={handleFileChange}

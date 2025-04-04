@@ -1,5 +1,6 @@
 import React from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
+import { useNavigate } from 'react-router-dom'; // Import useNavigate
 
 // Import UI Components
 import { Button } from './ui/Button';
@@ -8,16 +9,19 @@ import { ScrollArea } from './ui/ScrollArea';
 // Import Icons
 import { History, PlusCircle, FileText } from './icons/Icons';
 // Import Atoms
-import { pastSessionsAtom, navigateToSessionAtom, openUploadModalAtom } from '../store'; // Adjust path
-// Removed LandingPageProps type import
+import { pastSessionsAtom, /*navigateToSessionAtom,*/ openUploadModalAtom } from '../store'; // Remove navigateToSessionAtom
 
-export function LandingPage() { // Remove props destructuring
-  // Read data from atoms
+export function LandingPage() {
   const pastSessions = useAtomValue(pastSessionsAtom);
-
-  // Get setter functions for actions
-  const navigateToSession = useSetAtom(navigateToSessionAtom);
   const openUploadModal = useSetAtom(openUploadModalAtom);
+  // const navigateToSessionAction = useSetAtom(navigateToSessionAtom); // Remove atom action
+  const navigate = useNavigate(); // Get navigate function
+
+  const handleSessionClick = (sessionId: number) => {
+      // Use react-router's navigate function
+      navigate(`/sessions/${sessionId}`);
+      // The atom logic for setting activeSessionId/activeChatId will now live in SessionView's useEffect
+  };
 
   return (
     <div className="w-full max-w-4xl mx-auto flex-grow flex flex-col">
@@ -40,6 +44,7 @@ export function LandingPage() { // Remove props destructuring
             </CardHeader>
             <CardContent className="flex-grow flex flex-col space-y-2 overflow-hidden p-0">
                 {pastSessions.length === 0 ? (
+                    // ... (no changes needed here)
                     <div className="flex-grow flex items-center justify-center p-4">
                          <p className="text-center text-gray-500 py-4">
                             No sessions found. Upload one to get started!
@@ -47,6 +52,7 @@ export function LandingPage() { // Remove props destructuring
                     </div>
                 ) : (
                     <div className="flex-grow flex flex-col overflow-hidden p-4 space-y-3">
+                        {/* ... (no changes needed here) */}
                         <p className="text-sm text-gray-500 flex-shrink-0">
                             Select a session to view its details and analysis.
                         </p>
@@ -57,11 +63,14 @@ export function LandingPage() { // Remove props destructuring
                                         <li key={session.id}>
                                             <Button
                                                 variant="ghost"
-                                                onClick={() => navigateToSession(session.id)} // Use atom setter
+                                                // onClick={() => navigateToSessionAction(session.id)} // Use handleSessionClick instead
+                                                onClick={() => handleSessionClick(session.id)}
                                                 className="w-full justify-between text-left h-auto py-2 px-3 text-gray-700 hover:bg-gray-100"
                                                 title={`Load: ${session.sessionName || session.fileName}`}
                                             >
+                                                {/* ... (rest of the button content unchanged) ... */}
                                                 <div className="flex items-center space-x-3 overflow-hidden mr-2">
+                                                    {/* ... icon and text ... */}
                                                     <FileText className="h-5 w-5 flex-shrink-0 text-gray-500"/>
                                                     <div className="flex flex-col overflow-hidden">
                                                         <span className="font-medium truncate">{session.sessionName || session.fileName}</span>

@@ -1,30 +1,28 @@
 import React from 'react';
 import { useAtomValue } from 'jotai';
+import { Routes, Route, Navigate } from 'react-router-dom'; // Import routing components
 
 // Import Components
 import { LandingPage } from './components/LandingPage';
 import { SessionView } from './components/SessionView';
 import { UploadModal } from './components/UploadModal';
 
-// Import Atoms
+// Import Atoms (only those needed by App itself, like modal state)
 import {
-    viewAtom,
-    activeSessionIdAtom,
+    // viewAtom, // No longer needed for routing
+    // activeSessionIdAtom, // SessionView will handle this via params
     isUploadModalOpenAtom,
     isTranscribingAtom,
     transcriptionErrorAtom
-} from './store'; // Adjust path if needed
+} from './store';
 
 function App() {
-    // Read state directly from atoms
-    const view = useAtomValue(viewAtom);
-    const activeSessionId = useAtomValue(activeSessionIdAtom);
+    // Read state needed directly by App (like modal state)
     const isModalOpen = useAtomValue(isUploadModalOpenAtom);
     const isTranscribing = useAtomValue(isTranscribingAtom);
     const transcriptionError = useAtomValue(transcriptionErrorAtom);
 
-    // Removed all useState hooks and callback definitions (navigateBack, navigateToSession, etc.)
-    // Logic is now encapsulated within the write atoms in store.ts
+    // Logic previously handled by viewAtom is now managed by Routes
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', backgroundColor: '#f8fafc' }}>
@@ -35,21 +33,25 @@ function App() {
                  </h1>
             </header>
 
-            {/* Main Content Area */}
+            {/* Main Content Area using Routes */}
             <main style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', padding: '1.5rem', overflowY: 'auto' }}>
-                {view === 'landing' && <LandingPage />}
-                {/* Conditionally render SessionView based on view and activeSessionId */}
-                {view === 'session' && activeSessionId !== null && (
-                    <SessionView key={activeSessionId} /> // Pass key for re-mounting on session change
-                )}
-                 {/* Handle case where view is 'session' but ID is null (shouldn't normally happen with atom logic) */}
-                 {view === 'session' && activeSessionId === null && (
-                     // This state should ideally be prevented by the navigation atoms logic
-                    <div className="text-center text-red-500 p-10">Error: Session view active but no session ID. This indicates a state inconsistency.</div>
-                 )}
+                <Routes>
+                    {/* Route for the landing page */}
+                    <Route path="/" element={<LandingPage />} />
+
+                    {/* Route for a specific session (defaults to latest chat or no chat if none exist) */}
+                    <Route path="/sessions/:sessionId" element={<SessionView />} />
+
+                    {/* Route for a specific session AND a specific chat */}
+                    <Route path="/sessions/:sessionId/chats/:chatId" element={<SessionView />} />
+
+                    {/* Optional: Redirect any unknown paths back to landing */}
+                    <Route path="*" element={<Navigate replace to="/" />} />
+                </Routes>
             </main>
 
-            {/* Upload Modal - Reads its state directly from atoms */}
+            {/* Upload Modal - state managed by atoms, rendered conditionally */}
+            {/* Pass props needed for display */}
             <UploadModal
                 isOpen={isModalOpen}
                 isTranscribing={isTranscribing}

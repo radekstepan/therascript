@@ -1,37 +1,30 @@
-// src/store.ts
 import { atom } from 'jotai';
 import { SAMPLE_SESSIONS } from './sampleData';
-import type { View, Session, ChatMessage, ChatSession, SessionMetadata } from './types';
+import type { Session, ChatMessage, ChatSession, SessionMetadata } from './types';
 import { getTodayDateString } from './helpers';
 
 // --- Core State Atoms ---
 
-// View control (landing or session)
-export const viewAtom = atom<View>('landing');
-
 // All session data
 export const pastSessionsAtom = atom<Session[]>(SAMPLE_SESSIONS);
 
-// ID of the currently active session
+// ID of the currently active session (Set by SessionView based on URL)
 export const activeSessionIdAtom = atom<number | null>(null);
 
-// ID of the currently active chat within the active session
+// ID of the currently active chat within the active session (Set by SessionView based on URL)
 export const activeChatIdAtom = atom<number | null>(null);
 
-// --- Upload Modal State Atoms ---
+// --- Upload Modal State Atoms --- (No change)
 export const isUploadModalOpenAtom = atom(false);
 export const isTranscribingAtom = atom(false);
 export const transcriptionErrorAtom = atom('');
 
-// --- Chat State Atoms ---
-// User's current input in the chat box
+// --- Chat State Atoms --- (No change)
 export const currentQueryAtom = atom('');
-// Loading state during AI response generation
 export const isChattingAtom = atom(false);
-// Error message related to chat interaction
 export const chatErrorAtom = atom('');
 
-// --- Derived Read Atoms ---
+// --- Derived Read Atoms --- (No change)
 
 // Get the full Session object for the active session ID
 export const activeSessionAtom = atom<Session | null>((get) => {
@@ -79,51 +72,10 @@ export const starredMessagesAtom = atom<Pick<ChatMessage, 'id' | 'text'>[]>((get
 
 // --- Write Atoms (Actions) ---
 
-// Action to navigate to a specific session
-export const navigateToSessionAtom = atom(
-  null, // No read function needed
-  (get, set, sessionId: number) => {
-    const sessions = get(pastSessionsAtom);
-    const session = sessions.find(s => s.id === sessionId);
-    if (session) {
-      set(activeSessionIdAtom, sessionId);
-      // Default to the latest chat or null if none exist
-      let initialChatId: number | null = null;
-      if (Array.isArray(session.chats) && session.chats.length > 0) {
-          const latestChat = [...session.chats].sort((a, b) => b.timestamp - a.timestamp)[0];
-          initialChatId = latestChat.id;
-      }
-      set(activeChatIdAtom, initialChatId);
-      set(viewAtom, 'session');
-      // Reset chat-specific state
-      set(currentQueryAtom, '');
-      set(chatErrorAtom, '');
-      set(isChattingAtom, false);
-    } else {
-      console.error(`Session with ID ${sessionId} not found.`);
-      // Optionally navigate back or show an error
-       set(activeSessionIdAtom, null);
-       set(activeChatIdAtom, null);
-       set(viewAtom, 'landing');
-    }
-  }
-);
+// Removed navigateToSessionAtom
+// Removed navigateBackAtom
 
-// Action to navigate back to the landing page
-export const navigateBackAtom = atom(
-  null,
-  (get, set) => {
-    set(viewAtom, 'landing');
-    set(activeSessionIdAtom, null);
-    set(activeChatIdAtom, null);
-    // Reset chat state
-    set(currentQueryAtom, '');
-    set(chatErrorAtom, '');
-    set(isChattingAtom, false);
-  }
-);
-
-// Action to open the upload modal
+// Action to open the upload modal (No change)
 export const openUploadModalAtom = atom(
     null,
     (get, set) => {
@@ -132,7 +84,7 @@ export const openUploadModalAtom = atom(
     }
 );
 
-// Action to close the upload modal
+// Action to close the upload modal (No change)
 export const closeUploadModalAtom = atom(
     null,
     (get, set) => {
@@ -143,7 +95,8 @@ export const closeUploadModalAtom = atom(
     }
 );
 
-// Action to add a new session (typically after successful transcription)
+// Action to add a new session (No change in core logic)
+// The navigation will happen in the component calling handleStartTranscriptionAtom
 export const addSessionAtom = atom(
     null,
     (get, set, newSession: Session) => {
@@ -151,7 +104,7 @@ export const addSessionAtom = atom(
     }
 );
 
-// Action to update metadata for a specific session
+// Action to update metadata for a specific session (No change)
 export const updateSessionMetadataAtom = atom(
   null,
   (get, set, update: { sessionId: number; metadata: Omit<Session, 'id' | 'fileName' | 'transcription' | 'chats'> }) => {
@@ -164,7 +117,7 @@ export const updateSessionMetadataAtom = atom(
   }
 );
 
-// Action to save the transcript for a specific session
+// Action to save the transcript for a specific session (No change)
 export const saveTranscriptAtom = atom(
   null,
   (get, set, update: { sessionId: number; transcript: string }) => {
@@ -177,7 +130,7 @@ export const saveTranscriptAtom = atom(
   }
 );
 
-// Action to add a message to the currently active chat
+// Action to add a message to the currently active chat (No change)
 // Note: This directly modifies the main pastSessionsAtom
 export const addChatMessageAtom = atom(
     null,
@@ -216,7 +169,7 @@ export const addChatMessageAtom = atom(
 );
 
 
-// Action to star/unstar a message
+// Action to star/unstar a message (No change)
 export const starMessageAtom = atom(
     null,
     (get, set, payload: { chatId: number; messageId: number; shouldStar: boolean }) => {
@@ -252,18 +205,22 @@ export const starMessageAtom = atom(
 );
 
 // Action to start a new chat within the active session
-export const startNewChatAtom = atom(
-    null,
-    (get, set) => {
-        const sessionId = get(activeSessionIdAtom);
-        if (sessionId === null) {
-            console.error("Cannot start new chat: No active session.");
-            set(chatErrorAtom, "Error: Could not find the current session.");
-            return;
+// This atom NOW returns the ID of the newly created chat, so the component can navigate.
+// It receives the sessionId as an argument because activeSessionIdAtom might not be updated yet
+// when called immediately after navigation.
+type StartNewChatResult = { success: true; newChatId: number } | { success: false; error: string };
+export const startNewChatAtom = atom<null, [{ sessionId: number }], Promise<StartNewChatResult>>(
+    null, // Read function is null
+    async (get, set, { sessionId }) => { // async to potentially handle future async ops if needed
+        if (sessionId === null || isNaN(sessionId)) {
+             const error = "Error: Could not find the current session to start a new chat.";
+            console.error(error);
+            set(chatErrorAtom, error);
+            return { success: false, error };
         }
 
-        const newChatId = Date.now();
-        const initialMessageId = newChatId + 1; // Ensure uniqueness
+        const newChatId = Date.now(); // Use timestamp for unique ID
+        const initialMessageId = newChatId + 1;
         const newChat: ChatSession = {
             id: newChatId,
             timestamp: Date.now(),
@@ -272,24 +229,33 @@ export const startNewChatAtom = atom(
             ]
         };
 
+        let success = false;
         set(pastSessionsAtom, (prevSessions) =>
-            prevSessions.map(s =>
-                s.id === sessionId
-                    ? { ...s, chats: [...(Array.isArray(s.chats) ? s.chats : []), newChat] }
-                    : s
-            )
+            prevSessions.map(s => {
+                if (s.id === sessionId) {
+                    success = true; // Mark success if session was found and updated
+                    return { ...s, chats: [...(Array.isArray(s.chats) ? s.chats : []), newChat] };
+                }
+                return s;
+            })
         );
 
-        // Switch view to the new chat
-        set(activeChatIdAtom, newChatId);
-        set(currentQueryAtom, '');
-        set(chatErrorAtom, '');
-        set(isChattingAtom, false);
-        console.log(`Started new chat (${newChatId}) for session ${sessionId}`);
+        if (success) {
+            // Don't set activeChatIdAtom here - the component will navigate, causing re-render and effect run
+            // Don't set currentQueryAtom etc here - the effect in SessionView handles this on nav
+            console.log(`Created new chat (${newChatId}) for session ${sessionId}`);
+            return { success: true, newChatId: newChatId };
+        } else {
+             const error = `Error: Session ${sessionId} not found when trying to add new chat.`;
+             console.error(error);
+             set(chatErrorAtom, error);
+            return { success: false, error };
+        }
     }
 );
 
-// Action to rename a chat
+
+// Action to rename a chat (No change)
 export const renameChatAtom = atom(
     null,
     (get, set, payload: { chatId: number, newName: string }) => {
@@ -321,24 +287,24 @@ export const renameChatAtom = atom(
 // --- Complex Actions (Involving Async/Multiple State Updates) ---
 
 // Action to handle the transcription process
-export const handleStartTranscriptionAtom = atom(
-    null,
-    async (get, set, payload: { file: File, metadata: SessionMetadata }) => {
-        const { file, metadata } = payload;
+// Returns the new session ID and chat ID on success, so the calling component can navigate
+type TranscriptionResult = { success: true, newSessionId: number, newChatId: number } | { success: false, error: string };
+export const handleStartTranscriptionAtom = atom<null, [{ file: File, metadata: SessionMetadata }], Promise<TranscriptionResult>>(
+    null, // Read function is null
+    async (get, set, { file, metadata }) => {
         set(isTranscribingAtom, true);
         set(transcriptionErrorAtom, '');
         console.log("Starting transcription simulation for:", file.name, metadata);
 
         // Simulate network delay and processing time
         await new Promise(resolve => setTimeout(resolve, 1500 + Math.random() * 1000));
-
         const success = Math.random() > 0.1; // 90% chance of success
 
         if (success) {
             const dummyTranscription = `Therapist: Okay ${metadata.clientName}, let's begin session "${metadata.sessionName}" from ${metadata.date}. What's been on your mind?\nPatient: Well, it's been a challenging week...\nTherapist: Tell me more about that.\n(Simulated transcription content...)`;
             const newSessionId = Date.now();
-            const initialChatId = Date.now() + 1; // Unique IDs
-            const initialMessageId = Date.now() + 2;
+            const initialChatId = newSessionId + 1; // Unique IDs
+            const initialMessageId = newSessionId + 2;
 
             const initialChat: ChatSession = {
                 id: initialChatId,
@@ -349,7 +315,6 @@ export const handleStartTranscriptionAtom = atom(
                     text: `Session "${metadata.sessionName}" (${metadata.date}) transcribed and loaded. Ask me anything.`
                 }]
             };
-
             const newSession: Session = {
                 id: newSessionId,
                 fileName: file.name,
@@ -358,24 +323,24 @@ export const handleStartTranscriptionAtom = atom(
                 chats: [initialChat]
             };
 
-            // Use the addSessionAtom action
-            set(addSessionAtom, newSession);
-            set(isUploadModalOpenAtom, false);
+            set(addSessionAtom, newSession); // Add the session to the state
+            set(isUploadModalOpenAtom, false); // Close modal
+            set(isTranscribingAtom, false); // Stop loading
             console.log("Transcription successful. New session added:", newSessionId);
-
-            // Use the navigateToSessionAtom action after a short delay
-            setTimeout(() => set(navigateToSessionAtom, newSessionId), 50);
+            // Return success and the IDs so the component can navigate
+            return { success: true, newSessionId: newSessionId, newChatId: initialChatId };
 
         } else {
             const errorMsg = 'Simulated transcription failed. Please check the file or try again.';
             set(transcriptionErrorAtom, errorMsg);
+            set(isTranscribingAtom, false);
             console.error("Transcription failed (simulated).");
+            return { success: false, error: errorMsg };
         }
-        set(isTranscribingAtom, false);
     }
 );
 
-// Action to handle chat submission
+// Action to handle chat submission (No change in core logic)
 export const handleChatSubmitAtom = atom(
     null,
     async (get, set) => {
@@ -396,12 +361,13 @@ export const handleChatSubmitAtom = atom(
         const chat = get(activeChatAtom);
          if (!session || !chat) {
              set(chatErrorAtom, `Error: Active session or chat not found. Please select again.`);
-             set(activeChatIdAtom, null); // Reset potentially invalid chat ID
+             // Let the SessionView effect handle potential redirection if needed
+             // set(activeChatIdAtom, null); // Reset potentially invalid chat ID
              return;
          }
 
         // --- Prepare and Send User Message ---
-        const userMessageId = Date.now() + 1;
+        const userMessageId = Date.now() + 1; // Simple unique ID generation
         const newUserMessage: ChatMessage = { id: userMessageId, sender: 'user', text: query, starred: false };
 
         // Add user message optimistically using addChatMessageAtom
@@ -418,7 +384,7 @@ export const handleChatSubmitAtom = atom(
         try {
             // Simulate successful AI response
             const aiResponseText = `Simulated analysis of "${querySentToApi.substring(0, 50)}${querySentToApi.length > 50 ? '...' : ''}". Based on the transcript, the patient seems... [Simulated response]`;
-            const aiMessageId = Date.now() + 2;
+            const aiMessageId = Date.now() + 2; // Simple unique ID generation
             const aiResponseMessage: ChatMessage = { id: aiMessageId, sender: 'ai', text: aiResponseText };
 
             // Add AI response message using addChatMessageAtom
