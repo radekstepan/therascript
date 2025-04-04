@@ -1,102 +1,70 @@
+// src/types.ts
+
 export type View = 'landing' | 'session';
 
 export interface ChatMessage {
   id: number;
   sender: 'user' | 'ai';
   text: string;
-  starred?: boolean; // Optional property
+  starred?: boolean;
 }
-
 
 export interface ChatSession {
   id: number;
-  timestamp: number; // Unix timestamp (milliseconds)
-  name?: string; // Optional user-defined name for the chat
+  timestamp: number;
+  name?: string;
   messages: ChatMessage[];
-}
-
-// Add new handler props to SessionViewProps
-export interface SessionViewProps {
-    sessionId: number;
-    activeChatId: number | null;
-    setActiveChatIdHandler: (chatId: number | null) => void;
-    pastSessions: Session[];
-    navigateBack: () => void;
-    chatHandlers: ChatHandlers;
-    onSaveMetadata: (sessionId: number, updatedMetadata: Omit<Session, 'id' | 'fileName' | 'transcription' | 'chats'>) => void;
-    onSaveTranscript: (sessionId: number, newTranscript: string) => void;
-    starredMessages: Pick<ChatMessage, 'id' | 'text'>[];
-    onStarMessage: (chatId: number, messageId: number, messageText: string, shouldStar: boolean) => void;
-    // Add new props
-    onStartNewChat: (sessionId: number) => void;
-    onRenameChat: (sessionId: number, chatId: number, newName: string) => void;
 }
 
 export interface SessionMetadata {
   clientName: string;
   sessionName: string;
-  date: string; // Format: "YYYY-MM-DD"
+  date: string;
   sessionType: string;
   therapy: string;
 }
 
 export interface Session extends SessionMetadata {
-  id: number; // Unique session identifier
-  fileName: string; // Original uploaded filename
+  id: number;
+  fileName: string;
   transcription: string;
-  chats: ChatSession[]; // Array of chat conversations for this session
+  chats: ChatSession[];
 }
 
-// Props type for UploadModal component for better type safety
+// --- Component Props (Keep only props not handled by Jotai atoms) ---
+
+// No longer needs props managed by Jotai
+export interface LandingPageProps {
+    // Props removed: pastSessions, navigateToSession, openUploadModal
+}
+
+// No longer needs props managed by Jotai
+export interface SessionViewProps {
+    // Props removed: sessionId, activeChatId, setActiveChatIdHandler, pastSessions,
+    // navigateBack, chatHandlers, onSaveMetadata, onSaveTranscript,
+    // starredMessages, onStarMessage, onStartNewChat, onRenameChat
+}
+
+// Keep props that App needs to pass down for display/status
 export interface UploadModalProps {
     isOpen: boolean;
-    onClose: () => void;
-    onStartTranscription: (file: File, metadata: SessionMetadata) => Promise<void>; // Explicitly async
     isTranscribing: boolean;
     transcriptionError: string;
+    // Props removed: onClose, onStartTranscription
 }
 
-// Props type for LandingPage
-export interface LandingPageProps {
-  pastSessions: Session[];
-  navigateToSession: (sessionId: number) => void;
-  openUploadModal: () => void;
-}
-
-// Props type for StarredTemplates component
+// Keep props needed for interaction callbacks from SessionView
 export interface StarredTemplatesProps {
-    starredMessages: Pick<ChatMessage, 'id' | 'text'>[]; // Only need id and text
+    // Props removed: starredMessages
     onSelectTemplate: (text: string) => void;
-    onClose: () => void; // Function to close the template list
+    onClose: () => void;
 }
 
 
-// Define a type for the chat handlers passed down to SessionView
-export interface ChatHandlers {
-    chatMessages: ChatMessage[];
-    loadChatMessages: (messages: ChatMessage[]) => void;
-    currentQuery: string;
-    setCurrentQuery: React.Dispatch<React.SetStateAction<string>>;
-    isChatting: boolean;
-    chatError: string;
-    handleChatSubmit: (event: React.FormEvent<HTMLFormElement>) => Promise<void>; // Explicitly async
-}
+// --- Obsolete/Removed Types ---
+// export interface ChatHandlers { ... } // No longer needed as props are removed
 
-// Props type for SessionView
-export interface SessionViewProps {
-    sessionId: number;
-    activeChatId: number | null;
-    setActiveChatIdHandler: (chatId: number | null) => void;
-    pastSessions: Session[];
-    navigateBack: () => void;
-    chatHandlers: ChatHandlers;
-    onSaveMetadata: (sessionId: number, updatedMetadata: Omit<Session, 'id' | 'fileName' | 'transcription' | 'chats'>) => void;
-    onSaveTranscript: (sessionId: number, newTranscript: string) => void;
-    starredMessages: Pick<ChatMessage, 'id' | 'text'>[];
-    onStarMessage: (chatId: number, messageId: number, messageText: string, shouldStar: boolean) => void;
-}
-
-// Props for individual UI components (basic examples)
+// --- UI Component Prop Types (Unchanged) ---
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
     children: React.ReactNode;
     variant?: 'default' | 'secondary' | 'ghost' | 'destructive' | 'outline' | 'link';

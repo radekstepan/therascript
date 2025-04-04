@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
+
 // Import UI Components
 import { Button } from './ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/Card';
 import { Input } from './ui/Input';
 import { Label } from './ui/Label';
-// Remove Select import if no longer needed elsewhere
 import { Select } from './ui/Select';
 import { ScrollArea } from './ui/ScrollArea';
 import { Textarea } from './ui/Textarea';
@@ -12,35 +13,59 @@ import { Textarea } from './ui/Textarea';
 import {
     ArrowLeft, Edit, Save, User, CalendarDays, Tag, BookMarked,
     FileText, MessageSquare, Bot, Loader2, List, Star,
-    PlusCircle, Check, X // Add PlusCircle, Check, X
+    PlusCircle, Check, X
 } from './icons/Icons';
 // Import Other Components
 import { StarredTemplatesList } from './StarredTemplates';
-// Import Constants, Helpers, Types
+// Import Constants
 import { SESSION_TYPES, THERAPY_TYPES } from '../constants';
 import { formatTimestamp } from '../helpers';
-// Make sure SessionViewProps includes the new handlers
-import type { Session, ChatMessage, ChatSession, SessionViewProps } from '../types';
+// Import Types
+import type { ChatMessage, ChatSession } from '../types';
+// Import Atoms
+import {
+    activeSessionAtom, // Read the active session object
+    activeChatIdAtom, // Read/Set the active chat ID
+    activeChatAtom, // Read the active chat object
+    currentChatMessagesAtom, // Read messages for the active chat
+    currentQueryAtom, // Read/Set the chat input query
+    isChattingAtom, // Read chat loading state
+    chatErrorAtom, // Read chat error state
+    starredMessagesAtom, // Read global starred messages
+    navigateBackAtom, // Action atom
+    updateSessionMetadataAtom, // Action atom
+    saveTranscriptAtom, // Action atom
+    starMessageAtom, // Action atom
+    startNewChatAtom, // Action atom
+    renameChatAtom, // Action atom
+    handleChatSubmitAtom, // Action atom for chat submission
+} from '../store'; // Adjust path
 
-export function SessionView({
-    sessionId,
-    activeChatId,
-    setActiveChatIdHandler,
-    pastSessions,
-    navigateBack,
-    chatHandlers,
-    onSaveMetadata,
-    onSaveTranscript,
-    starredMessages,
-    onStarMessage,
-    // Receive new handlers
-    onStartNewChat,
-    onRenameChat
-}: SessionViewProps) {
-    const session = pastSessions.find(s => s.id === sessionId);
+// SessionViewProps is no longer needed
+
+export function SessionView() { // Removed props
+    // Read state from Jotai atoms
+    const session = useAtomValue(activeSessionAtom);
+    const [activeChatId, setActiveChatId] = useAtom(activeChatIdAtom); // Need setter for switching past chats
+    const activeChat = useAtomValue(activeChatAtom);
+    const chatMessages = useAtomValue(currentChatMessagesAtom);
+    const [currentQuery, setCurrentQuery] = useAtom(currentQueryAtom);
+    const isChatting = useAtomValue(isChattingAtom);
+    const chatError = useAtomValue(chatErrorAtom);
+    const starredMessages = useAtomValue(starredMessagesAtom); // Global list
+
+    // Get setter functions for Jotai actions
+    const navigateBack = useSetAtom(navigateBackAtom);
+    const updateMetadata = useSetAtom(updateSessionMetadataAtom);
+    const saveTranscript = useSetAtom(saveTranscriptAtom);
+    const starMessage = useSetAtom(starMessageAtom);
+    const startNewChat = useSetAtom(startNewChatAtom);
+    const renameChat = useSetAtom(renameChatAtom);
+    const handleChatSubmit = useSetAtom(handleChatSubmitAtom);
+
     const chatScrollRef = useRef<HTMLDivElement>(null);
 
-    // --- State ---
+    // --- Local UI State (useState remains appropriate here) ---
     const [isEditingMetadata, setIsEditingMetadata] = useState(false);
     const [editClientName, setEditClientName] = useState('');
     const [editName, setEditName] = useState('');
@@ -50,125 +75,119 @@ export function SessionView({
     const [isEditingTranscript, setIsEditingTranscript] = useState(false);
     const [editTranscriptContent, setEditTranscriptContent] = useState('');
     const [showTemplates, setShowTemplates] = useState(false);
-
-    // --- NEW: State for Chat Renaming ---
     const [renamingChatId, setRenamingChatId] = useState<number | null>(null);
     const [editChatName, setEditChatName] = useState('');
 
     // --- Effects ---
-    // Initialize metadata edit fields when session changes or editing starts
+    // Initialize local edit fields when session changes or editing starts/stops
     useEffect(() => {
-        if (session) {
+        if (session && !isEditingMetadata) {
             setEditClientName(session.clientName || '');
-            setEditName(session.sessionName || '');
+            setEditName(session.sessionName || session.fileName || ''); // Use fileName as fallback
             setEditDate(session.date || '');
-            setEditType(session.sessionType || SESSION_TYPES[0]); // Default if empty
-            setEditTherapy(session.therapy || THERAPY_TYPES[0]); // Default if empty
+            setEditType(session.sessionType || SESSION_TYPES[0]);
+            setEditTherapy(session.therapy || THERAPY_TYPES[0]);
         }
-    }, [session, isEditingMetadata]); // Re-run only when session or editing mode changes
+         // Reset if session becomes null (e.g., navigating back unexpectedly)
+        if (!session) {
+            setIsEditingMetadata(false);
+        }
+    }, [session, isEditingMetadata]);
 
-    // Initialize transcript edit field
-     useEffect(() => {
-         // Initialize or reset transcript content when session changes OR when editing *stops*
+    useEffect(() => {
         if (session && !isEditingTranscript) {
             setEditTranscriptContent(session.transcription || '');
         }
-         // Note: When editing starts, we *don't* want to reset from session here,
-         // allowing the user to continue editing potential unsaved changes.
-    }, [session, isEditingTranscript]); // Re-run when session or transcript edit mode changes
+         // Reset if session becomes null
+        if (!session) {
+             setIsEditingTranscript(false);
+         }
+    }, [session, isEditingTranscript]);
 
-     // Effect to scroll chat ScrollArea to the bottom when messages update
+    // Scroll chat to bottom when messages change
     useEffect(() => {
         if (chatScrollRef.current) {
-            // Scroll the referenced div to its maximum scroll height
             chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
         }
-    }, [chatHandlers.chatMessages]); // Trigger scroll whenever chatMessages array changes
+    }, [chatMessages]); // Depend on the derived chatMessages atom value
 
-
-    // Effect to load messages for the active chat
-    useEffect(() => {
-        if (session && activeChatId !== null) {
-            const currentChat = session.chats?.find(c => c.id === activeChatId);
-            chatHandlers.loadChatMessages(currentChat?.messages || []);
-            // Reset renaming state when chat changes
-            setRenamingChatId(null);
-            setEditChatName('');
-        } else if (!session || activeChatId === null) {
-            // If no session or no chat selected, clear messages
-            chatHandlers.loadChatMessages([]);
-             // Reset renaming state if no chat is active
-            setRenamingChatId(null);
-            setEditChatName('');
-        }
-        // Also hide templates when chat changes
-        setShowTemplates(false);
-    }, [session, activeChatId, chatHandlers.loadChatMessages]); // Keep loadChatMessages in dependencies
-
+    // Reset renaming state and hide templates when the active chat changes
+     useEffect(() => {
+         setRenamingChatId(null);
+         setEditChatName('');
+         setShowTemplates(false);
+     }, [activeChatId]); // Depend directly on activeChatIdAtom's value
 
     // --- Handlers ---
     const handleEditMetadataToggle = () => {
-        const nextEditingState = !isEditingMetadata;
-        setIsEditingMetadata(nextEditingState);
-        // If turning OFF edit mode, useEffect handles resetting fields
+        setIsEditingMetadata(prev => !prev);
+        // Resetting fields on cancel is handled by the useEffect above
     };
 
     const handleSaveMetadataEdit = () => {
-        // Basic validation
         if (!editClientName.trim() || !editName.trim() || !editDate || !editType || !editTherapy) {
             alert("Please fill all metadata fields before saving.");
             return;
         }
         if (session) {
-            onSaveMetadata(session.id, {
-                clientName: editClientName.trim(),
-                sessionName: editName.trim(),
-                date: editDate,
-                sessionType: editType,
-                therapy: editTherapy
+            // Call the Jotai action atom
+            updateMetadata({
+                sessionId: session.id,
+                metadata: {
+                    clientName: editClientName.trim(),
+                    sessionName: editName.trim(),
+                    date: editDate,
+                    sessionType: editType,
+                    therapy: editTherapy
+                }
             });
-            setIsEditingMetadata(false); // Exit edit mode on save
+            setIsEditingMetadata(false);
         }
     };
 
     const handleEditTranscriptToggle = () => {
         setIsEditingTranscript(prev => !prev);
-        // Resetting content if cancelling is handled by useEffect
+        // Resetting fields on cancel is handled by the useEffect above
     };
 
     const handleSaveTranscriptEdit = () => {
         if (session) {
-            onSaveTranscript(session.id, editTranscriptContent);
-            setIsEditingTranscript(false); // Exit edit mode
+            // Call the Jotai action atom
+            saveTranscript({ sessionId: session.id, transcript: editTranscriptContent });
+            setIsEditingTranscript(false);
         }
     };
 
-    // Handler to switch active chat
+    // Handler to switch active chat (directly set the activeChatIdAtom)
     const handleSelectChatHistory = (chatId: number) => {
         if (chatId !== activeChatId) {
-            setActiveChatIdHandler(chatId);
-            // Renaming state is reset by the useEffect watching activeChatId
+            setActiveChatId(chatId);
+            // Renaming state reset is handled by useEffect watching activeChatId
         }
     };
 
     const handleSelectTemplate = (text: string) => {
-        // Append template text to the current input query
-        chatHandlers.setCurrentQuery(prev => prev ? `${prev} ${text}` : text);
-        setShowTemplates(false); // Hide the template list after selection
+        setCurrentQuery(prev => prev ? `${prev} ${text}` : text); // Directly use setter from useAtom
+        setShowTemplates(false);
     };
 
-     const handleStarClick = (message: ChatMessage) => {
-        if (activeChatId !== null) { // Ensure there's an active chat
-            onStarMessage(activeChatId, message.id, message.text, !message.starred);
+    const handleStarClick = (message: ChatMessage) => {
+        if (activeChatId !== null) {
+            // Call the Jotai action atom
+            starMessage({
+                chatId: activeChatId,
+                messageId: message.id,
+                shouldStar: !message.starred // Toggle starred status
+            });
         } else {
             console.warn("Cannot star message: No active chat selected.");
         }
     };
 
-    // --- NEW: Chat Renaming Handlers ---
+    // Local UI state handlers for renaming
     const handleRenameClick = (chat: ChatSession) => {
         setRenamingChatId(chat.id);
-        setEditChatName(chat.name || ''); // Start edit with current name or empty string
+        setEditChatName(chat.name || '');
     };
 
     const handleCancelRename = () => {
@@ -178,60 +197,65 @@ export function SessionView({
 
     const handleSaveRename = () => {
         if (renamingChatId !== null && session) {
-            // Prevent renaming to just whitespace
             const trimmedName = editChatName.trim();
-             // Allow saving if name is non-empty OR if clearing an existing name
-            if (trimmedName || session.chats?.find(c => c.id === renamingChatId)?.name) {
-                 onRenameChat(session.id, renamingChatId, trimmedName);
+            // Allow saving if name is non-empty OR if clearing an existing name
+            if (trimmedName || activeChat?.name) { // Check current activeChat derived atom
+                // Call the Jotai action atom
+                renameChat({ chatId: renamingChatId, newName: trimmedName });
             }
         }
-        setRenamingChatId(null); // Exit renaming mode
+        setRenamingChatId(null);
         setEditChatName('');
     };
 
-    // --- NEW: Start New Chat Trigger ---
+    // Trigger the Jotai action atom for starting a new chat
     const handleNewChatClick = () => {
-        if (session) {
-            // Optional: Add confirmation if current chat has unsaved user input?
-            // e.g., if(chatHandlers.currentQuery.trim() && !confirm("Start new chat? Current input will be lost.")) return;
-            onStartNewChat(session.id);
-        }
+        // Confirmation logic could be added here if needed
+        startNewChat(); // No arguments needed as it reads activeSessionId internally
     };
 
+     // --- Submit Handler ---
+     // Uses the handleChatSubmitAtom. The form calls this directly.
+     const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+         e.preventDefault();
+         handleChatSubmit(); // Call the action atom setter
+     };
+
+
     // --- Render Logic ---
-    // Loading or Error State for Session
     if (!session) {
-        // This case should ideally be handled by App.tsx redirecting
-        // but provide a fallback message.
+        // This can happen briefly during navigation or if ID is invalid
         return (
-            <div className="text-center text-red-600 p-10">
-                <p className="mb-4">Error: Session data could not be loaded.</p>
-                <Button onClick={navigateBack} variant="outline">
-                    <ArrowLeft className="mr-2 h-4 w-4" /> Go Back
+            <div className="text-center text-gray-600 p-10">
+                <Loader2 className="mx-auto h-8 w-8 animate-spin mb-4" />
+                <p>Loading session data...</p>
+                {/* Provide a way back if stuck */}
+                <Button onClick={navigateBack} variant="outline" className="mt-4">
+                    Go Back
                 </Button>
             </div>
         );
     }
 
-    const activeChat = session.chats?.find(c => c.id === activeChatId);
-    // Sort chats once for consistent ordering (newest first for past list)
+    // Sort chats consistently
     const sortedChats = [...(session.chats || [])].sort((a, b) => b.timestamp - a.timestamp);
 
-    // Determine the title for the active chat display
-    const getChatDisplayTitle = (chat: ChatSession | undefined): string => {
+    // Determine chat title
+    const getChatDisplayTitle = (chat: ChatSession | undefined | null): string => {
         if (!chat) return 'No Chat Selected';
         return chat.name || `Chat (${formatTimestamp(chat.timestamp)})`;
     };
-    const activeChatTitle = getChatDisplayTitle(activeChat);
+    const activeChatTitle = getChatDisplayTitle(activeChat); // Use derived activeChat atom
 
+    // --- RETURN JSX ---
     return (
-        // Main container for the view
-        <div className="w-full max-w-7xl mx-auto flex-grow flex flex-col space-y-4 min-h-0"> {/* Increased max-width */}
-             {/* Header Row: Back Button & Metadata Edit Controls */}
+        <div className="w-full max-w-7xl mx-auto flex-grow flex flex-col space-y-4 min-h-0">
+             {/* Header Row */}
              <div className="flex-shrink-0 flex justify-between items-center">
                  <Button onClick={navigateBack} variant="ghost" className="text-gray-600 hover:text-gray-900">
                     <ArrowLeft className="mr-2 h-4 w-4" /> Back to Sessions
                  </Button>
+                 {/* Metadata Edit Controls (using local state) */}
                  <div className="space-x-2">
                     {!isEditingMetadata ? (
                          <Button onClick={handleEditMetadataToggle} variant="outline" size="sm">
@@ -242,7 +266,6 @@ export function SessionView({
                             <Button onClick={handleSaveMetadataEdit} variant="default" size="sm">
                                 <Save className="mr-2 h-4 w-4" /> Save Details
                             </Button>
-                            {/* Use toggle function for cancel to reset fields */}
                             <Button onClick={handleEditMetadataToggle} variant="secondary" size="sm">
                                 Cancel
                             </Button>
@@ -251,50 +274,45 @@ export function SessionView({
                 </div>
             </div>
 
-             {/* Main Content Area: Two Columns on Large Screens */}
-             {/* Use flex-grow and min-h-0 on the container */}
+            {/* Main Content Area */}
             <div className="flex-grow flex flex-col lg:flex-row lg:space-x-4 space-y-4 lg:space-y-0 min-h-0">
 
                 {/* Left Column: Details & Transcript */}
-                <div className="lg:w-1/2 flex flex-col space-y-4 min-h-0"> {/* Ensure column can shrink/grow */}
+                <div className="lg:w-1/2 flex flex-col space-y-4 min-h-0">
                      {/* Session Metadata Card */}
                      <Card className="flex-shrink-0">
-                         <CardHeader className="border-b"> {/* Added border */}
+                         <CardHeader className="border-b">
                              <CardTitle className="flex items-center">
-                                 Details:  {/* Added space */}
+                                 Details: {/* Note: Fixed space typo */}
                                  {isEditingMetadata ? (
                                      <Input
                                         value={editName}
                                         onChange={(e: any) => setEditName(e.target.value)}
                                         placeholder="Session Name"
-                                        className="text-lg font-semibold leading-none tracking-tight h-9 inline-block w-auto ml-1 flex-grow" /* Adjusted styles */
+                                        className="text-lg font-semibold leading-none tracking-tight h-9 inline-block w-auto ml-1 flex-grow"
                                     />
                                 ) : (
                                     <span className="ml-1">{session.sessionName || session.fileName}</span>
                                 )}
                             </CardTitle>
                          </CardHeader>
-                         <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3 pt-4 text-sm"> {/* Added top padding */}
-                             {/* Client Name */}
+                         <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3 pt-4 text-sm">
+                             {/* Fields using local state for editing, session data for display */}
                              <div className="flex items-center space-x-2">
                                  <User className="h-4 w-4 text-gray-500 flex-shrink-0" />
-                                 <Label htmlFor="clientNameEditView" className="w-16 flex-shrink-0">Client:</Label> {/* Fixed width label */}
+                                 <Label htmlFor="clientNameEditView" className="w-16 flex-shrink-0">Client:</Label>
                                  {isEditingMetadata ? (
                                     <Input id="clientNameEditView" value={editClientName} onChange={(e: any) => setEditClientName(e.target.value)} placeholder="Client Name" className="text-sm h-8 flex-grow"/>
                                  ) : ( <span className="font-medium">{session.clientName || 'N/A'}</span> )}
                             </div>
-
-                             {/* Date */}
-                             <div className="flex items-center space-x-2">
+                            <div className="flex items-center space-x-2">
                                  <CalendarDays className="h-4 w-4 text-gray-500 flex-shrink-0" />
                                  <Label htmlFor="sessionDateEditView" className="w-16 flex-shrink-0">Date:</Label>
                                 {isEditingMetadata ? (
                                     <Input id="sessionDateEditView" type="date" value={editDate} onChange={(e: any) => setEditDate(e.target.value)} className="text-sm h-8 flex-grow"/>
                                 ) : ( <span className="font-medium">{session.date || 'N/A'}</span> )}
                             </div>
-
-                            {/* Session Type */}
-                             <div className="flex items-center space-x-2">
+                            <div className="flex items-center space-x-2">
                                  <Tag className="h-4 w-4 text-gray-500 flex-shrink-0" />
                                  <Label htmlFor="sessionTypeEditView" className="w-16 flex-shrink-0">Type:</Label>
                                 {isEditingMetadata ? (
@@ -303,8 +321,6 @@ export function SessionView({
                                     </Select>
                                  ) : ( <span className="font-medium capitalize">{session.sessionType || 'N/A'}</span> )}
                             </div>
-
-                             {/* Therapy Type */}
                              <div className="flex items-center space-x-2">
                                  <BookMarked className="h-4 w-4 text-gray-500 flex-shrink-0" />
                                  <Label htmlFor="therapyEditView" className="w-16 flex-shrink-0">Therapy:</Label>
@@ -314,10 +330,8 @@ export function SessionView({
                                     </Select>
                                  ) : ( <span className="font-medium">{session.therapy || 'N/A'}</span> )}
                             </div>
-
-                            {/* Original Filename (only shown in view mode) */}
                             {session.fileName && !isEditingMetadata && (
-                                 <div className="flex items-center space-x-2 text-xs text-gray-400 pt-1 md:col-span-2"> {/* Span full width on medium+ */}
+                                 <div className="flex items-center space-x-2 text-xs text-gray-400 pt-1 md:col-span-2">
                                     <FileText className="h-3 w-3" />
                                     <span>Original file: {session.fileName}</span>
                                 </div>
@@ -325,11 +339,12 @@ export function SessionView({
                          </CardContent>
                      </Card>
 
-                     {/* Transcription Card - Make this take remaining space */}
-                     <Card className="flex-grow flex flex-col min-h-0"> {/* flex-grow needed */}
+                     {/* Transcription Card */}
+                     <Card className="flex-grow flex flex-col min-h-0">
                          <CardHeader className="flex-shrink-0 flex flex-row items-center justify-between border-b">
                             <CardTitle>Transcription</CardTitle>
-                            <div className="space-x-2">
+                            {/* Transcript Edit Controls (using local state) */}
+                             <div className="space-x-2">
                                 {!isEditingTranscript ? (
                                     <Button onClick={handleEditTranscriptToggle} variant="outline" size="sm"><Edit className="mr-2 h-4 w-4" /> Edit</Button>
                                 ) : (
@@ -340,17 +355,15 @@ export function SessionView({
                                 )}
                             </div>
                          </CardHeader>
-                         {/* Content needs to be flexible */}
                          <CardContent className="flex-grow pt-4 flex flex-col min-h-0">
                             {isEditingTranscript ? (
                                  <Textarea
-                                    value={editTranscriptContent}
-                                    onChange={(e: any) => setEditTranscriptContent(e.target.value)}
-                                    className="flex-grow w-full whitespace-pre-wrap text-sm font-mono" // Use flex-grow here
+                                    value={editTranscriptContent} // local state
+                                    onChange={(e: any) => setEditTranscriptContent(e.target.value)} // local state
+                                    className="flex-grow w-full whitespace-pre-wrap text-sm font-mono"
                                     placeholder="Enter or paste transcription here..."
                                 />
                             ) : (
-                                // ScrollArea needs to fill the space
                                 <ScrollArea className="flex-grow border rounded-md">
                                     <pre className="whitespace-pre-wrap text-sm text-gray-700 p-3 font-mono">
                                         {session.transcription || <span className="italic text-gray-500">No transcription available.</span>}
@@ -359,39 +372,36 @@ export function SessionView({
                             )}
                          </CardContent>
                     </Card>
-                </div>
+                </div> {/* End Left Column */}
 
                  {/* Right Column: Chat Interface + History List */}
-                 {/* Needs to be flex-grow and flex-col to fill height */}
                  <div className="lg:w-1/2 flex flex-col space-y-4 min-h-0">
-                     {/* Chat Interaction Card */}
-                     {/* Use flex-grow and min-h-0 to make it fill remaining space */}
                      <Card className="flex-grow flex flex-col min-h-0">
-                         {/* --- MODIFIED Chat Header --- */}
+                         {/* Chat Header */}
                          <CardHeader className="flex-shrink-0 flex flex-row justify-between items-center border-b gap-2">
-                             <div className="flex items-center gap-2 flex-grow min-w-0"> {/* Allow title area to grow/shrink */}
+                             {/* Title/Rename Section */}
+                             <div className="flex items-center gap-2 flex-grow min-w-0">
                                 <MessageSquare className="h-5 w-5 text-blue-600 flex-shrink-0" />
-                                {renamingChatId === activeChatId && activeChat ? ( // Ensure activeChat exists for renaming mode
-                                    // Rename Input Mode
+                                {renamingChatId === activeChatId && activeChat ? (
+                                    // Rename Mode (using local state)
                                     <>
                                         <Input
-                                            value={editChatName}
-                                            onChange={(e: any) => setEditChatName(e.target.value)}
+                                            value={editChatName} // local state
+                                            onChange={(e: any) => setEditChatName(e.target.value)} // local state
                                             placeholder="Enter new chat name"
-                                            className="h-8 text-sm flex-grow"
-                                            autoFocus
+                                            className="h-8 text-sm flex-grow" autoFocus
                                             onKeyDown={(e) => e.key === 'Enter' && handleSaveRename()}
                                         />
                                         <Button onClick={handleSaveRename} variant="ghost" size="icon" className="h-8 w-8 text-green-600 hover:bg-green-100" title="Save Name"><Check size={18} /></Button>
                                         <Button onClick={handleCancelRename} variant="ghost" size="icon" className="h-8 w-8 text-red-600 hover:bg-red-100" title="Cancel Rename"><X size={18} /></Button>
                                     </>
                                 ) : (
-                                     // Display Mode
+                                    // Display Mode
                                     <div className="flex items-center gap-1 min-w-0">
                                          <CardTitle className="truncate" title={activeChatTitle}>
                                              {activeChatTitle}
                                          </CardTitle>
-                                         {/* Show Edit button only if a chat is active */}
+                                         {/* Edit button triggers local rename state */}
                                          {activeChat && (
                                              <Button onClick={() => handleRenameClick(activeChat)} variant="ghost" size="icon" className="h-6 w-6 ml-1 text-gray-500 hover:text-blue-600 flex-shrink-0" title="Rename Chat">
                                                  <Edit size={14} />
@@ -400,38 +410,37 @@ export function SessionView({
                                      </div>
                                 )}
                             </div>
-                             {/* New Chat Button */}
+                             {/* New Chat Button (triggers Jotai action) */}
                              <Button onClick={handleNewChatClick} variant="outline" size="sm" className="flex-shrink-0">
                                  <PlusCircle className="mr-1 h-4 w-4" /> New Chat
                              </Button>
-                             {/* Remove Select Dropdown */}
                          </CardHeader>
 
                          {/* Chat Content: Messages + Input */}
                          <CardContent className="flex-grow flex flex-col space-y-4 overflow-hidden min-h-0 p-4">
-                             {/* Chat Messages Area - Must grow */}
+                             {/* Chat Messages Area */}
                              <ScrollArea className="flex-grow border rounded-md mb-4" elRef={chatScrollRef}>
                                  <div className="space-y-3 p-3">
-                                     {chatHandlers.chatMessages.length === 0 && activeChatId === null && (
+                                     {/* Display messages read from currentChatMessagesAtom */}
+                                     {chatMessages.length === 0 && activeChatId === null && (
                                         <p className="text-center text-gray-500 italic py-4">Start a new chat or select one from the list below.</p>
                                      )}
-                                     {chatHandlers.chatMessages.length === 0 && activeChatId !== null && (
+                                     {chatMessages.length === 0 && activeChatId !== null && (
                                         <p className="text-center text-gray-500 italic py-4">No messages in this chat yet. Start typing below.</p>
                                      )}
-                                    {chatHandlers.chatMessages.map((msg) => (
+                                    {chatMessages.map((msg) => (
                                         <div key={msg.id} className={`flex items-start space-x-2 group ${msg.sender === 'user' ? 'justify-end' : ''}`}>
                                             {msg.sender === 'ai' && <Bot className="h-5 w-5 text-blue-600 flex-shrink-0 mt-1" />}
                                             <div className={`relative rounded-lg p-2 px-3 text-sm max-w-[85%] break-words shadow-sm ${msg.sender === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-800'}`}>
+                                                {/* Star button triggers local handler -> Jotai action */}
                                                 {msg.sender === 'user' && (
                                                      <Button
-                                                         variant="ghost"
-                                                         size="icon"
+                                                         variant="ghost" size="icon"
                                                          className="absolute -left-9 top-0 h-6 w-6 p-1 opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-yellow-500"
                                                          title={msg.starred ? "Unstar message" : "Star message as template"}
                                                          onClick={() => handleStarClick(msg)}
                                                          aria-label={msg.starred ? "Unstar message" : "Star message"}
                                                      >
-                                                         {/* Use filled prop for Star */}
                                                          <Star size={14} filled={!!msg.starred} className={msg.starred ? "text-yellow-500" : ""} />
                                                      </Button>
                                                  )}
@@ -440,7 +449,8 @@ export function SessionView({
                                             {msg.sender === 'user' && <User className="h-5 w-5 text-gray-500 flex-shrink-0 mt-1" />}
                                         </div>
                                     ))}
-                                    {chatHandlers.isChatting && (
+                                    {/* Display loading state read from isChattingAtom */}
+                                    {isChatting && (
                                         <div className="flex items-start space-x-2">
                                             <Bot className="h-5 w-5 text-blue-600 flex-shrink-0 mt-1" />
                                             <div className="rounded-lg p-2 px-3 text-sm bg-gray-200 text-gray-800 italic flex items-center">
@@ -451,76 +461,72 @@ export function SessionView({
                                 </div>
                              </ScrollArea>
 
-                            {/* Chat Input Form - Must not grow */}
-                            <form onSubmit={chatHandlers.handleChatSubmit} className="relative flex space-x-2 flex-shrink-0 pt-2 border-t">
-                                 {/* Starred Templates Button & Popover */}
-                                 <div className="relative"> {/* Container for positioning popover */}
+                            {/* Chat Input Form */}
+                            {/* Form submission triggers the onSubmit -> handleChatSubmitAtom */}
+                            <form onSubmit={onSubmit} className="relative flex space-x-2 flex-shrink-0 pt-2 border-t">
+                                 {/* Starred Templates (uses local state for popover visibility) */}
+                                 <div className="relative">
                                      <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="icon"
+                                        type="button" variant="outline" size="icon"
                                         className="h-10 w-10 flex-shrink-0"
                                         title="Show Starred Templates"
-                                        onClick={() => setShowTemplates(prev => !prev)} // Toggle visibility
+                                        onClick={() => setShowTemplates(prev => !prev)}
                                         aria-label="Show starred templates"
                                     >
                                         <Star size={18} />
                                     </Button>
-                                    {/* Conditionally render the template list */}
                                     {showTemplates && (
+                                        // StarredTemplatesList now reads atom internally
                                         <StarredTemplatesList
-                                            starredMessages={starredMessages}
                                             onSelectTemplate={handleSelectTemplate}
-                                            onClose={() => setShowTemplates(false)} // Pass close handler
+                                            onClose={() => setShowTemplates(false)}
                                         />
                                     )}
                                  </div>
 
-                                {/* Text Input */}
+                                {/* Text Input (binds to currentQueryAtom) */}
                                 <Input
                                     type="text"
                                     placeholder="Ask about the session..."
-                                    value={chatHandlers.currentQuery}
-                                    onChange={(e: any) => chatHandlers.setCurrentQuery(e.target.value)}
-                                    // Disable input only if chatting, or if no chat is active/selected
-                                    disabled={chatHandlers.isChatting || activeChatId === null}
+                                    value={currentQuery}
+                                    onChange={(e: any) => setCurrentQuery(e.target.value)}
+                                    disabled={isChatting || activeChatId === null} // Use isChattingAtom value
                                     className="flex-grow"
                                     aria-label="Chat input message"
                                 />
                                 {/* Send Button */}
-                                <Button type="submit" disabled={chatHandlers.isChatting || !chatHandlers.currentQuery.trim() || activeChatId === null}>
+                                <Button type="submit" disabled={isChatting || !currentQuery.trim() || activeChatId === null}>
                                      Send
                                 </Button>
                             </form>
-                             {/* Chat Error Message */}
-                             {chatHandlers.chatError && (
+                             {/* Chat Error Message (read from chatErrorAtom) */}
+                             {chatError && (
                                 <p className="text-sm text-red-600 text-center flex-shrink-0 mt-1">
-                                    {chatHandlers.chatError}
+                                    {chatError}
                                 </p>
                              )}
                          </CardContent>
                      </Card>
 
-                     {/* --- NEW: Past Chats List --- */}
-                     {/* Show this section only if there are chats that are NOT the active one */}
+                     {/* Past Chats List */}
                      {sortedChats.filter(c => c.id !== activeChatId).length > 0 && (
                         <Card className="flex-shrink-0">
                              <CardHeader className="pb-2 pt-3 border-b">
                                  <CardTitle className="text-base flex items-center"><List className="mr-2 h-4 w-4 text-gray-500"/> Past Chats</CardTitle>
                              </CardHeader>
-                             <CardContent className="p-2 max-h-36 overflow-y-auto"> {/* Limit height and scroll */}
+                             <CardContent className="p-2 max-h-36 overflow-y-auto">
                                  <ul className="space-y-1">
                                      {sortedChats
-                                         .filter(chat => chat.id !== activeChatId) // Exclude the active one
+                                         .filter(chat => chat.id !== activeChatId)
                                          .map(chat => (
                                              <li key={chat.id} className="flex items-center justify-between p-1.5 hover:bg-gray-100 rounded-md">
                                                   <span className="text-sm text-gray-700 truncate mr-2" title={getChatDisplayTitle(chat)}>
                                                       {getChatDisplayTitle(chat)}
                                                   </span>
+                                                  {/* Switch button triggers local handler -> sets activeChatIdAtom */}
                                                   <Button
-                                                      variant="ghost"
-                                                      size="sm"
-                                                      className="text-xs h-7 px-2 flex-shrink-0" // Added flex-shrink-0
+                                                      variant="ghost" size="sm"
+                                                      className="text-xs h-7 px-2 flex-shrink-0"
                                                       onClick={() => handleSelectChatHistory(chat.id)}
                                                       title={`Switch to: ${getChatDisplayTitle(chat)}`}
                                                   >
