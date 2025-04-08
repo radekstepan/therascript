@@ -28,7 +28,7 @@ export const sessionSortDirectionAtom = atomWithStorage<SortDirection>('session-
 
 // --- Theme Atom ---
 // Type for theme values
-type Theme = 'light' | 'dark' | 'system';
+export type Theme = 'light' | 'dark' | 'system';
 
 // Atom to store the theme preference, persisted in localStorage under the key 'ui-theme'
 // Defaults to 'system' preference
