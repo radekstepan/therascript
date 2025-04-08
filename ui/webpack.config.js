@@ -32,7 +32,11 @@ module.exports = {
       },
       {
         test: /\.css$/, // Match CSS files
-        use: ['style-loader', 'css-loader'], // Process CSS and inject into DOM
+        use: [
+          'style-loader',
+          'css-loader',
+          'postcss-loader' // Add postcss-loader HERE
+        ],
       },
        // Add loaders for images, fonts etc. if needed later
       // {

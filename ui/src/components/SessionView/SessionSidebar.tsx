@@ -3,32 +3,28 @@ import React from 'react';
 import { NavLink, useParams } from 'react-router-dom';
 import { useAtomValue } from 'jotai';
 import { activeSessionAtom } from '../../store';
+import { Flex, Title, Text, Divider } from '@tremor/react'; // Import Tremor components
 import { FileText, MessageSquare, User } from '../icons/Icons';
-import { ScrollArea } from '../ui/ScrollArea';
-import { Button } from '../ui/Button'; // Use Button for scroll links
 import { formatTimestamp } from '../../helpers';
 import type { ChatSession } from '../../types';
 
-// Type for the scroll handler prop
-interface SessionSidebarProps {
-    scrollToSection: (section: 'details' | 'transcript' | 'chat') => void;
-}
+// Type for the scroll handler prop - REMOVED
+// interface SessionSidebarProps {
+//     scrollToSection: (section: 'details' | 'transcript' | 'chat') => void;
+// }
 
 // NavLink styling helper remains the same
 const getNavLinkClass = ({ isActive }: { isActive: boolean }): string => {
-    const base = "flex items-center w-full text-left px-3 py-2 rounded-md text-sm transition-colors duration-150";
-    const active = "bg-blue-100 text-blue-700 font-medium";
-    const inactive = "text-gray-600 hover:bg-gray-100 hover:text-gray-900";
+    // Use Tremor/Tailwind classes for styling NavLink like a light button/nav item
+    const base = "flex items-center w-full text-left px-3 py-1.5 rounded-tremor-small text-tremor-default transition-colors duration-150";
+    const active = "bg-tremor-background-muted text-tremor-content-strong font-medium";
+    const inactive = "text-tremor-content hover:bg-tremor-background-subtle hover:text-tremor-content-strong";
     return `${base} ${isActive ? active : inactive}`;
 };
 
-// Button styling helper for scroll links
-const getScrollButtonClass = (): string => {
-    return "flex items-center w-full text-left px-3 py-2 rounded-md text-sm transition-colors duration-150 text-gray-600 hover:bg-gray-100 hover:text-gray-900";
-};
 
-
-export function SessionSidebar({ scrollToSection }: SessionSidebarProps) {
+// export function SessionSidebar({ scrollToSection }: SessionSidebarProps) { // REMOVED prop
+export function SessionSidebar() { // REMOVED prop
     const { sessionId } = useParams<{ sessionId: string; chatId?: string }>();
     const session = useAtomValue(activeSessionAtom);
 
@@ -43,41 +39,43 @@ export function SessionSidebar({ scrollToSection }: SessionSidebarProps) {
     };
 
     return (
-        <aside className="w-64 flex-shrink-0 border-r border-gray-200 bg-white flex flex-col p-3 space-y-4">
+        <aside className="w-64 flex-shrink-0 border-r border-tremor-border bg-tremor-background flex flex-col p-4 space-y-4 hidden lg:flex"> {/* Hide sidebar on smaller screens, show on lg+ */}
+            {/* Maybe add Session Title here */}
+             {/* Use Text instead of Title if smaller heading preferred */}
+             {/* <Title order={5} className="truncate">{session.sessionName || session.fileName}</Title> */}
+             <Text className="font-semibold text-tremor-content-strong truncate">{session.sessionName || session.fileName}</Text>
+             <Divider/>
 
             {/* Dynamic Chat Links - Still NavLinks */}
             <div className="flex-grow flex flex-col min-h-0">
-                <h3 className="px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Chats</h3>
+                <h3 className="px-1 text-xs font-semibold text-tremor-content-subtle uppercase tracking-wider mb-2">Chats</h3>
                 {sortedChats.length === 0 ? (
-                     <p className="px-3 text-sm text-gray-500 italic">No chats yet.</p>
+                     <Text className="px-1 text-tremor-content-subtle italic">No chats yet.</Text>
                  ) : (
-                     <ScrollArea className="flex-grow -mx-3">
-                        <nav className="space-y-1 px-3">
+                     <div className="flex-grow overflow-y-auto -mx-1"> {/* Container with overflow */}
+                        <nav className="space-y-1 px-1">
                             {sortedChats.map(chat => (
                                 <NavLink
                                     key={chat.id}
                                     to={`/sessions/${sessionId}/chats/${chat.id}`}
-                                    // Optionally trigger scroll if already on the chat page
-                                    onClick={(e) => {
-                                        // Check if the target chat is already the active one (compare with URL or atom)
-                                        // This comparison logic might need refinement based on how activeChatId atom is updated
-                                        const currentUrlChatId = window.location.pathname.split('/chats/')[1];
-                                        if (currentUrlChatId === String(chat.id)) {
-                                            // Already on this chat, trigger scroll
-                                             e.preventDefault(); // Prevent full navigation
-                                             scrollToSection('chat');
-                                        }
-                                        // Otherwise, let NavLink handle navigation
-                                    }}
+                                    // REMOVED scroll logic from onClick
+                                    // onClick={(e) => {
+                                    //     const currentUrlChatId = window.location.pathname.split('/chats/')[1];
+                                    //     if (currentUrlChatId === String(chat.id)) {
+                                    //          e.preventDefault();
+                                    //          scrollToSection('chat');
+                                    //     }
+                                    // }}
                                     className={getNavLinkClass}
                                     title={getChatDisplayTitle(chat)}
+                                    end // Ensure exact match for active class
                                 >
-                                    <MessageSquare size={16} className="mr-3 flex-shrink-0" />
+                                    <MessageSquare size={16} className="mr-2 flex-shrink-0" />
                                     <span className="truncate flex-grow">{getChatDisplayTitle(chat)}</span>
                                 </NavLink>
                             ))}
-                        </nav>
-                    </ScrollArea>
+                         </nav>
+                    </div>
                  )}
             </div>
         </aside>

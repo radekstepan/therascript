@@ -3,9 +3,10 @@ import React, { useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useParams, useNavigate } from 'react-router-dom';
 // Removed Card imports
+import { Card, Flex, Text, Divider } from '@tremor/react'; // Import Tremor
 import { ChatHeader, ChatMessages, ChatInput } from './'; // Import siblings
 import { activeSessionAtom, startNewChatAtom, chatErrorAtom, activeChatIdAtom } from '../../store'; // Added activeChatIdAtom
-import { Loader2 } from '../icons/Icons';
+import { Loader2 } from '../icons/Icons'; // Keep icon import
 
 export function ChatInterface() {
     // Removed sessionId param as it's less relevant here now
@@ -35,29 +36,32 @@ export function ChatInterface() {
      if (activeChatId === null) {
          // This might indicate loading or an issue, SessionView should ideally handle this state
          return (
-            <div className="flex-grow flex items-center justify-center p-4">
-                 <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
-                 <span className="ml-2 text-gray-500">Loading chat...</span>
-             </div>
+             <Flex className="flex-grow p-4" justifyContent="center" alignItems="center">
+                  <Loader2 className="h-6 w-6 animate-spin text-tremor-content-subtle" />
+                  <Text className="ml-2 text-tremor-content-subtle">Loading chat...</Text>
+              </Flex>
         );
      }
 
     return (
-        // Removed outer Card/CardContent. Use flex column for layout.
-        <div className="flex-grow flex flex-col min-h-0 h-full">
+        // Use Flex column for layout. ChatInterface is now expected to be INSIDE a Card in SessionView.
+        // Apply h-full and min-h-0 to ensure it fills the parent Card.
+        <Flex flexDirection="col" className="flex-grow min-h-0 h-full">
              <ChatHeader
                 activeChatId={activeChatId} // Use atom value
                 onNewChatClick={handleNewChatClick}
              />
-             <hr className="border-gray-200 flex-shrink-0" /> {/* Ensure hr doesn't grow */}
+             <Divider className="flex-shrink-0 my-0" /> {/* Use Tremor Divider */}
              {/* Chat Content Wrapper */}
-             <div className="flex-grow flex flex-col space-y-4 overflow-hidden min-h-0 p-4 pt-4">
+             {/* Added px-4 pb-4 for padding, removed pt-4 as header/divider has padding */}
+             <Flex flexDirection="col" className="flex-grow space-y-4 overflow-hidden min-h-0 p-4">
                 <ChatMessages
                     chatScrollRef={chatScrollRef}
                     activeChatId={activeChatId} // Use atom value
                 />
                 <ChatInput />
-            </div>
-        </div>
+            </Flex> {/* Added missing closing tag */}
+        </Flex>
+        // Removed outer Card/CardContent. Parent SessionView provides the Card.
     );
 }

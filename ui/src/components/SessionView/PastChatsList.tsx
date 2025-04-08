@@ -1,8 +1,7 @@
 // src/components/SessionView/PastChatsList.tsx
 import React from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '../ui/Card';
-import { Button } from '../ui/Button';
-import { List } from '../icons/Icons';
+import { Card, Title, Text, Button, Divider, Flex } from '@tremor/react'; // Import Tremor components
+import { List } from '../icons/Icons'; // Keep icon
 import { formatTimestamp } from '../../helpers';
 import type { ChatSession, Session } from '../../types';
 
@@ -30,21 +29,27 @@ export function PastChatsList({ session, activeChatId, onSelectChatHistory }: Pa
 
     // FIX: Corrected JSX syntax in the map function
     return (
-        <Card className="flex-shrink-0">
-            <CardHeader className="pb-2 pt-3 border-b">
-                <CardTitle className="text-base flex items-center"><List className="mr-2 h-4 w-4 text-gray-500" /> Past Chats</CardTitle>
-            </CardHeader>
-            <CardContent className="p-2 max-h-36 overflow-y-auto">
-                <ul className="space-y-1 list-none">
+        // This component might not be used if chats are listed in the sidebar
+        // If kept, it should be styled with Tremor
+        <Card className="flex-shrink-0 mt-4"> {/* Add margin if needed */}
+             <Flex alignItems="center" className="px-4 pt-3 pb-2"> {/* Adjust padding */}
+                 <List className="mr-2 h-4 w-4 text-tremor-content-subtle" aria-hidden="true"/>
+                 {/* Use Text instead of Title if a smaller heading is desired */}
+                 {/* <Title order={6}>Past Chats</Title> */}
+                 <Text className="font-semibold text-tremor-content-strong">Past Chats</Text>
+             </Flex>
+             <Divider className="my-0" />
+             {/* Container for scrollable list */}
+             <div className="p-2 max-h-36 overflow-y-auto">
+                 <div className="space-y-1"> {/* Use div instead of ul */}
                     {otherChats.map(chat => (
-                        // Correctly define the li element with its props
-                        <li
+                        <div
                             key={chat.id}
-                            className="flex items-center justify-between p-1.5 hover:bg-gray-100 rounded-md cursor-pointer"
+                            className="flex items-center justify-between p-1.5 hover:bg-tremor-background-muted rounded-tremor-small cursor-pointer"
                             onClick={() => onSelectChatHistory(chat.id)}
                             role="button"
                             tabIndex={0}
-                            onKeyDown={(e: React.KeyboardEvent<HTMLLIElement>) => { // Add type for event
+                            onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => { // Add type for event
                                 if (e.key === 'Enter' || e.key === ' ') {
                                     e.preventDefault(); // Prevent default space scroll
                                     onSelectChatHistory(chat.id);
@@ -52,20 +57,15 @@ export function PastChatsList({ session, activeChatId, onSelectChatHistory }: Pa
                             }}
                             title={`Switch to: ${getChatDisplayTitle(chat)}`}
                         >
-                            <span className="text-sm text-gray-700 truncate mr-2 pointer-events-none">
+                            <Text className="truncate mr-2 pointer-events-none">
                                 {getChatDisplayTitle(chat)}
-                            </span>
-                            <Button
-                                variant="ghost" size="sm"
-                                className="text-xs h-7 px-2 flex-shrink-0 pointer-events-none"
-                                tabIndex={-1} // Make button non-focusable
-                            >
-                                Switch
-                            </Button>
-                        </li>
+                            </Text>
+                             {/* Optionally add a visual indicator like an arrow? Or remove button. */}
+                             {/* <ChevronRightIcon className="h-4 w-4 text-tremor-content-subtle" /> */}
+                        </div>
                     ))}
-                </ul>
-            </CardContent>
+                 </div>
+            </div>
         </Card>
     );
 }

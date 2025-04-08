@@ -1,15 +1,26 @@
 import React from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { useNavigate } from 'react-router-dom'; // Import useNavigate
+import { useNavigate } from 'react-router-dom';
 
-// Import UI Components
-import { Button } from './ui/Button';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/Card';
-import { ScrollArea } from './ui/ScrollArea';
+// Import Tremor Components
+import {
+    Button,
+    Card,
+    Title,
+    Text,
+    Badge, // Import Badge
+    Table, // Import Table components
+    TableHead,
+    TableRow,
+    TableHeaderCell,
+    TableBody,
+    TableCell
+} from '@tremor/react';
 // Import Icons
 import { History, PlusCircle, FileText } from './icons/Icons';
 // Import Atoms
 import { pastSessionsAtom, openUploadModalAtom } from '../store';
+import { Session } from '../types'; // Import Session type for clarity
 
 export function LandingPage() {
   const pastSessions = useAtomValue(pastSessionsAtom);
@@ -20,72 +31,114 @@ export function LandingPage() {
       navigate(`/sessions/${sessionId}`);
   };
 
+  // Helper to get badge color based on type (customize as needed)
+  const getSessionTypeColor = (type?: string): string => {
+      switch(type?.toLowerCase()){
+          case 'individual': return 'blue';
+          case 'phone': return 'sky';
+          case 'skills group': return 'teal';
+          case 'family session': return 'emerald';
+          case 'couples': return 'indigo';
+          default: return 'gray';
+      }
+  }
+    const getTherapyTypeColor = (type?: string): string => {
+      switch(type?.toLowerCase()){
+          case 'act': return 'purple';
+          case 'dbt': return 'amber';
+          case 'cbt': return 'lime';
+          case 'erp': return 'rose';
+          default: return 'cyan';
+      }
+  }
+
+
   return (
-    <div className="w-full max-w-4xl mx-auto flex-grow flex flex-col">
-       <Card className="flex-grow flex flex-col overflow-hidden">
-            <CardHeader className="flex-shrink-0"> {/* Removed border-b */}
-                <CardTitle className="flex items-center justify-between">
-                    <div className="flex items-center">
-                        Session History
-                    </div>
-                    <Button
-                         variant="ghost"
-                         size="icon"
-                         onClick={openUploadModal}
-                         title="Upload New Session"
-                         aria-label="Upload New Session"
-                     >
-                         <PlusCircle className="h-6 w-6 text-blue-600"/>
-                    </Button>
-                </CardTitle>
-            </CardHeader>
-            <CardContent className="flex-grow flex flex-col space-y-2 overflow-hidden p-0">
+    <div className="w-full max-w-4xl mx-auto flex-grow flex flex-col p-4 md:p-6 lg:p-8">
+       <Card className="flex-grow flex flex-col overflow-hidden h-full">
+            <div className="flex items-center justify-between mb-4 px-1 pt-1">
+                 <Title className="flex items-center">
+                    <History className="mr-2 h-5 w-5 text-tremor-content" aria-hidden="true" />
+                    Session History
+                 </Title>
+                 <Button
+                     icon={PlusCircle}
+                     variant="light"
+                     onClick={openUploadModal}
+                     tooltip="Upload New Session"
+                     aria-label="Upload New Session"
+                 >
+                     New Session
+                 </Button>
+            </div>
+            <div className="flex-grow flex flex-col overflow-hidden">
                 {pastSessions.length === 0 ? (
-                    <div className="flex-grow flex items-center justify-center p-4">
-                         <p className="text-center text-gray-500 py-4">
+                    <div className="flex-grow flex items-center justify-center p-6 text-center">
+                         <Text>
                             No sessions found. Upload one to get started!
-                        </p>
+                         </Text>
                     </div>
                 ) : (
-                    <div className="flex-grow flex flex-col overflow-hidden p-4 space-y-3">
-                        <p className="text-sm text-gray-500 flex-shrink-0">
-                            Select a session to view its details and analysis.
-                        </p>
-                         {/* Removed border */}
-                        <div className="flex-grow overflow-hidden rounded-md">
-                             <ScrollArea className="h-full">
-                                 {/* FIX: Added list-none class HERE */}
-                                <ul className="space-y-1 p-1 list-none">
-                                    {pastSessions.map((session) => (
-                                        <li key={session.id}>
-                                            <Button
-                                                variant="ghost"
-                                                onClick={() => handleSessionClick(session.id)}
-                                                className="w-full justify-between text-left h-auto py-2 px-3 text-gray-700 hover:bg-gray-100"
-                                                title={`Load: ${session.sessionName || session.fileName}`}
-                                            >
-                                                <div className="flex items-center space-x-3 overflow-hidden mr-2">
-                                                    <FileText className="h-5 w-5 flex-shrink-0 text-gray-500"/>
-                                                    <div className="flex flex-col overflow-hidden">
-                                                        <span className="font-medium truncate">{session.sessionName || session.fileName}</span>
-                                                        <span className="text-xs text-gray-500 truncate">
-                                                             {session.clientName || 'No Client'} - <span className="capitalize">{session.sessionType}</span>
-                                                         </span>
-                                                    </div>
-                                                </div>
-                                                <div className="flex flex-col items-end flex-shrink-0 ml-2 text-right">
-                                                     <span className="text-xs font-medium text-gray-600">{session.therapy || 'N/A'}</span>
-                                                     <span className="text-sm text-gray-500">{session.date}</span>
-                                                </div>
-                                            </Button>
-                                        </li>
-                                    ))}
-                                </ul>
-                            </ScrollArea>
-                        </div>
+                    // Use overflow-auto directly on the container around the Table if needed
+                    // But usually the parent Card handles overflow with flex layout
+                    <div className="flex-grow overflow-y-auto border-t border-tremor-border">
+                         {/* Use Tremor Table */}
+                         <Table>
+                            <TableHead>
+                                <TableRow>
+                                    <TableHeaderCell>Session / File</TableHeaderCell>
+                                    <TableHeaderCell>Client</TableHeaderCell>
+                                    <TableHeaderCell>Type</TableHeaderCell>
+                                    <TableHeaderCell>Therapy</TableHeaderCell>
+                                    <TableHeaderCell>Date</TableHeaderCell>
+                                </TableRow>
+                            </TableHead>
+                            <TableBody>
+                                {pastSessions.map((session: Session) => (
+                                    <TableRow
+                                        key={session.id}
+                                        onClick={() => handleSessionClick(session.id)}
+                                        className="cursor-pointer hover:bg-tremor-background-muted"
+                                        aria-label={`Load session: ${session.sessionName || session.fileName}`}
+                                        role="link" // Indicate row click action
+                                    >
+                                        <TableCell>
+                                            <div className="flex items-center space-x-2">
+                                                 <FileText className="h-4 w-4 flex-shrink-0 text-tremor-content-subtle" aria-hidden="true"/>
+                                                 <Text className="font-medium text-tremor-content-strong truncate">{session.sessionName || session.fileName}</Text>
+                                            </div>
+                                        </TableCell>
+                                        <TableCell>
+                                            <Text>{session.clientName || 'No Client'}</Text>
+                                        </TableCell>
+                                        <TableCell>
+                                            {session.sessionType ? (
+                                                <Badge color={getSessionTypeColor(session.sessionType)} className="capitalize">
+                                                    {session.sessionType}
+                                                </Badge>
+                                            ) : (
+                                                <Text className="text-tremor-content-subtle">N/A</Text>
+                                            )}
+                                        </TableCell>
+                                        <TableCell>
+                                            {session.therapy ? (
+                                                <Badge color={getTherapyTypeColor(session.therapy)}>
+                                                    {session.therapy}
+                                                </Badge>
+                                            ) : (
+                                                <Text className="text-tremor-content-subtle">N/A</Text>
+                                            )}
+                                        </TableCell>
+                                        <TableCell>
+                                            <Text>{session.date || 'N/A'}</Text>
+                                        </TableCell>
+                                    </TableRow>
+                                ))}
+                            </TableBody>
+                        </Table>
                     </div>
                 )}
-            </CardContent>
+            </div>
         </Card>
     </div>
   );

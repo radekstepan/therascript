@@ -57,49 +57,6 @@ export interface StarredTemplatesProps {
     onClose: () => void;
 }
 
-
-// --- UI Component Prop Types (Unchanged) ---
-export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-    children: React.ReactNode;
-    variant?: 'default' | 'secondary' | 'ghost' | 'destructive' | 'outline' | 'link';
-    size?: 'default' | 'sm' | 'lg' | 'icon';
-}
-
-export interface CardElementProps extends React.HTMLAttributes<HTMLDivElement> {
-    children: React.ReactNode;
-    className?: string;
-}
-
-export interface CardTitleProps extends React.HTMLAttributes<HTMLHeadingElement> {
-    children: React.ReactNode;
-    className?: string;
-    as?: 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'; // Allow different heading levels
-}
-
-export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
-    className?: string;
-}
-
-export interface LabelProps extends React.LabelHTMLAttributes<HTMLLabelElement> {
-    children: React.ReactNode;
-    className?: string;
-}
-
-export interface ScrollAreaProps extends React.HTMLAttributes<HTMLDivElement> {
-    children: React.ReactNode;
-    className?: string;
-    elRef?: React.Ref<HTMLDivElement>; // Pass ref for scrolling control
-}
-
-export interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
-    children: React.ReactNode;
-    className?: string;
-}
-
-export interface TextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {
-    className?: string;
-}
-
 // Props for Icons
 export interface IconProps {
     size?: number;

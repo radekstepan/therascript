@@ -1,10 +1,8 @@
 import React from 'react'; // Add explicit React import
-// Use standard UI components directly
-import { Input } from '../ui/Input';
-import { Label } from '../ui/Label';
-import { Select } from '../ui/Select';
+
+import { TextInput, Select, SelectItem, DateRangePicker, Grid, Col, Text, Title } from '@tremor/react'; // Import Tremor components
 // Import icons
-import { User, CalendarDays, Tag, BookMarked, FileText } from '../icons/Icons';
+import { User, CalendarDays, Tag, BookMarked, FileText } from '../icons/Icons'; // Keep icons
 // Import constants and types
 import { SESSION_TYPES, THERAPY_TYPES } from '../../constants';
 import type { Session } from '../../types';
@@ -35,70 +33,103 @@ export function SessionMetadata({
     // It's possible the error occurs if derivedSession is null initially.
     // Add a check, although SessionView should handle this.
     if (!session) {
-        return <div className="text-gray-500 italic">Loading details...</div>; // Or null
+        return <Text className="italic text-tremor-content-subtle">Loading details...</Text>; // Use Tremor Text
     }
 
     return (
         <div className="space-y-4">
-             <h2 className="text-xl font-semibold flex items-center">
+             {/* Use Title or Text for the main heading */}
+             {/* <Title className="flex items-center"> */}
+             <Text className="text-xl font-semibold flex items-center text-tremor-content-strong">
                 Details: 
                 {isEditing ? (
-                    <Input
+                    <TextInput
                         value={editName}
-                        onChange={(e: any) => onEditNameChange(e.target.value)}
+                        onValueChange={onEditNameChange} // Use onValueChange
                         placeholder="Session Name"
-                        className="text-xl font-semibold h-auto inline-block w-auto ml-1 flex-grow p-0 border-0 focus-visible:ring-0 focus-visible:outline-none"
+                        // Use Tailwind/Tremor classes for styling instead of complex inline styles
+                        className="text-lg font-semibold h-9 inline-block w-auto ml-1 flex-grow p-1" // Adjusted classes
                         autoFocus
                     />
                 ) : (
-                    <span className="ml-1 font-semibold">{session.sessionName || session.fileName}</span>
+                    <span className="ml-1 font-normal">{session.sessionName || session.fileName}</span> // Use font-normal to contrast with label
                 )}
-             </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 text-sm pt-2">
+             </Text>
+             {/* </Title> */}
+
+             {/* Use Tremor Grid for layout */}
+             <Grid numItemsSm={1} numItemsMd={2} className="gap-x-6 gap-y-4 text-tremor-default pt-4">
                 {/* Client Name */}
-                <div className="flex items-center space-x-2">
-                    <User className="h-4 w-4 text-gray-500 flex-shrink-0" />
-                    <Label htmlFor="clientNameEditView" className="w-16 flex-shrink-0">Client:</Label>
+                <Col>
+                    <label htmlFor="clientNameEditView" className="text-tremor-default font-medium text-tremor-content-strong block mb-1">
+                        <User className="inline-block h-4 w-4 mr-1 align-text-bottom text-tremor-content-subtle" aria-hidden="true"/> Client
+                    </label>
                     {isEditing ? (
-                        <Input id="clientNameEditView" value={editClientName} onChange={(e: any) => onEditClientNameChange(e.target.value)} placeholder="Client Name" className="text-sm h-8 flex-grow" />
-                    ) : (<span className="font-medium">{session.clientName || 'N/A'}</span>)}
-                </div>
+                        <TextInput id="clientNameEditView" value={editClientName} onValueChange={onEditClientNameChange} placeholder="Client Name" />
+                    ) : (<Text>{session.clientName || 'N/A'}</Text>)}
+                </Col>
+
                  {/* Date */}
-                 <div className="flex items-center space-x-2">
-                    <CalendarDays className="h-4 w-4 text-gray-500 flex-shrink-0" />
-                    <Label htmlFor="sessionDateEditView" className="w-16 flex-shrink-0">Date:</Label>
+                 <Col>
+                    <label htmlFor="sessionDateEditView" className="text-tremor-default font-medium text-tremor-content-strong block mb-1">
+                         <CalendarDays className="inline-block h-4 w-4 mr-1 align-text-bottom text-tremor-content-subtle" aria-hidden="true"/> Date
+                    </label>
                     {isEditing ? (
-                        <Input id="sessionDateEditView" type="date" value={editDate} onChange={(e: any) => onEditDateChange(e.target.value)} className="text-sm h-8 flex-grow" />
-                    ) : (<span className="font-medium">{session.date || 'N/A'}</span>)}
-                </div>
+                         // *** CORRECTED JSX SYNTAX FOR INPUT ***
+                        <input
+                            id="sessionDateEditView"
+                            type="date"
+                            value={editDate}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => onEditDateChange(e.target.value)}
+                            disabled={false} // Assuming you want it enabled during edit
+                            required
+                            className="block w-full rounded-tremor-default border border-tremor-border bg-tremor-background px-3 py-2 text-tremor-default text-tremor-content shadow-tremor-input focus:outline-none focus:ring-2 focus:ring-tremor-brand focus:border-tremor-brand disabled:opacity-50 disabled:cursor-not-allowed"
+                         />
+                         // *** END CORRECTION ***
+                    ) : (
+                        <Text>{session.date || 'N/A'}</Text>
+                    )}
+                </Col>
+
                 {/* Type */}
-                <div className="flex items-center space-x-2">
-                    <Tag className="h-4 w-4 text-gray-500 flex-shrink-0" />
-                    <Label htmlFor="sessionTypeEditView" className="w-16 flex-shrink-0">Type:</Label>
+                <Col>
+                    <label htmlFor="sessionTypeEditView" className="text-tremor-default font-medium text-tremor-content-strong block mb-1">
+                         <Tag className="inline-block h-4 w-4 mr-1 align-text-bottom text-tremor-content-subtle" aria-hidden="true"/> Type
+                    </label>
                     {isEditing ? (
-                        <Select id="sessionTypeEditView" value={editType} onChange={(e: any) => onEditTypeChange(e.target.value)} className="text-sm h-8 flex-grow">
-                            {SESSION_TYPES.map(type => (<option key={type} value={type}>{type.charAt(0).toUpperCase() + type.slice(1)}</option>))}
+                        <Select id="sessionTypeEditView" value={editType} onValueChange={onEditTypeChange}>
+                            {SESSION_TYPES.map(type => (
+                                <SelectItem key={type} value={type}>
+                                    {type.charAt(0).toUpperCase() + type.slice(1)}
+                                </SelectItem>
+                            ))}
                         </Select>
-                    ) : (<span className="font-medium capitalize">{session.sessionType || 'N/A'}</span>)}
-                </div>
+                    ) : (<Text className="capitalize">{session.sessionType || 'N/A'}</Text>)}
+                </Col>
+
                 {/* Therapy */}
-                <div className="flex items-center space-x-2">
-                    <BookMarked className="h-4 w-4 text-gray-500 flex-shrink-0" />
-                    <Label htmlFor="therapyEditView" className="w-16 flex-shrink-0">Therapy:</Label>
+                <Col>
+                    <label htmlFor="therapyEditView" className="text-tremor-default font-medium text-tremor-content-strong block mb-1">
+                        <BookMarked className="inline-block h-4 w-4 mr-1 align-text-bottom text-tremor-content-subtle" aria-hidden="true"/> Therapy
+                    </label>
                     {isEditing ? (
-                        <Select id="therapyEditView" value={editTherapy} onChange={(e: any) => onEditTherapyChange(e.target.value)} className="text-sm h-8 flex-grow">
-                            {THERAPY_TYPES.map(type => (<option key={type} value={type}>{type}</option>))}
+                        <Select id="therapyEditView" value={editTherapy} onValueChange={onEditTherapyChange}>
+                            {THERAPY_TYPES.map(type => (
+                                <SelectItem key={type} value={type}>{type}</SelectItem>
+                            ))}
                         </Select>
-                    ) : (<span className="font-medium">{session.therapy || 'N/A'}</span>)}
-                </div>
+                    ) : (<Text>{session.therapy || 'N/A'}</Text>)}
+                </Col>
+
                 {/* File Name */}
                 {session.fileName && !isEditing && (
-                    <div className="flex items-center space-x-2 text-xs text-gray-400 pt-1 md:col-span-2">
-                        <FileText className="h-3 w-3" />
-                        <span>Original file: {session.fileName}</span>
-                    </div>
+                    <Col numColSpanSm={1} numColSpanMd={2}>
+                         <Text className="text-tremor-content-subtle text-xs pt-2 flex items-center">
+                             <FileText className="h-3 w-3 mr-1" aria-hidden="true" /> Original file: {session.fileName}
+                         </Text>
+                    </Col>
                 )}
-            </div>
+            </Grid>
         </div>
     );
 }

@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-import { Button } from '../ui/Button';
-import { Input } from '../ui/Input';
-import { Star } from '../icons/Icons';
+
+import { Button, TextInput, Flex, Text } from '@tremor/react'; // Import Tremor components
+import { Star } from '../icons/Icons'; // Keep icon
 import { StarredTemplatesList } from '../StarredTemplates';
 import { currentQueryAtom, isChattingAtom, activeChatIdAtom, chatErrorAtom, handleChatSubmitAtom } from '../../store';
 
@@ -13,11 +13,27 @@ export function ChatInput() {
     const chatError = useAtomValue(chatErrorAtom);
     const handleChatSubmitAction = useSetAtom(handleChatSubmitAtom);
 
+    const inputRef = useRef<HTMLInputElement>(null);
     const [showTemplates, setShowTemplates] = useState(false);
+
+    // Focus input when chat ID changes (and isn't null)
+    useEffect(() => {
+        if (activeChatId !== null && inputRef.current) {
+            inputRef.current.focus();
+        }
+    }, [activeChatId]);
 
     const handleSelectTemplate = (text: string) => {
         setCurrentQuery(prev => prev ? `${prev} ${text}` : text);
         setShowTemplates(false);
+        inputRef.current?.focus(); // Re-focus after selection
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === 'Enter' && !e.shiftKey && !isChatting && currentQuery.trim() && activeChatId !== null) {
+             e.preventDefault(); // Prevent default newline in case shift was held briefly
+             handleChatSubmitAction();
+        }
     };
 
     const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -27,42 +43,47 @@ export function ChatInput() {
 
     return (
         <>
-            {/* FIX: Removed border-t class from the form */}
-            <form onSubmit={onSubmit} className="relative flex space-x-2 flex-shrink-0 pt-2">
-                <div className="relative">
-                    <Button
-                        type="button" variant="outline" size="icon"
-                        className="h-10 w-10 flex-shrink-0"
-                        title="Show Starred Templates"
-                        onClick={() => setShowTemplates(prev => !prev)}
-                        aria-label="Show starred templates"
-                    >
-                        <Star size={18} />
-                    </Button>
-                    {showTemplates && (
-                        <StarredTemplatesList
-                            onSelectTemplate={handleSelectTemplate}
-                            onClose={() => setShowTemplates(false)}
+            <form onSubmit={onSubmit} className="flex-shrink-0 pt-2">
+                <Flex className="relative space-x-2 w-full" alignItems='start'>
+                    <div className="relative flex-shrink-0">
+                        <Button
+                            type="button"
+                            variant="secondary" // Corrected variant
+                            // Remove size="icon", control with classes
+                            className="h-10 w-10 p-0 flex items-center justify-center" // Ensure icon is centered
+                            title="Show Starred Templates"
+                            onClick={() => setShowTemplates(prev => !prev)}
+                            aria-label="Show starred templates"
+                            icon={Star} // Use icon prop
                         />
-                    )}
-                </div>
-                <Input
-                    type="text"
-                    placeholder="Ask about the session..."
-                    value={currentQuery}
-                    onChange={(e: any) => setCurrentQuery(e.target.value)}
-                    disabled={isChatting || activeChatId === null}
-                    className="flex-grow"
-                    aria-label="Chat input message"
-                />
-                <Button type="submit" disabled={isChatting || !currentQuery.trim() || activeChatId === null}>
-                    Send
-                </Button>
+                         {/* Removed explicit icon child */}
+                        {showTemplates && (
+                            <StarredTemplatesList
+                                onSelectTemplate={handleSelectTemplate}
+                                onClose={() => setShowTemplates(false)}
+                                // Add positioning classes if needed, e.g., bottom-full, mb-2, right-0
+                            />
+                        )}
+                    </div>
+                    <TextInput
+                        ref={inputRef}
+                        placeholder="Ask about the session..."
+                        value={currentQuery}
+                        onValueChange={setCurrentQuery} // Use onValueChange
+                        disabled={isChatting || activeChatId === null}
+                        className="flex-grow h-10" // Ensure height matches button
+                        aria-label="Chat input message"
+                        onKeyDown={handleKeyDown} // Handle Enter key
+                    />
+                    <Button type="submit" disabled={isChatting || !currentQuery.trim() || activeChatId === null} className="h-10">
+                        Send
+                    </Button>
+                </Flex> {/* Added missing closing tag */}
             </form>
             {chatError && (
-                <p className="text-sm text-red-600 text-center flex-shrink-0 mt-1">
+                    <Text color="rose" className="text-sm text-center flex-shrink-0 mt-1">
                     {chatError}
-                </p>
+                    </Text>
             )}
         </>
     );

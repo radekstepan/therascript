@@ -1,10 +1,8 @@
 import React, { useState } from 'react';
 // UI Components
-import { Textarea } from '../ui/Textarea';
-import { ScrollArea } from '../ui/ScrollArea';
-import { Button } from '../ui/Button';
+import { Textarea, Button, Flex, Card, Text } from '@tremor/react'; // Import Tremor components
 import { Edit, Save, X } from '../icons/Icons'; // Import Save and X icons
-// Import types
+
 import type { Session } from '../../types';
 
 // Props interface - Ensure it receives necessary props for paragraph editing
@@ -32,7 +30,7 @@ export function Transcription({
 
     // Add check for session prop
      if (!session && !isEditingOverall) { // Check logic: Allow editing even if session is null?
-        return <div className="text-gray-500 italic">Loading transcript...</div>; // Or null
+        return <Text className="italic text-tremor-content-subtle p-4">Loading transcript...</Text>; // Or null
     }
 
     // Use editTranscriptContent when overall editing is active, otherwise use session.transcription for display
@@ -83,78 +81,78 @@ export function Transcription({
 
 
     return (
-        <div className="flex-grow flex flex-col min-h-0 space-y-2"> {/* Reduced space-y */}
+        <div className="flex-grow flex flex-col min-h-0"> {/* Reduced space-y, full height */}
              {/* Header is controlled by parent SessionView based on isEditingOverall */}
-             {/* Removed h2 from here */}
-            <div className="flex-grow flex flex-col min-h-0">
+
+            {/* Main content area for transcript */}
+            <div className="flex-grow flex flex-col min-h-0 relative"> {/* Added relative for potential absolute positioning */}
                 {isEditingOverall ? (
                     // Overall Edit Mode: Show the single large Textarea
                     <Textarea
                         value={editTranscriptContent}
-                        onChange={(e: any) => onContentChange(e.target.value)}
-                        className="flex-grow w-full whitespace-pre-wrap text-sm font-mono border border-gray-300 rounded-md p-3"
+                        onValueChange={onContentChange} // Use Tremor's onValueChange
+                        className="flex-grow w-full whitespace-pre-wrap !text-sm font-mono !leading-relaxed p-3 h-full resize-none" // Force font/leading, ensure full height, no resize handle
                         placeholder="Enter or paste transcription here..."
                         autoFocus
                     />
                 ) : (
                     // View Mode with Inline Paragraph Editing
-                    <ScrollArea className="flex-grow border rounded-md p-1"> {/* Added padding to ScrollArea's inner div */}
-                        <div className="space-y-3 p-2"> {/* Add space between paragraphs */}
+                    // Use a div with overflow-y-auto instead of ScrollArea
+                    <div className="flex-grow overflow-y-auto border border-tremor-border rounded-tremor-default p-1">
+                        <div className="space-y-4 p-3"> {/* Add space between paragraphs */}
                             {paragraphs.length > 0 ? paragraphs.map((paragraph, index) => (
-                                <div key={index}> {/* Outer container per paragraph */}
+                                <div key={index} className="relative group"> {/* Outer container per paragraph, needs group */}
                                     {editingParagraphIndex === index ? (
                                         // --- Editing mode for this paragraph ---
-                                        <div className="space-y-2 p-2 border border-blue-300 rounded-md bg-white"> {/* Add padding and bg */}
+                                        <Card className="p-2 border-tremor-brand shadow-tremor-input ring-1 ring-tremor-brand"> {/* Use Card for focus state */}
+                                        <Flex flexDirection="col" alignItems='stretch' className="gap-2">
                                             <Textarea
                                                 value={currentEditValue}
-                                                onChange={handleParagraphContentChange}
-                                                className="w-full whitespace-pre-wrap text-sm font-mono border border-gray-300 rounded p-2 focus:ring-1 focus:ring-blue-500" // Simplified border/focus
+                                                onChange={handleParagraphContentChange} // Standard onChange for controlled Textarea
+                                                className="w-full whitespace-pre-wrap !text-sm !font-mono !leading-relaxed p-2 resize-none" // Force font/leading
                                                 rows={Math.max(3, paragraph.split('\n').length + 1)} // Basic auto-sizing attempt
                                                 autoFocus
                                             />
-                                            <div className="flex items-center space-x-2 justify-end">
-                                                <Button onClick={handleSaveParagraph} size="sm" variant="default" className="h-7 px-2 text-xs">
-                                                    <Save size={14} className="mr-1" /> Save
+                                                <Flex justifyContent="end" className="space-x-2">
+                                                <Button onClick={handleSaveParagraph} size="xs" variant="primary" icon={Save}>
+                                                     Save
                                                 </Button>
-                                                <Button onClick={handleCancelParagraphEdit} size="sm" variant="ghost" className="h-7 px-2 text-xs">
-                                                    <X size={14} className="mr-1" /> Cancel
+                                                <Button onClick={handleCancelParagraphEdit} size="xs" variant="secondary" icon={X}>
+                                                     Cancel
                                                 </Button>
-                                            </div>
-                                        </div>
+                                            </Flex>
+                                            </Flex>
+                                        </Card>
                                     ) : (
                                         // --- View mode for this paragraph ---
-                                        // Use flexbox to align text and button
-                                        <div className="relative group flex items-start space-x-2 p-1 rounded hover:bg-gray-50 transition-colors duration-150"> {/* Flex container with group */}
-                                            {/* Paragraph Text (takes available space) */}
-                                            <pre className="flex-grow whitespace-pre-wrap text-sm text-gray-700 py-1 font-mono min-w-0"> {/* Use flex-grow, min-w-0 prevents overflow issues */}
+                                        // Use padding and relative positioning for the button
+                                        <div className="p-1 rounded-tremor-small hover:bg-tremor-background-muted transition-colors duration-150">
+                                            <pre className="whitespace-pre-wrap text-tremor-default text-tremor-content font-mono leading-relaxed">
                                                 {paragraph}
                                             </pre>
                                             {/* Edit Button (fixed size, appears on hover) */}
                                             <Button
-                                                variant="ghost" size="icon"
-                                                // Removed absolute positioning. Added flex-shrink-0. Adjusted style/size slightly.
-                                                className="flex-shrink-0 h-6 w-6 p-1 mt-0.5 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity text-gray-400 hover:text-blue-600 hover:bg-gray-200 rounded-full"
+                                                variant="light" size="xs"
+                                                // Use absolute positioning top-right within the relative parent
+                                                className="absolute top-1 right-1 h-6 w-6 p-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity text-tremor-content-subtle hover:text-tremor-brand hover:bg-tremor-background-muted"
                                                 onClick={() => handleEditClick(index, paragraph)}
                                                 title="Edit this paragraph"
                                                 aria-label="Edit paragraph" // Accessibility
-                                            >
-                                                <Edit size={14} />
-                                            </Button>
+                                                icon={Edit} // Use Tremor icon prop
+                                            />
                                         </div>
                                     )}
                                 </div>
                             )) : (
                                 // Display if no transcription content
-                                <div className="p-3"> {/* Wrap placeholder message */}
-                                    <pre className="whitespace-pre-wrap text-sm text-gray-500 font-mono italic">
+                                <Text className="italic text-tremor-content-subtle p-3">
                                         No transcription available.
                                         {/* Only show edit hint if session exists but transcription is empty */}
                                         { session && !session.transcription && ' You can edit the session details to add one.'}
-                                    </pre>
-                                </div>
+                                </Text>
                             )}
                         </div>
-                    </ScrollArea>
+                    </div>
                 )}
             </div>
         </div>

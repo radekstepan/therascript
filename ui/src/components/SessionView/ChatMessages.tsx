@@ -1,8 +1,7 @@
 import React from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { ScrollArea } from '../ui/ScrollArea';
-import { Button } from '../ui/Button';
-import { Bot, User, Loader2, Star } from '../icons/Icons';
+import { Button, Flex, Text } from '@tremor/react'; // Import Tremor
+import { Bot, User, Loader2, Star } from '../icons/Icons'; // Keep icons
 import { currentChatMessagesAtom, isChattingAtom, starMessageAtom } from '../../store';
 import type { ChatMessage } from '../../types';
 
@@ -29,59 +28,58 @@ export function ChatMessages({ chatScrollRef, activeChatId }: ChatMessagesProps)
     };
 
     return (
-        <ScrollArea className="flex-grow border rounded-md mb-4" elRef={chatScrollRef}>
+        // Replace ScrollArea with a div having overflow and border/rounding
+        <div
+            ref={chatScrollRef as React.RefObject<HTMLDivElement>} // Cast ref type if needed
+            className="flex-grow border border-tremor-border rounded-tremor-default mb-4 overflow-y-auto p-3" // Use Tremor classes and overflow
+        >
             <div className="space-y-3 p-3">
                 {/* Placeholder messages */}
                 {chatMessages.length === 0 && activeChatId === null && (
-                    <p className="text-center text-gray-500 italic py-4">Start a new chat or select one from the list below.</p>
+                    <Text className="text-center text-tremor-content-subtle italic py-4">Start a new chat or select one from the list.</Text>
                 )}
                 {chatMessages.length === 0 && activeChatId !== null && (
-                    <p className="text-center text-gray-500 italic py-4">No messages in this chat yet. Start typing below.</p>
+                    <Text className="text-center text-tremor-content-subtle italic py-4">No messages yet. Start typing below.</Text>
                 )}
                 {/* Actual messages */}
                 {chatMessages.map((msg) => (
-                    <div key={msg.id} className={`flex items-start space-x-2 group ${msg.sender === 'user' ? 'justify-end' : ''}`}>
-                        {msg.sender === 'ai' && <Bot className="h-5 w-5 text-blue-600 flex-shrink-0 mt-1" />}
+                    <Flex key={msg.id} alignItems="start" className={`group ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`} >
+                        {msg.sender === 'ai' && <Bot className="h-5 w-5 text-tremor-brand flex-shrink-0 mt-1 mr-2" aria-hidden="true" />}
                         {/* Message bubble container */}
-                        <div className={`relative rounded-lg p-2 px-3 text-sm max-w-[85%] break-words shadow-sm ${msg.sender === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-800'}`}>
-                            {/* 7. Star button - Adjust positioning */}
-                            {msg.sender === 'user' && (
+                        <Flex alignItems="center" className={`relative max-w-[85%] ${msg.sender === 'user' ? 'order-2' : 'order-1'}`}>
+                             {/* Star button for user messages - position relative to the message div */}
+                             {msg.sender === 'user' && (
                                 <Button
-                                    variant="ghost" size="icon"
-                                    // Center vertically: top-1/2 and transform -translate-y-1/2
-                                    // Adjust left offset as needed (e.g., -left-8 or less)
-                                    // Ensure button size is appropriate (h-6 w-6 p-1)
-                                    className="absolute -left-8 top-1/2 transform -translate-y-1/2 h-6 w-6 p-1 opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-yellow-500 focus:opacity-100" // Added focus:opacity-100
+                                    variant="light" // Corrected variant
+                                    // size="icon" - removed
+                                    // Use Tailwind for positioning and group-hover visibility
+                                    className="-ml-8 mr-1 h-6 w-6 p-0 flex items-center justify-center opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity text-tremor-content-subtle hover:text-yellow-500" // Adjusted classes
                                     title={msg.starred ? "Unstar message" : "Star message as template"}
                                     onClick={() => handleStarClick(msg)}
                                     aria-label={msg.starred ? "Unstar message" : "Star message"}
+                                    icon={() => <Star size={14} filled={!!msg.starred} className={msg.starred ? "text-yellow-500" : ""} />} // Use icon prop with function
                                 >
-                                    <Star size={14} filled={!!msg.starred} className={msg.starred ? "text-yellow-500" : ""} />
+                                     {/* Content inside button is handled by icon prop */}
                                 </Button>
                             )}
-                            {msg.text}
-                        </div>
-                        {msg.sender === 'user' && <User className="h-5 w-5 text-gray-500 flex-shrink-0 mt-1" />}
-                    </div>
+                            {/* The actual message bubble */}
+                            <div className={`rounded-tremor-default p-2 px-3 text-sm break-words shadow-tremor-card ${msg.sender === 'user' ? 'bg-tremor-brand text-tremor-brand-inverted' : 'bg-tremor-background-subtle text-tremor-content'}`}>
+                                {msg.text}
+                            </div>
+                        </Flex>
+                        {msg.sender === 'user' && <User className="h-5 w-5 text-tremor-content-subtle flex-shrink-0 mt-1 ml-2 order-1" aria-hidden="true" />}
+                    </Flex>
                 ))}
                 {/* Loading indicator */}
                 {isChatting && (
                     <div className="flex items-start space-x-2">
                         <Bot className="h-5 w-5 text-blue-600 flex-shrink-0 mt-1" />
-                        <div className="rounded-lg p-2 px-3 text-sm bg-gray-200 text-gray-800 italic flex items-center">
+                        <div className="rounded-tremor-default p-2 px-3 text-sm bg-tremor-background-subtle text-tremor-content italic flex items-center">
                             <Loader2 className="inline mr-1 h-4 w-4 animate-spin" /> Thinking...
                         </div>
                     </div>
                 )}
             </div>
-        </ScrollArea>
+        </div>
     );
 }
-
-// Add missing CSS utility classes if needed in global.css
-/*
-.top-1\/2 { top: 50%; }
-.transform { transform: translate(var(--tw-translate-x, 0), var(--tw-translate-y, 0)) rotate(var(--tw-rotate, 0)) skewX(var(--tw-skew-x, 0)) skewY(var(--tw-skew-y, 0)) scaleX(var(--tw-scale-x, 1)) scaleY(var(--tw-scale-y, 1)); }
-.\-translate-y-1\/2 { --tw-translate-y: -50%; }
-.focus\:opacity-100:focus { opacity: 1; }
-*/

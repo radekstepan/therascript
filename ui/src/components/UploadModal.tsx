@@ -2,11 +2,7 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useSetAtom } from 'jotai';
 import { useNavigate } from 'react-router-dom';
 
-// Import UI components
-import { Button } from './ui/Button';
-import { Input } from './ui/Input';
-import { Label } from './ui/Label';
-import { Select } from './ui/Select';
+import { Button, TextInput, Select, SelectItem, Dialog, DialogPanel, Title, Text, Divider, Grid, Col, Flex } from '@tremor/react'; // Removed Card import
 // Import Icons
 import { UploadCloud, Loader2, X } from './icons/Icons';
 // Import constants and helpers
@@ -49,6 +45,7 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
     }, []);
 
     useEffect(() => {
+        // Reset form when opening
         if (isOpen) {
             resetModal();
         }
@@ -57,7 +54,7 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
 
     // --- Event Handlers ---
 
-    const handleDrag = (e: React.DragEvent<HTMLDivElement>) => {
+    const handleDrag = (e: React.DragEvent<HTMLDivElement | HTMLFormElement>) => { // Added HTMLFormElement for panel drag
         e.preventDefault();
         e.stopPropagation();
         if (isTranscribing) return;
@@ -68,16 +65,21 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
     const handleFileSelection = (file: File | null) => {
          if (file && file.type === 'audio/mpeg') {
             setModalFile(file);
-            setSessionNameInput(file.name.replace(/\.[^/.]+$/, ""));
+            // Set session name based on file, only if session name input is currently empty
+            if (!sessionNameInput) {
+                setSessionNameInput(file.name.replace(/\.[^/.]+$/, ""));
+            }
         } else {
             setModalFile(null);
-            setSessionNameInput('');
+            // Don't clear session name here, user might have typed one before selecting invalid file
+            // setSessionNameInput('');
             if (file) alert('Invalid file type. Please upload an MP3 audio file.');
         }
+        // Clear file input visually after selection/drop regardless of validity
         if (fileInputRef.current) fileInputRef.current.value = '';
     };
 
-     const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+     const handleDrop = (e: React.DragEvent<HTMLDivElement | HTMLFormElement>) => { // Added HTMLFormElement for panel drop
         e.preventDefault(); e.stopPropagation();
         if (isTranscribing) return;
         setDragActive(false);
@@ -105,20 +107,27 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
 
             if (result.success) {
                 navigate(`/sessions/${result.newSessionId}/chats/${result.newChatId}`);
+                closeModal(); // Close drawer on successful navigation trigger
             }
+            // Error handling is done via transcriptionError atom display
         } else {
              let missingFields = [];
              if (!modalFile) missingFields.push("Audio File (.mp3)");
              if (!clientNameInput.trim()) missingFields.push("Client Name");
              if (!sessionNameInput.trim()) missingFields.push("Session Name");
+             if (!sessionDate) missingFields.push("Date"); // Check date too
              alert(`Please fill in all required fields: ${missingFields.join(', ')}`);
         }
     };
 
     const handleCloseAttempt = useCallback(() => {
-         closeModal();
-    }, [closeModal]);
+        // Prevent closing if transcribing
+         if (!isTranscribing) {
+             closeModal();
+         }
+    }, [closeModal, isTranscribing]);
 
+    // --- ESC key listener ---
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
             if (event.key === 'Escape') handleCloseAttempt();
@@ -130,105 +139,138 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
 
     if (!isOpen) return null;
 
-    const dropAreaClasses = `border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors duration-200 ease-in-out flex flex-col items-center justify-center space-y-2 min-h-[10rem] ${
-        isTranscribing ? 'bg-gray-100 cursor-not-allowed' :
-        dragActive ? 'border-blue-500 bg-blue-50' :
-        modalFile ? 'border-green-500 bg-green-50' :
-        'border-gray-300 hover:border-gray-400'
+    // Use Tailwind classes compatible with Tremor for drop area
+    const dropAreaClasses = `border-2 border-dashed rounded-tremor-default p-6 text-center cursor-pointer transition-colors duration-200 ease-in-out flex flex-col items-center justify-center space-y-2 min-h-[10rem] ${
+        isTranscribing ? 'bg-tremor-background-muted cursor-not-allowed opacity-70' : // Adjusted disabled style
+        dragActive ? 'border-tremor-brand bg-tremor-brand-faint' : // Use Tremor colors
+        modalFile ? 'border-emerald-500 bg-emerald-50' : // Keep success colors distinct
+        'border-tremor-border hover:border-tremor-border-emphasis' // Use Tremor border colors
     }`;
 
 
     return (
-        <div
-            className="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center p-4"
-            onClick={handleCloseAttempt}
+        <Dialog
+            open={isOpen}
+            onClose={handleCloseAttempt} // Use the handler that prevents closing if transcribing
+            static={isTranscribing} // Prevent closing on outside click if transcribing
+            className="relative z-50" // Ensure high z-index
         >
-            <div
-                className="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 relative space-y-4" // Existing space-y-4
-                onClick={(e) => e.stopPropagation()}
-                onDragEnter={handleDrag}
+             {/* Backdrop with transition */}
+            <div className="fixed inset-0 bg-gray-700/60 transition-opacity duration-300 ease-out data-[closed]:opacity-0" aria-hidden="true" />
+
+            {/* Drawer Panel */}
+            <DialogPanel
+                className="fixed inset-y-0 right-0 z-50 flex h-full w-full max-w-lg flex-col overflow-y-auto bg-tremor-background p-6 shadow-xl transition duration-300 ease-out data-[closed]:translate-x-full"
+                // Drag handlers directly on the panel if needed, otherwise keep on specific drop zone
+                // onDragEnter={handleDrag} onDragLeave={handleDrag} onDragOver={handleDrag} onDrop={handleDrop}
             >
-                <Button
-                    variant="ghost" size="icon"
-                    className="absolute top-2 right-2 text-gray-500 hover:text-gray-800"
-                    onClick={handleCloseAttempt}
-                    disabled={isTranscribing}
-                    aria-label="Close upload modal"
-                 >
-                    <X size={20} />
-                </Button>
+                {/* Removed inner Card, DialogPanel is now the container */}
+                <Flex justifyContent="between" alignItems="center" className="mb-4">
+                     <Title>Upload New Session</Title>
+                     <Button
+                        variant="light" icon={X}
+                        className=" -mr-2 text-tremor-content-subtle hover:text-tremor-content" // Adjust margin for padding
+                        onClick={handleCloseAttempt} // Button always attempts close
+                        disabled={isTranscribing} // Visually disable button if transcribing
+                        aria-label="Close upload panel"
+                     />
+                 </Flex>
+                <Divider className="-mx-6 mb-4"/> {/* Adjust margin */}
 
-                <h2 className="text-xl font-semibold mb-4 text-center">Upload New Session</h2>
+                {/* Form content */}
+                <div className="flex-grow space-y-4"> {/* Add flex-grow to push button to bottom */}
 
-                <div
-                    className={dropAreaClasses.trim()}
-                    onDragEnter={handleDrag} onDragLeave={handleDrag}
-                    onDragOver={handleDrag} onDrop={handleDrop}
-                    onClick={handleUploadAreaClick}
-                >
-                     <input
-                        ref={fileInputRef} type="file" accept="audio/mpeg" className="hidden"
-                        onChange={handleFileChange}
-                        disabled={!!modalFile || isTranscribing}
-                    />
-                    <UploadCloud className={`mx-auto h-10 w-10 mb-2 ${dragActive ? 'text-blue-600' : (modalFile ? 'text-green-600' : 'text-gray-400')}`} />
-                     <p className="text-sm text-gray-600">
-                        {isTranscribing ? "Processing audio..." :
-                         (modalFile ? `Selected: ${modalFile.name}` :
-                          (dragActive ? "Drop MP3 file here" : "Drag & drop MP3 file or click"))}
-                    </p>
-                     {modalFile && !isTranscribing && (
-                        <Button variant="link" size="sm" className="text-xs text-red-600 mt-1 h-auto p-0"
-                            onClick={(e: any) => {
-                                e.stopPropagation();
-                                setModalFile(null);
-                                setSessionNameInput('');
-                            }} > Change file </Button>
+                    <div
+                        className={dropAreaClasses.trim()}
+                        onDragEnter={handleDrag} onDragLeave={handleDrag}
+                        onDragOver={handleDrag} onDrop={handleDrop}
+                        onClick={handleUploadAreaClick}
+                        aria-disabled={isTranscribing}
+                        role="button"
+                        tabIndex={isTranscribing ? -1 : 0}
+                    >
+                         <input
+                            ref={fileInputRef} type="file" accept="audio/mpeg" className="hidden"
+                            onChange={handleFileChange}
+                            disabled={!!modalFile || isTranscribing}
+                        />
+                        <UploadCloud className={`mx-auto h-10 w-10 mb-2 ${dragActive ? 'text-tremor-brand' : (modalFile ? 'text-emerald-600' : 'text-tremor-content-subtle')}`} aria-hidden="true"/>
+                         <Text>
+                            {isTranscribing ? "Processing audio..." :
+                             (modalFile ? <>Selected: <span className="font-medium">{modalFile.name}</span></> :
+                              (dragActive ? "Drop MP3 file here" : "Drag & drop MP3 file or click"))}
+                         </Text>
+                         {modalFile && !isTranscribing && (
+                            <Button variant="light" size="xs" className="text-rose-600 mt-1 h-auto p-0"
+                                onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                                    e.stopPropagation();
+                                    handleFileSelection(null);
+                                }}>
+                                 Remove file
+                             </Button>
+                        )}
+                    </div>
+
+                    {/* Use Tremor Grid for form layout */}
+                    <Grid numItemsSm={1} numItemsMd={2} className="gap-4 pt-2">
+                        <Col>
+                            <label htmlFor="clientNameModal" className="tremor-default font-medium text-tremor-content-strong block mb-1">Client Name</label>
+                            <TextInput id="clientNameModal" type="text" placeholder="Client's Full Name" value={clientNameInput} onValueChange={setClientNameInput} disabled={isTranscribing} required />
+                        </Col>
+                        <Col>
+                             <label htmlFor="sessionNameModal" className="tremor-default font-medium text-tremor-content-strong block mb-1">Session Name / Title</label>
+                             <TextInput id="sessionNameModal" type="text" placeholder="e.g., Weekly Check-in" value={sessionNameInput} onValueChange={setSessionNameInput} disabled={isTranscribing} required />
+                        </Col>
+                         <Col>
+                             <label htmlFor="sessionDateModal" className="tremor-default font-medium text-tremor-content-strong block mb-1">Date</label>
+                             {/* Using standard HTML input type="date" styled */}
+                             <input
+                                id="sessionDateModal"
+                                type="date"
+                                value={sessionDate}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSessionDate(e.target.value)}
+                                disabled={isTranscribing}
+                                required
+                                className="block w-full rounded-tremor-default border border-tremor-border bg-tremor-background px-3 py-2 text-tremor-default text-tremor-content shadow-tremor-input focus:outline-none focus:ring-2 focus:ring-tremor-brand focus:border-tremor-brand disabled:opacity-50 disabled:cursor-not-allowed"
+                              />
+                        </Col>
+                        <Col>
+                            <label htmlFor="sessionTypeModal" className="tremor-default font-medium text-tremor-content-strong block mb-1">Session Type</label>
+                            <Select id="sessionTypeModal" value={sessionTypeInput} onValueChange={setSessionTypeInput} disabled={isTranscribing} required >
+                                 {SESSION_TYPES.map(type => (
+                                     <SelectItem key={type} value={type}>
+                                         {type.charAt(0).toUpperCase() + type.slice(1)}
+                                     </SelectItem>
+                                ))}
+                            </Select>
+                        </Col>
+                        <Col numColSpanMd={2}>
+                            <label htmlFor="therapyTypeModal" className="tremor-default font-medium text-tremor-content-strong block mb-1">Therapy Modality</label>
+                            <Select id="therapyTypeModal" value={therapyInput} onValueChange={setTherapyInput} disabled={isTranscribing} required >
+                                {THERAPY_TYPES.map(type => ( <SelectItem key={type} value={type}>{type}</SelectItem> ))}
+                            </Select>
+                        </Col>
+                    </Grid>
+                </div> {/* End flex-grow container */}
+
+                {/* Sticky Footer Area */}
+                 <div className="mt-auto pt-4 border-t border-tremor-border -mx-6 px-6">
+                    {transcriptionError && (
+                        <Text color="rose" className="mb-2 text-center text-sm">
+                            Error: {transcriptionError}
+                        </Text>
                     )}
+                    <Button
+                        className="w-full"
+                        onClick={handleStartClick}
+                        disabled={!modalFile || !clientNameInput.trim() || !sessionNameInput.trim() || !sessionDate || !sessionTypeInput || !therapyInput || isTranscribing}
+                        loading={isTranscribing} // Use Tremor loading state
+                    >
+                        {isTranscribing ? 'Transcribing...' : 'Upload & Transcribe Session'}
+                    </Button>
                 </div>
 
-                {/* 5. Add padding around the grid (e.g., pt-4) or adjust overall space-y */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2"> {/* Added pt-2 */}
-                    <div>
-                        <Label htmlFor="clientNameModal" className="mb-1 block">Client Name</Label>
-                        <Input id="clientNameModal" type="text" placeholder="Client's Full Name" value={clientNameInput} onChange={(e: any) => setClientNameInput(e.target.value)} disabled={isTranscribing} required />
-                    </div>
-                    <div>
-                         <Label htmlFor="sessionNameModal" className="mb-1 block">Session Name / Title</Label>
-                         <Input id="sessionNameModal" type="text" placeholder="e.g., Weekly Check-in" value={sessionNameInput} onChange={(e: any) => setSessionNameInput(e.target.value)} disabled={isTranscribing} required />
-                    </div>
-                     <div>
-                         <Label htmlFor="sessionDateModal" className="mb-1 block">Date</Label>
-                         <Input id="sessionDateModal" type="date" value={sessionDate} onChange={(e: any) => setSessionDate(e.target.value)} disabled={isTranscribing} required />
-                    </div>
-                    <div>
-                        <Label htmlFor="sessionTypeModal" className="mb-1 block">Session Type</Label>
-                        <Select id="sessionTypeModal" value={sessionTypeInput} onChange={(e: any) => setSessionTypeInput(e.target.value)} disabled={isTranscribing} required >
-                             {SESSION_TYPES.map(type => ( <option key={type} value={type}> {type.charAt(0).toUpperCase() + type.slice(1)} </option> ))}
-                        </Select>
-                    </div>
-                    <div className="md:col-span-2">
-                        <Label htmlFor="therapyTypeModal" className="mb-1 block">Therapy Modality</Label>
-                        <Select id="therapyTypeModal" value={therapyInput} onChange={(e: any) => setTherapyInput(e.target.value)} disabled={isTranscribing} required >
-                            {THERAPY_TYPES.map(type => ( <option key={type} value={type}>{type}</option> ))}
-                        </Select>
-                    </div>
-                </div>
-
-                <Button
-                    className="w-full"
-                    onClick={handleStartClick}
-                    disabled={!modalFile || !clientNameInput.trim() || !sessionNameInput.trim() || !sessionDate || !sessionTypeInput || !therapyInput || isTranscribing}
-                >
-                    {isTranscribing ? ( <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Transcribing...</> ) : ( 'Upload & Transcribe Session' )}
-                </Button>
-
-                {transcriptionError && (
-                    <div className="mt-2 text-center text-red-600 text-sm">
-                        Error: {transcriptionError}
-                    </div>
-                )}
-            </div>
-        </div>
+            </DialogPanel>
+        </Dialog>
     );
 }

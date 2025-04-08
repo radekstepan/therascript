@@ -3,6 +3,7 @@ import React from 'react';
 import { useAtomValue } from 'jotai';
 import { Routes, Route, Navigate } from 'react-router-dom'; // No Outlet needed
 
+import { Title } from '@tremor/react';
 // Import Components
 import { LandingPage } from './components/LandingPage';
 import { SessionView } from './components/SessionView'; // Renders all sections
@@ -22,16 +23,16 @@ function App() {
     const transcriptionError = useAtomValue(transcriptionErrorAtom);
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', backgroundColor: '#f8fafc' }}>
+        <div className="flex flex-col min-h-screen bg-gray-50">
             {/* Header */}
-            <header style={{ padding: '1rem 1.5rem', borderBottom: '1px solid #e5e7eb', backgroundColor: '#ffffff', flexShrink: 0 }}>
-                <h1 style={{ fontSize: '1.5rem', fontWeight: 'bold', textAlign: 'center', color: '#111827' }}>
+            <header className="p-4 sm:p-6 border-b border-gray-200 bg-white flex-shrink-0">
+                <Title className="text-center text-xl sm:text-2xl font-bold text-gray-900">
                      Therapy Session Analyzer
-                 </h1>
+                 </Title>
             </header>
 
             {/* Main Content Area */}
-            <main style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
+            <main className="flex-grow flex flex-col overflow-y-auto">
                 <Routes>
                     <Route path="/" element={<LandingPage />} />
 

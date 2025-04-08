@@ -1,9 +1,8 @@
 import React, { useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { CardHeader, CardTitle } from '../ui/Card';
-import { Button } from '../ui/Button';
-import { Input } from '../ui/Input';
-import { MessageSquare, PlusCircle, Edit, Check, X } from '../icons/Icons';
+
+import { Button, TextInput, Title, Flex, Text } from '@tremor/react'; // Import Tremor components
+import { MessageSquare, PlusCircle, Edit, Check, X } from '../icons/Icons'; // Keep existing icons
 import { activeChatAtom, renameChatAtom } from '../../store';
 import { formatTimestamp } from '../../helpers';
 import type { ChatSession } from '../../types';
@@ -48,44 +47,51 @@ export function ChatHeader({ activeChatId, onNewChatClick }: ChatHeaderProps) {
         setEditChatName('');
     };
 
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === 'Enter') handleSaveRename();
+        if (e.key === 'Escape') handleCancelRename();
+    };
+
 
     return (
-        // 6. Remove border-b
-        <CardHeader className="flex-shrink-0 flex flex-row justify-between items-center gap-2">
+        // Use Flex for layout within the chat interface header area
+        <Flex className="flex-shrink-0 py-3 px-4 gap-2" justifyContent="between" alignItems="center">
             {/* Title/Rename Section */}
-            <div className="flex items-center gap-2 flex-grow min-w-0">
-                <MessageSquare className="h-5 w-5 text-blue-600 flex-shrink-0" />
+            <Flex className="flex-grow min-w-0 gap-2" alignItems='center'>
+                <MessageSquare className="h-5 w-5 text-tremor-brand flex-shrink-0" aria-hidden="true" />
                 {renamingChatId === activeChatId && activeChat ? (
                     // Rename Mode
-                    <>
-                        <Input
+                    <Flex className="flex-grow min-w-0 gap-1">
+                        <TextInput
                             value={editChatName}
-                            onChange={(e: any) => setEditChatName(e.target.value)}
+                            onValueChange={setEditChatName} // Use onValueChange for Tremor TextInput
                             placeholder="Enter new chat name"
-                            className="h-8 text-sm flex-grow" autoFocus
-                            onKeyDown={(e) => e.key === 'Enter' && handleSaveRename()}
+                            className="h-9 text-sm flex-grow" autoFocus
+                            onKeyDown={handleKeyDown}
+                            aria-label="New chat name"
                         />
-                        <Button onClick={handleSaveRename} variant="ghost" size="icon" className="h-8 w-8 text-green-600 hover:bg-green-100" title="Save Name"><Check size={18} /></Button>
-                        <Button onClick={handleCancelRename} variant="ghost" size="icon" className="h-8 w-8 text-red-600 hover:bg-red-100" title="Cancel Rename"><X size={18} /></Button>
-                    </>
+                        <Button onClick={handleSaveRename} variant="light" icon={Check} tooltip="Save Name" color="emerald" className="h-9 w-9 p-0" />
+                        <Button onClick={handleCancelRename} variant="light" icon={X} tooltip="Cancel Rename" color="rose" className="h-9 w-9 p-0" />
+                    </Flex>
                 ) : (
                     // Display Mode
-                    <div className="flex items-center gap-1 min-w-0">
-                        <CardTitle className="truncate" title={activeChatTitle}>
+                    <Flex className="items-center gap-1 min-w-0">
+                        {/* Use Text instead of Title if you need smaller heading, or keep Title */}
+                        {/* <Title className="truncate font-semibold" title={activeChatTitle}> */}
+                        <Text className="truncate font-semibold text-tremor-content-strong" title={activeChatTitle}>
                             {activeChatTitle}
-                        </CardTitle>
+                        </Text>
+                        {/* </Title> */}
                         {activeChat && (
-                            <Button onClick={() => handleRenameClick(activeChat)} variant="ghost" size="icon" className="h-6 w-6 ml-1 text-gray-500 hover:text-blue-600 flex-shrink-0" title="Rename Chat">
-                                <Edit size={14} />
-                            </Button>
+                            <Button onClick={() => handleRenameClick(activeChat)} variant="light" icon={Edit} tooltip="Rename Chat" className="h-6 w-6 ml-1 text-tremor-content-subtle hover:text-tremor-brand p-0" />
                         )}
-                    </div>
+                    </Flex>
                 )}
-            </div>
+            </Flex>
             {/* New Chat Button */}
-            <Button onClick={onNewChatClick} variant="outline" size="sm" className="flex-shrink-0">
-                <PlusCircle className="mr-1 h-4 w-4" /> New Chat
+            <Button onClick={onNewChatClick} variant="secondary" icon={PlusCircle} className="flex-shrink-0">
+                 New Chat
             </Button>
-        </CardHeader>
+        </Flex>
     );
 }
