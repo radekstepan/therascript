@@ -56,7 +56,6 @@ export function LandingPage() {
        <Card className="flex-grow flex flex-col overflow-hidden h-full">
             <CardHeader className="flex-row items-center justify-between mb-4 px-4 pt-4 pb-2 sm:px-6">
                  <h2 className="text-xl font-semibold flex items-center text-gray-900 dark:text-gray-100">
-                    <History className="mr-2 h-5 w-5 text-gray-600 dark:text-gray-400" aria-hidden="true" />
                     Session History
                  </h2>
                  <Button
