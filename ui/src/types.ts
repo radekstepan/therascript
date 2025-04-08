@@ -1,11 +1,12 @@
-// Removed View type as routing handles it
-// export type View = 'landing' | 'session';
+// src/types.ts
+// Keep other types as they are
 
 export interface ChatMessage {
     id: number;
     sender: 'user' | 'ai';
     text: string;
     starred?: boolean;
+    starredName?: string; // Add this field to store the custom name
 }
 
 export interface ChatSession {
@@ -30,36 +31,26 @@ export interface Session extends SessionMetadata {
     chats: ChatSession[];
 }
 
-// --- Component Props (Keep only props not handled by Jotai atoms) ---
+// --- Component Props ---
 
-// No longer needs props managed by Jotai
-export interface LandingPageProps {
-    // Props removed: pastSessions, navigateToSession, openUploadModal
-}
-
-// SessionView no longer needs props, it gets IDs from URL params
-export interface SessionViewProps {
-    // Props removed
-}
-
-// Keep props that App needs to pass down for display/status
+// Keep UploadModalProps, StarredTemplatesProps, IconProps as they are
 export interface UploadModalProps {
     isOpen: boolean;
     isTranscribing: boolean;
     transcriptionError: string;
-    // Props removed: onClose, onStartTranscription (now handled via atoms/navigation)
 }
 
-// Keep props needed for interaction callbacks from SessionView
 export interface StarredTemplatesProps {
-    // Props removed: starredMessages (reads atom directly)
     onSelectTemplate: (text: string) => void;
     onClose: () => void;
 }
 
-// Props for Icons
 export interface IconProps {
     size?: number;
     className?: string;
-    filled?: boolean; // Specific to Star icon
+    filled?: boolean;
 }
+
+// Remove LandingPageProps and SessionViewProps if they are empty
+// interface LandingPageProps {}
+// interface SessionViewProps {}
