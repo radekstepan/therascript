@@ -6,13 +6,13 @@ import React, { useRef } from 'react';
   import { cn } from '../../utils'; // Import cn
 
   export function ChatInterface() {
-      const { chatId } = useParams<{ chatId?: string }>();
-      const navigate = useNavigate();
-      const session = useAtomValue(activeSessionAtom);
-      const startNewChatAction = useSetAtom(startNewChatAtom);
-      const setChatError = useSetAtom(chatErrorAtom);
-      const activeChatId = useAtomValue(activeChatIdAtom);
-      const chatScrollRef = useRef<HTMLDivElement | null>(null);
+        const { chatId } = useParams<{ chatId?: string }>();
+        const navigate = useNavigate();
+        const session = useAtomValue(activeSessionAtom);
+        const startNewChatAction = useSetAtom(startNewChatAtom);
+        const setChatError = useSetAtom(chatErrorAtom);
+        const activeChatId = useAtomValue(activeChatIdAtom);
+        const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
        const handleNewChatClick = async () => {
           const currentSessionId = session?.id;
@@ -28,35 +28,28 @@ import React, { useRef } from 'react';
           }
       };
 
-       if (activeChatId === null) {
-           // Replace Flex with div + Tailwind
-           return (
-               <div className="flex flex-grow p-4 justify-center items-center">
-                    <ReloadIcon className="h-6 w-6 animate-spin text-gray-400 dark:text-gray-500" />
-                    {/* Replace Text with p */}
-                    <p className="ml-2 text-gray-500 dark:text-gray-400">Loading chat...</p>
-                </div>
-          );
-       }
-
-      return (
-          // Replace Flex with div + Tailwind for layout
-          <div className={cn("flex flex-col flex-grow min-h-0 h-full")}>
-               <ChatHeader
-                  activeChatId={activeChatId}
-                  onNewChatClick={handleNewChatClick}
-               />
-               {/* Replace Divider with hr */}
-               <hr className="flex-shrink-0 my-0 border-gray-200 dark:border-gray-700" />
-               {/* Chat Content Wrapper - Replace Flex with div */}
-               <div className={cn("flex flex-col flex-grow space-y-4 min-h-0 p-4")}>
-                  <ChatMessages
-                      chatScrollRef={chatScrollRef}
-                      activeChatId={activeChatId}
-                  />
-                  <ChatInput />
-              </div>
+      if (activeChatId === null) {
+        return (
+          <div className="flex flex-grow p-4 justify-center items-center">
+            <ReloadIcon className="h-6 w-6 animate-spin text-gray-400 dark:text-gray-500" />
+            <p className="ml-2 text-gray-500 dark:text-gray-400">Loading chat...</p>
           </div>
+        );
+      }
+    
+      return (
+        <div className="flex flex-col flex-grow min-h-0 h-full">
+          <ChatHeader activeChatId={activeChatId} onNewChatClick={handleNewChatClick} />
+          <hr className="flex-shrink-0 my-0 border-gray-200 dark:border-gray-700" />
+          {/* Chat Content - Scrollable Messages */}
+          <div className="flex-grow min-h-0 overflow-y-auto p-4">
+            <ChatMessages chatScrollRef={chatScrollRef} activeChatId={activeChatId} />
+          </div>
+          {/* Fixed Input at Bottom */}
+          <div className="sticky bottom-0 z-10 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 p-4">
+            <ChatInput />
+          </div>
+        </div>
       );
   }
   
