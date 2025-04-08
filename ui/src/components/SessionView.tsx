@@ -3,9 +3,13 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { useParams, useNavigate, Navigate, useLocation } from 'react-router-dom';
 
 // UI Components & Icons
-import { Button } from './ui/Button'; // Import new Button
-import { Card, CardContent, CardHeader } from './ui/Card'; // Import new Card
-import { Loader2, ArrowLeft, Edit, Save } from './icons/Icons';
+import { Button } from './ui/Button';
+import { Card, CardContent, CardHeader } from './ui/Card';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from './ui/Dialog'; // Import Dialog
+import { Input } from './ui/Input';   // Import Input
+import { Label } from './ui/Label';   // Import Label
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/Select'; // Import Select
+import { Loader2, ArrowLeft, User, CalendarDays, Tag, BookMarked, Edit, Save, X } from './icons/Icons'; // Re-add Edit, Save, X
 
 // Sidebar
 import { SessionSidebar } from './SessionView/SessionSidebar';
@@ -13,6 +17,7 @@ import { SessionSidebar } from './SessionView/SessionSidebar';
 // Constants, Types
 import { SESSION_TYPES, THERAPY_TYPES } from '../constants';
 import type { Session, ChatSession } from '../types';
+import { cn } from '../utils'; // Import cn
 
 // Atoms
 import {
@@ -21,14 +26,44 @@ import {
     activeChatIdAtom,
     activeSessionAtom,
     chatErrorAtom,
-    updateSessionMetadataAtom,
+    updateSessionMetadataAtom, // Need this atom
     saveTranscriptAtom,
 } from '../store';
 
-// Sub-components
-import { SessionMetadata } from './SessionView/SessionMetadata';
+// Sub-components (No longer importing SessionMetadata)
 import { Transcription } from './SessionView/Transcription';
 import { ChatInterface } from './SessionView/ChatInterface';
+
+// --- Helper function for badges (copied from LandingPage) ---
+const getBadgeClasses = (type?: string, category: 'session' | 'therapy' = 'session'): string => {
+    const base = "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold capitalize"; // Adjusted padding slightly
+    let colorClasses = "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300"; // Default
+
+    const typeLower = type?.toLowerCase();
+
+    if (category === 'session') {
+        switch(typeLower){
+            case 'individual': colorClasses = 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'; break;
+            case 'phone': colorClasses = 'bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-200'; break;
+            case 'skills group': colorClasses = 'bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-200'; break;
+            case 'family session': colorClasses = 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200'; break;
+            case 'couples': colorClasses = 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200'; break;
+            // Add other session types if needed
+            default: colorClasses = 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'; // Fallback for unmapped session types
+        }
+    } else { // therapy
+         switch(typeLower){
+            case 'act': colorClasses = 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200'; break;
+            case 'dbt': colorClasses = 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200'; break;
+            case 'cbt': colorClasses = 'bg-lime-100 text-lime-800 dark:bg-lime-900 dark:text-lime-200'; break;
+            case 'erp': colorClasses = 'bg-rose-100 text-rose-800 dark:bg-rose-900 dark:text-rose-200'; break;
+            case 'mindfulness': colorClasses = 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-200'; break;
+            // Add other therapy types if needed
+            default: colorClasses = 'bg-pink-100 text-pink-800 dark:bg-pink-900 dark:text-pink-200'; // Fallback for unmapped therapy types
+        }
+    }
+    return cn(base, colorClasses);
+}
 
 
 export function SessionView() {
@@ -46,20 +81,21 @@ export function SessionView() {
     const saveTranscriptAction = useSetAtom(saveTranscriptAtom);
     const activeChatId = useAtomValue(activeChatIdAtom);
 
-    // Local UI State
-    const [isEditingMetadata, setIsEditingMetadata] = useState(false);
+    // --- Re-introduce State for Editing Details ---
+    const [isEditingMetadata, setIsEditingMetadata] = useState(false); // Controls the modal
     const [editClientName, setEditClientName] = useState('');
-    const [editName, setEditName] = useState('');
+    const [editSessionName, setEditSessionName] = useState(''); // Renamed for clarity
     const [editDate, setEditDate] = useState('');
     const [editType, setEditType] = useState('');
     const [editTherapy, setEditTherapy] = useState('');
+    // --- Transcript Editing State (Keep as is) ---
     const [isEditingTranscript, setIsEditingTranscript] = useState(false);
     const [editTranscriptContent, setEditTranscriptContent] = useState('');
     const [isLoading, setIsLoading] = useState(true);
 
     const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 
-    // --- Effect to Sync Session ID and Chat ID ---
+    // --- Effect to Sync Session ID and Chat ID (Keep as is) ---
     useEffect(() => {
         setIsLoading(true);
         const currentSessionIdNum = sessionIdParam ? parseInt(sessionIdParam, 10) : NaN;
@@ -78,80 +114,84 @@ export function SessionView() {
                 targetChatId = currentChatIdNum;
             } else {
                 console.warn(`Chat ID ${currentChatIdNum} not found, defaulting.`);
-                // Navigate to session base, let the next part redirect to latest chat
                 navigate(`/sessions/${currentSessionIdNum}`, { replace: true });
-                targetChatId = NaN; // Ensure it falls into default logic below
+                targetChatId = NaN;
             }
         }
 
-        // If no valid chat ID from URL OR URL points to base session URL, find the latest chat
         if (isNaN(targetChatId) && chats.length > 0) {
             targetChatId = [...chats].sort((a, b) => b.timestamp - a.timestamp)[0].id;
-            // Only navigate if the URL doesn't already include this targetChatId
             const expectedPath = `/sessions/${currentSessionIdNum}/chats/${targetChatId}`;
              if (location.pathname !== expectedPath) {
                 navigate(expectedPath, { replace: true });
              }
         } else if (isNaN(targetChatId)) {
-             targetChatId = NaN; // No chats exist
+             targetChatId = NaN;
         }
 
         setActiveChatId(isNaN(targetChatId) ? null : targetChatId);
         setChatError('');
         setIsLoading(false);
-    }, [sessionIdParam, chatIdParam, allSessions, navigate, setActiveSessionId, setActiveChatId, setChatError, location.pathname]); // Added location.pathname dependency
+    }, [sessionIdParam, chatIdParam, allSessions, navigate, setActiveSessionId, setActiveChatId, setChatError, location.pathname]);
 
 
-    // --- Effects to Initialize Local Edit State ---
-     useEffect(() => {
-        if (derivedSession && !isEditingMetadata) {
+    // --- Effect to Initialize Local Edit State (Keep transcript, add details for modal) ---
+    useEffect(() => {
+        if (derivedSession) {
+            // Initialize transcript edit state
+            if (!isEditingTranscript) {
+                setEditTranscriptContent(derivedSession.transcription || '');
+            }
+            // Initialize details edit state (used when modal opens)
             setEditClientName(derivedSession.clientName || '');
-            setEditName(derivedSession.sessionName || derivedSession.fileName || '');
+            setEditSessionName(derivedSession.sessionName || derivedSession.fileName || '');
+            setEditDate(derivedSession.date || '');
+            setEditType(derivedSession.sessionType || SESSION_TYPES[0]); // Default if undefined
+            setEditTherapy(derivedSession.therapy || THERAPY_TYPES[0]);   // Default if undefined
+        }
+         // Reset transcript editing if session changes or editing stops
+        if (!derivedSession || !isEditingTranscript) { setIsEditingTranscript(false); }
+        // We don't need to reset the detail edit state here constantly, only when opening modal
+    }, [derivedSession, isEditingTranscript]); // Depend only on derivedSession and isEditingTranscript
+
+    // --- Handlers ---
+
+    // Handler to open the Edit Details modal and initialize state
+    const handleOpenEditMetadataModal = () => {
+        if (derivedSession) {
+            // Ensure state is fresh when opening modal
+            setEditClientName(derivedSession.clientName || '');
+            setEditSessionName(derivedSession.sessionName || derivedSession.fileName || '');
             setEditDate(derivedSession.date || '');
             setEditType(derivedSession.sessionType || SESSION_TYPES[0]);
             setEditTherapy(derivedSession.therapy || THERAPY_TYPES[0]);
+            setIsEditingMetadata(true); // Open the modal
         }
-        // Reset if session changes or editing stops
-        if (!derivedSession || !isEditingMetadata) { setIsEditingMetadata(false); }
-    }, [derivedSession, isEditingMetadata]);
-
-    useEffect(() => {
-        if (derivedSession && !isEditingTranscript) {
-            setEditTranscriptContent(derivedSession.transcription || '');
-        }
-         // Reset if session changes or editing stops
-        if (!derivedSession || !isEditingTranscript) { setIsEditingTranscript(false); }
-    }, [derivedSession, isEditingTranscript]);
-
-    // --- Handlers ---
-    const handleEditMetadataToggle = () => {
-         if (!isEditingMetadata && derivedSession) {
-             // Re-initialize state when starting edit
-             setEditClientName(derivedSession.clientName || '');
-             setEditName(derivedSession.sessionName || derivedSession.fileName || '');
-             setEditDate(derivedSession.date || '');
-             setEditType(derivedSession.sessionType || SESSION_TYPES[0]);
-             setEditTherapy(derivedSession.therapy || THERAPY_TYPES[0]);
-         }
-         setIsEditingMetadata(prev => !prev);
     };
 
-    const handleEditTranscriptToggle = () => {
+    // Handler to close the Edit Details modal
+     const handleCloseEditMetadataModal = () => {
+        setIsEditingMetadata(false);
+        // No need to reset state here, it's reset on open
+    };
+
+
+    const handleEditTranscriptToggle = () => { // Keep this
         if (!isEditingTranscript && derivedSession) {
-             // Re-initialize state when starting edit
             setEditTranscriptContent(derivedSession.transcription || '');
         }
         setIsEditingTranscript(prev => !prev);
     };
 
+    // Re-introduce handler to save metadata changes (from modal)
     const handleSaveMetadataEdit = () => {
         if (!derivedSession) return;
-        const trimmedName = editName.trim();
+        const trimmedName = editSessionName.trim(); // Use correct state variable
         const trimmedClient = editClientName.trim();
 
         if (!trimmedName || !trimmedClient || !editDate) {
             alert("Please ensure Session Name, Client Name, and Date are filled.");
-            return;
+            return; // Keep modal open if validation fails
         }
 
         updateMetadataAction({
@@ -164,10 +204,11 @@ export function SessionView() {
                  therapy: editTherapy,
             }
         });
-        setIsEditingMetadata(false);
+        setIsEditingMetadata(false); // Close modal on success
     };
 
-    const handleSaveTranscriptEdit = () => {
+
+    const handleSaveTranscriptEdit = () => { // Keep this
         if (!derivedSession) return;
         saveTranscriptAction({
             sessionId: derivedSession.id,
@@ -176,7 +217,30 @@ export function SessionView() {
         setIsEditingTranscript(false);
     };
 
-    const handleNavigateBack = () => navigate('/');
+    const handleNavigateBack = () => navigate('/'); // Keep this
+
+    // Modified helper to render details, handling badges for type/therapy
+    const renderHeaderDetail = (
+        IconComponent: React.ElementType,
+        value: string | undefined,
+        label: string,
+        category?: 'session' | 'therapy' // Add category for badge styling
+    ) => {
+        if (!value) return null;
+
+        // Use badge style if category is provided
+        const isBadge = category === 'session' || category === 'therapy';
+        const badgeClasses = isBadge ? getBadgeClasses(value, category) : '';
+
+        return (
+            <div className="flex items-center space-x-1" title={label}>
+                 <IconComponent className={cn("h-3.5 w-3.5 flex-shrink-0", isBadge ? "text-inherit" : "text-gray-400 dark:text-gray-500")} aria-hidden="true" />
+                 <span className={cn("text-xs capitalize", isBadge ? badgeClasses : "text-gray-600 dark:text-gray-400")}>
+                     {value}
+                 </span>
+             </div>
+        );
+    };
 
 
     // --- Render Logic ---
@@ -187,76 +251,59 @@ export function SessionView() {
 
     return (
         // Main flex container for sidebar + content
-        <div className="flex flex-grow min-h-0 items-stretch"> {/* Use div + flex */}
+        <div className="flex flex-grow min-h-0 items-stretch">
             <SessionSidebar />
 
-            {/* Main Content Area with Scroll */}
-            <main ref={scrollContainerRef} className="flex-grow flex flex-col min-w-0 bg-gray-100 dark:bg-gray-950 overflow-y-auto">
+            {/* Main Content Area */}
+            <main ref={scrollContainerRef} className="flex-grow flex flex-col min-w-0 bg-gray-100 dark:bg-gray-950">
 
-                {/* Sticky Header */}
-                 <div className="sticky top-0 z-10 flex-shrink-0 p-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm flex items-center justify-between"> {/* div + flex */}
-                     <Button onClick={handleNavigateBack} variant="link" size="sm" icon={ArrowLeft}> {/* Use link variant */}
-                         Back to Sessions
-                     </Button>
-                      <span className="truncate font-medium text-gray-800 dark:text-gray-200">{derivedSession.sessionName || derivedSession.fileName}</span>
-                      {/* Placeholder for potential actions */}
-                      <div className="w-[150px]"></div> {/* Keep spacing roughly balanced */}
+                {/* Sticky Header - Now includes details with badges and Edit button */}
+                 <div className="sticky top-0 z-10 flex-shrink-0 p-3 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm flex items-center justify-between gap-4">
+                     {/* Back Button */}
+                     <div className="flex-shrink-0">
+                         <Button onClick={handleNavigateBack} variant="ghost" size="sm" icon={ArrowLeft} className="text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800">
+                             Back
+                         </Button>
+                     </div>
+
+                     {/* Central Area: Session Name + Details */}
+                     <div className="flex flex-col items-center text-center overflow-hidden flex-grow min-w-0 px-2">
+                        <span className="truncate font-semibold text-sm text-gray-800 dark:text-gray-200" title={derivedSession.sessionName || derivedSession.fileName}>
+                            {derivedSession.sessionName || derivedSession.fileName}
+                        </span>
+                        {/* Details Row - using helper with category for badges */}
+                        <div className="flex items-center flex-wrap justify-center gap-x-3 gap-y-1 mt-1">
+                            {renderHeaderDetail(User, derivedSession.clientName, "Client")}
+                            {renderHeaderDetail(CalendarDays, derivedSession.date, "Date")}
+                            {renderHeaderDetail(Tag, derivedSession.sessionType, "Session Type", 'session')} {/* Pass category */}
+                            {renderHeaderDetail(BookMarked, derivedSession.therapy, "Therapy Type", 'therapy')} {/* Pass category */}
+                        </div>
+                     </div>
+
+                      {/* Right Action Area */}
+                      <div className="flex-shrink-0">
+                         <Button variant="secondary" size="sm" onClick={handleOpenEditMetadataModal} icon={Edit}>
+                            Edit Details
+                        </Button>
+                      </div>
                  </div>
 
-                {/* Content Wrapper: Default vertical, becomes horizontal row on large screens */}
-                <div className="p-4 md:p-6 lg:p-8 flex-grow flex flex-col lg:flex-row lg:space-x-6 space-y-6 lg:space-y-0">
+                {/* Content Wrapper: Takes remaining space, defines flex context for panels */}
+                <div className="p-4 md:p-6 lg:p-8 flex-grow flex flex-col lg:flex-row lg:space-x-6 space-y-6 lg:space-y-0 min-h-0">
 
-                    {/* Left Panel (Details + Transcript) */}
-                    <div className="flex flex-col space-y-6 lg:w-1/2 lg:flex-shrink-0">
-                        {/* Details Section */}
-                        <Card>
-                             {/* CardHeader for padding and layout */}
-                            <CardHeader className="flex-row justify-between items-start mb-0 pb-2"> {/* Adjust layout */}
-                                <h3 className="text-lg font-semibold">Details</h3> {/* Use h3 */}
-                                {!isEditingMetadata ? (
-                                    <Button onClick={handleEditMetadataToggle} variant="secondary" size="sm" icon={Edit}>
-                                        Edit
-                                    </Button>
-                                ) : (
-                                    <div className="flex justify-end space-x-2"> {/* div + flex */}
-                                        <Button onClick={handleSaveMetadataEdit} variant="default" size="sm" icon={Save}>
-                                            Save
-                                        </Button>
-                                        <Button onClick={handleEditMetadataToggle} variant="secondary" size="sm">Cancel</Button>
-                                    </div>
-                                )}
-                            </CardHeader>
-                            {/* Use hr for divider */}
-                            <hr className="my-4 border-gray-200 dark:border-gray-700" />
-                            {/* CardContent for padding */}
-                            <CardContent className="pt-2">
-                                <SessionMetadata
-                                    session={derivedSession}
-                                    isEditing={isEditingMetadata}
-                                    editName={editName}
-                                    editClientName={editClientName}
-                                    editDate={editDate}
-                                    editType={editType}
-                                    editTherapy={editTherapy}
-                                    onEditNameChange={setEditName}
-                                    onEditClientNameChange={setEditClientName}
-                                    onEditDateChange={setEditDate}
-                                    onEditTypeChange={setEditType}
-                                    onEditTherapyChange={setEditTherapy}
-                                />
-                            </CardContent>
-                        </Card>
+                    {/* Left Panel (Transcript only now) */}
+                    <div className="flex flex-col lg:w-1/2 lg:flex-shrink-0 min-h-0">
 
-                        {/* Transcription Section */}
-                        <Card className="flex flex-col min-h-[50vh]">
-                            <CardHeader className="flex-row justify-between items-start mb-0 pb-2"> {/* Adjust layout */}
-                                <h3 className="text-lg font-semibold">Transcription</h3> {/* Use h3 */}
+                        {/* Transcription Section - Needs to grow */}
+                        <Card className="flex flex-col flex-grow min-h-0">
+                            <CardHeader className="flex-row justify-between items-start mb-0 pb-2 flex-shrink-0">
+                                <h3 className="text-lg font-semibold">Transcription</h3>
                                 {!isEditingTranscript ? (
                                     <Button onClick={handleEditTranscriptToggle} variant="secondary" size="sm" icon={Edit}>
                                         Edit
                                     </Button>
                                 ) : (
-                                    <div className="flex justify-end space-x-2"> {/* div + flex */}
+                                    <div className="flex justify-end space-x-2">
                                         <Button onClick={handleSaveTranscriptEdit} variant="default" size="sm" icon={Save}>
                                             Save
                                         </Button>
@@ -264,16 +311,13 @@ export function SessionView() {
                                     </div>
                                 )}
                             </CardHeader>
-                            <hr className="my-4 border-gray-200 dark:border-gray-700" />
-                            {/* Use CardContent and ensure Transcription takes full height */}
+                            <hr className="my-4 border-gray-200 dark:border-gray-700 flex-shrink-0" />
                             <CardContent className="pt-2 flex flex-col flex-grow min-h-0">
                                 <Transcription
                                     session={derivedSession}
                                     isEditingOverall={isEditingTranscript}
                                     editTranscriptContent={editTranscriptContent}
                                     onContentChange={setEditTranscriptContent}
-                                    onEditToggle={handleEditTranscriptToggle}
-                                    onSave={handleSaveTranscriptEdit}
                                 />
                             </CardContent>
                         </Card>
@@ -281,20 +325,20 @@ export function SessionView() {
 
 
                     {/* Right Panel (Chat) */}
-                    <div className="flex flex-col lg:w-1/2 lg:flex-shrink-0">
+                    <div className="flex flex-col lg:w-1/2 lg:flex-shrink-0 min-h-0">
                         {/* Chat Section */}
-                        {activeChatId !== null ? (
-                             <Card className="flex flex-col flex-grow min-h-[70vh] p-0"> {/* Remove Card padding */}
+                         {activeChatId !== null ? (
+                             <Card className="flex flex-col flex-grow min-h-0 p-0">
                                 <ChatInterface />
                              </Card>
                         ) : derivedSession.chats && derivedSession.chats.length > 0 ? (
-                            <Card className="flex items-center justify-center text-center italic min-h-[70vh]">
+                            <Card className="flex flex-grow items-center justify-center text-center italic min-h-0">
                                 <p className="text-gray-500 dark:text-gray-400">
                                 Select a chat from the sidebar to view it.
                                 </p>
                             </Card>
                         ) : (
-                            <Card className="flex items-center justify-center text-center italic min-h-[70vh]">
+                            <Card className="flex flex-grow items-center justify-center text-center italic min-h-0">
                                 <p className="text-gray-500 dark:text-gray-400">
                                 No chats have been started for this session yet.
                                 </p>
@@ -304,6 +348,66 @@ export function SessionView() {
 
                 </div> {/* End Content Wrapper */}
             </main> {/* End Main Content Area */}
+
+            {/* Edit Details Modal */}
+            <Dialog open={isEditingMetadata} onOpenChange={setIsEditingMetadata}>
+                <DialogContent className="sm:max-w-[525px]">
+                    <DialogHeader>
+                        <DialogTitle>Edit Session Details</DialogTitle>
+                        {/* Optional: <DialogDescription>Make changes to the session metadata.</DialogDescription> */}
+                    </DialogHeader>
+                    {/* Form Grid */}
+                    <div className="grid gap-4 py-4">
+                        <div className="grid grid-cols-4 items-center gap-4">
+                             <Label htmlFor="sessionNameEdit" className="text-right">Session Name</Label>
+                             <Input id="sessionNameEdit" value={editSessionName} onChange={(e) => setEditSessionName(e.target.value)} className="col-span-3" placeholder="e.g., Weekly Check-in" />
+                        </div>
+                        <div className="grid grid-cols-4 items-center gap-4">
+                            <Label htmlFor="clientNameEdit" className="text-right">Client Name</Label>
+                            <Input id="clientNameEdit" value={editClientName} onChange={(e) => setEditClientName(e.target.value)} className="col-span-3" placeholder="Client's Full Name"/>
+                        </div>
+                         <div className="grid grid-cols-4 items-center gap-4">
+                            <Label htmlFor="sessionDateEdit" className="text-right">Date</Label>
+                            {/* Standard date input, styled via global.css */}
+                            <input id="sessionDateEdit" type="date" value={editDate} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditDate(e.target.value)} required className="col-span-3" />
+                        </div>
+                        <div className="grid grid-cols-4 items-center gap-4">
+                            <Label htmlFor="sessionTypeEdit" className="text-right">Session Type</Label>
+                            <Select value={editType} onValueChange={setEditType}>
+                                <SelectTrigger id="sessionTypeEdit" className="col-span-3">
+                                    <SelectValue placeholder="Select type..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {SESSION_TYPES.map(type => (
+                                        <SelectItem key={type} value={type}>
+                                            {type.charAt(0).toUpperCase() + type.slice(1)}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                         <div className="grid grid-cols-4 items-center gap-4">
+                            <Label htmlFor="therapyTypeEdit" className="text-right">Therapy Type</Label>
+                            <Select value={editTherapy} onValueChange={setEditTherapy}>
+                                <SelectTrigger id="therapyTypeEdit" className="col-span-3">
+                                     <SelectValue placeholder="Select therapy..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {THERAPY_TYPES.map(type => ( <SelectItem key={type} value={type}>{type}</SelectItem> ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        {/* Use DialogClose for the Cancel button for better accessibility */}
+                        <DialogClose asChild>
+                             <Button type="button" variant="secondary">Cancel</Button>
+                        </DialogClose>
+                        <Button type="button" onClick={handleSaveMetadataEdit}>Save Changes</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
         </div> // End Outer Flex Container
     );
 }

@@ -50,7 +50,7 @@ export function ChatInterface() {
              {/* Replace Divider with hr */}
              <hr className="flex-shrink-0 my-0 border-gray-200 dark:border-gray-700" />
              {/* Chat Content Wrapper - Replace Flex with div */}
-             <div className={cn("flex flex-col flex-grow space-y-4 overflow-hidden min-h-0 p-4")}>
+             <div className={cn("flex flex-col flex-grow space-y-4 min-h-0 p-4")}>
                 <ChatMessages
                     chatScrollRef={chatScrollRef}
                     activeChatId={activeChatId}
