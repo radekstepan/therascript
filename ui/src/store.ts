@@ -9,10 +9,6 @@ export const MIN_SIDEBAR_WIDTH = 200;
 export const MAX_SIDEBAR_WIDTH = 500;
 export const DEFAULT_SIDEBAR_WIDTH = 256; // Corresponds to w-64
 
-// --- Define Sort Types ---
-export type SessionSortCriteria = 'sessionName' | 'clientName' | 'sessionType' | 'therapy' | 'date' | 'id'; // Added 'id' as a fallback
-export type SortDirection = 'asc' | 'desc';
-
 // --- Sidebar Width Atom ---
 // Persist sidebar width in localStorage, default to DEFAULT_SIDEBAR_WIDTH
 export const sidebarWidthAtom = atomWithStorage<number>(
@@ -20,18 +16,9 @@ export const sidebarWidthAtom = atomWithStorage<number>(
     DEFAULT_SIDEBAR_WIDTH
 );
 
-// --- Derived atom to ensure sidebar width stays within bounds ---
-// This is optional but good practice: ensures the stored value is always valid
-export const clampedSidebarWidthAtom = atom(
-    (get) => {
-        const width = get(sidebarWidthAtom);
-        return Math.max(MIN_SIDEBAR_WIDTH, Math.min(width, MAX_SIDEBAR_WIDTH));
-    },
-    (get, set, newWidth: number) => {
-        const clampedWidth = Math.max(MIN_SIDEBAR_WIDTH, Math.min(newWidth, MAX_SIDEBAR_WIDTH));
-        set(sidebarWidthAtom, clampedWidth); // Set the original persistent atom
-    }
-);
+// --- Define Sort Types ---
+export type SessionSortCriteria = 'sessionName' | 'clientName' | 'sessionType' | 'therapy' | 'date' | 'id'; // Added 'id' as a fallback
+export type SortDirection = 'asc' | 'desc';
 
 // --- Sorting Atoms ---
 // Persist sort criteria, default to 'date'
@@ -181,6 +168,18 @@ export const sortedSessionsAtom = atom<Session[]>((get) => {
     return sorted;
 });
 
+// --- Derived atom to ensure sidebar width stays within bounds ---
+// This is optional but good practice: ensures the stored value is always valid
+export const clampedSidebarWidthAtom = atom(
+    (get) => {
+        const width = get(sidebarWidthAtom);
+        return Math.max(MIN_SIDEBAR_WIDTH, Math.min(width, MAX_SIDEBAR_WIDTH));
+    },
+    (get, set, newWidth: number) => {
+        const clampedWidth = Math.max(MIN_SIDEBAR_WIDTH, Math.min(newWidth, MAX_SIDEBAR_WIDTH));
+        set(sidebarWidthAtom, clampedWidth); // Set the original persistent atom
+    }
+);
 
 // --- Write Atoms (Actions) ---
 
@@ -229,6 +228,92 @@ export const starMessageAtom = atom(null, (get, set, payload: { chatId: number; 
     if (shouldStar) { console.log(`Message ${messageId} in chat ${chatId} starred with name "${name || 'Default Name'}"`); }
     else { console.log(`Message ${messageId} in chat ${chatId} unstarred`); }
 });
+
+export const renameChatAtom = atom(null, (get, set, payload: { chatId: number, newName: string }) => {
+    const { chatId, newName } = payload; const sessionId = get(activeSessionIdAtom);
+    if (sessionId === null) { console.error("Cannot rename chat: No active session."); return; }
+    set(pastSessionsAtom, (prev) => prev.map(session => { if (session.id === sessionId) { const updatedChats = (session.chats || []).map(chat => chat.id === chatId ? { ...chat, name: newName.trim() || undefined } : chat); return { ...session, chats: updatedChats }; } return session; }));
+    console.log(`Renamed chat ${chatId} in session ${sessionId} to: ${newName.trim()}`);
+});
+
+type DeleteChatResult = { success: true; newActiveChatId: number | null } | { success: false; error: string };
+export const deleteChatAtom = atom<null, [{ chatId: number }], DeleteChatResult>(
+    null,
+    (get, set, { chatId }) => {
+        const sessionId = get(activeSessionIdAtom);
+        if (sessionId === null) {
+            const error = "Cannot delete chat: No active session.";
+            console.error(error);
+            return { success: false, error };
+        }
+
+        let sessionFound = false;
+        let chatDeleted = false;
+        let remainingChats: ChatSession[] = [];
+        let currentlyActiveChatId = get(activeChatIdAtom);
+        let newActiveChatId: number | null = null;
+
+        set(pastSessionsAtom, (prevSessions) =>
+            prevSessions.map(session => {
+                if (session.id === sessionId) {
+                    sessionFound = true;
+                    const initialChats = session.chats || [];
+                    const chatIndex = initialChats.findIndex(c => c.id === chatId);
+
+                    if (chatIndex === -1) {
+                        return session; // Chat not found in this session
+                    }
+
+                    chatDeleted = true;
+                    remainingChats = [
+                        ...initialChats.slice(0, chatIndex),
+                        ...initialChats.slice(chatIndex + 1)
+                    ];
+
+                    return { ...session, chats: remainingChats };
+                }
+                return session;
+            })
+        );
+
+        if (!sessionFound) {
+             const error = `Error: Session ${sessionId} not found when deleting chat.`;
+             console.error(error);
+             return { success: false, error };
+        }
+        if (!chatDeleted) {
+            const error = `Error: Chat ${chatId} not found in session ${sessionId}.`;
+            console.error(error);
+            return { success: false, error };
+        }
+
+        console.log(`Deleted chat ${chatId} from session ${sessionId}`);
+
+        // Determine the next active chat ID
+        if (currentlyActiveChatId === chatId) {
+            // If we deleted the active chat, find the next newest one
+            if (remainingChats.length > 0) {
+                // Sort remaining by timestamp descending
+                const sortedRemaining = [...remainingChats].sort((a, b) => b.timestamp - a.timestamp);
+                newActiveChatId = sortedRemaining[0].id;
+            } else {
+                // No chats left
+                newActiveChatId = null;
+            }
+            // Update the active chat ID atom *after* the session update
+            set(activeChatIdAtom, newActiveChatId);
+             console.log(`Active chat was deleted. New active chat ID: ${newActiveChatId}`);
+        } else {
+            // If we deleted a non-active chat, keep the current one active
+            newActiveChatId = currentlyActiveChatId;
+        }
+
+
+        return { success: true, newActiveChatId: newActiveChatId };
+    }
+);
+
+
 type StartNewChatResult = { success: true; newChatId: number } | { success: false; error: string };
 export const startNewChatAtom = atom<null, [{ sessionId: number }], Promise<StartNewChatResult>>(null, async (get, set, { sessionId }) => {
     if (sessionId === null || isNaN(sessionId)) { const error = "Error: Could not find session to start new chat."; console.error(error); set(chatErrorAtom, error); return { success: false, error }; }
@@ -239,12 +324,7 @@ export const startNewChatAtom = atom<null, [{ sessionId: number }], Promise<Star
     if (success) { console.log(`Created new chat (${newChatId}) for session ${sessionId}`); return { success: true, newChatId: newChatId }; }
     else { const error = `Error: Session ${sessionId} not found when adding new chat.`; console.error(error); set(chatErrorAtom, error); return { success: false, error }; }
 });
-export const renameChatAtom = atom(null, (get, set, payload: { chatId: number, newName: string }) => {
-    const { chatId, newName } = payload; const sessionId = get(activeSessionIdAtom);
-    if (sessionId === null) { console.error("Cannot rename chat: No active session."); return; }
-    set(pastSessionsAtom, (prev) => prev.map(session => { if (session.id === sessionId) { const updatedChats = (session.chats || []).map(chat => chat.id === chatId ? { ...chat, name: newName.trim() || undefined } : chat); return { ...session, chats: updatedChats }; } return session; }));
-    console.log(`Renamed chat ${chatId} in session ${sessionId} to: ${newName.trim()}`);
-});
+
 type TranscriptionResult = { success: true, newSessionId: number, newChatId: number } | { success: false, error: string };
 export const handleStartTranscriptionAtom = atom<null, [{ file: File, metadata: SessionMetadata }], Promise<TranscriptionResult>>(null, async (get, set, { file, metadata }) => {
     set(isTranscribingAtom, true); set(transcriptionErrorAtom, ''); console.log("Starting transcription simulation for:", file.name, metadata);

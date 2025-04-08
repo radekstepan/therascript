@@ -20,9 +20,9 @@ import {
     ArrowLeftIcon,     // Available
     BookmarkIcon,      // Available
     CalendarIcon,      // Available
+    ChatBubbleIcon,    // Import for the button
     Cross1Icon,        // Available (used implicitly by DialogClose)
     Pencil1Icon,       // Available
-    // ArchiveIcon removed from here, used in Transcription.tsx
     PersonIcon,        // Available
     ReloadIcon,        // Available
     BadgeIcon,         // Available (replaces TagIcon)
@@ -43,11 +43,12 @@ import {
     activeChatIdAtom,
     activeSessionAtom,
     chatErrorAtom,
-    updateSessionMetadataAtom, // Need this atom
+    updateSessionMetadataAtom,
     saveTranscriptAtom,
+    startNewChatAtom, // Import atom to start a chat
     // Sidebar Width Atoms & Constants
-    clampedSidebarWidthAtom, // Use the clamped atom for reading and writing
-    MIN_SIDEBAR_WIDTH,       // Import constants if needed here, or rely on clamped atom
+    clampedSidebarWidthAtom,
+    MIN_SIDEBAR_WIDTH,
     MAX_SIDEBAR_WIDTH,
 } from '../store';
 
@@ -55,11 +56,6 @@ import {
 import { Transcription } from './SessionView/Transcription';
 import { ChatInterface } from './SessionView/ChatInterface';
 import { getBadgeClasses } from '../helpers'; // Import shared helper
-
-// Remove constants defined locally if imported from store
-// const MIN_SIDEBAR_WIDTH = 200;
-// const MAX_SIDEBAR_WIDTH = 500;
-// const DEFAULT_SIDEBAR_WIDTH = 256;
 
 export function SessionView() {
     const { sessionId: sessionIdParam, chatId: chatIdParam } = useParams<{ sessionId: string; chatId?: string }>();
@@ -75,9 +71,9 @@ export function SessionView() {
     const updateMetadataAction = useSetAtom(updateSessionMetadataAtom);
     const saveTranscriptAction = useSetAtom(saveTranscriptAtom);
     const activeChatId = useAtomValue(activeChatIdAtom);
+    const startNewChatAction = useSetAtom(startNewChatAtom); // Get the action setter
 
     // --- Sidebar Resizing State ---
-    // Read width and get setter from the clamped atom
     const [sidebarWidth, setSidebarWidth] = useAtom(clampedSidebarWidthAtom);
     const isResizing = useRef(false);
     const sidebarRef = useRef<HTMLDivElement | null>(null);
@@ -95,7 +91,7 @@ export function SessionView() {
 
     const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 
-    // --- Effect to Sync Session ID and Chat ID ---
+    // --- Effect to Sync Session ID and Chat ID --- (remains the same)
     useEffect(() => {
         setIsLoading(true);
         const currentSessionIdNum = sessionIdParam ? parseInt(sessionIdParam, 10) : NaN;
@@ -135,7 +131,7 @@ export function SessionView() {
     }, [sessionIdParam, chatIdParam, allSessions, navigate, setActiveSessionId, setActiveChatId, setChatError, location.pathname]);
 
 
-    // --- Effect to Initialize Local Edit State ---
+    // --- Effect to Initialize Local Edit State --- (remains the same)
     useEffect(() => {
         if (derivedSession) {
             // Initialize transcript edit state
@@ -152,7 +148,23 @@ export function SessionView() {
 
     // --- Handlers ---
 
-    // Handler to open the Edit Details modal and initialize state
+    // --- Start First Chat Handler ---
+    const handleStartFirstChat = async () => {
+        if (!derivedSession) return;
+        const currentSessionId = derivedSession.id;
+        const result = await startNewChatAction({ sessionId: currentSessionId });
+        if (result.success) {
+            navigate(`/sessions/${currentSessionId}/chats/${result.newChatId}`);
+        } else {
+             setChatError(result.error);
+             // Optionally display a more visible error message/toast
+             alert(`Error starting chat: ${result.error}`); // Simple alert for now
+        }
+    };
+    // --- End Start First Chat Handler ---
+
+
+    // Handler to open the Edit Details modal and initialize state (remains the same)
     const handleOpenEditMetadataModal = () => {
       if (derivedSession) {
         setEditClientName(derivedSession.clientName || '');
@@ -164,13 +176,13 @@ export function SessionView() {
       }
     };
 
-    // Handler to close the Edit Details modal
+    // Handler to close the Edit Details modal (remains the same)
      const handleCloseEditMetadataModal = () => {
         setIsEditingMetadata(false);
         // No need to reset state here, it's reset on open
     };
 
-    // Re-introduce handler to save metadata changes (from modal)
+    // Re-introduce handler to save metadata changes (from modal) (remains the same)
     const handleSaveMetadataEdit = () => {
         if (!derivedSession) return;
         const trimmedName = editSessionName.trim(); // Use correct state variable
@@ -194,7 +206,7 @@ export function SessionView() {
         setIsEditingMetadata(false); // Close modal on success
     };
 
-    // This handler updates the state when a paragraph is saved in Transcription.tsx
+    // This handler updates the state when a paragraph is saved in Transcription.tsx (remains the same)
     const handleTranscriptContentChange = (newContent: string) => {
         if (!derivedSession) return;
         saveTranscriptAction({
@@ -206,7 +218,7 @@ export function SessionView() {
 
     const handleNavigateBack = () => navigate('/'); // Keep this
 
-    // Modified helper to render details, handling badges for type/therapy
+    // Modified helper to render details, handling badges for type/therapy (remains the same)
     const renderHeaderDetail = (
         IconComponent: React.ElementType, // Use ElementType for flexibility
         value: string | undefined,
@@ -230,7 +242,7 @@ export function SessionView() {
         );
     };
 
-    // --- Resizing Handlers ---
+    // --- Resizing Handlers --- (remain the same)
     const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
         e.preventDefault();
         isResizing.current = true;
@@ -239,23 +251,13 @@ export function SessionView() {
         document.addEventListener('mousemove', handleMouseMove);
         document.addEventListener('mouseup', handleMouseUp);
     };
-
-    // Update the atom directly in handleMouseMove
     const handleMouseMove = useCallback((e: MouseEvent) => {
         if (!isResizing.current || !sidebarRef.current) return;
-
-        // Calculate new width based on mouse position relative to the viewport start
-        // This assumes the sidebar is anchored to the left edge of its container
         const containerRect = sidebarRef.current.parentElement?.getBoundingClientRect();
         if (!containerRect) return; // Need parent context
-
         let newWidth = e.clientX - containerRect.left;
-
-        // Constraints are handled by the clampedSidebarWidthAtom setter
         setSidebarWidth(newWidth);
-
-    }, [setSidebarWidth]); // Depend on the atom setter
-
+    }, [setSidebarWidth]);
     const handleMouseUp = useCallback(() => {
         if (isResizing.current) {
             isResizing.current = false;
@@ -263,12 +265,10 @@ export function SessionView() {
             document.body.style.userSelect = ''; // Restore text selection
             document.removeEventListener('mousemove', handleMouseMove);
             document.removeEventListener('mouseup', handleMouseUp);
-            // No need to set width here again as it's updated live
-            // Optional: Persist sidebarWidth to localStorage here (handled by atomWithStorage now)
         }
-    }, [handleMouseMove]); // Add handleMouseMove as dependency
+    }, [handleMouseMove]);
 
-    // Cleanup listeners if component unmounts while resizing
+    // Cleanup listeners if component unmounts while resizing (remains the same)
     useEffect(() => {
         return () => {
             if (isResizing.current) {
@@ -295,6 +295,9 @@ export function SessionView() {
     }
     if (!derivedSession) { return <Navigate to="/" replace />; }
 
+    // Determine if there are any chats for the current session
+    const hasChats = derivedSession.chats && derivedSession.chats.length > 0;
+
     return (
       <div className="flex flex-grow min-h-0 items-stretch h-screen">
         {/* Sidebar Container - Apply width dynamically */}
@@ -318,7 +321,7 @@ export function SessionView() {
 
         {/* Main Content Area - Takes remaining space */}
         <main ref={scrollContainerRef} className="flex-grow flex flex-col min-w-0 bg-gray-100 dark:bg-gray-950">
-          {/* Sticky Header */}
+          {/* Sticky Header (remains the same) */}
           <div className="sticky top-0 z-10 flex-shrink-0 px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-md flex items-center justify-between gap-6">
             <div className="flex-shrink-0">
               <Button
@@ -358,95 +361,109 @@ export function SessionView() {
 
           {/* Content Wrapper */}
           <div className="flex flex-col flex-grow min-h-0 lg:flex-row lg:space-x-6 p-4 md:p-6 lg:p-8">
-            {/* Left Panel: Transcript */}
+            {/* Left Panel: Transcript (remains the same) */}
             <div className="flex flex-col lg:w-1/2 lg:flex-shrink-0 min-h-0 mb-6 lg:mb-0">
-              <Card className="flex flex-col h-full">
-                <CardHeader className="mb-0 pb-2 flex-shrink-0">
-                  <h3 className="text-lg font-semibold">Transcription</h3>
-                </CardHeader>
-                <hr className="my-4 border-gray-200 dark:border-gray-700 flex-shrink-0" />
-                <CardContent className="flex-grow overflow-y-auto p-0">
-                  <Transcription
-                    session={derivedSession}
-                    editTranscriptContent={editTranscriptContent}
-                    onContentChange={handleTranscriptContentChange}
-                  />
-                </CardContent>
-              </Card>
+                <Card className="flex flex-col h-full">
+                    <CardHeader className="mb-0 pb-2 flex-shrink-0">
+                    <h3 className="text-lg font-semibold">Transcription</h3>
+                    </CardHeader>
+                    <hr className="my-4 border-gray-200 dark:border-gray-700 flex-shrink-0" />
+                    <CardContent className="flex-grow overflow-y-auto p-0">
+                    <Transcription
+                        session={derivedSession}
+                        editTranscriptContent={editTranscriptContent}
+                        onContentChange={handleTranscriptContentChange}
+                    />
+                    </CardContent>
+                </Card>
             </div>
 
             {/* Right Panel: Chat */}
             <div className="flex flex-col lg:w-1/2 lg:flex-shrink-0 min-h-0">
               {activeChatId !== null ? (
+                // --- Render Chat Interface if a chat is active ---
                 <Card className="flex flex-col h-full p-0">
                   <ChatInterface />
                 </Card>
-              ) : derivedSession.chats && derivedSession.chats.length > 0 ? (
+              ) : hasChats ? (
+                // --- Render "Select Chat" message if chats exist but none are active ---
                 <Card className="flex flex-grow items-center justify-center text-center italic h-full">
                   <p className="text-gray-500 dark:text-gray-400">Select a chat from the sidebar to view it.</p>
                 </Card>
               ) : (
-                <Card className="flex flex-grow items-center justify-center text-center italic h-full">
-                  <p className="text-gray-500 dark:text-gray-400">No chats have been started for this session yet.</p>
+                // --- Render "Start Chat" button if NO chats exist for this session ---
+                <Card className="flex flex-col flex-grow items-center justify-center text-center h-full p-6">
+                    <ChatBubbleIcon className="w-12 h-12 text-gray-300 dark:text-gray-600 mb-4" />
+                    <p className="text-gray-600 dark:text-gray-400 mb-6">
+                        No chats have been started for this session yet.
+                    </p>
+                    <Button
+                        onClick={handleStartFirstChat}
+                        variant="secondary" // Or "default" if you want it more prominent
+                        size="sm"
+                        icon={ChatBubbleIcon} // Optional: use a specific icon like PlusCircledIcon
+                    >
+                        Start New Chat
+                    </Button>
                 </Card>
               )}
             </div>
           </div>
         </main>
 
-        {/* Edit Details Modal (unchanged) */}
+        {/* Edit Details Modal (remains the same) */}
         <Dialog open={isEditingMetadata} onOpenChange={setIsEditingMetadata}>
-                <DialogContent className="sm:max-w-[525px]">
-                    <DialogHeader>
-                        <DialogTitle>Edit Session Details</DialogTitle>
-                    </DialogHeader>
-                    <div className="grid gap-4 py-4">
-                        {/* Form fields remain the same */}
-                        <div className="grid grid-cols-4 items-center gap-4">
-                             <Label htmlFor="sessionNameEdit" className="text-right">Session Name</Label>
-                             <Input id="sessionNameEdit" value={editSessionName} onChange={(e) => setEditSessionName(e.target.value)} className="col-span-3" placeholder="e.g., Weekly Check-in" />
-                        </div>
-                        <div className="grid grid-cols-4 items-center gap-4">
-                            <Label htmlFor="clientNameEdit" className="text-right">Client Name</Label>
-                            <Input id="clientNameEdit" value={editClientName} onChange={(e) => setEditClientName(e.target.value)} className="col-span-3" placeholder="Client's Full Name"/>
-                        </div>
-                         <div className="grid grid-cols-4 items-center gap-4">
-                            <Label htmlFor="sessionDateEdit" className="text-right">Date</Label>
-                            <input id="sessionDateEdit" type="date" value={editDate} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditDate(e.target.value)} required className="col-span-3" />
-                        </div>
-                        <div className="grid grid-cols-4 items-center gap-4">
-                            <Label htmlFor="sessionTypeEdit" className="text-right">Session Type</Label>
-                            <Select value={editType} onValueChange={setEditType}>
-                                <SelectTrigger id="sessionTypeEdit" className="col-span-3">
-                                    <SelectValue placeholder="Select type..." />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {SESSION_TYPES.map(type => (
-                                        <SelectItem key={type} value={type}>{type.charAt(0).toUpperCase() + type.slice(1)}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                         <div className="grid grid-cols-4 items-center gap-4">
-                            <Label htmlFor="therapyTypeEdit" className="text-right">Therapy Type</Label>
-                            <Select value={editTherapy} onValueChange={setEditTherapy}>
-                                <SelectTrigger id="therapyTypeEdit" className="col-span-3">
-                                     <SelectValue placeholder="Select therapy..." />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {THERAPY_TYPES.map(type => ( <SelectItem key={type} value={type}>{type}</SelectItem> ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
+            <DialogContent className="sm:max-w-[525px]">
+                <DialogHeader>
+                    <DialogTitle>Edit Session Details</DialogTitle>
+                </DialogHeader>
+                <div className="grid gap-4 py-4">
+                    {/* Form fields remain the same */}
+                    <div className="grid grid-cols-4 items-center gap-4">
+                         <Label htmlFor="sessionNameEdit" className="text-right">Session Name</Label>
+                         <Input id="sessionNameEdit" value={editSessionName} onChange={(e) => setEditSessionName(e.target.value)} className="col-span-3" placeholder="e.g., Weekly Check-in" />
                     </div>
-                    <DialogFooter>
-                        <DialogClose asChild>
-                             <Button type="button" variant="secondary">Cancel</Button>
-                        </DialogClose>
-                        <Button type="button" onClick={handleSaveMetadataEdit}>Save Changes</Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+                    <div className="grid grid-cols-4 items-center gap-4">
+                        <Label htmlFor="clientNameEdit" className="text-right">Client Name</Label>
+                        <Input id="clientNameEdit" value={editClientName} onChange={(e) => setEditClientName(e.target.value)} className="col-span-3" placeholder="Client's Full Name"/>
+                    </div>
+                     <div className="grid grid-cols-4 items-center gap-4">
+                        <Label htmlFor="sessionDateEdit" className="text-right">Date</Label>
+                        <input id="sessionDateEdit" type="date" value={editDate} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditDate(e.target.value)} required className="col-span-3" />
+                    </div>
+                    <div className="grid grid-cols-4 items-center gap-4">
+                        <Label htmlFor="sessionTypeEdit" className="text-right">Session Type</Label>
+                        <Select value={editType} onValueChange={setEditType}>
+                            <SelectTrigger id="sessionTypeEdit" className="col-span-3">
+                                <SelectValue placeholder="Select type..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {SESSION_TYPES.map(type => (
+                                    <SelectItem key={type} value={type}>{type.charAt(0).toUpperCase() + type.slice(1)}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                     <div className="grid grid-cols-4 items-center gap-4">
+                        <Label htmlFor="therapyTypeEdit" className="text-right">Therapy Type</Label>
+                        <Select value={editTherapy} onValueChange={setEditTherapy}>
+                            <SelectTrigger id="therapyTypeEdit" className="col-span-3">
+                                 <SelectValue placeholder="Select therapy..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {THERAPY_TYPES.map(type => ( <SelectItem key={type} value={type}>{type}</SelectItem> ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                </div>
+                <DialogFooter>
+                    <DialogClose asChild>
+                         <Button type="button" variant="secondary">Cancel</Button>
+                    </DialogClose>
+                    <Button type="button" onClick={handleSaveMetadataEdit}>Save Changes</Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
 
       </div>
     );
