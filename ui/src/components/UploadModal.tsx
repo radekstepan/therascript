@@ -1,14 +1,12 @@
-// src/components/UploadModal.tsx
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useSetAtom } from 'jotai';
 import { useNavigate } from 'react-router-dom';
 import { Button } from './ui/Button'; // Use new Button
 import { Input } from './ui/Input'; // Use new Input
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/Select'; // Use new Select
-// Use standard Dialog components, including Header, Footer, Title, Close
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from './ui/Dialog';
 import { Label } from './ui/Label'; // Use new Label
-import { UploadCloud, Loader2, X } from './icons/Icons';
+import { UploadIcon, ReloadIcon, Cross1Icon } from '@radix-ui/react-icons';
 import { SESSION_TYPES, THERAPY_TYPES } from '../constants';
 import { getTodayDateString } from '../helpers';
 import type { SessionMetadata, UploadModalProps } from '../types';
@@ -168,7 +166,7 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
                             onChange={handleFileChange}
                             disabled={!!modalFile || isTranscribing}
                         />
-                        <UploadCloud className={cn("mx-auto h-10 w-10 mb-2",
+                        <UploadIcon className={cn("mx-auto h-10 w-10 mb-2",
                              dragActive ? 'text-blue-500' :
                              (modalFile ? 'text-emerald-600' : 'text-gray-400 dark:text-gray-500')
                          )} aria-hidden="true"/>

@@ -1,8 +1,8 @@
-// src/components/StarredTemplates.tsx
 import React from 'react';
 import { useAtomValue } from 'jotai';
 import { Button } from './ui/Button'; // Import new Button
 import { starredMessagesAtom } from '../store'; // Atom now includes starredName
+import { StarIcon } from '@radix-ui/react-icons'; // Can be used for visual cue if needed
 import type { StarredTemplatesProps } from '../types';
 import { cn } from '../utils'; // Import cn
 

@@ -2,7 +2,7 @@ import React from 'react';
 import { NavLink, useParams } from 'react-router-dom';
 import { useAtomValue } from 'jotai';
 import { activeSessionAtom } from '../../store';
-import { FileText, MessageSquare, User } from '../icons/Icons';
+import { FileTextIcon, ChatBubbleIcon, PersonIcon } from '@radix-ui/react-icons';
 import { formatTimestamp } from '../../helpers';
 import type { ChatSession } from '../../types';
 import { cn } from '../../utils'; // Import cn
@@ -48,7 +48,7 @@ export function SessionSidebar() {
                                     title={getChatDisplayTitle(chat)}
                                     end // Ensure exact match for active class
                                 >
-                                    <MessageSquare size={16} className="mr-2 flex-shrink-0 text-gray-400 group-hover:text-gray-600 dark:text-gray-500 dark:group-hover:text-gray-300" /> {/* Icon color */}
+                                    <ChatBubbleIcon className="mr-2 h-4 w-4 flex-shrink-0 text-gray-400 group-hover:text-gray-600 dark:text-gray-500 dark:group-hover:text-gray-300" /> {/* Icon color */}
                                     <span className="truncate flex-grow">{getChatDisplayTitle(chat)}</span>
                                 </NavLink>
                             ))}

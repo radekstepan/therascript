@@ -5,11 +5,28 @@ import { useParams, useNavigate, Navigate, useLocation } from 'react-router-dom'
 // UI Components & Icons
 import { Button } from './ui/Button';
 import { Card, CardContent, CardHeader } from './ui/Card';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from './ui/Dialog'; // Import Dialog
+import {
+    Dialog,
+    DialogClose,
+    DialogContent,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from './ui/Dialog'; // Import Dialog
 import { Input } from './ui/Input'; // Import Input
 import { Label } from './ui/Label'; // Import Label
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/Select'; // Import Select
-import { Loader2, ArrowLeft, User, CalendarDays, Tag, BookMarked, Edit, Save, X } from './icons/Icons'; // Re-add Edit, Save, X
+import {
+    ArrowLeftIcon,     // Available
+    BookmarkIcon,      // Available
+    CalendarIcon,      // Available
+    Cross1Icon,        // Available (used implicitly by DialogClose)
+    Pencil1Icon,       // Available
+    // ArchiveIcon removed from here, used in Transcription.tsx
+    PersonIcon,        // Available
+    ReloadIcon,        // Available
+    BadgeIcon,         // Available (replaces TagIcon)
+} from '@radix-ui/react-icons';
 
 // Sidebar
 import { SessionSidebar } from './SessionView/SessionSidebar';
@@ -40,7 +57,7 @@ const { sessionId: sessionIdParam, chatId: chatIdParam } = useParams<{ sessionId
 const navigate = useNavigate();
 const location = useLocation();
 
-      
+
 // Atoms
 const allSessions = useAtomValue(pastSessionsAtom);
 const setActiveSessionId = useSetAtom(activeSessionIdAtom);
@@ -178,10 +195,10 @@ const handleNavigateBack = () => navigate('/'); // Keep this
 
 // Modified helper to render details, handling badges for type/therapy
 const renderHeaderDetail = (
-    IconComponent: React.ElementType,
+    IconComponent: React.ElementType, // Use ElementType for flexibility
     value: string | undefined,
     label: string,
-    category?: 'session' | 'therapy' // Add category for badge styling
+    category?: 'session' | 'therapy'
 ) => {
     if (!value) return null;
 
@@ -194,7 +211,6 @@ const renderHeaderDetail = (
         <div className="flex items-center space-x-1" title={label}>
              <IconComponent className={cn("h-3.5 w-3.5 flex-shrink-0", isBadge ? "text-inherit" : "text-gray-400 dark:text-gray-500")} aria-hidden="true" />
              <span className={cn("text-xs capitalize", isBadge ? badgeClasses : "text-gray-600 dark:text-gray-400")}>
-                 {/* Don't double-capitalize if it's already a badge */}
                  {isBadge ? value : value}
              </span>
          </div>
@@ -204,7 +220,7 @@ const renderHeaderDetail = (
 
 // --- Render Logic ---
 if (isLoading) {
-    return ( <div className="flex-grow flex items-center justify-center text-center p-10"> <Card className="max-w-sm mx-auto p-6"> <div className="flex justify-center mb-4"> <Loader2 className="h-8 w-8 animate-spin text-gray-400 dark:text-gray-500" /> </div> <p className="text-gray-600 dark:text-gray-300">Loading session data...</p> <Button onClick={handleNavigateBack} variant="secondary" className="mt-6 w-full"> Go Back </Button> </Card> </div> );
+    return ( <div className="flex-grow flex items-center justify-center text-center p-10"> <Card className="max-w-sm mx-auto p-6"> <div className="flex justify-center mb-4"> <ReloadIcon className="h-8 w-8 animate-spin text-gray-400 dark:text-gray-500" /> </div> <p className="text-gray-600 dark:text-gray-300">Loading session data...</p> <Button onClick={handleNavigateBack} variant="secondary" className="mt-6 w-full"> Go Back </Button> </Card> </div> );
 }
 if (!derivedSession) { return <Navigate to="/" replace />; }
 
@@ -216,11 +232,12 @@ return (
         {/* Main Content Area */}
         <main ref={scrollContainerRef} className="flex-grow flex flex-col min-w-0 bg-gray-100 dark:bg-gray-950">
 
-            {/* Sticky Header - Now includes details with badges and Edit button */}
+            {/* Sticky Header */}
              <div className="sticky top-0 z-10 flex-shrink-0 p-3 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm flex items-center justify-between gap-4">
                  {/* Back Button */}
                  <div className="flex-shrink-0">
-                     <Button onClick={handleNavigateBack} variant="ghost" size="sm" icon={ArrowLeft} className="text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800">
+                     {/* Use icon prop */}
+                     <Button onClick={handleNavigateBack} variant="ghost" size="sm" icon={ArrowLeftIcon} className="text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800">
                          Back
                      </Button>
                  </div>
@@ -230,32 +247,30 @@ return (
                     <span className="truncate font-semibold text-sm text-gray-800 dark:text-gray-200" title={derivedSession.sessionName || derivedSession.fileName}>
                         {derivedSession.sessionName || derivedSession.fileName}
                     </span>
-                    {/* Details Row - using helper with category for badges */}
+                    {/* Details Row */}
                     <div className="flex items-center flex-wrap justify-center gap-x-3 gap-y-1 mt-1">
-                        {renderHeaderDetail(User, derivedSession.clientName, "Client")}
-                        {renderHeaderDetail(CalendarDays, derivedSession.date, "Date")}
-                        {renderHeaderDetail(Tag, derivedSession.sessionType, "Session Type", 'session')} {/* Pass category */}
-                        {renderHeaderDetail(BookMarked, derivedSession.therapy, "Therapy Type", 'therapy')} {/* Pass category */}
+                        {renderHeaderDetail(PersonIcon, derivedSession.clientName, "Client")}
+                        {renderHeaderDetail(CalendarIcon, derivedSession.date, "Date")}
+                        {renderHeaderDetail(BadgeIcon, derivedSession.sessionType, "Session Type", 'session')}
+                        {renderHeaderDetail(BookmarkIcon, derivedSession.therapy, "Therapy Type", 'therapy')}
                     </div>
                  </div>
 
                   {/* Right Action Area */}
                   <div className="flex-shrink-0">
-                     <Button variant="secondary" size="sm" onClick={handleOpenEditMetadataModal} icon={Edit}>
+                      {/* Use icon prop */}
+                     <Button variant="secondary" size="sm" icon={Pencil1Icon} onClick={handleOpenEditMetadataModal}>
                         Edit Details
                     </Button>
                   </div>
              </div>
 
-            {/* Content Wrapper: Takes remaining space, defines flex context for panels */}
+            {/* Content Wrapper */}
             <div className="p-4 md:p-6 lg:p-8 flex-grow flex flex-col lg:flex-row lg:space-x-6 space-y-6 lg:space-y-0 min-h-0">
 
-                {/* Left Panel (Transcript only now) */}
+                {/* Left Panel */}
                 <div className="flex flex-col lg:w-1/2 lg:flex-shrink-0 min-h-0">
-
-                    {/* Transcription Section - Needs to grow */}
                     <Card className="flex flex-col flex-grow min-h-0">
-                         {/* Remove Edit/Save/Cancel buttons for overall transcript */}
                         <CardHeader className="mb-0 pb-2 flex-shrink-0">
                             <h3 className="text-lg font-semibold">Transcription</h3>
                         </CardHeader>
@@ -263,49 +278,40 @@ return (
                         <CardContent className="pt-2 flex flex-col flex-grow min-h-0">
                             <Transcription
                                 session={derivedSession}
-                                // isEditingOverall={false} // REMOVED - Prop no longer exists
-                                editTranscriptContent={editTranscriptContent} // Pass current content
-                                onContentChange={handleTranscriptContentChange} // Pass handler to update state/atom
+                                editTranscriptContent={editTranscriptContent}
+                                onContentChange={handleTranscriptContentChange}
                             />
                         </CardContent>
                     </Card>
-                </div> {/* End Left Panel */}
+                </div>
 
-
-                {/* Right Panel (Chat) */}
+                {/* Right Panel */}
                 <div className="flex flex-col lg:w-1/2 lg:flex-shrink-0 min-h-0">
-                    {/* Chat Section */}
                      {activeChatId !== null ? (
                          <Card className="flex flex-col flex-grow min-h-0 p-0">
                             <ChatInterface />
                          </Card>
                     ) : derivedSession.chats && derivedSession.chats.length > 0 ? (
                         <Card className="flex flex-grow items-center justify-center text-center italic min-h-0">
-                            <p className="text-gray-500 dark:text-gray-400">
-                            Select a chat from the sidebar to view it.
-                            </p>
+                            <p className="text-gray-500 dark:text-gray-400">Select a chat from the sidebar to view it.</p>
                         </Card>
                     ) : (
                         <Card className="flex flex-grow items-center justify-center text-center italic min-h-0">
-                            <p className="text-gray-500 dark:text-gray-400">
-                            No chats have been started for this session yet.
-                            </p>
+                            <p className="text-gray-500 dark:text-gray-400">No chats have been started for this session yet.</p>
                         </Card>
                     )}
-                </div> {/* End Right Panel */}
-
-            </div> {/* End Content Wrapper */}
-        </main> {/* End Main Content Area */}
+                </div>
+            </div>
+        </main>
 
         {/* Edit Details Modal */}
         <Dialog open={isEditingMetadata} onOpenChange={setIsEditingMetadata}>
             <DialogContent className="sm:max-w-[525px]">
                 <DialogHeader>
                     <DialogTitle>Edit Session Details</DialogTitle>
-                    {/* Optional: <DialogDescription>Make changes to the session metadata.</DialogDescription> */}
                 </DialogHeader>
-                {/* Form Grid */}
                 <div className="grid gap-4 py-4">
+                    {/* Form fields remain the same */}
                     <div className="grid grid-cols-4 items-center gap-4">
                          <Label htmlFor="sessionNameEdit" className="text-right">Session Name</Label>
                          <Input id="sessionNameEdit" value={editSessionName} onChange={(e) => setEditSessionName(e.target.value)} className="col-span-3" placeholder="e.g., Weekly Check-in" />
@@ -316,7 +322,6 @@ return (
                     </div>
                      <div className="grid grid-cols-4 items-center gap-4">
                         <Label htmlFor="sessionDateEdit" className="text-right">Date</Label>
-                        {/* Standard date input, styled via global.css */}
                         <input id="sessionDateEdit" type="date" value={editDate} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditDate(e.target.value)} required className="col-span-3" />
                     </div>
                     <div className="grid grid-cols-4 items-center gap-4">
@@ -327,14 +332,12 @@ return (
                             </SelectTrigger>
                             <SelectContent>
                                 {SESSION_TYPES.map(type => (
-                                    <SelectItem key={type} value={type}>
-                                        {type.charAt(0).toUpperCase() + type.slice(1)}
-                                    </SelectItem>
+                                    <SelectItem key={type} value={type}>{type.charAt(0).toUpperCase() + type.slice(1)}</SelectItem>
                                 ))}
                             </SelectContent>
                         </Select>
                     </div>
-                     <div className="grid grid-cols-4 items-center gap-4">
+                    <div className="grid grid-cols-4 items-center gap-4">
                         <Label htmlFor="therapyTypeEdit" className="text-right">Therapy Type</Label>
                         <Select value={editTherapy} onValueChange={setEditTherapy}>
                             <SelectTrigger id="therapyTypeEdit" className="col-span-3">
@@ -347,7 +350,7 @@ return (
                     </div>
                 </div>
                 <DialogFooter>
-                    {/* Use DialogClose for the Cancel button for better accessibility */}
+                    {/* This button only has text, should be fine with asChild */}
                     <DialogClose asChild>
                          <Button type="button" variant="secondary">Cancel</Button>
                     </DialogClose>
@@ -356,6 +359,6 @@ return (
             </DialogContent>
         </Dialog>
 
-    </div> // End Outer Flex Container
+    </div>
 );
 }

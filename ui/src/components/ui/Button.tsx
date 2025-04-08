@@ -3,7 +3,7 @@ import { Slot } from "@radix-ui/react-slot"
 import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "../../utils" // Assuming alias setup or use relative path '../../lib/utils'
-import { Loader2 } from "../icons/Icons" // Assuming alias setup or use relative path '../icons/Icons'
+import { ReloadIcon } from "@radix-ui/react-icons" // Import Radix reload icon
 
 const buttonVariants = cva(
   "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 dark:ring-offset-gray-950 dark:focus-visible:ring-blue-500",
@@ -25,8 +25,8 @@ const buttonVariants = cva(
         xs: "h-8 rounded-md px-2.5 text-xs", // Added xs size
         lg: "h-11 rounded-md px-8",
         icon: "h-10 w-10",
-        iconXs: "h-6 w-6 p-0", // Added small icon size
-        iconSm: "h-8 w-8 p-0", // Added small icon size
+        iconXs: "h-6 w-6", // Keep size definitions
+        iconSm: "h-8 w-8",
       },
     },
     defaultVariants: {
@@ -41,13 +41,26 @@ export interface ButtonProps
     VariantProps<typeof buttonVariants> {
   asChild?: boolean
   loading?: boolean
-  icon?: React.ComponentType<{ className?: string; size?: number }>; // Accept icon component
+  icon?: React.ElementType; // Use React.ElementType for the icon prop
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, asChild = false, loading = false, children, icon: Icon, ...props }, ref) => {
     const Comp = asChild ? Slot : "button"
-    const iconSize = size === 'xs' || size === 'iconXs' ? 14 : size === 'sm' || size === 'iconSm' ? 16 : 18; // Adjust icon size based on button size
+
+    // Determine icon size class based on button size prop
+    const iconSizeClasses =
+      size === 'lg' ? 'h-5 w-5' :
+      size === 'sm' ? 'h-4 w-4' :
+      size === 'xs' ? 'h-3.5 w-3.5' :
+      size === 'icon' ? 'h-5 w-5' : // Use size for icon-only buttons
+      size === 'iconSm' ? 'h-4 w-4' :
+      size === 'iconXs' ? 'h-3.5 w-3.5' :
+      'h-4 w-4'; // Default size
+
+    const hasTextChildren = React.Children.toArray(children).some(child =>
+      typeof child === 'string' && child.trim().length > 0
+    );
 
     return (
       <Comp
@@ -57,9 +70,9 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         {...props}
       >
         {loading ? (
-          <Loader2 className={cn("animate-spin", children ? "mr-2" : "", "h-4 w-4")} /> // Use Loader2 from Icons
+          <ReloadIcon className={cn("animate-spin", hasTextChildren ? "mr-2" : "", iconSizeClasses)} />
         ) : (
-           Icon && <Icon size={iconSize} className={cn(children ? "mr-2" : "", "h-4 w-4")} aria-hidden="true" /> // Render passed icon
+          Icon && <Icon className={cn(hasTextChildren ? "mr-2" : "", iconSizeClasses)} aria-hidden="true" />
         )}
         {children}
       </Comp>

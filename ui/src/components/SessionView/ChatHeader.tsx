@@ -1,6 +1,12 @@
 import React, { useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { MessageSquare, PlusCircle, Edit, Check, X } from '../icons/Icons';
+import {
+    ChatBubbleIcon, // Available
+    PlusCircledIcon, // Available
+    Pencil1Icon, // Available
+    CheckIcon, // Available
+    Cross1Icon // Available
+} from '@radix-ui/react-icons';
 import { Button } from '../ui/Button'; // Import new Button
 import { Input } from '../ui/Input'; // Import new Input
 import { activeChatAtom, renameChatAtom } from '../../store';
@@ -56,7 +62,7 @@ export function ChatHeader({ activeChatId, onNewChatClick }: ChatHeaderProps) {
         <div className="flex flex-shrink-0 items-center justify-between py-3 px-4 gap-2">
             {/* Title/Rename Section */}
             <div className={cn("flex flex-grow items-center min-w-0 gap-2")}>
-                <MessageSquare className="h-5 w-5 text-brand-DEFAULT flex-shrink-0" aria-hidden="true" />
+                <ChatBubbleIcon className="h-5 w-5 text-brand-DEFAULT flex-shrink-0" aria-hidden="true" />
                 {renamingChatId === activeChatId && activeChat ? (
                     // Rename Mode
                     <div className="flex flex-grow items-center min-w-0 gap-1">
@@ -69,25 +75,25 @@ export function ChatHeader({ activeChatId, onNewChatClick }: ChatHeaderProps) {
                             onKeyDown={handleKeyDown}
                             aria-label="New chat name"
                         />
-                        {/* Use new Button component */}
-                        <Button onClick={handleSaveRename} variant="ghost" size="iconSm" title="Save Name" className="text-success-600 hover:text-success-700"> <Check size={16}/> </Button>
-                        <Button onClick={handleCancelRename} variant="ghost" size="iconSm" title="Cancel Rename" className="text-danger-600 hover:text-danger-700"> <X size={16}/> </Button>
+                        {/* Use icon prop */}
+                        <Button onClick={handleSaveRename} variant="ghost" size="iconSm" icon={CheckIcon} title="Save Name" className="text-success-600 hover:text-success-700" />
+                        <Button onClick={handleCancelRename} variant="ghost" size="iconSm" icon={Cross1Icon} title="Cancel Rename" className="text-danger-600 hover:text-danger-700" />
                     </div>
                 ) : (
                     // Display Mode
                     <div className="flex items-center gap-1 min-w-0">
-                        {/* Use standard HTML element for text */}
                         <span className="truncate font-semibold text-gray-800 dark:text-gray-200" title={activeChatTitle}>
                             {activeChatTitle}
                         </span>
                         {activeChat && (
-                            <Button onClick={() => handleRenameClick(activeChat)} variant="ghost" size="iconXs" title="Rename Chat" className="ml-1 text-gray-400 hover:text-brand-DEFAULT p-0"> <Edit size={14}/> </Button>
+                            // Use icon prop
+                            <Button onClick={() => handleRenameClick(activeChat)} variant="ghost" size="iconXs" icon={Pencil1Icon} title="Rename Chat" className="ml-1 text-gray-400 hover:text-brand-DEFAULT" />
                         )}
                     </div>
                 )}
             </div>
-            {/* New Chat Button */}
-            <Button onClick={onNewChatClick} variant="secondary" size="sm" icon={PlusCircle}>
+            {/* Use icon prop */}
+            <Button onClick={onNewChatClick} variant="secondary" size="sm" icon={PlusCircledIcon}>
                  New Chat
             </Button>
         </div>

@@ -1,6 +1,5 @@
-// src/components/SessionView/PastChatsList.tsx
 import React from 'react';
-import { List } from '../icons/Icons';
+import { ListBulletIcon } from '@radix-ui/react-icons';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/Card'; // Import new Card components
 import { formatTimestamp } from '../../helpers';
 import type { ChatSession, Session } from '../../types';
@@ -32,7 +31,7 @@ export function PastChatsList({ session, activeChatId, onSelectChatHistory }: Pa
         <Card className="flex-shrink-0 mt-4">
              {/* Use CardHeader */}
              <CardHeader className="flex-row items-center space-y-0 px-4 pt-3 pb-2"> {/* Adjust padding & layout */}
-                 <List className="mr-2 h-4 w-4 text-gray-500 dark:text-gray-400" aria-hidden="true"/>
+                 <ListBulletIcon className="mr-2 h-4 w-4 text-gray-500 dark:text-gray-400" aria-hidden="true"/>
                  {/* Use CardTitle or simple span */}
                  <span className="font-semibold text-gray-800 dark:text-gray-200 text-sm">Past Chats</span>
              </CardHeader>

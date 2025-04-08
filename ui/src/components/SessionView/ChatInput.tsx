@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-import { Star } from '../icons/Icons';
+import { StarIcon } from '@radix-ui/react-icons';
 import { Button } from '../ui/Button'; // Use new Button
 import { Input } from '../ui/Input'; // Use new Input
 import { StarredTemplatesList } from '../StarredTemplates';
@@ -55,7 +55,7 @@ export function ChatInput() {
                             aria-label="Show starred templates"
                             // Pass icon component directly
                         >
-                          <Star size={16} />
+                          <StarIcon width={16} height={16} />
                         </Button>
                         {showTemplates && (
                             <StarredTemplatesList
