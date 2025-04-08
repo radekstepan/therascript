@@ -32,13 +32,6 @@ export function SessionSidebar() {
 
     return (
         <aside className="w-64 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 flex flex-col p-4 space-y-4 hidden lg:flex"> {/* Use standard bg/border colors */}
-            {/* Session Title */}
-             <p className="font-semibold text-gray-800 dark:text-gray-200 truncate text-base"> {/* Use p */}
-                {session.sessionName || session.fileName}
-             </p>
-             {/* Replace Divider with hr */}
-             <hr className="border-gray-200 dark:border-gray-700"/>
-
             {/* Dynamic Chat Links */}
             <div className="flex-grow flex flex-col min-h-0">
                 <h3 className="px-1 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Chats</h3>
