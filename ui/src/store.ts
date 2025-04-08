@@ -1,8 +1,26 @@
 // src/store.ts
 import { atom } from 'jotai';
+import { atomWithStorage } from 'jotai/utils';
 import { SAMPLE_SESSIONS } from './sampleData';
 import type { Session, ChatMessage, ChatSession, SessionMetadata } from './types';
-import { getTodayDateString } from './helpers';
+
+// --- Theme Atom ---
+// Type for theme values
+type Theme = 'light' | 'dark' | 'system';
+
+// Atom to store the theme preference, persisted in localStorage under the key 'ui-theme'
+// Defaults to 'system' preference
+export const themeAtom = atomWithStorage<Theme>('ui-theme', 'system');
+
+// Derived atom to get the *effective* theme (resolving 'system')
+export const effectiveThemeAtom = atom<Exclude<Theme, 'system'>>((get) => {
+    const theme = get(themeAtom);
+    if (theme === 'system') {
+        // Check system preference
+        return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+    return theme; // Return 'light' or 'dark' directly
+});
 
 // --- Core State Atoms --- (Keep as is)
 export const pastSessionsAtom = atom<Session[]>(SAMPLE_SESSIONS);
