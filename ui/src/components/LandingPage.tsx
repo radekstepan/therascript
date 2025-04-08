@@ -1,29 +1,26 @@
 import React from 'react';
-import { useAtomValue, useSetAtom, useAtom } from 'jotai'; // Import useAtom
+import { useAtomValue, useSetAtom, useAtom } from 'jotai';
 import { useNavigate } from 'react-router-dom';
-import { History, PlusCircle, FileText, ChevronUp, ChevronDown } from './icons/Icons'; // Add sort icons
+import { History, PlusCircle, FileText, ChevronUp, ChevronDown } from './icons/Icons';
 import { Button } from './ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/Card';
 import {
-    // pastSessionsAtom, // No longer directly used for display
-    openUploadModalAtom,
-    sortedSessionsAtom, // Use the sorted atom
-    sessionSortCriteriaAtom, // Read current sort criteria
-    sessionSortDirectionAtom, // Read current sort direction
-    setSessionSortAtom, // Action to set sorting
-    SessionSortCriteria // Import type
+    openUploadModalAtom, // This atom's action is still used
+    sortedSessionsAtom,
+    sessionSortCriteriaAtom,
+    sessionSortDirectionAtom,
+    setSessionSortAtom,
+    SessionSortCriteria
 } from '../store';
 import { Session } from '../types';
 import { getBadgeClasses } from '../helpers';
-import { cn } from '../utils'; // Import cn
+import { cn } from '../utils';
 
 export function LandingPage() {
-  // const pastSessions = useAtomValue(pastSessionsAtom); // Replace with sorted
   const sortedSessions = useAtomValue(sortedSessionsAtom);
-  const openUploadModal = useSetAtom(openUploadModalAtom);
+  const openUploadModal = useSetAtom(openUploadModalAtom); // Use the action atom
   const navigate = useNavigate();
 
-  // Get current sort state and setter action
   const currentSortCriteria = useAtomValue(sessionSortCriteriaAtom);
   const currentSortDirection = useAtomValue(sessionSortDirectionAtom);
   const setSort = useSetAtom(setSessionSortAtom);
@@ -32,11 +29,9 @@ export function LandingPage() {
       navigate(`/sessions/${sessionId}`);
   };
 
-  // Helper to render sort icon
   const renderSortIcon = (criteria: SessionSortCriteria) => {
     if (currentSortCriteria !== criteria) {
-      // Show a subtle placeholder/unsorted icon if desired, or nothing
-       return <ChevronDown className="h-3 w-3 ml-1 text-gray-300 dark:text-gray-600 invisible group-hover:visible" />; // Example: Dimmed, appears on hover
+       return <ChevronDown className="h-3 w-3 ml-1 text-gray-300 dark:text-gray-600 invisible group-hover:visible" />;
     }
     if (currentSortDirection === 'asc') {
       return <ChevronUp className="h-4 w-4 ml-1 text-gray-600 dark:text-gray-400" />;
@@ -44,9 +39,8 @@ export function LandingPage() {
     return <ChevronDown className="h-4 w-4 ml-1 text-gray-600 dark:text-gray-400" />;
   };
 
-  // Helper for header cell props and click handler
   const getHeaderCellProps = (criteria: SessionSortCriteria) => ({
-    scope: "col" as const, // Ensure TS knows it's a valid scope value
+    scope: "col" as const,
     className: "group px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700/50",
     onClick: () => setSort(criteria),
   });
@@ -56,8 +50,10 @@ export function LandingPage() {
        <Card className="flex-grow flex flex-col overflow-hidden h-full">
             <CardHeader className="flex-row items-center justify-between mb-4 px-4 pt-4 pb-2 sm:px-6">
                  <h2 className="text-xl font-semibold flex items-center text-gray-900 dark:text-gray-100">
+                    <History className="mr-2 h-5 w-5 text-gray-600 dark:text-gray-400" aria-hidden="true" />
                     Session History
                  </h2>
+                 {/* This button's onClick remains the same */}
                  <Button
                      variant="light" size="sm" onClick={openUploadModal}
                      title="Upload New Session" aria-label="Upload New Session" icon={PlusCircle}
@@ -66,7 +62,6 @@ export function LandingPage() {
                  </Button>
             </CardHeader>
             <CardContent className="flex-grow flex flex-col overflow-hidden p-0">
-                {/* Use sortedSessions.length */}
                 {sortedSessions.length === 0 ? (
                     <div className="flex-grow flex items-center justify-center p-6 text-center">
                          <p className="text-gray-600 dark:text-gray-400">
@@ -78,8 +73,6 @@ export function LandingPage() {
                          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                             <thead className="bg-gray-50 dark:bg-gray-800">
                                 <tr>
-                                    {/* Apply props and render icon for sortable headers */}
-                                    {/* Use cn to merge base classes with sm:px-6 */}
                                     <th {...getHeaderCellProps('sessionName')} className={cn(getHeaderCellProps('sessionName').className, "sm:px-6")}>
                                         <div className="flex items-center">Session / File {renderSortIcon('sessionName')}</div>
                                     </th>
@@ -97,7 +90,6 @@ export function LandingPage() {
                                     </th>
                                 </tr>
                             </thead>
-                            {/* Use sortedSessions in map */}
                             <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
                                 {sortedSessions.map((session: Session) => (
                                     <tr
