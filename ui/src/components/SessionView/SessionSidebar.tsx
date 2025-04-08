@@ -30,11 +30,14 @@ export function SessionSidebar() {
         return chat.name || `Chat (${formatTimestamp(chat.timestamp)})`;
     };
 
+    // Note: The width is now controlled by the parent (`SessionView`) and applied via inline styles there.
+    // Removed `w-64` and `hidden lg:flex` (visibility handled by parent now).
+    // Added `h-full` to ensure it fills the height given by the parent container.
     return (
-        <aside className="w-64 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 flex flex-col p-4 space-y-4 hidden lg:flex"> {/* Use standard bg/border colors */}
+        <aside className="flex-shrink-0 border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 flex flex-col p-4 space-y-4 h-full w-full overflow-hidden"> {/* Use standard bg/border colors, occupy full provided space */}
             {/* Dynamic Chat Links */}
             <div className="flex-grow flex flex-col min-h-0">
-                <h3 className="px-1 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Chats</h3>
+                <h3 className="px-1 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 flex-shrink-0">Chats</h3>
                 {sortedChats.length === 0 ? (
                      <p className="px-1 text-gray-500 dark:text-gray-400 italic text-sm">No chats yet.</p> // Use p
                  ) : (

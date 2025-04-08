@@ -4,9 +4,34 @@ import { SAMPLE_SESSIONS } from './sampleData';
 import type { Session, ChatMessage, ChatSession, SessionMetadata } from './types';
 import { getTodayDateString } from './helpers'; // Assuming helpers are needed
 
+// --- Constants for Sidebar Width ---
+export const MIN_SIDEBAR_WIDTH = 200;
+export const MAX_SIDEBAR_WIDTH = 500;
+export const DEFAULT_SIDEBAR_WIDTH = 256; // Corresponds to w-64
+
 // --- Define Sort Types ---
 export type SessionSortCriteria = 'sessionName' | 'clientName' | 'sessionType' | 'therapy' | 'date' | 'id'; // Added 'id' as a fallback
 export type SortDirection = 'asc' | 'desc';
+
+// --- Sidebar Width Atom ---
+// Persist sidebar width in localStorage, default to DEFAULT_SIDEBAR_WIDTH
+export const sidebarWidthAtom = atomWithStorage<number>(
+    'session-sidebar-width', // Key in localStorage
+    DEFAULT_SIDEBAR_WIDTH
+);
+
+// --- Derived atom to ensure sidebar width stays within bounds ---
+// This is optional but good practice: ensures the stored value is always valid
+export const clampedSidebarWidthAtom = atom(
+    (get) => {
+        const width = get(sidebarWidthAtom);
+        return Math.max(MIN_SIDEBAR_WIDTH, Math.min(width, MAX_SIDEBAR_WIDTH));
+    },
+    (get, set, newWidth: number) => {
+        const clampedWidth = Math.max(MIN_SIDEBAR_WIDTH, Math.min(newWidth, MAX_SIDEBAR_WIDTH));
+        set(sidebarWidthAtom, clampedWidth); // Set the original persistent atom
+    }
+);
 
 // --- Sorting Atoms ---
 // Persist sort criteria, default to 'date'
