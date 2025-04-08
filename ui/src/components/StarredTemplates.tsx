@@ -1,62 +1,56 @@
 import React from 'react';
 import { useAtomValue } from 'jotai';
-
-import { Button, Card, Text, Divider, Flex } from '@tremor/react'; // Import Tremor components
-import { starredMessagesAtom } from '../store'; // Keep atom
+import { Button } from './ui/Button'; // Import new Button
+import { starredMessagesAtom } from '../store';
 import type { StarredTemplatesProps } from '../types';
+import { cn } from '../utils'; // Import cn
 
-// Interface for props remains the same
-interface StarredTemplatesDisplayProps {
-    onSelectTemplate: (text: string) => void;
-    onClose: () => void;
-}
-
-export function StarredTemplatesList({ onSelectTemplate, onClose }: StarredTemplatesDisplayProps) {
+export function StarredTemplatesList({ onSelectTemplate, onClose }: StarredTemplatesProps) {
     const starredMessages = useAtomValue(starredMessagesAtom);
 
-    // Use Tremor Card for the popover appearance
-    // Positioning needs to be handled by the parent or wrapper div
-    const popoverPositionClasses = "absolute bottom-full mb-2 right-0 z-10"; // Keep positioning separate
+    // Use Tailwind classes for positioning and appearance
+    const popoverClasses = cn(
+        "absolute bottom-full mb-2 right-0 z-10", // Positioning
+        "w-72 max-h-60 overflow-hidden flex flex-col", // Size, layout
+        "rounded-md border bg-white dark:bg-gray-900 shadow-lg" // Appearance (like Card)
+    );
 
     if (!starredMessages || starredMessages.length === 0) {
         return (
-            <Card className={`${popoverPositionClasses} w-72 max-h-60 p-4 text-center`}>
-                 <Text className="text-tremor-content-subtle">
+            <div className={cn(popoverClasses, "p-4 text-center")}> {/* Add padding for empty state */}
+                 <p className="text-sm text-gray-500 dark:text-gray-400"> {/* Use p */}
                     No starred messages yet.
-                 </Text>
-                 {/* Position close button inside the card */}
-                 <Button variant="light" size="xs" onClick={onClose} className="!absolute top-1.5 right-1.5">
+                 </p>
+                 <Button variant="ghost" size="sm" onClick={onClose} className="!absolute top-1.5 right-1.5 text-xs"> {/* Style close button */}
                     Close
                 </Button>
-             </Card>
+             </div>
         );
     }
 
     return (
-        <Card className={`${popoverPositionClasses} w-72 max-h-60 p-0 overflow-hidden flex flex-col`}> {/* Remove padding, add flex */}
-             <Flex justifyContent='end' className="p-1.5 flex-shrink-0"> {/* Put button in a flex header */}
-                 <Button variant="light" size="xs" onClick={onClose}>
-                 Close
-             </Button>
-             </Flex>
-             <Divider className="my-0 flex-shrink-0" />
+        <div className={popoverClasses}> {/* Main container div */}
+             {/* Header with close button */}
+             <div className="flex justify-end p-1.5 flex-shrink-0 border-b dark:border-gray-700"> {/* Use div + flex */}
+                 <Button variant="ghost" size="sm" onClick={onClose} className="text-xs h-auto"> {/* Style close button */}
+                    Close
+                </Button>
+             </div>
              {/* Scrollable list area */}
              <div className="overflow-y-auto p-1 flex-grow">
                 {starredMessages.map(msg => (
-                    <div key={msg.id} className="block w-full"> {/* Use div or Button */}
+                    <div key={msg.id} className="block w-full">
                         <Button
-                            variant="secondary" // Use Tremor variants
+                            variant="ghost" // Use ghost variant for list items
                             onClick={() => onSelectTemplate(msg.text)}
-                            className="block w-full text-left p-2 text-sm text-gray-700 hover:bg-gray-100 rounded whitespace-normal"
+                            className="block w-full h-auto text-left p-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded whitespace-normal justify-start" // Adjusted style
                             title="Insert this template"
                          >
                             {msg.text}
                         </Button>
-                        {/* Or use a styled div if button interaction isn't perfect */}
-                        {/* <div onClick={() => onSelectTemplate(msg.text)} className="w-full text-left p-2 text-tremor-default text-tremor-content hover:bg-tremor-background-muted rounded-tremor-small cursor-pointer whitespace-normal"> {msg.text} </div> */}
                     </div>
                 ))}
             </div>
-        </Card>
+        </div>
     );
 }

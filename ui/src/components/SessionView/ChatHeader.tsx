@@ -1,22 +1,22 @@
 import React, { useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-
-import { Button, TextInput, Title, Flex, Text } from '@tremor/react'; // Import Tremor components
-import { MessageSquare, PlusCircle, Edit, Check, X } from '../icons/Icons'; // Keep existing icons
+import { MessageSquare, PlusCircle, Edit, Check, X } from '../icons/Icons';
+import { Button } from '../ui/Button'; // Import new Button
+import { Input } from '../ui/Input'; // Import new Input
 import { activeChatAtom, renameChatAtom } from '../../store';
 import { formatTimestamp } from '../../helpers';
 import type { ChatSession } from '../../types';
+import { cn } from '../../utils'; // Import cn utility
 
 interface ChatHeaderProps {
-    activeChatId: number | null; // Needed to match renamingChatId
-    onNewChatClick: () => void; // Callback to trigger navigation etc.
+    activeChatId: number | null;
+    onNewChatClick: () => void;
 }
 
 export function ChatHeader({ activeChatId, onNewChatClick }: ChatHeaderProps) {
     const activeChat = useAtomValue(activeChatAtom);
     const renameChatAction = useSetAtom(renameChatAtom);
 
-    // Local state for renaming UI
     const [renamingChatId, setRenamingChatId] = useState<number | null>(null);
     const [editChatName, setEditChatName] = useState('');
 
@@ -39,9 +39,9 @@ export function ChatHeader({ activeChatId, onNewChatClick }: ChatHeaderProps) {
     const handleSaveRename = () => {
         if (renamingChatId !== null) {
             const trimmedName = editChatName.trim();
-             if (trimmedName || activeChat?.name) {
-                 renameChatAction({ chatId: renamingChatId, newName: trimmedName });
-             }
+            if (trimmedName || activeChat?.name) {
+                renameChatAction({ chatId: renamingChatId, newName: trimmedName });
+            }
         }
         setRenamingChatId(null);
         setEditChatName('');
@@ -52,46 +52,44 @@ export function ChatHeader({ activeChatId, onNewChatClick }: ChatHeaderProps) {
         if (e.key === 'Escape') handleCancelRename();
     };
 
-
     return (
-        // Use Flex for layout within the chat interface header area
-        <Flex className="flex-shrink-0 py-3 px-4 gap-2" justifyContent="between" alignItems="center">
+        <div className="flex flex-shrink-0 items-center justify-between py-3 px-4 gap-2">
             {/* Title/Rename Section */}
-            <Flex className="flex-grow min-w-0 gap-2" alignItems='center'>
-                <MessageSquare className="h-5 w-5 text-tremor-brand flex-shrink-0" aria-hidden="true" />
+            <div className={cn("flex flex-grow items-center min-w-0 gap-2")}>
+                <MessageSquare className="h-5 w-5 text-brand-DEFAULT flex-shrink-0" aria-hidden="true" />
                 {renamingChatId === activeChatId && activeChat ? (
                     // Rename Mode
-                    <Flex className="flex-grow min-w-0 gap-1">
-                        <TextInput
+                    <div className="flex flex-grow items-center min-w-0 gap-1">
+                        <Input
                             value={editChatName}
-                            onValueChange={setEditChatName} // Use onValueChange for Tremor TextInput
+                            onChange={(e) => setEditChatName(e.target.value)} // Use standard onChange
                             placeholder="Enter new chat name"
-                            className="h-9 text-sm flex-grow" autoFocus
+                            className="h-9 text-sm flex-grow"
+                            autoFocus
                             onKeyDown={handleKeyDown}
                             aria-label="New chat name"
                         />
-                        <Button onClick={handleSaveRename} variant="light" icon={Check} tooltip="Save Name" color="emerald" className="h-9 w-9 p-0" />
-                        <Button onClick={handleCancelRename} variant="light" icon={X} tooltip="Cancel Rename" color="rose" className="h-9 w-9 p-0" />
-                    </Flex>
+                        {/* Use new Button component */}
+                        <Button onClick={handleSaveRename} variant="ghost" size="iconSm" title="Save Name" className="text-success-600 hover:text-success-700"> <Check size={16}/> </Button>
+                        <Button onClick={handleCancelRename} variant="ghost" size="iconSm" title="Cancel Rename" className="text-danger-600 hover:text-danger-700"> <X size={16}/> </Button>
+                    </div>
                 ) : (
                     // Display Mode
-                    <Flex className="items-center gap-1 min-w-0">
-                        {/* Use Text instead of Title if you need smaller heading, or keep Title */}
-                        {/* <Title className="truncate font-semibold" title={activeChatTitle}> */}
-                        <Text className="truncate font-semibold text-tremor-content-strong" title={activeChatTitle}>
+                    <div className="flex items-center gap-1 min-w-0">
+                        {/* Use standard HTML element for text */}
+                        <span className="truncate font-semibold text-gray-800 dark:text-gray-200" title={activeChatTitle}>
                             {activeChatTitle}
-                        </Text>
-                        {/* </Title> */}
+                        </span>
                         {activeChat && (
-                            <Button onClick={() => handleRenameClick(activeChat)} variant="light" icon={Edit} tooltip="Rename Chat" className="h-6 w-6 ml-1 text-tremor-content-subtle hover:text-tremor-brand p-0" />
+                            <Button onClick={() => handleRenameClick(activeChat)} variant="ghost" size="iconXs" title="Rename Chat" className="ml-1 text-gray-400 hover:text-brand-DEFAULT p-0"> <Edit size={14}/> </Button>
                         )}
-                    </Flex>
+                    </div>
                 )}
-            </Flex>
+            </div>
             {/* New Chat Button */}
-            <Button onClick={onNewChatClick} variant="secondary" icon={PlusCircle} className="flex-shrink-0">
+            <Button onClick={onNewChatClick} variant="secondary" size="sm" icon={PlusCircle}>
                  New Chat
             </Button>
-        </Flex>
+        </div>
     );
 }

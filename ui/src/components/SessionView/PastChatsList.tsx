@@ -1,7 +1,7 @@
 // src/components/SessionView/PastChatsList.tsx
 import React from 'react';
-import { Card, Title, Text, Button, Divider, Flex } from '@tremor/react'; // Import Tremor components
-import { List } from '../icons/Icons'; // Keep icon
+import { List } from '../icons/Icons';
+import { Card, CardContent, CardHeader, CardTitle } from '../ui/Card'; // Import new Card components
 import { formatTimestamp } from '../../helpers';
 import type { ChatSession, Session } from '../../types';
 
@@ -27,45 +27,45 @@ export function PastChatsList({ session, activeChatId, onSelectChatHistory }: Pa
         return chat.name || `Chat (${formatTimestamp(chat.timestamp)})`;
     };
 
-    // FIX: Corrected JSX syntax in the map function
     return (
-        // This component might not be used if chats are listed in the sidebar
-        // If kept, it should be styled with Tremor
-        <Card className="flex-shrink-0 mt-4"> {/* Add margin if needed */}
-             <Flex alignItems="center" className="px-4 pt-3 pb-2"> {/* Adjust padding */}
-                 <List className="mr-2 h-4 w-4 text-tremor-content-subtle" aria-hidden="true"/>
-                 {/* Use Text instead of Title if a smaller heading is desired */}
-                 {/* <Title order={6}>Past Chats</Title> */}
-                 <Text className="font-semibold text-tremor-content-strong">Past Chats</Text>
-             </Flex>
-             <Divider className="my-0" />
+        // Use new Card component
+        <Card className="flex-shrink-0 mt-4">
+             {/* Use CardHeader */}
+             <CardHeader className="flex-row items-center space-y-0 px-4 pt-3 pb-2"> {/* Adjust padding & layout */}
+                 <List className="mr-2 h-4 w-4 text-gray-500 dark:text-gray-400" aria-hidden="true"/>
+                 {/* Use CardTitle or simple span */}
+                 <span className="font-semibold text-gray-800 dark:text-gray-200 text-sm">Past Chats</span>
+             </CardHeader>
+             {/* Use hr for divider */}
+             <hr className="my-0 border-gray-200 dark:border-gray-700" />
              {/* Container for scrollable list */}
-             <div className="p-2 max-h-36 overflow-y-auto">
-                 <div className="space-y-1"> {/* Use div instead of ul */}
+             {/* Use CardContent for padding */}
+             <CardContent className="p-2 max-h-36 overflow-y-auto">
+                 <div className="space-y-1">
                     {otherChats.map(chat => (
-                        <div
+                        <div // Use div, style like a button item
                             key={chat.id}
-                            className="flex items-center justify-between p-1.5 hover:bg-tremor-background-muted rounded-tremor-small cursor-pointer"
+                            className="flex items-center justify-between p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
                             onClick={() => onSelectChatHistory(chat.id)}
                             role="button"
                             tabIndex={0}
-                            onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => { // Add type for event
+                            onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => {
                                 if (e.key === 'Enter' || e.key === ' ') {
-                                    e.preventDefault(); // Prevent default space scroll
+                                    e.preventDefault();
                                     onSelectChatHistory(chat.id);
                                 }
                             }}
                             title={`Switch to: ${getChatDisplayTitle(chat)}`}
                         >
-                            <Text className="truncate mr-2 pointer-events-none">
+                            {/* Use span for text */}
+                            <span className="truncate mr-2 pointer-events-none text-sm text-gray-700 dark:text-gray-300">
                                 {getChatDisplayTitle(chat)}
-                            </Text>
-                             {/* Optionally add a visual indicator like an arrow? Or remove button. */}
-                             {/* <ChevronRightIcon className="h-4 w-4 text-tremor-content-subtle" /> */}
+                            </span>
+                            {/* Optionally add an indicator icon */}
                         </div>
                     ))}
                  </div>
-            </div>
+            </CardContent>
         </Card>
     );
 }

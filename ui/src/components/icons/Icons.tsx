@@ -197,3 +197,20 @@ export const Check: React.FC<IconProps> = ({ size = 24, className = '' }) => (
         <path d="M20 6 9 17l-5-5"/>
     </svg>
 );
+
+
+export const ChevronDown: React.FC<IconProps> = ({ size = 24, className = '' }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24"
+         fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+         className={`${iconBaseClass} lucide-chevron-down ${className}`}>
+        <path d="m6 9 6 6 6-6"/>
+    </svg>
+);
+
+export const ChevronUp: React.FC<IconProps> = ({ size = 24, className = '' }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24"
+         fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+         className={`${iconBaseClass} lucide-chevron-up ${className}`}>
+        <path d="m18 15-6-6-6 6"/>
+    </svg>
+);

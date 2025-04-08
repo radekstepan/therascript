@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-
-import { Button, TextInput, Flex, Text } from '@tremor/react'; // Import Tremor components
-import { Star } from '../icons/Icons'; // Keep icon
+import { Star } from '../icons/Icons';
+import { Button } from '../ui/Button'; // Use new Button
+import { Input } from '../ui/Input'; // Use new Input
 import { StarredTemplatesList } from '../StarredTemplates';
 import { currentQueryAtom, isChattingAtom, activeChatIdAtom, chatErrorAtom, handleChatSubmitAtom } from '../../store';
+import { cn } from '../../utils'; // Import cn
 
 export function ChatInput() {
     const [currentQuery, setCurrentQuery] = useAtom(currentQueryAtom);
@@ -16,7 +17,6 @@ export function ChatInput() {
     const inputRef = useRef<HTMLInputElement>(null);
     const [showTemplates, setShowTemplates] = useState(false);
 
-    // Focus input when chat ID changes (and isn't null)
     useEffect(() => {
         if (activeChatId !== null && inputRef.current) {
             inputRef.current.focus();
@@ -26,12 +26,12 @@ export function ChatInput() {
     const handleSelectTemplate = (text: string) => {
         setCurrentQuery(prev => prev ? `${prev} ${text}` : text);
         setShowTemplates(false);
-        inputRef.current?.focus(); // Re-focus after selection
+        inputRef.current?.focus();
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === 'Enter' && !e.shiftKey && !isChatting && currentQuery.trim() && activeChatId !== null) {
-             e.preventDefault(); // Prevent default newline in case shift was held briefly
+             e.preventDefault();
              handleChatSubmitAction();
         }
     };
@@ -44,46 +44,47 @@ export function ChatInput() {
     return (
         <>
             <form onSubmit={onSubmit} className="flex-shrink-0 pt-2">
-                <Flex className="relative space-x-2 w-full" alignItems='start'>
+                <div className="relative flex items-start space-x-2 w-full"> {/* Use div + flex */}
                     <div className="relative flex-shrink-0">
                         <Button
                             type="button"
-                            variant="secondary" // Corrected variant
-                            // Remove size="icon", control with classes
-                            className="h-10 w-10 p-0 flex items-center justify-center" // Ensure icon is centered
+                            variant="secondary"
+                            size="icon" // Use icon size
                             title="Show Starred Templates"
                             onClick={() => setShowTemplates(prev => !prev)}
                             aria-label="Show starred templates"
-                            icon={Star} // Use icon prop
-                        />
-                         {/* Removed explicit icon child */}
+                            // Pass icon component directly
+                        >
+                          <Star size={16} />
+                        </Button>
                         {showTemplates && (
                             <StarredTemplatesList
                                 onSelectTemplate={handleSelectTemplate}
                                 onClose={() => setShowTemplates(false)}
-                                // Add positioning classes if needed, e.g., bottom-full, mb-2, right-0
+                                // Positioning is handled inside StarredTemplatesList now
                             />
                         )}
                     </div>
-                    <TextInput
+                    <Input
                         ref={inputRef}
                         placeholder="Ask about the session..."
                         value={currentQuery}
-                        onValueChange={setCurrentQuery} // Use onValueChange
+                        onChange={(e) => setCurrentQuery(e.target.value)} // Use standard onChange
                         disabled={isChatting || activeChatId === null}
                         className="flex-grow h-10" // Ensure height matches button
                         aria-label="Chat input message"
-                        onKeyDown={handleKeyDown} // Handle Enter key
+                        onKeyDown={handleKeyDown}
                     />
                     <Button type="submit" disabled={isChatting || !currentQuery.trim() || activeChatId === null} className="h-10">
                         Send
                     </Button>
-                </Flex> {/* Added missing closing tag */}
+                </div>
             </form>
             {chatError && (
-                    <Text color="rose" className="text-sm text-center flex-shrink-0 mt-1">
-                    {chatError}
-                    </Text>
+                    // Use standard p element for error text
+                    <p className={cn("text-sm text-center flex-shrink-0 mt-1", "text-red-600 dark:text-red-500")}>
+                        {chatError}
+                    </p>
             )}
         </>
     );

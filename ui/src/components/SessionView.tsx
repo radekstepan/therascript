@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react'; // Removed Dispatch, SetStateAction
-import { useAtomValue, useSetAtom } from 'jotai'; // Removed useAtom
+import React, { useState, useEffect, useRef } from 'react';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useParams, useNavigate, Navigate, useLocation } from 'react-router-dom';
 
 // UI Components & Icons
-import { Button, Card, Flex, Title, Text, Divider } from '@tremor/react';
-import { Loader2, ArrowLeft, Edit, Save } from './icons/Icons'; // Removed FileText as it's not directly used here
+import { Button } from './ui/Button'; // Import new Button
+import { Card, CardContent, CardHeader } from './ui/Card'; // Import new Card
+import { Loader2, ArrowLeft, Edit, Save } from './icons/Icons';
 
 // Sidebar
 import { SessionSidebar } from './SessionView/SessionSidebar';
@@ -24,7 +25,7 @@ import {
     saveTranscriptAtom,
 } from '../store';
 
-// Sub-components and their Props Interfaces
+// Sub-components
 import { SessionMetadata } from './SessionView/SessionMetadata';
 import { Transcription } from './SessionView/Transcription';
 import { ChatInterface } from './SessionView/ChatInterface';
@@ -45,7 +46,7 @@ export function SessionView() {
     const saveTranscriptAction = useSetAtom(saveTranscriptAtom);
     const activeChatId = useAtomValue(activeChatIdAtom);
 
-    // Local UI State for Editing
+    // Local UI State
     const [isEditingMetadata, setIsEditingMetadata] = useState(false);
     const [editClientName, setEditClientName] = useState('');
     const [editName, setEditName] = useState('');
@@ -56,11 +57,7 @@ export function SessionView() {
     const [editTranscriptContent, setEditTranscriptContent] = useState('');
     const [isLoading, setIsLoading] = useState(true);
 
-    // Refs for scrolling - REMOVED
-    // const detailsRef = useRef<HTMLDivElement | null>(null);
-    // const transcriptRef = useRef<HTMLDivElement | null>(null);
-    // const chatRef = useRef<HTMLDivElement | null>(null);
-    const scrollContainerRef = useRef<HTMLDivElement | null>(null); // Keep for main scroll
+    const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 
     // --- Effect to Sync Session ID and Chat ID ---
     useEffect(() => {
@@ -81,23 +78,29 @@ export function SessionView() {
                 targetChatId = currentChatIdNum;
             } else {
                 console.warn(`Chat ID ${currentChatIdNum} not found, defaulting.`);
+                // Navigate to session base, let the next part redirect to latest chat
                 navigate(`/sessions/${currentSessionIdNum}`, { replace: true });
-                targetChatId = NaN;
+                targetChatId = NaN; // Ensure it falls into default logic below
             }
         }
+
+        // If no valid chat ID from URL OR URL points to base session URL, find the latest chat
         if (isNaN(targetChatId) && chats.length > 0) {
             targetChatId = [...chats].sort((a, b) => b.timestamp - a.timestamp)[0].id;
-             if (location.pathname !== `/sessions/${currentSessionIdNum}/chats/${targetChatId}`) {
-                navigate(`/sessions/${currentSessionIdNum}/chats/${targetChatId}`, { replace: true });
+            // Only navigate if the URL doesn't already include this targetChatId
+            const expectedPath = `/sessions/${currentSessionIdNum}/chats/${targetChatId}`;
+             if (location.pathname !== expectedPath) {
+                navigate(expectedPath, { replace: true });
              }
         } else if (isNaN(targetChatId)) {
-             targetChatId = NaN;
+             targetChatId = NaN; // No chats exist
         }
 
         setActiveChatId(isNaN(targetChatId) ? null : targetChatId);
         setChatError('');
         setIsLoading(false);
-    }, [sessionIdParam, chatIdParam, allSessions, navigate, setActiveSessionId, setActiveChatId, setChatError, location.pathname]);
+    }, [sessionIdParam, chatIdParam, allSessions, navigate, setActiveSessionId, setActiveChatId, setChatError, location.pathname]); // Added location.pathname dependency
+
 
     // --- Effects to Initialize Local Edit State ---
      useEffect(() => {
@@ -108,6 +111,7 @@ export function SessionView() {
             setEditType(derivedSession.sessionType || SESSION_TYPES[0]);
             setEditTherapy(derivedSession.therapy || THERAPY_TYPES[0]);
         }
+        // Reset if session changes or editing stops
         if (!derivedSession || !isEditingMetadata) { setIsEditingMetadata(false); }
     }, [derivedSession, isEditingMetadata]);
 
@@ -115,12 +119,14 @@ export function SessionView() {
         if (derivedSession && !isEditingTranscript) {
             setEditTranscriptContent(derivedSession.transcription || '');
         }
+         // Reset if session changes or editing stops
         if (!derivedSession || !isEditingTranscript) { setIsEditingTranscript(false); }
     }, [derivedSession, isEditingTranscript]);
 
     // --- Handlers ---
     const handleEditMetadataToggle = () => {
          if (!isEditingMetadata && derivedSession) {
+             // Re-initialize state when starting edit
              setEditClientName(derivedSession.clientName || '');
              setEditName(derivedSession.sessionName || derivedSession.fileName || '');
              setEditDate(derivedSession.date || '');
@@ -132,6 +138,7 @@ export function SessionView() {
 
     const handleEditTranscriptToggle = () => {
         if (!isEditingTranscript && derivedSession) {
+             // Re-initialize state when starting edit
             setEditTranscriptContent(derivedSession.transcription || '');
         }
         setIsEditingTranscript(prev => !prev);
@@ -171,34 +178,30 @@ export function SessionView() {
 
     const handleNavigateBack = () => navigate('/');
 
-    // ScrollToSection logic REMOVED
-    // const scrollToSection = (section: 'details' | 'transcript' | 'chat') => { ... };
 
     // --- Render Logic ---
     if (isLoading) {
-        return ( <div className="flex-grow flex items-center justify-center text-center p-10"> <Card className="max-w-sm mx-auto p-6"> <Flex justifyContent="center" className="mb-4"> <Loader2 className="h-8 w-8 animate-spin text-tremor-content-subtle" /> </Flex> <Text className="text-tremor-content">Loading session data...</Text> <Button onClick={handleNavigateBack} variant="secondary" className="mt-6 w-full"> Go Back </Button> </Card> </div> );
+        return ( <div className="flex-grow flex items-center justify-center text-center p-10"> <Card className="max-w-sm mx-auto p-6"> <div className="flex justify-center mb-4"> <Loader2 className="h-8 w-8 animate-spin text-gray-400 dark:text-gray-500" /> </div> <p className="text-gray-600 dark:text-gray-300">Loading session data...</p> <Button onClick={handleNavigateBack} variant="secondary" className="mt-6 w-full"> Go Back </Button> </Card> </div> );
     }
     if (!derivedSession) { return <Navigate to="/" replace />; }
 
     return (
-        // The main flex container for sidebar + content
-        <Flex className="flex-grow min-h-0" alignItems='stretch'>
-            {/* Sidebar */}
-            {/* <SessionSidebar scrollToSection={scrollToSection} /> // REMOVED prop */}
+        // Main flex container for sidebar + content
+        <div className="flex flex-grow min-h-0 items-stretch"> {/* Use div + flex */}
             <SessionSidebar />
 
             {/* Main Content Area with Scroll */}
-            <main ref={scrollContainerRef} className="flex-grow flex flex-col min-w-0 bg-tremor-background-muted overflow-y-auto">
+            <main ref={scrollContainerRef} className="flex-grow flex flex-col min-w-0 bg-gray-100 dark:bg-gray-950 overflow-y-auto">
 
                 {/* Sticky Header */}
-                 <Flex className="sticky top-0 z-10 flex-shrink-0 p-4 border-b border-tremor-border bg-tremor-background shadow-sm" justifyContent="between" alignItems='center'>
-                     <Button onClick={handleNavigateBack} variant="light" icon={ArrowLeft}>
+                 <div className="sticky top-0 z-10 flex-shrink-0 p-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm flex items-center justify-between"> {/* div + flex */}
+                     <Button onClick={handleNavigateBack} variant="link" size="sm" icon={ArrowLeft}> {/* Use link variant */}
                          Back to Sessions
                      </Button>
-                      <Text className="truncate font-medium text-tremor-content-strong">{derivedSession.sessionName || derivedSession.fileName}</Text>
+                      <span className="truncate font-medium text-gray-800 dark:text-gray-200">{derivedSession.sessionName || derivedSession.fileName}</span>
                       {/* Placeholder for potential actions */}
-                      <div></div>
-                 </Flex>
+                      <div className="w-[150px]"></div> {/* Keep spacing roughly balanced */}
+                 </div>
 
                 {/* Content Wrapper: Default vertical, becomes horizontal row on large screens */}
                 <div className="p-4 md:p-6 lg:p-8 flex-grow flex flex-col lg:flex-row lg:space-x-6 space-y-6 lg:space-y-0">
@@ -206,60 +209,64 @@ export function SessionView() {
                     {/* Left Panel (Details + Transcript) */}
                     <div className="flex flex-col space-y-6 lg:w-1/2 lg:flex-shrink-0">
                         {/* Details Section */}
-                        {/* Removed ref={detailsRef} */}
                         <Card>
-                            <Flex justifyContent="between" alignItems="start" className="mb-4">
-                                <Title>Details</Title>
+                             {/* CardHeader for padding and layout */}
+                            <CardHeader className="flex-row justify-between items-start mb-0 pb-2"> {/* Adjust layout */}
+                                <h3 className="text-lg font-semibold">Details</h3> {/* Use h3 */}
                                 {!isEditingMetadata ? (
-                                    <Button onClick={handleEditMetadataToggle} variant="secondary" icon={Edit}>
+                                    <Button onClick={handleEditMetadataToggle} variant="secondary" size="sm" icon={Edit}>
                                         Edit
                                     </Button>
                                 ) : (
-                                    <Flex justifyContent="end" className="space-x-2">
-                                        <Button onClick={handleSaveMetadataEdit} variant="primary" icon={Save}>
+                                    <div className="flex justify-end space-x-2"> {/* div + flex */}
+                                        <Button onClick={handleSaveMetadataEdit} variant="default" size="sm" icon={Save}>
                                             Save
                                         </Button>
-                                        <Button onClick={handleEditMetadataToggle} variant="secondary">Cancel</Button>
-                                    </Flex>
+                                        <Button onClick={handleEditMetadataToggle} variant="secondary" size="sm">Cancel</Button>
+                                    </div>
                                 )}
-                            </Flex>
-                            <Divider className="my-4 -mx-6" />
-                            <SessionMetadata
-                                session={derivedSession}
-                                isEditing={isEditingMetadata}
-                                editName={editName}
-                                editClientName={editClientName}
-                                editDate={editDate}
-                                editType={editType}
-                                editTherapy={editTherapy}
-                                onEditNameChange={setEditName}
-                                onEditClientNameChange={setEditClientName}
-                                onEditDateChange={setEditDate}
-                                onEditTypeChange={setEditType}
-                                onEditTherapyChange={setEditTherapy}
-                            />
+                            </CardHeader>
+                            {/* Use hr for divider */}
+                            <hr className="my-4 border-gray-200 dark:border-gray-700" />
+                            {/* CardContent for padding */}
+                            <CardContent className="pt-2">
+                                <SessionMetadata
+                                    session={derivedSession}
+                                    isEditing={isEditingMetadata}
+                                    editName={editName}
+                                    editClientName={editClientName}
+                                    editDate={editDate}
+                                    editType={editType}
+                                    editTherapy={editTherapy}
+                                    onEditNameChange={setEditName}
+                                    onEditClientNameChange={setEditClientName}
+                                    onEditDateChange={setEditDate}
+                                    onEditTypeChange={setEditType}
+                                    onEditTherapyChange={setEditTherapy}
+                                />
+                            </CardContent>
                         </Card>
 
                         {/* Transcription Section */}
-                         {/* Removed ref={transcriptRef} */}
                         <Card className="flex flex-col min-h-[50vh]">
-                            <Flex justifyContent="between" alignItems="start" className="mb-4 flex-shrink-0">
-                                <Title>Transcription</Title>
+                            <CardHeader className="flex-row justify-between items-start mb-0 pb-2"> {/* Adjust layout */}
+                                <h3 className="text-lg font-semibold">Transcription</h3> {/* Use h3 */}
                                 {!isEditingTranscript ? (
-                                    <Button onClick={handleEditTranscriptToggle} variant="secondary" icon={Edit}>
+                                    <Button onClick={handleEditTranscriptToggle} variant="secondary" size="sm" icon={Edit}>
                                         Edit
                                     </Button>
                                 ) : (
-                                    <Flex justifyContent="end" className="space-x-2">
-                                        <Button onClick={handleSaveTranscriptEdit} variant="primary" icon={Save}>
+                                    <div className="flex justify-end space-x-2"> {/* div + flex */}
+                                        <Button onClick={handleSaveTranscriptEdit} variant="default" size="sm" icon={Save}>
                                             Save
                                         </Button>
-                                        <Button onClick={handleEditTranscriptToggle} variant="secondary">Cancel</Button>
-                                    </Flex>
+                                        <Button onClick={handleEditTranscriptToggle} variant="secondary" size="sm">Cancel</Button>
+                                    </div>
                                 )}
-                            </Flex>
-                            <Divider className="my-4 -mx-6 flex-shrink-0" />
-                            <div className="flex flex-col flex-grow min-h-0">
+                            </CardHeader>
+                            <hr className="my-4 border-gray-200 dark:border-gray-700" />
+                            {/* Use CardContent and ensure Transcription takes full height */}
+                            <CardContent className="pt-2 flex flex-col flex-grow min-h-0">
                                 <Transcription
                                     session={derivedSession}
                                     isEditingOverall={isEditingTranscript}
@@ -268,7 +275,7 @@ export function SessionView() {
                                     onEditToggle={handleEditTranscriptToggle}
                                     onSave={handleSaveTranscriptEdit}
                                 />
-                            </div>
+                            </CardContent>
                         </Card>
                     </div> {/* End Left Panel */}
 
@@ -276,30 +283,27 @@ export function SessionView() {
                     {/* Right Panel (Chat) */}
                     <div className="flex flex-col lg:w-1/2 lg:flex-shrink-0">
                         {/* Chat Section */}
-                         {/* Removed ref={chatRef} */}
-                        {/* Conditionally render ChatInterface or placeholders */}
                         {activeChatId !== null ? (
-                            // Ensure Chat Card takes up appropriate space in the column
-                             <Card className="flex flex-col flex-grow min-h-[70vh]"> {/* flex-grow helps it fill */}
+                             <Card className="flex flex-col flex-grow min-h-[70vh] p-0"> {/* Remove Card padding */}
                                 <ChatInterface />
-                            </Card>
+                             </Card>
                         ) : derivedSession.chats && derivedSession.chats.length > 0 ? (
-                            <Card className="text-center italic py-6">
-                                <Text className="text-tremor-content-subtle">
+                            <Card className="flex items-center justify-center text-center italic min-h-[70vh]">
+                                <p className="text-gray-500 dark:text-gray-400">
                                 Select a chat from the sidebar to view it.
-                                </Text>
+                                </p>
                             </Card>
                         ) : (
-                            <Card className="text-center italic py-6">
-                                <Text className="text-tremor-content-subtle">
+                            <Card className="flex items-center justify-center text-center italic min-h-[70vh]">
+                                <p className="text-gray-500 dark:text-gray-400">
                                 No chats have been started for this session yet.
-                                </Text>
+                                </p>
                             </Card>
                         )}
                     </div> {/* End Right Panel */}
 
                 </div> {/* End Content Wrapper */}
             </main> {/* End Main Content Area */}
-        </Flex> // End Outer Flex Container
+        </div> // End Outer Flex Container
     );
 }

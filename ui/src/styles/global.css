@@ -9,8 +9,102 @@
 }
 
 @layer base {
+  :root {
+    /* Define light mode color variables (adjust HSL values as needed) */
+    --background: 0 0% 100%; /* white */
+    --foreground: 222.2 84% 4.9%; /* near black */
+
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+
+    --primary: 217.2 91.2% 59.8%; /* blue-600 */
+    --primary-foreground: 210 40% 98%; /* near white */
+
+    --secondary: 210 40% 96.1%; /* gray-100 */
+    --secondary-foreground: 222.2 47.4% 11.2%; /* gray-900 */
+
+    --muted: 210 40% 96.1%; /* gray-100 */
+    --muted-foreground: 215.4 16.3% 46.9%; /* gray-500 */
+
+    --accent: 210 40% 96.1%; /* gray-100 */
+    --accent-foreground: 222.2 47.4% 11.2%; /* gray-900 */
+
+    --destructive: 0 84.2% 60.2%; /* red-500/600 */
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 214.3 31.8% 91.4%; /* gray-200 */
+    --input: 214.3 31.8% 91.4%; /* gray-200 */
+    --ring: 217.2 91.2% 59.8%; /* blue-600 */
+
+    --radius: 0.5rem; /* Default border radius */
+  }
+
+  .dark {
+    /* Define dark mode color variables */
+    --background: 222.2 84% 4.9%; /* near black */
+    --foreground: 210 40% 98%; /* near white */
+
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 210 40% 98%; /* near white (adjust if blue preferred in dark) */
+    --primary-foreground: 222.2 47.4% 11.2%;
+
+    --secondary: 217.2 32.6% 17.5%; /* gray-800 */
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217.2 32.6% 17.5%; /* gray-800 */
+    --muted-foreground: 215 20.2% 65.1%; /* gray-400 */
+
+    --accent: 217.2 32.6% 17.5%; /* gray-800 */
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 62.8% 30.6%; /* dark red */
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 217.2 32.6% 17.5%; /* gray-800 */
+    --input: 217.2 32.6% 17.5%; /* gray-800 */
+    --ring: 217.2 91.2% 59.8%; /* blue-600 (keep ring color?) */
+  }
+}
+
+
+@layer base {
     body {
-        @apply bg-tremor-background text-tremor-content antialiased;
+        @apply bg-background text-foreground antialiased;
+        /* @apply bg-tremor-background text-tremor-content antialiased; */ /* Old Tremor style */
+    }
+    /* Define input styles using @apply for consistency */
+    input[type="text"],
+    input[type="date"],
+    input[type="email"],
+    input[type="number"],
+    input[type="password"],
+    textarea,
+    select {
+      @apply block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm dark:bg-gray-800 dark:border-gray-700 dark:text-gray-100 dark:focus:border-blue-600 dark:focus:ring-blue-600;
+      @apply px-3 py-2; /* Ensure padding */
+      @apply disabled:cursor-not-allowed disabled:opacity-50; /* Disabled styles */
+    }
+     /* Style the date input specifically to allow browser styling but match height/border */
+    input[type="date"] {
+       @apply h-10; /* Match Input height */
+    }
+     /* Style Radix Select Trigger */
+    button[data-radix-select-trigger] {
+        @apply h-10;
+    }
+     /* Remove default browser styling for date input icon if needed */
+    input[type="date"]::-webkit-calendar-picker-indicator {
+       /* background: url('path/to/your/icon.svg') no-repeat; */
+       /* opacity: 0.7; */
+       /* Adjust appearance */
     }
 }
 
