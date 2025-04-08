@@ -1,8 +1,18 @@
-// src/store.ts
 import { atom } from 'jotai';
-import { atomWithStorage } from 'jotai/utils';
+import { atomWithStorage } from 'jotai/utils'; // Import atomWithStorage
 import { SAMPLE_SESSIONS } from './sampleData';
 import type { Session, ChatMessage, ChatSession, SessionMetadata } from './types';
+import { getTodayDateString } from './helpers'; // Assuming helpers are needed
+
+// --- Define Sort Types ---
+export type SessionSortCriteria = 'sessionName' | 'clientName' | 'sessionType' | 'therapy' | 'date' | 'id'; // Added 'id' as a fallback
+export type SortDirection = 'asc' | 'desc';
+
+// --- Sorting Atoms ---
+// Persist sort criteria, default to 'date'
+export const sessionSortCriteriaAtom = atomWithStorage<SessionSortCriteria>('session-sort-criteria', 'date');
+// Persist sort direction, default to 'desc' (newest date first)
+export const sessionSortDirectionAtom = atomWithStorage<SortDirection>('session-sort-direction', 'desc');
 
 // --- Theme Atom ---
 // Type for theme values
@@ -16,74 +26,139 @@ export const themeAtom = atomWithStorage<Theme>('ui-theme', 'system');
 export const effectiveThemeAtom = atom<Exclude<Theme, 'system'>>((get) => {
     const theme = get(themeAtom);
     if (theme === 'system') {
-        // Check system preference
-        return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        // Check system preference only if window is available (SSR safety)
+        if (typeof window !== 'undefined') {
+            return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+        return 'light'; // Default fallback for SSR
     }
     return theme; // Return 'light' or 'dark' directly
 });
 
-// --- Core State Atoms --- (Keep as is)
+
+// --- Core State Atoms ---
 export const pastSessionsAtom = atom<Session[]>(SAMPLE_SESSIONS);
 export const activeSessionIdAtom = atom<number | null>(null);
 export const activeChatIdAtom = atom<number | null>(null);
 
-// --- Upload Modal State Atoms --- (Keep as is)
+// --- Upload Modal State Atoms ---
 export const isUploadModalOpenAtom = atom(false);
 export const isTranscribingAtom = atom(false);
 export const transcriptionErrorAtom = atom('');
 
-// --- Chat State Atoms --- (Keep as is)
+// --- Chat State Atoms ---
 export const currentQueryAtom = atom('');
 export const isChattingAtom = atom(false);
 export const chatErrorAtom = atom('');
 
 // --- Derived Read Atoms ---
 
-// activeSessionAtom, activeChatAtom, currentChatMessagesAtom (Keep as is)
+// Get the full Session object for the active session ID
 export const activeSessionAtom = atom<Session | null>((get) => {
   const sessions = get(pastSessionsAtom);
   const id = get(activeSessionIdAtom);
   return id !== null ? sessions.find(s => s.id === id) ?? null : null;
 });
 
+// Get the full ChatSession object for the active chat ID within the active session
 export const activeChatAtom = atom<ChatSession | null>((get) => {
   const session = get(activeSessionAtom);
   const chatId = get(activeChatIdAtom);
-  if (!session || chatId === null) return null;
+  if (!session || chatId === null) {
+    return null;
+  }
+  // Ensure chats array exists and find the chat
   return session.chats?.find(c => c.id === chatId) ?? null;
 });
 
+// Get the messages for the currently active chat
 export const currentChatMessagesAtom = atom<ChatMessage[]>((get) => {
   const chat = get(activeChatAtom);
   return chat?.messages || [];
 });
 
 // Get a globally flattened list of starred messages including their names
-export const starredMessagesAtom = atom<Pick<ChatMessage, 'id' | 'text' | 'starredName'>[]>((get) => { // Add starredName
+export const starredMessagesAtom = atom<Pick<ChatMessage, 'id' | 'text' | 'starredName'>[]>((get) => {
     const sessions = get(pastSessionsAtom);
-    const allStarred: Pick<ChatMessage, 'id' | 'text' | 'starredName'>[] = []; // Add starredName
+    const allStarred: Pick<ChatMessage, 'id' | 'text' | 'starredName'>[] = [];
     sessions.forEach(session => {
         session.chats?.forEach(chat => {
             chat.messages?.forEach(msg => {
                 if (msg.starred) {
                     if (!allStarred.some(starred => starred.id === msg.id)) {
-                        // Include starredName in the pushed object
                         allStarred.push({ id: msg.id, text: msg.text, starredName: msg.starredName });
                     }
                 }
             });
         });
     });
-    // Optionally sort by name or original text if needed
-    // allStarred.sort((a, b) => (a.starredName || a.text).localeCompare(b.starredName || b.text));
     return allStarred;
+});
+
+// Derived Atom for Sorted Sessions
+export const sortedSessionsAtom = atom<Session[]>((get) => {
+    const sessions = get(pastSessionsAtom);
+    const criteria = get(sessionSortCriteriaAtom);
+    const direction = get(sessionSortDirectionAtom);
+
+    // Create a mutable copy before sorting
+    const sorted = [...sessions].sort((a, b) => {
+        // Prioritize sessionName if available, otherwise fallback to fileName for 'sessionName' sort
+        let valA: any;
+        let valB: any;
+
+        if (criteria === 'sessionName') {
+             valA = a.sessionName || a.fileName || null;
+             valB = b.sessionName || b.fileName || null;
+        } else {
+             valA = a[criteria] ?? null; // Use nullish coalescing for undefined/null
+             valB = b[criteria] ?? null;
+        }
+
+        // Handle nulls/undefined consistently (e.g., push them to the end)
+        if (valA === null && valB !== null) return 1; // a is null, b is not -> b comes first
+        if (valA !== null && valB === null) return -1; // a is not null, b is -> a comes first
+        if (valA === null && valB === null) return 0; // both null -> equal
+
+        // Specific comparison logic based on criteria
+        switch (criteria) {
+            case 'date':
+                // Assuming date strings are in 'YYYY-MM-DD' format or similar that Date can parse
+                // Treat invalid dates like nulls (push to end)
+                const dateA = new Date(valA);
+                const dateB = new Date(valB);
+                if (isNaN(dateA.getTime()) && !isNaN(dateB.getTime())) return 1;
+                if (!isNaN(dateA.getTime()) && isNaN(dateB.getTime())) return -1;
+                if (isNaN(dateA.getTime()) && isNaN(dateB.getTime())) return 0;
+                return dateA.getTime() - dateB.getTime(); // Chronological comparison
+
+            case 'clientName':
+            case 'sessionName': // Will use the prepared valA/valB including fallback
+            case 'sessionType':
+            case 'therapy':
+                // Case-insensitive string comparison
+                return String(valA).localeCompare(String(valB), undefined, { sensitivity: 'base' });
+
+            case 'id': // Fallback/default numeric sort
+            default:
+                 // Ensure values are numbers if possible, fallback to 0
+                 const numA = typeof valA === 'number' ? valA : 0;
+                 const numB = typeof valB === 'number' ? valB : 0;
+                 return numA - numB;
+        }
+    });
+
+    // Apply direction
+    if (direction === 'desc') {
+        sorted.reverse(); // Reverse the array for descending order
+    }
+
+    return sorted;
 });
 
 
 // --- Write Atoms (Actions) ---
 
-// openUploadModalAtom, closeUploadModalAtom, addSessionAtom,
-// updateSessionMetadataAtom, saveTranscriptAtom, addChatMessageAtom (Keep as is)
 export const openUploadModalAtom = atom(null, (get, set) => { set(transcriptionErrorAtom, ''); set(isUploadModalOpenAtom, true); });
 export const closeUploadModalAtom = atom(null, (get, set) => { if (!get(isTranscribingAtom)) { set(isUploadModalOpenAtom, false); }});
 export const addSessionAtom = atom(null, (get, set, newSession: Session) => { set(pastSessionsAtom, (prev) => [newSession, ...prev]); });
@@ -109,53 +184,26 @@ export const addChatMessageAtom = atom(null, (get, set, message: ChatMessage) =>
         return session;
     }));
 });
-
-// Action to star/unstar a message - Modified to handle name
-export const starMessageAtom = atom(
-    null,
-    (get, set, payload: { chatId: number; messageId: number; shouldStar: boolean; name?: string }) => { // Add optional name
-        const { chatId, messageId, shouldStar, name } = payload; // Destructure name
-        const sessionId = get(activeSessionIdAtom);
-
-        if (sessionId === null) {
-            console.error("Cannot star/unstar message: No active session.");
-            return;
-        }
-
-        set(pastSessionsAtom, (prevSessions) =>
-            prevSessions.map(session => {
-                if (session.id === sessionId) {
-                    const updatedChats = (session.chats || []).map(chat => {
-                        if (chat.id === chatId) {
-                            const updatedMessages = (chat.messages || []).map(msg =>
-                                msg.id === messageId
-                                    ? {
-                                        ...msg,
-                                        starred: shouldStar,
-                                        // Set name if starring, clear if unstarring
-                                        starredName: shouldStar ? (name?.trim() || msg.text.substring(0, 50) + '...') : undefined
-                                      }
-                                    : msg
-                            );
-                            return { ...chat, messages: updatedMessages };
-                        }
-                        return chat;
-                    });
-                    return { ...session, chats: updatedChats };
+export const starMessageAtom = atom(null, (get, set, payload: { chatId: number; messageId: number; shouldStar: boolean; name?: string }) => {
+    const { chatId, messageId, shouldStar, name } = payload;
+    const sessionId = get(activeSessionIdAtom);
+    if (sessionId === null) { console.error("Cannot star/unstar message: No active session."); return; }
+    set(pastSessionsAtom, (prevSessions) => prevSessions.map(session => {
+        if (session.id === sessionId) {
+            const updatedChats = (session.chats || []).map(chat => {
+                if (chat.id === chatId) {
+                    const updatedMessages = (chat.messages || []).map(msg => msg.id === messageId ? { ...msg, starred: shouldStar, starredName: shouldStar ? (name?.trim() || msg.text.substring(0, 50) + '...') : undefined } : msg );
+                    return { ...chat, messages: updatedMessages };
                 }
-                return session;
-            })
-        );
-        if (shouldStar) {
-            console.log(`Message ${messageId} in chat ${chatId} starred with name "${name || 'Default Name'}"`);
-        } else {
-            console.log(`Message ${messageId} in chat ${chatId} unstarred`);
+                return chat;
+            });
+            return { ...session, chats: updatedChats };
         }
-    }
-);
-
-
-// startNewChatAtom, renameChatAtom, handleStartTranscriptionAtom, handleChatSubmitAtom (Keep as is)
+        return session;
+    }));
+    if (shouldStar) { console.log(`Message ${messageId} in chat ${chatId} starred with name "${name || 'Default Name'}"`); }
+    else { console.log(`Message ${messageId} in chat ${chatId} unstarred`); }
+});
 type StartNewChatResult = { success: true; newChatId: number } | { success: false; error: string };
 export const startNewChatAtom = atom<null, [{ sessionId: number }], Promise<StartNewChatResult>>(null, async (get, set, { sessionId }) => {
     if (sessionId === null || isNaN(sessionId)) { const error = "Error: Could not find session to start new chat."; console.error(error); set(chatErrorAtom, error); return { success: false, error }; }
@@ -166,14 +214,12 @@ export const startNewChatAtom = atom<null, [{ sessionId: number }], Promise<Star
     if (success) { console.log(`Created new chat (${newChatId}) for session ${sessionId}`); return { success: true, newChatId: newChatId }; }
     else { const error = `Error: Session ${sessionId} not found when adding new chat.`; console.error(error); set(chatErrorAtom, error); return { success: false, error }; }
 });
-
 export const renameChatAtom = atom(null, (get, set, payload: { chatId: number, newName: string }) => {
     const { chatId, newName } = payload; const sessionId = get(activeSessionIdAtom);
     if (sessionId === null) { console.error("Cannot rename chat: No active session."); return; }
     set(pastSessionsAtom, (prev) => prev.map(session => { if (session.id === sessionId) { const updatedChats = (session.chats || []).map(chat => chat.id === chatId ? { ...chat, name: newName.trim() || undefined } : chat); return { ...session, chats: updatedChats }; } return session; }));
     console.log(`Renamed chat ${chatId} in session ${sessionId} to: ${newName.trim()}`);
 });
-
 type TranscriptionResult = { success: true, newSessionId: number, newChatId: number } | { success: false, error: string };
 export const handleStartTranscriptionAtom = atom<null, [{ file: File, metadata: SessionMetadata }], Promise<TranscriptionResult>>(null, async (get, set, { file, metadata }) => {
     set(isTranscribingAtom, true); set(transcriptionErrorAtom, ''); console.log("Starting transcription simulation for:", file.name, metadata);
@@ -190,7 +236,6 @@ export const handleStartTranscriptionAtom = atom<null, [{ file: File, metadata: 
         return { success: false, error: errorMsg };
     }
 });
-
 export const handleChatSubmitAtom = atom(null, async (get, set) => {
     const query = get(currentQueryAtom); const sessionId = get(activeSessionIdAtom); const chatId = get(activeChatIdAtom); const chatting = get(isChattingAtom);
     if (!query.trim()) { set(chatErrorAtom, "Cannot send an empty message."); return; }
@@ -209,3 +254,22 @@ export const handleChatSubmitAtom = atom(null, async (get, set) => {
     } catch (error) { console.error("Chat API simulation error:", error); set(chatErrorAtom, "Failed to get response from AI (simulated error)."); }
     finally { set(isChattingAtom, false); }
 });
+
+// Action Atom to Handle Sorting Click
+export const setSessionSortAtom = atom(
+    null, // No read function needed
+    (get, set, newCriteria: SessionSortCriteria) => {
+        const currentCriteria = get(sessionSortCriteriaAtom);
+        const currentDirection = get(sessionSortDirectionAtom);
+
+        if (newCriteria === currentCriteria) {
+            // If clicking the same column, toggle direction
+            set(sessionSortDirectionAtom, currentDirection === 'asc' ? 'desc' : 'asc');
+        } else {
+            // If clicking a new column, set new criteria and default direction
+            set(sessionSortCriteriaAtom, newCriteria);
+            // Default to 'desc' for date, 'asc' for others
+            set(sessionSortDirectionAtom, newCriteria === 'date' ? 'desc' : 'asc');
+        }
+    }
+);
