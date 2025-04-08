@@ -56,13 +56,6 @@ return (
              {/* Adjust width based on your button/layout needs */}
              <div className="w-24 md:w-32"></div>
 
-             {/* Title */}
-             <h1 className={cn(
-                "text-center text-xl sm:text-2xl font-bold flex-grow", // Added flex-grow
-                "text-gray-900 dark:text-gray-100"
-             )}>
-                 Therapy Session Analyzer
-             </h1>
              {/* Theme Toggle Button */}
              {/* Adjust width based on your button/layout needs */}
              <div className="w-24 md:w-32 flex justify-end">
