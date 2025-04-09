@@ -31,8 +31,12 @@ export function ChatMessages({ activeChatId }: ChatMessagesProps) {
     const handleStarClick = (message: ChatMessage) => {
         if (activeChatId === null) return;
         if (message.starred) {
+            // --- MODIFICATION: Handle Unstar Directly ---
+            // If already starred, unstar it immediately without dialog
             starMessageAction({ chatId: activeChatId, messageId: message.id, shouldStar: false });
+            // --- END MODIFICATION ---
         } else {
+            // If not starred, open the naming dialog to star it
             setMessageToName(message);
             setTemplateNameInput(message.starredName || message.text.substring(0, 50) + (message.text.length > 50 ? '...' : ''));
             setNamingError(null);
@@ -71,19 +75,16 @@ export function ChatMessages({ activeChatId }: ChatMessagesProps) {
                {chatMessages.map((msg) => (
                    <Flex
                        key={msg.id}
-                       gap="2" // Gap between potential star icon and bubble
-                       align="start" // Align items to the top
+                       gap="2"
+                       align="start"
                        className="group relative"
-                       // Outer flex controls left/right justification
                        justify={msg.sender === 'user' ? 'end' : 'start'}
                    >
-                        {/* --- AI Message Rendering (No Icon) --- */}
+                        {/* AI Message */}
                        {msg.sender === 'ai' && (
                            <>
-                               {/* Bot icon removed */}
                                <Box
-                                   // AI bubble takes up almost full width available on its side
-                                   style={{ maxWidth: 'calc(100% - 1rem)' }} // Adjust if needed
+                                   style={{ maxWidth: 'calc(100% - 1rem)' }}
                                    className={cn('rounded-lg p-2 px-3 text-sm shadow-sm break-words', 'bg-[--gray-a3] text-[--gray-a12]')}
                                >
                                    <Text size="2">{msg.text}</Text>
@@ -91,18 +92,28 @@ export function ChatMessages({ activeChatId }: ChatMessagesProps) {
                            </>
                        )}
 
-                        {/* --- User Message Rendering (No Bubble Icon, Star Aligned) --- */}
+                        {/* User Message */}
                        {msg.sender === 'user' && (
                            <>
                                {/* Star Icon Area */}
                                <Box className="flex-shrink-0 self-center mt-px">
                                    {msg.starred ? (
-                                       <StarFilledIcon width="16" height="16" className="text-yellow-500" />
+                                       // --- MODIFICATION: Make filled star an IconButton ---
+                                       <IconButton
+                                            variant="ghost" color="yellow" // Use yellow color? Or keep gray and rely on icon fill? Test needed. Let's try yellow.
+                                            size="1"
+                                            className="p-0 text-yellow-500" // Keep yellow color explicit via className too
+                                            onClick={() => handleStarClick(msg)} // Call handler on click
+                                            title="Unstar message" aria-label="Unstar message"
+                                        >
+                                            <StarFilledIcon width="16" height="16" />
+                                        </IconButton>
+                                       // --- END MODIFICATION ---
                                    ) : (
                                        <IconButton
                                            variant="ghost" color="gray" size="1"
                                            className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity p-0"
-                                           onClick={() => handleStarClick(msg)}
+                                           onClick={() => handleStarClick(msg)} // Call handler on click
                                            title="Star message as template" aria-label="Star message"
                                        >
                                            <StarIcon width="14" height="14" />
@@ -112,8 +123,7 @@ export function ChatMessages({ activeChatId }: ChatMessagesProps) {
 
                                {/* Text Bubble */}
                                <Box
-                                   // User bubble takes up almost full width available on its side
-                                   style={{ maxWidth: 'calc(100% - 2rem)' }} // Adjust to account for star button space
+                                   style={{ maxWidth: 'calc(100% - 2rem)' }}
                                    className={cn('rounded-lg p-2 px-3 text-sm shadow-sm break-words', 'bg-blue-600 text-white dark:bg-blue-500 dark:text-white')}
                                >
                                    <Text size="2">{msg.text}</Text>
@@ -123,11 +133,9 @@ export function ChatMessages({ activeChatId }: ChatMessagesProps) {
                    </Flex>
                ))}
 
-               {/* AI Thinking Indicator (No Icon) */}
+               {/* AI Thinking Indicator */}
                {isChatting && (
-                   // Justify start to align left like AI messages
                    <Flex align="start" gap="2" justify="start">
-                        {/* Bot icon removed */}
                        <Box className="rounded-lg p-2 px-3 text-sm bg-[--gray-a3] text-[--gray-a11] shadow-sm">
                            <Flex align="center" gap="1" style={{ fontStyle: 'italic' }}>
                                <Spinner size="1"/> Thinking...
@@ -137,7 +145,7 @@ export function ChatMessages({ activeChatId }: ChatMessagesProps) {
                )}
            </Box>
 
-           {/* --- Dialog for Naming Starred Template (Unchanged) --- */}
+           {/* --- Dialog for Naming Starred Template (Unchanged Logic, only called when starring) --- */}
            <Dialog.Root open={isNamingDialogOpen} onOpenChange={(open) => !open && handleCancelName()}>
               <Dialog.Content style={{ maxWidth: 450 }}>
                  <Dialog.Title>Name This Template</Dialog.Title>

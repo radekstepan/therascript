@@ -238,17 +238,25 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
                              </label>
                              <label>
                                  <Text as="div" size="2" mb="1" weight="medium">Date</Text>
+                                 {/* --- MODIFICATION FOR DATE INPUT --- */}
                                  <input
                                     type="date"
                                     value={sessionDate}
                                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSessionDate(e.target.value)}
                                     disabled={isTranscribing}
                                     required
+                                    // Apply classes for consistent styling with Radix size="2" inputs
                                     className={cn(
-                                         "rt-TextFieldInput rt-r-size-2 rt-variant-surface",
-                                         "h-8 text-sm"
+                                         "flex w-full rounded-md border border-[--gray-a7] bg-[--gray-1] focus:border-[--accent-8] focus:shadow-[0_0_0_1px_var(--accent-8)]", // Base styles mimicking Radix input appearance
+                                         "h-8 px-2 py-1", // Explicit height and padding to match size="2"
+                                         "text-sm", // Explicit font size
+                                         "text-[--gray-12]", // Text color
+                                         "placeholder:text-[--gray-a9]", // Placeholder color
+                                         "focus-visible:outline-none", // Remove default outline
+                                         "disabled:cursor-not-allowed disabled:opacity-50" // Disabled styles
                                      )}
                                   />
+                                 {/* --- END MODIFICATION --- */}
                             </label>
                          </Box>
                          {/* Grid for Session Type & Therapy Type */}
@@ -256,8 +264,9 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
                              <label>
                                 <Text as="div" size="2" mb="1" weight="medium">Session Type</Text>
                                 <Select.Root value={sessionTypeInput} onValueChange={setSessionTypeInput} disabled={isTranscribing} required size="2">
-                                     {/* --- MODIFICATION HERE --- */}
+                                    {/* --- MODIFICATION FOR SELECT WIDTH --- */}
                                     <Select.Trigger placeholder="Select type..." style={{ width: '100%' }}/>
+                                    {/* --- END MODIFICATION --- */}
                                     <Select.Content>
                                          {SESSION_TYPES.map(type => (
                                              <Select.Item key={type} value={type}>
@@ -270,8 +279,9 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
                              <label>
                                 <Text as="div" size="2" mb="1" weight="medium">Therapy Modality</Text>
                                 <Select.Root value={therapyInput} onValueChange={setTherapyInput} disabled={isTranscribing} required size="2">
-                                     {/* --- MODIFICATION HERE --- */}
+                                    {/* --- MODIFICATION FOR SELECT WIDTH --- */}
                                     <Select.Trigger placeholder="Select therapy..." style={{ width: '100%' }}/>
+                                    {/* --- END MODIFICATION --- */}
                                     <Select.Content>
                                         {THERAPY_TYPES.map(type => ( <Select.Item key={type} value={type}>{type}</Select.Item> ))}
                                     </Select.Content>

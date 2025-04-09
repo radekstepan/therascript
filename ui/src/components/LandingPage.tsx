@@ -36,33 +36,41 @@ export function LandingPage() {
       // Outer Box takes full height
       <Box className="w-full flex-grow flex flex-col">
 
-          {/* --- NEW HEADER for Landing Page --- */}
+          {/* --- MODIFICATION: Landing Page Header Border Style --- */}
           <Box
              py="2"
              px={{ initial: '4', md: '6', lg: '8' }}
              flexShrink="0"
-             className="border-b"
-             style={{ backgroundColor: 'var(--color-panel-solid)'}} // Added background to match session view header
+             // Removed className="border-b"
+             style={{
+                 backgroundColor: 'var(--color-panel-solid)',
+                 borderBottom: '1px solid var(--gray-a6)' // Use Radix variable for border color
+             }}
           >
+          {/* --- END MODIFICATION --- */}
               <Flex justify="end">
                    <UserThemeDropdown />
               </Flex>
           </Box>
-          {/* --- END NEW HEADER --- */}
 
           {/* Content Area with Padding */}
           <Box className="flex-grow flex flex-col py-4 md:py-6 lg:py-8">
               <Container size="4" className="flex-grow flex flex-col">
                   <Card size="3" className="flex-grow flex flex-col overflow-hidden h-full">
                       {/* Card Header */}
-                      <Flex justify="between" align="center" px="4" pt="4" pb="3" className="border-b">
+                      <Flex
+                         justify="between"
+                         align="center"
+                         px="4" pt="4" pb="3"
+                         // Use explicit border style here too for consistency within the card
+                         style={{ borderBottom: '1px solid var(--gray-a6)' }}
+                       >
                           <Heading as="h2" size="5" weight="medium">
                             <Flex align="center" gap="2">
                                  <CounterClockwiseClockIcon />
                                  Session History
                             </Flex>
                           </Heading>
-                          {/* REMOVED Dropdown from here */}
                           <Button
                                variant="soft"
                                size="2"

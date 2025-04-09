@@ -1,5 +1,6 @@
 /*
 Modified File: src/components/SessionView.tsx
++ Fixed header border color in dark mode
 */
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useAtomValue, useSetAtom, useAtom } from 'jotai';
@@ -44,7 +45,7 @@ export function SessionView() {
     const [editTranscriptContent, setEditTranscriptContent] = useState('');
     const [isLoading, setIsLoading] = useState(true);
 
-    // useEffects for loading/navigation (remain the same)
+    // useEffects for loading/navigation
     useEffect(() => {
         setIsLoading(true);
         const currentSessionIdNum = sessionIdParam ? parseInt(sessionIdParam, 10) : NaN;
@@ -81,8 +82,7 @@ export function SessionView() {
      }, [sessionIdParam, chatIdParam, allSessions, navigate, setActiveSessionId, setActiveChatId, setChatError, location.pathname]);
     useEffect(() => { if (session) setEditTranscriptContent(session.transcription || ''); }, [session]);
 
-    // Sidebar Resizing Logic (remain the same)
-    // Dummy implementations for unchanged callbacks
+    // Sidebar Resizing Logic
     const handleMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
         e.preventDefault();
         isResizing.current = true;
@@ -121,8 +121,7 @@ export function SessionView() {
     }, [handleMouseMove, handleMouseUp]);
 
 
-    // Handlers (remain the same)
-    // Dummy implementations for unchanged callbacks
+    // Handlers
     const handleStartFirstChat = async () => {
         if (!session) return;
         const currentSessionId = session.id;
@@ -142,7 +141,11 @@ export function SessionView() {
     const handleNavigateBack = () => navigate('/');
 
     if (isLoading || !session) {
+        // Show loading state or redirect
+        // Using Navigate for now, consider a dedicated loading component
         return <Navigate to="/" replace />;
+        // Example loading state:
+        // return <Flex justify="center" align="center" style={{height: '100vh'}}><Spinner size="3" /></Flex>;
     }
 
     const displayTitle = session.sessionName || session.fileName;
@@ -151,7 +154,7 @@ export function SessionView() {
     return (
         // Main container: Full height, hidden overflow
         <Flex flexGrow="1" style={{ height: '100vh', overflow: 'hidden' }}>
-             {/* Sidebar (Unchanged) */}
+             {/* Sidebar */}
             <Box
                 ref={sidebarRef}
                 className="relative flex-shrink-0 hidden lg:flex flex-col"
@@ -160,7 +163,7 @@ export function SessionView() {
                 <SessionSidebar />
             </Box>
 
-            {/* Resizer (Unchanged) */}
+            {/* Resizer */}
             <Box
                 className="hidden lg:block flex-shrink-0 w-1.5 cursor-col-resize group hover:bg-[--gray-a4]"
                 onMouseDown={handleMouseDown}
@@ -170,15 +173,19 @@ export function SessionView() {
             </Box>
 
             {/* Main Content Column */}
-            <Flex direction="column" flexGrow="1" style={{ minWidth: 0, height: '100vh', overflow: 'hidden' }}> {/* Ensure column takes full height and hides overflow */}
-                 {/* Header (Unchanged) */}
+            <Flex direction="column" flexGrow="1" style={{ minWidth: 0, height: '100vh', overflow: 'hidden' }}>
+                 {/* --- MODIFICATION: Header Border Style --- */}
                  <Box
                     px={{ initial: '4', md: '6', lg: '8' }}
                     py="3"
                     flexShrink="0"
-                    className="border-b"
-                    style={{ backgroundColor: 'var(--color-panel-solid)'}}
+                    // Removed className="border-b"
+                    style={{
+                        backgroundColor: 'var(--color-panel-solid)',
+                        borderBottom: '1px solid var(--gray-a6)' // Use Radix variable for border color
+                    }}
                 >
+                {/* --- END MODIFICATION --- */}
                     <Flex justify="between" align="center">
                          <Flex align="center" gap="2" style={{ minWidth: 0 }}>
                             <Button onClick={handleNavigateBack} variant="ghost" color="gray" size="2" style={{ flexShrink: 0 }}>
@@ -193,11 +200,9 @@ export function SessionView() {
                     </Flex>
                 </Box>
 
-                 {/* *** MODIFICATION HERE *** */}
-                 {/* Content Area: Takes remaining space, NO overflowY, minimum height 0 */}
-                 {/* This Box defines the height constraint for SessionContent */}
-                 <Box flexGrow="1" style={{ minHeight: 0, overflow: 'hidden' }}> {/* REMOVED overflowY: 'auto' */}
-                    <SessionContent // SessionContent itself should fill this Box (e.g., using height: 100%)
+                 {/* Content Area */}
+                 <Box flexGrow="1" style={{ minHeight: 0, overflow: 'hidden' }}>
+                    <SessionContent
                         session={session}
                         onEditDetailsClick={handleOpenEditMetadataModal}
                         editTranscriptContent={editTranscriptContent}
@@ -207,10 +212,9 @@ export function SessionView() {
                         onStartFirstChat={handleStartFirstChat}
                     />
                  </Box>
-                 {/* *** END MODIFICATION *** */}
             </Flex>
 
-            {/* Modal (Unchanged) */}
+            {/* Modal */}
             <EditDetailsModal
                 isOpen={isEditingMetadata}
                 onOpenChange={setIsEditingMetadata}

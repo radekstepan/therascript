@@ -1,3 +1,4 @@
+// src/components/StarredTemplates.tsx
 import React from 'react';
 import { useAtomValue } from 'jotai';
 import { Button, Box, Text, Flex, ScrollArea, Separator } from '@radix-ui/themes'; // Use Themes components
@@ -9,15 +10,16 @@ import { cn } from '../utils';
 export function StarredTemplatesList({ onSelectTemplate, onClose }: StarredTemplatesProps) {
     const starredMessages = useAtomValue(starredMessagesAtom);
 
-    // Using Box for the popover container
+    // --- MODIFICATION: Increase z-index ---
     const popoverClasses = cn(
-        "absolute bottom-full mb-2 right-0 z-10",
+        "absolute bottom-full mb-2 right-0 z-50", // Changed z-10 to z-50
         "w-72 max-h-60 overflow-hidden flex flex-col", // Flex direction column
         "rounded-md border shadow-lg", // Keep base structure classes
         // Explicit background and border for solid appearance in light/dark modes:
         "bg-white dark:bg-gray-900", // Example: White/Dark Gray background
         "border-gray-200 dark:border-gray-700" // Example: Matching border
     );
+    // --- END MODIFICATION ---
 
     return (
         <Box className={popoverClasses}>
