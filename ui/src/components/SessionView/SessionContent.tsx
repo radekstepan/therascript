@@ -1,17 +1,16 @@
-// src/components/SessionView/SessionContent.tsx
-import React from 'react'; // Removed refs, useCallback, useEffect if not used
-// Removed useAtom, clampedSidebarWidthAtom
+/*
+Modified File: src/components/SessionView/SessionContent.tsx
+*/
+import React from 'react';
 import { Box, Flex, Text } from '@radix-ui/themes';
 import type { Session } from '../../types';
-// Removed SessionSidebar import
 import { Transcription } from './Transcription';
 import { ChatInterface } from './ChatInterface';
 import { StartChatPrompt } from './StartChatPrompt';
-// Removed cn import if no longer needed
 
 interface SessionContentProps {
     session: Session;
-    onEditDetailsClick: () => void; // Still needs this for Transcription
+    onEditDetailsClick: () => void;
     editTranscriptContent: string;
     onTranscriptContentChange: (newContent: string) => void;
     activeChatId: number | null;
@@ -21,7 +20,7 @@ interface SessionContentProps {
 
 export function SessionContent({
     session,
-    onEditDetailsClick, // Still receive handler
+    onEditDetailsClick,
     editTranscriptContent,
     onTranscriptContentChange,
     activeChatId,
@@ -29,41 +28,43 @@ export function SessionContent({
     onStartFirstChat
 }: SessionContentProps) {
 
-    // Removed sidebar width state and resizing logic
-
     return (
-        // Main Flex container for the two panels ONLY
-        // Takes full width available from parent, applies padding
-        // Takes full height available from parent (via flexGrow in parent Box)
+        // *** MODIFICATION HERE ***
+        // Main Flex container: Takes FULL HEIGHT of its parent (the Box in SessionView)
         <Flex
-            flexGrow="1" // Ensures it tries to fill height from parent Box
             direction={{ initial: 'column', lg: 'row' }}
             gap={{ initial: '4', lg: '6' }}
-            p={{ initial: '4', md: '6', lg: '8' }} // Padding for the content panels
-            style={{ minHeight: 0 }} // Important for scroll context
+            p={{ initial: '4', md: '6', lg: '8' }}
+            style={{ height: '100%', minHeight: 0 }} // Ensure it fills parent height
         >
-            {/* Chat Panel */}
-            <Flex direction="column" className="lg:w-1/2" style={{ minHeight: 0 }}>
+            {/* Chat Panel: Takes half width on large screens, full height of the row */}
+            {/* minHeight: 0 is crucial for flex children that need to scroll */}
+            <Flex direction="column" className="lg:w-1/2 h-full" style={{ minHeight: 0 }}>
                 {activeChatId !== null ? (
-                    <ChatInterface />
+                    <ChatInterface /> // ChatInterface should fill this container
                 ) : hasChats ? (
-                    <Box className="flex flex-grow items-center justify-center" style={{ border: '2px dashed var(--gray-a6)', borderRadius: 'var(--radius-3)' }}>
+                    <Box className="flex flex-grow items-center justify-center h-full" style={{ border: '2px dashed var(--gray-a6)', borderRadius: 'var(--radius-3)' }}>
                         <Text color="gray" align="center">Select a chat from the sidebar to view it.</Text>
                     </Box>
                 ) : (
-                    <StartChatPrompt onStartFirstChat={onStartFirstChat} />
+                    // Ensure StartChatPrompt fills height if it should occupy the full panel
+                    <Box className="flex flex-grow items-center justify-center h-full">
+                        <StartChatPrompt onStartFirstChat={onStartFirstChat} />
+                    </Box>
                 )}
             </Flex>
 
-            {/* Transcription Panel */}
-            <Flex direction="column" className="lg:w-1/2" style={{ minHeight: 0 }}>
-                <Transcription
+            {/* Transcription Panel: Takes half width on large screens, full height of the row */}
+            {/* minHeight: 0 is crucial */}
+            <Flex direction="column" className="lg:w-1/2 h-full" style={{ minHeight: 0 }}>
+                <Transcription // Transcription should fill this container
                     session={session}
-                    onEditDetailsClick={onEditDetailsClick} // Pass handler down
+                    onEditDetailsClick={onEditDetailsClick}
                     editTranscriptContent={editTranscriptContent}
                     onContentChange={onTranscriptContentChange}
                 />
             </Flex>
         </Flex>
+        // *** END MODIFICATION ***
     );
 }

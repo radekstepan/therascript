@@ -1,13 +1,14 @@
-// src/components/SessionView.tsx
+/*
+Modified File: src/components/SessionView.tsx
+*/
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { useAtomValue, useSetAtom, useAtom } from 'jotai'; // Import useAtom for sidebar width
+import { useAtomValue, useSetAtom, useAtom } from 'jotai';
 import { useParams, useNavigate, Navigate, useLocation } from 'react-router-dom';
-// Import Text component
 import { Flex, Box, Button, Text } from '@radix-ui/themes';
-import { ArrowLeftIcon } from '@radix-ui/react-icons'; // Icon for back button
-import { UserThemeDropdown } from '../components/UserThemeDropdown'; // Import dropdown
-import { SessionSidebar } from './SessionView/SessionSidebar'; // Import Sidebar
-import { SessionContent } from './SessionView/SessionContent'; // Content now holds only panels
+import { ArrowLeftIcon } from '@radix-ui/react-icons';
+import { UserThemeDropdown } from '../components/UserThemeDropdown';
+import { SessionSidebar } from './SessionView/SessionSidebar';
+import { SessionContent } from './SessionView/SessionContent';
 import { EditDetailsModal } from './SessionView/EditDetailsModal';
 import {
     pastSessionsAtom,
@@ -17,8 +18,8 @@ import {
     chatErrorAtom,
     saveTranscriptAtom,
     startNewChatAtom,
-    clampedSidebarWidthAtom, // Import sidebar width atom
-    MIN_SIDEBAR_WIDTH, // Import constants if needed here for resize logic
+    clampedSidebarWidthAtom,
+    MIN_SIDEBAR_WIDTH,
     MAX_SIDEBAR_WIDTH,
 } from '../store';
 
@@ -35,7 +36,6 @@ export function SessionView() {
     const saveTranscriptAction = useSetAtom(saveTranscriptAtom);
     const activeChatId = useAtomValue(activeChatIdAtom);
     const startNewChatAction = useSetAtom(startNewChatAtom);
-    // Sidebar Width Logic (moved from SessionContent)
     const [sidebarWidth, setSidebarWidth] = useAtom(clampedSidebarWidthAtom);
     const isResizing = useRef(false);
     const sidebarRef = useRef<HTMLDivElement | null>(null);
@@ -81,7 +81,8 @@ export function SessionView() {
      }, [sessionIdParam, chatIdParam, allSessions, navigate, setActiveSessionId, setActiveChatId, setChatError, location.pathname]);
     useEffect(() => { if (session) setEditTranscriptContent(session.transcription || ''); }, [session]);
 
-    // Sidebar Resizing Logic (moved from SessionContent)
+    // Sidebar Resizing Logic (remain the same)
+    // Dummy implementations for unchanged callbacks
     const handleMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
         e.preventDefault();
         isResizing.current = true;
@@ -89,16 +90,15 @@ export function SessionView() {
         document.body.style.userSelect = 'none';
         document.addEventListener('mousemove', handleMouseMove);
         document.addEventListener('mouseup', handleMouseUp);
-     }, []); // Empty dependency array assuming handleMouseMove/Up are stable refs or defined outside
+     }, []); // Assuming handleMouseMove/Up are stable refs or defined outside
 
     const handleMouseMove = useCallback((e: MouseEvent) => {
         if (!isResizing.current || !sidebarRef.current) return;
         const containerRect = sidebarRef.current.parentElement?.getBoundingClientRect();
         if (!containerRect) return;
         let newWidth = e.clientX - containerRect.left;
-        // Clamp here directly as well, or rely on atom setter's clamping
         newWidth = Math.max(MIN_SIDEBAR_WIDTH, Math.min(newWidth, MAX_SIDEBAR_WIDTH));
-        setSidebarWidth(newWidth); // Uses the derived writable atom setter
+        setSidebarWidth(newWidth);
     }, [setSidebarWidth]); // Depends on setSidebarWidth
 
     const handleMouseUp = useCallback(() => {
@@ -111,7 +111,6 @@ export function SessionView() {
         }
     }, [handleMouseMove]); // Depends on handleMouseMove
 
-    // Cleanup listeners on component unmount
     useEffect(() => {
         return () => {
             if (isResizing.current) {
@@ -123,6 +122,7 @@ export function SessionView() {
 
 
     // Handlers (remain the same)
+    // Dummy implementations for unchanged callbacks
     const handleStartFirstChat = async () => {
         if (!session) return;
         const currentSessionId = session.id;
@@ -132,37 +132,35 @@ export function SessionView() {
         } else {
             setChatError(result.error);
         }
-     };
+    };
     const handleOpenEditMetadataModal = () => setIsEditingMetadata(true);
     const handleTranscriptContentChange = (newContent: string) => {
         if (!session) return;
         saveTranscriptAction({ sessionId: session.id, transcript: newContent });
         setEditTranscriptContent(newContent);
-     };
+    };
     const handleNavigateBack = () => navigate('/');
 
     if (isLoading || !session) {
         return <Navigate to="/" replace />;
     }
 
-    // --- Calculate displayTitle here ---
     const displayTitle = session.sessionName || session.fileName;
     const hasChats = Array.isArray(session.chats) && session.chats.length > 0;
 
     return (
-        // Main container for the whole Session view (Sidebar + Main)
+        // Main container: Full height, hidden overflow
         <Flex flexGrow="1" style={{ height: '100vh', overflow: 'hidden' }}>
-             {/* --- Sidebar --- */}
+             {/* Sidebar (Unchanged) */}
             <Box
                 ref={sidebarRef}
                 className="relative flex-shrink-0 hidden lg:flex flex-col"
                 style={{ width: `${sidebarWidth}px`, backgroundColor: 'var(--color-panel-solid)' }}
             >
-                {/* Render Sidebar Directly */}
                 <SessionSidebar />
             </Box>
 
-            {/* --- Resizer --- */}
+            {/* Resizer (Unchanged) */}
             <Box
                 className="hidden lg:block flex-shrink-0 w-1.5 cursor-col-resize group hover:bg-[--gray-a4]"
                 onMouseDown={handleMouseDown}
@@ -171,46 +169,37 @@ export function SessionView() {
                 <Box className="h-full w-[1px] bg-[--gray-a5] group-hover:bg-[--accent-9] mx-auto" />
             </Box>
 
-            {/* --- Main Content Column (Header + Panels) --- */}
-            <Flex direction="column" flexGrow="1" style={{ minWidth: 0, height: '100vh', overflow: 'hidden' }}>
-                 {/* --- NEW HEADER for Main Panel Area --- */}
+            {/* Main Content Column */}
+            <Flex direction="column" flexGrow="1" style={{ minWidth: 0, height: '100vh', overflow: 'hidden' }}> {/* Ensure column takes full height and hides overflow */}
+                 {/* Header (Unchanged) */}
                  <Box
-                    px={{ initial: '4', md: '6', lg: '8' }} // Consistent padding
+                    px={{ initial: '4', md: '6', lg: '8' }}
                     py="3"
                     flexShrink="0"
-                    className="border-b" // Add border below header
-                    style={{ backgroundColor: 'var(--color-panel-solid)'}} // Match sidebar bg
+                    className="border-b"
+                    style={{ backgroundColor: 'var(--color-panel-solid)'}}
                 >
-                    {/* Outer Flex: Pushes Left (Breadcrumb) and Right (Dropdown) apart */}
                     <Flex justify="between" align="center">
-                         {/* --- MODIFICATION START: Left Breadcrumb Section --- */}
-                         <Flex align="center" gap="2" style={{ minWidth: 0 }}> {/* Allow shrinking */}
-                            {/* Back Button */}
-                            <Button onClick={handleNavigateBack} variant="ghost" color="gray" size="2" style={{ flexShrink: 0 }}> {/* Prevent shrinking */}
-                                <ArrowLeftIcon />
-                                Sessions
+                         <Flex align="center" gap="2" style={{ minWidth: 0 }}>
+                            <Button onClick={handleNavigateBack} variant="ghost" color="gray" size="2" style={{ flexShrink: 0 }}>
+                                <ArrowLeftIcon /> Sessions
                             </Button>
-                            {/* Separator */}
                             <Text color="gray" size="2" style={{ flexShrink: 0 }}> / </Text>
-                            {/* Current Session Title */}
-                            <Text size="2" weight="bold" truncate title={displayTitle} style={{ flexShrink: 1 }}> {/* Allow shrinking and truncation */}
+                            <Text size="2" weight="bold" truncate title={displayTitle} style={{ flexShrink: 1 }}>
                                 {displayTitle}
                             </Text>
                          </Flex>
-                         {/* --- MODIFICATION END --- */}
-
-                         {/* User/Theme Dropdown (Stays on the right) */}
                          <UserThemeDropdown />
                     </Flex>
                 </Box>
-                 {/* --- END NEW HEADER --- */}
 
-                 {/* SessionContent now just renders the panels within the remaining space */}
-                 {/* Takes remaining vertical space and allows internal scrolling */}
-                 <Box flexGrow="1" style={{ overflowY: 'auto', minHeight: 0 }}>
-                    <SessionContent
+                 {/* *** MODIFICATION HERE *** */}
+                 {/* Content Area: Takes remaining space, NO overflowY, minimum height 0 */}
+                 {/* This Box defines the height constraint for SessionContent */}
+                 <Box flexGrow="1" style={{ minHeight: 0, overflow: 'hidden' }}> {/* REMOVED overflowY: 'auto' */}
+                    <SessionContent // SessionContent itself should fill this Box (e.g., using height: 100%)
                         session={session}
-                        onEditDetailsClick={handleOpenEditMetadataModal} // Still needs to pass this down
+                        onEditDetailsClick={handleOpenEditMetadataModal}
                         editTranscriptContent={editTranscriptContent}
                         onTranscriptContentChange={handleTranscriptContentChange}
                         activeChatId={activeChatId}
@@ -218,9 +207,10 @@ export function SessionView() {
                         onStartFirstChat={handleStartFirstChat}
                     />
                  </Box>
+                 {/* *** END MODIFICATION *** */}
             </Flex>
 
-            {/* Modal remains outside the main layout */}
+            {/* Modal (Unchanged) */}
             <EditDetailsModal
                 isOpen={isEditingMetadata}
                 onOpenChange={setIsEditingMetadata}

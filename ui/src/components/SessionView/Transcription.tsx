@@ -1,20 +1,23 @@
-// src/components/SessionView/Transcription.tsx
+/*
+Modified File: src/components/SessionView/Transcription.tsx
+Using @radix-ui/themes ScrollArea
+*/
 import React from 'react';
 import type { Session } from '../../types';
 import { TranscriptParagraph } from '../Transcription/TranscriptParagraph';
-// Import necessary components for header/metadata
+// Import ScrollArea from Radix UI Themes
 import { Box, ScrollArea, Text, Flex, Button, Heading, Badge } from '@radix-ui/themes';
 import {
-    Pencil1Icon, // Keep for edit button
-    BookmarkIcon, // Add icons for metadata
+    Pencil1Icon,
+    BookmarkIcon,
     CalendarIcon,
     PersonIcon,
     BadgeIcon as SessionTypeIcon,
-    PlayIcon // Keep PlayIcon if still needed
+    PlayIcon
 } from '@radix-ui/react-icons';
 import { cn } from '../../utils';
 
-// --- Add helper functions for metadata display (moved from SessionHeader/SessionContent) ---
+// --- Helper functions (unchanged placeholders for brevity) ---
 const sessionColorMap: Record<string, React.ComponentProps<typeof Badge>['color']> = {
     'individual': 'blue', 'phone': 'sky', 'skills group': 'teal',
     'family session': 'green', 'family skills': 'green', 'couples': 'indigo',
@@ -49,19 +52,19 @@ const renderHeaderDetail = (
         </Flex>
     );
 };
-// --- End helper functions ---
+// --- End Helper functions ---
 
 
 interface TranscriptionProps {
-    session: Session | null; // Accept session
-    onEditDetailsClick: () => void; // Accept handler
+    session: Session | null;
+    onEditDetailsClick: () => void;
     editTranscriptContent: string;
     onContentChange: (value: string) => void;
 }
 
 export function Transcription({
     session,
-    onEditDetailsClick, // Destructure handler
+    onEditDetailsClick,
     editTranscriptContent,
     onContentChange,
 }: TranscriptionProps) {
@@ -72,52 +75,51 @@ export function Transcription({
 
     const sourceContent = editTranscriptContent;
     const paragraphs = sourceContent.split(/\n\s*\n/).filter(p => p.trim() !== '');
-    const displayTitle = session.sessionName || session.fileName;
 
     const handleSaveParagraph = (index: number, newText: string) => {
         // ... (save paragraph logic remains the same)
-        const baseContentForSave = editTranscriptContent;
-        const currentParagraphs = baseContentForSave.split(/\n\s*\n/);
-        if (index >= 0 && index < currentParagraphs.length) {
-            let paragraphIndexInFullSplit = -1;
-            let visibleIndexCounter = -1;
-            for (let i = 0; i < currentParagraphs.length; i++) {
-                if (currentParagraphs[i].trim() !== '') {
-                    visibleIndexCounter++;
-                    if (visibleIndexCounter === index) {
-                        paragraphIndexInFullSplit = i;
-                        break;
-                    }
-                }
-            }
+         const baseContentForSave = editTranscriptContent;
+         const currentParagraphs = baseContentForSave.split(/\n\s*\n/);
+         if (index >= 0 && index < currentParagraphs.length) {
+             let paragraphIndexInFullSplit = -1;
+             let visibleIndexCounter = -1;
+             for (let i = 0; i < currentParagraphs.length; i++) {
+                 if (currentParagraphs[i].trim() !== '') {
+                     visibleIndexCounter++;
+                     if (visibleIndexCounter === index) {
+                         paragraphIndexInFullSplit = i;
+                         break;
+                     }
+                 }
+             }
 
-            if (paragraphIndexInFullSplit !== -1) {
-                currentParagraphs[paragraphIndexInFullSplit] = newText;
-            } else {
-                console.warn("Paragraph index mapping failed during save.");
-                return;
-            }
-        } else {
-            console.warn("Paragraph index out of bounds during save.");
-            return;
-        }
-        const newTranscript = currentParagraphs.join('\n\n');
-        onContentChange(newTranscript);
+             if (paragraphIndexInFullSplit !== -1) {
+                 currentParagraphs[paragraphIndexInFullSplit] = newText;
+             } else {
+                 console.warn("Paragraph index mapping failed during save.");
+                 return;
+             }
+         } else {
+             console.warn("Paragraph index out of bounds during save.");
+             return;
+         }
+         const newTranscript = currentParagraphs.join('\n\n');
+         onContentChange(newTranscript);
     };
 
     return (
-        <Box style={{ height: '100%', display: 'flex', flexDirection: 'column', border: '1px solid var(--gray-a6)', borderRadius: 'var(--radius-3)' }}>
-             {/* --- MODIFIED HEADER --- */}
+        // Flex column taking full height from parent (SessionContent panel)
+        // Added border/rounding here
+        <Flex direction="column" style={{ height: '100%', minHeight: 0, border: '1px solid var(--gray-a6)', borderRadius: 'var(--radius-3)' }}>
+             {/* Header fixed */}
              <Flex
                 align="center"
-                justify="between" // Push title/details left, button right
+                justify="between"
                 px="3" py="2"
                 style={{ borderBottom: '1px solid var(--gray-a6)', flexShrink: 0 }}
-                gap="3" // Add gap between left/right sections
+                gap="3"
             >
-                {/* Left Section: Title and Details */}
-                <Flex direction="column" gap="1" style={{ minWidth: 0 }}> {/* Allow shrinking */}
-                    {/* Details - smaller size, wrap */}
+                <Flex direction="column" gap="1" style={{ minWidth: 0 }}>
                     <Flex align="center" gap="3" wrap="wrap">
                          {renderHeaderDetail(PersonIcon, session.clientName, "Client")}
                          {renderHeaderDetail(CalendarIcon, session.date, "Date")}
@@ -125,26 +127,21 @@ export function Transcription({
                          {renderHeaderDetail(BookmarkIcon, session.therapy, "Therapy Type", 'therapy')}
                     </Flex>
                 </Flex>
-
-                {/* Right Section: Edit Button */}
-                <Box flexShrink="0"> {/* Prevent button shrinking */}
-                     <Button
-                        variant="ghost"
-                        size="1"
-                        onClick={onEditDetailsClick}
-                        aria-label="Edit session details"
-                    >
+                <Box flexShrink="0">
+                     <Button variant="ghost" size="1" onClick={onEditDetailsClick} aria-label="Edit session details">
                         <Pencil1Icon width="14" height="14" />
-                        <Text ml="1">Edit</Text> {/* Shorten text */}
+                        <Text ml="1">Edit</Text>
                     </Button>
                 </Box>
             </Flex>
-            {/* --- END MODIFIED HEADER --- */}
 
-            {/* Main Content Area with Scroll */}
-            <ScrollArea type="auto" scrollbars="vertical" style={{ flexGrow: 1, minHeight: 0 }}>
-                 {/* Removed Session Title and Metadata from here */}
-                 {/* Transcript Paragraphs */}
+            {/* Themes ScrollArea taking remaining space */}
+            <ScrollArea
+                type="auto"
+                scrollbars="vertical"
+                style={{ flexGrow: 1, minHeight: 0 }} // Takes available space
+            >
+                 {/* Inner Box for padding */}
                  <Box p="3" className="space-y-3">
                     {paragraphs.length > 0 ? paragraphs.map((paragraph, index) => (
                         <TranscriptParagraph
@@ -158,14 +155,6 @@ export function Transcription({
                     )}
                 </Box>
             </ScrollArea>
-        </Box>
+        </Flex>
     );
 }
-
-// Note: Ensure implementations for helper functions (renderHeaderDetail, getBadgeColor, color maps)
-// are either present here or correctly imported if moved to a shared utils file.
-// Example implementations (replace with actual logic):
-// const sessionColorMap = { 'individual': 'blue', /* ... */ };
-// const therapyColorMap = { 'act': 'purple', /* ... */ };
-// const getBadgeColor = (type, category) => (category === 'session' ? sessionColorMap[type] : therapyColorMap[type]) || 'gray';
-// const renderHeaderDetail = (Icon, value, label, category) => { ... };
