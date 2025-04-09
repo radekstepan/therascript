@@ -1,3 +1,4 @@
+// src/components/Transcription/TranscriptParagraph.tsx
 import React, { useState } from 'react';
 import { Button, TextArea, Card, Flex, Box, Text, IconButton } from '@radix-ui/themes';
 import { Pencil1Icon, CheckIcon, Cross1Icon } from '@radix-ui/react-icons';
@@ -72,29 +73,41 @@ export function TranscriptParagraph({ paragraph, index, onSave }: TranscriptPara
     }
 
     return (
-        <Box className="group relative p-1 rounded hover:bg-[--gray-a3] transition-colors duration-150">
-            {/* Use Box as="pre" for semantic correctness and styling */}
-            {/* The TS error was likely incorrect, Box should support as="pre" */}
-            <Box as="div" className="text-sm text-[--gray-a12]"
-                  style={{
-                      whiteSpace: 'pre-wrap', // Crucial for respecting newlines/spaces
-                      fontFamily: 'var(--font-mono)', // Use monospace for transcript feel
-                      lineHeight: 'var(--line-height-4)', // Consistent line height
-                      wordBreak: 'break-word' // Break long words if needed
-                  }}
-            >
-                {/* Render paragraph text, handle potential empty string */}
-                {paragraph || <span style={{ fontStyle: 'italic', color: 'var(--gray-a9)'}}>[Empty Paragraph]</span>}
-            </Box>
-             <IconButton
-                variant="ghost" color="gray" size="1"
-                className="absolute top-1 right-1 flex-shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity p-0 h-5 w-5" // Tailwind positioning and hover
-                onClick={handleEditClick}
-                title="Edit this paragraph"
-                aria-label="Edit paragraph"
-            >
-                <Pencil1Icon />
-            </IconButton>
+        // Outer Box purely for hover background effect now
+        <Box className="rounded hover:bg-[--gray-a3] transition-colors duration-150">
+            {/* --- MODIFICATION START --- */}
+            {/* Use Flex to layout text and button side-by-side */}
+            {/* Add group class here for hover effect on icon */}
+            <Flex align="start" gap="2" className="group p-1"> {/* Moved p-1 here */}
+                 {/* Text Box - takes up available space */}
+                 <Box
+                    as="div"
+                    className="text-sm text-[--gray-a12] flex-grow" // Added flex-grow
+                    style={{
+                        whiteSpace: 'pre-wrap',
+                        fontFamily: 'var(--font-mono)',
+                        lineHeight: 'var(--line-height-4)',
+                        wordBreak: 'break-word',
+                        // Add min-width to prevent squishing if needed, though flex-grow should handle it
+                        // minWidth: 0,
+                    }}
+                 >
+                    {paragraph || <span style={{ fontStyle: 'italic', color: 'var(--gray-a9)'}}>[Empty Paragraph]</span>}
+                </Box>
+
+                {/* Edit Button - aligned to the right, appears on hover */}
+                <IconButton
+                    variant="ghost" color="gray" size="1"
+                    // Removed absolute positioning, kept visibility/hover classes
+                    className="flex-shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity p-0 h-5 w-5 mt-0.5" // Adjusted margin-top slightly if needed
+                    onClick={handleEditClick}
+                    title="Edit this paragraph"
+                    aria-label="Edit paragraph"
+                >
+                    <Pencil1Icon />
+                </IconButton>
+            </Flex>
+             {/* --- MODIFICATION END --- */}
         </Box>
     );
 }
