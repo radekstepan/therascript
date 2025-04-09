@@ -14,7 +14,7 @@ import { cn } from '../../utils';
 
 export function ChatInput() {
     const [currentQuery, setCurrentQuery] = useAtom(currentQueryAtom);
-    const isChatting = useAtomValue(isChattingAtom);
+    const isChatting = useAtomValue(isChattingAtom); // Still need this to show cancel button
     const activeChatId = useAtomValue(activeChatIdAtom);
     const [chatError, setChatError] = useAtom(chatErrorAtom);
     const handleChatSubmitAction = useSetAtom(handleChatSubmitAtom);
@@ -22,87 +22,130 @@ export function ChatInput() {
     const toastMessageContent = useAtomValue(toastMessageAtom);
     const setToastMessageAtom = useSetAtom(toastMessageAtom);
     const [isToastVisible, setIsToastVisible] = useState(false);
-    const inputRef = useRef<HTMLInputElement>(null); // Keep ref if needed for focus management
+    const inputRef = useRef<HTMLInputElement>(null); // Ref for the underlying input
     const [showTemplates, setShowTemplates] = useState(false);
 
-    useEffect(() => { setIsToastVisible(!!toastMessageContent); }, [toastMessageContent]);
-    useEffect(() => { if (activeChatId !== null && inputRef.current) { inputRef.current.focus(); } }, [activeChatId]);
-    useEffect(() => { if ((chatError === "Cannot send an empty message." || chatError === "Please select a chat first.") && currentQuery !== '') { setChatError(''); } }, [currentQuery, chatError, setChatError]);
+    // Effect to focus when active chat changes, but NOT when chatting starts/stops
+    useEffect(() => {
+        if (activeChatId !== null) {
+            inputRef.current?.focus();
+        }
+    }, [activeChatId]); // Removed isChatting dependency
+
+    // Effect to clear potential validation errors when user types
+    useEffect(() => {
+        if ((chatError === "Cannot send an empty message." || chatError === "Please select a chat first.") && currentQuery !== '') {
+            setChatError('');
+        }
+    }, [currentQuery, chatError, setChatError]);
+
+    // Effect for toast visibility
+     useEffect(() => {
+         setIsToastVisible(!!toastMessageContent);
+     }, [toastMessageContent]);
 
     const handleSelectTemplate = (text: string) => {
         setCurrentQuery(prev => prev ? `${prev} ${text}` : text);
         setShowTemplates(false);
         inputRef.current?.focus();
      };
+
     const trySubmit = () => {
-        if (isChatting) {
-            setToastMessageAtom("Please wait for the AI to finish responding.");
-            return false;
-        } else if (!currentQuery.trim()) {
+        // Remove the check for isChatting here, allow multiple submissions
+        // if (isChatting) { ... return false; } // REMOVED
+
+        if (!currentQuery.trim()) {
             console.log("Submit blocked: Empty message.");
-            // Optionally set an error: setChatError("Cannot send an empty message.");
+            // setChatError("Cannot send an empty message."); // Optionally show error
             return false;
-        } else if (activeChatId === null) {
+        }
+        if (activeChatId === null) {
             setChatError("Please select a chat first.");
             return false;
-        } else {
-            setChatError('');
-            handleChatSubmitAction();
-            requestAnimationFrame(() => { inputRef.current?.focus(); });
-            return true;
         }
+
+        setChatError('');
+        // Call the action - it now handles adding the message and *starting* the AI response async
+        handleChatSubmitAction();
+
+        // Focus logic remains, relying on useEffect primarily, but can add direct focus here too
+        requestAnimationFrame(() => {
+             if (inputRef.current) { // No need to check disabled status now
+                 inputRef.current.focus();
+             }
+         });
+
+
+        return true;
      };
+
     const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); trySubmit(); }
     };
     const handleSubmitClick = (e: React.MouseEvent<HTMLButtonElement>) => {
-        e.preventDefault(); if (!isChatting) { trySubmit(); }
+        // Remove the isChatting check
+        e.preventDefault();
+        trySubmit();
     };
     const handleCancelClick = (e: React.MouseEvent<HTMLButtonElement>) => {
-         e.preventDefault(); cancelChatAction(); inputRef.current?.focus();
+         // Cancel logic still needs to work based on isChatting state
+         e.preventDefault();
+         cancelChatAction();
+         inputRef.current?.focus();
     };
     const handleToastOpenChange = (open: boolean) => {
         setIsToastVisible(open); if (!open) { setToastMessageAtom(null); }
     };
 
-    const showCancelButton = isChatting;
-    const sendButtonDisabled = !currentQuery.trim() || activeChatId === null || isChatting;
-
-    // Removed inputClasses as they are no longer needed for the workaround
+    const showCancelButton = isChatting; // Keep this for showing/hiding cancel
+    // Update disabled logic for Send button
+    const sendButtonDisabled = !currentQuery.trim() || activeChatId === null;
+    // Update disabled logic for Starred Templates button
+    const starredButtonDisabled = activeChatId === null;
 
     return (
         <>
             <Flex direction="column" gap="1">
                 <Flex align="start" gap="2" width="100%">
                     <Box position="relative" flexShrink="0">
-                        <IconButton type="button" variant="soft" size="2" title="Show Starred Templates" onClick={() => setShowTemplates(prev => !prev)} aria-label="Show starred templates" disabled={activeChatId === null}>
+                        {/* --- UPDATE: Removed isChatting from disabled --- */}
+                        <IconButton
+                             type="button" variant="soft" size="2" title="Show Starred Templates"
+                             onClick={() => setShowTemplates(prev => !prev)}
+                             aria-label="Show starred templates"
+                             disabled={starredButtonDisabled} // Use updated variable
+                         >
                           <StarIcon width={16} height={16} />
                         </IconButton>
                         {showTemplates && ( <StarredTemplatesList onSelectTemplate={handleSelectTemplate} onClose={() => setShowTemplates(false)} /> )}
                     </Box>
 
-                    {/* --- FIX APPLIED HERE: Simplified TextField.Root --- */}
-                    {/* Use TextField.Root directly, passing props */}
                     <TextField.Root
-                        ref={inputRef} // Pass ref to the Root component
+                        ref={inputRef}
                         size="2"
                         style={{ flexGrow: 1 }}
                         placeholder="Ask about the session..."
                         value={currentQuery}
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCurrentQuery(e.target.value)}
-                        disabled={activeChatId === null || isChatting}
+                        // --- UPDATE: Removed isChatting from disabled ---
+                        disabled={activeChatId === null}
                         aria-label="Chat input message"
                         onKeyDown={handleKeyDown}
-                        // Type="text" is default but can be explicit if needed
-                        // type="text"
                     />
-                    {/* --- END FIX --- */}
 
-
+                    {/* Show Cancel button *only* if chatting */}
                     {showCancelButton ? (
                         <IconButton type="button" color="red" variant="solid" size="2" onClick={handleCancelClick} title="Cancel response" aria-label="Cancel AI response"> <StopIcon/> </IconButton>
                     ) : (
-                        <IconButton type="button" variant="solid" size="2" onClick={handleSubmitClick} disabled={sendButtonDisabled} title="Send message" aria-label="Send message"> <PaperPlaneIcon/> </IconButton>
+                        // --- UPDATE: Removed isChatting from disabled ---
+                        <IconButton
+                            type="button" variant="solid" size="2"
+                            onClick={handleSubmitClick}
+                            disabled={sendButtonDisabled} // Use updated variable
+                            title="Send message" aria-label="Send message"
+                        >
+                            <PaperPlaneIcon/>
+                        </IconButton>
                     )}
                 </Flex>
 

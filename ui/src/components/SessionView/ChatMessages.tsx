@@ -111,14 +111,12 @@ export function ChatMessages({ activeChatId }: ChatMessagesProps) {
                       <label>
                           <Text as="div" size="2" mb="1" weight="bold">Template Name</Text>
                           {/* Corrected TextField Usage - Assuming previous fix was applied */}
-                          <TextField.Root size="2">
-                            <TextField.Root
-                                value={templateNameInput}
-                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setTemplateNameInput(e.target.value); if (namingError) setNamingError(null); }}
-                                placeholder="Enter a short name..."
-                                autoFocus
-                            />
-                          </TextField.Root>
+                        <TextField.Root
+                            value={templateNameInput}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setTemplateNameInput(e.target.value); if (namingError) setNamingError(null); }}
+                            placeholder="Enter a short name..."
+                            autoFocus
+                        />
                       </label>
                       <Text size="1" color="gray" mt="1"> Original: "<Text truncate>{messageToName?.text}</Text>" </Text>
                       {namingError && (
