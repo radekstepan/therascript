@@ -7,7 +7,6 @@ export * from './ChatInterface'; // Ensure ChatInterface is exported if needed e
 export * from './EditDetailsModal';
 export * from './PastChatsList'; // Ensure this line exists and is correct
 export * from './SessionContent';
-export * from './SessionHeader';
 export * from './SessionSidebar'; // Keep SessionSidebar export
 export * from './StartChatPrompt';
 export * from './Transcription';

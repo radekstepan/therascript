@@ -4,16 +4,16 @@ import { NavLink, useParams, useNavigate } from 'react-router-dom';
 import { useAtomValue, useSetAtom } from 'jotai';
 import {
     activeSessionAtom, renameChatAtom, deleteChatAtom, activeChatIdAtom,
-    startNewChatAtom, // Import action atom for new chat
-    chatErrorAtom // Import atom to set potential errors
+    startNewChatAtom, chatErrorAtom
 } from '../../store';
 import {
-    ChatBubbleIcon, DotsHorizontalIcon, Pencil1Icon, TrashIcon, PlusCircledIcon // Add Plus icon
+    ChatBubbleIcon, DotsHorizontalIcon, Pencil1Icon, TrashIcon, PlusCircledIcon
 } from '@radix-ui/react-icons';
 import {
     Box, Flex, Text, Heading, Button, IconButton, TextField,
     DropdownMenu, AlertDialog, ScrollArea, Separator
 } from '@radix-ui/themes';
+// Removed UserThemeDropdown import
 import { formatTimestamp } from '../../helpers';
 import type { ChatSession } from '../../types';
 import { cn } from '../../utils';
@@ -24,10 +24,9 @@ export function SessionSidebar() {
     const session = useAtomValue(activeSessionAtom);
     const renameChatAction = useSetAtom(renameChatAtom);
     const deleteChatAction = useSetAtom(deleteChatAtom);
-    const startNewChatAction = useSetAtom(startNewChatAtom); // Hook for new chat action
-    const setChatError = useSetAtom(chatErrorAtom); // Hook to set errors
+    const startNewChatAction = useSetAtom(startNewChatAtom);
+    const setChatError = useSetAtom(chatErrorAtom);
     const currentActiveChatIdAtomValue = useAtomValue(activeChatIdAtom);
-    // REMOVED: Unused setActiveChatId import
 
     const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
     const [renamingChat, setRenamingChat] = useState<ChatSession | null>(null);
@@ -40,11 +39,9 @@ export function SessionSidebar() {
     if (!session || !sessionIdParam) return null;
     const sessionId = parseInt(sessionIdParam, 10);
     if (isNaN(sessionId)) {
-        // Handle invalid sessionIdParam if necessary, maybe navigate away
         console.error("Invalid session ID in URL parameter:", sessionIdParam);
-        return null; // Or redirect
+        return null;
     }
-
 
     const sortedChats = [...(session.chats || [])].sort((a, b) => b.timestamp - a.timestamp);
     const getChatDisplayTitle = (chat: ChatSession | null): string => {
@@ -52,14 +49,12 @@ export function SessionSidebar() {
         return chat.name || `Chat (${formatTimestamp(chat.timestamp)})`;
     };
 
-    // --- New Chat Handler ---
     const handleNewChatClick = async () => {
         const result = await startNewChatAction({ sessionId });
         if (result.success) {
             navigate(`/sessions/${sessionId}/chats/${result.newChatId}`);
         } else {
-            setChatError(result.error); // Show error if creation fails
-             // Optionally display a toast message here as well
+            setChatError(result.error);
         }
     };
 
@@ -78,27 +73,24 @@ export function SessionSidebar() {
         setDeletingChat(chat); setIsDeleteConfirmOpen(true);
     };
     const confirmDelete = () => {
-        if (!deletingChat) return; // sessionId already validated earlier
+        if (!deletingChat) return;
         const result = deleteChatAction({ chatId: deletingChat.id });
         if (result.success) {
              if (currentActiveChatIdAtomValue === deletingChat.id) {
                  if (result.newActiveChatId !== null) {
                      navigate(`/sessions/${sessionId}/chats/${result.newActiveChatId}`, { replace: true });
                  } else {
-                     // If no chats left, navigate back to session base or landing?
-                     // Navigating to session base for now, showing the StartChatPrompt.
                      navigate(`/sessions/${sessionId}`, { replace: true });
                  }
              }
-             // If a different chat was deleted, no navigation needed
         } else {
             console.error("Failed to delete chat:", result.error);
-            setChatError(result.error); // Show error
-            // Optionally display a toast message
+            setChatError(result.error);
         }
         cancelDelete();
     };
     const cancelDelete = () => { setIsDeleteConfirmOpen(false); setDeletingChat(null); };
+
     const getNavLinkClass = ({ isActive }: { isActive: boolean }): string => {
          const base = "group flex items-center w-full text-left px-2 py-1.5 rounded-md text-sm transition-colors duration-150 relative";
          const active = "bg-[--accent-a4] text-[--accent-a11] font-medium";
@@ -110,10 +102,10 @@ export function SessionSidebar() {
         <>
             {/* Sidebar content */}
             <Box p="4" className="flex flex-col h-full w-full overflow-hidden" style={{ backgroundColor: 'var(--color-panel-solid)'}}>
-                {/* Header and New Chat Button */}
-                <Flex justify="between" align="center" flexShrink="0" mb="2">
+                 {/* Sidebar Header */}
+                 <Flex justify="between" align="center" flexShrink="0" mb="2">
                     <Heading as="h3" size="1" color="gray" trim="start">Chats</Heading>
-                    {/* --- Moved New Chat Button Here --- */}
+                    {/* Removed Flex wrapper and UserThemeDropdown */}
                     <Button onClick={handleNewChatClick} variant="soft" size="1" highContrast title="Start New Chat">
                          <PlusCircledIcon width="14" height="14" />
                          {/* Optional Text: <Text ml="1">New</Text> */}
@@ -125,7 +117,6 @@ export function SessionSidebar() {
                     <Text color="gray" size="2" style={{ fontStyle: 'italic' }}>No chats yet.</Text>
                 ) : (
                     <ScrollArea type="auto" scrollbars="vertical" style={{ flexGrow: 1 }}>
-                         {/* Changed gap from number to string */}
                         <Flex direction="column" gap="1" asChild>
                             <nav>
                                 {sortedChats.map(chat => (
@@ -157,30 +148,15 @@ export function SessionSidebar() {
             {/* Rename Dialog */}
             <AlertDialog.Root open={isRenameModalOpen} onOpenChange={(open) => !open && cancelRename()}>
                 <AlertDialog.Content style={{ maxWidth: 450 }}>
-                    <AlertDialog.Title>
-                        Rename Chat
-                    </AlertDialog.Title>
+                    <AlertDialog.Title>Rename Chat</AlertDialog.Title>
                     {renamingChat && ( <AlertDialog.Description size="2" color="gray" mt="1" mb="4"> Enter a new name for "{getChatDisplayTitle(renamingChat)}". Leave empty to remove the name. </AlertDialog.Description> )}
                     <Flex direction="column" gap="3">
-                        {/* --- FIX APPLIED HERE: Simplified TextField.Root --- */}
-                        <TextField.Root
-                            size="2"
-                            value={currentRenameValue}
-                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCurrentRenameValue(e.target.value)}
-                            placeholder="Enter new name (optional)"
-                            autoFocus
-                            onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => { if (e.key === 'Enter') { e.preventDefault(); handleSaveRename(); }}}
-                         />
-                        {/* --- END FIX --- */}
+                        <TextField.Root size="2" value={currentRenameValue} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCurrentRenameValue(e.target.value)} placeholder="Enter new name (optional)" autoFocus onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => { if (e.key === 'Enter') { e.preventDefault(); handleSaveRename(); }}} />
                          {renameError && (<Text color="red" size="1">{renameError}</Text>)}
                     </Flex>
                     <Flex gap="3" mt="4" justify="end">
-                        <AlertDialog.Cancel>
-                            <Button variant="soft" color="gray" onClick={cancelRename}>Cancel</Button>
-                        </AlertDialog.Cancel>
-                        <AlertDialog.Action>
-                            <Button onClick={handleSaveRename}>Save</Button>
-                        </AlertDialog.Action>
+                        <AlertDialog.Cancel><Button variant="soft" color="gray" onClick={cancelRename}>Cancel</Button></AlertDialog.Cancel>
+                        <AlertDialog.Action><Button onClick={handleSaveRename}>Save</Button></AlertDialog.Action>
                     </Flex>
                 </AlertDialog.Content>
             </AlertDialog.Root>
@@ -188,17 +164,11 @@ export function SessionSidebar() {
             {/* Delete Confirmation Dialog */}
             <AlertDialog.Root open={isDeleteConfirmOpen} onOpenChange={(open) => !open && cancelDelete()}>
                 <AlertDialog.Content style={{ maxWidth: 450 }}>
-                    <AlertDialog.Title>
-                        Delete Chat
-                    </AlertDialog.Title>
+                    <AlertDialog.Title>Delete Chat</AlertDialog.Title>
                     {deletingChat && ( <AlertDialog.Description size="2" color="gray" mt="1" mb="4"> Are you sure you want to delete "{getChatDisplayTitle(deletingChat)}"? This action cannot be undone. </AlertDialog.Description> )}
                     <Flex gap="3" mt="4" justify="end">
-                        <AlertDialog.Cancel>
-                            <Button variant="soft" color="gray" onClick={cancelDelete}>Cancel</Button>
-                        </AlertDialog.Cancel>
-                        <AlertDialog.Action>
-                            <Button color="red" onClick={confirmDelete}>Delete</Button>
-                        </AlertDialog.Action>
+                        <AlertDialog.Cancel><Button variant="soft" color="gray" onClick={cancelDelete}>Cancel</Button></AlertDialog.Cancel>
+                        <AlertDialog.Action><Button color="red" onClick={confirmDelete}>Delete</Button></AlertDialog.Action>
                     </Flex>
                 </AlertDialog.Content>
             </AlertDialog.Root>

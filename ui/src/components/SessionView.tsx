@@ -1,9 +1,12 @@
-import React, { useEffect, useState } from 'react';
-import { useAtomValue, useSetAtom } from 'jotai';
+// src/components/SessionView.tsx
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { useAtomValue, useSetAtom, useAtom } from 'jotai'; // Import useAtom for sidebar width
 import { useParams, useNavigate, Navigate, useLocation } from 'react-router-dom';
-import { Flex } from '@radix-ui/themes';
-import { SessionHeader } from './SessionView/SessionHeader';
-import { SessionContent } from './SessionView/SessionContent';
+import { Flex, Box, Button, Text } from '@radix-ui/themes'; // Removed Link
+import { ArrowLeftIcon } from '@radix-ui/react-icons'; // Icon for back button
+import { UserThemeDropdown } from '../components/UserThemeDropdown'; // Import dropdown
+import { SessionSidebar } from './SessionView/SessionSidebar'; // Import Sidebar
+import { SessionContent } from './SessionView/SessionContent'; // Content now holds only panels
 import { EditDetailsModal } from './SessionView/EditDetailsModal';
 import {
     pastSessionsAtom,
@@ -13,6 +16,9 @@ import {
     chatErrorAtom,
     saveTranscriptAtom,
     startNewChatAtom,
+    clampedSidebarWidthAtom, // Import sidebar width atom
+    MIN_SIDEBAR_WIDTH, // Import constants if needed here for resize logic
+    MAX_SIDEBAR_WIDTH,
 } from '../store';
 
 export function SessionView() {
@@ -28,11 +34,16 @@ export function SessionView() {
     const saveTranscriptAction = useSetAtom(saveTranscriptAtom);
     const activeChatId = useAtomValue(activeChatIdAtom);
     const startNewChatAction = useSetAtom(startNewChatAtom);
+    // Sidebar Width Logic (moved from SessionContent)
+    const [sidebarWidth, setSidebarWidth] = useAtom(clampedSidebarWidthAtom);
+    const isResizing = useRef(false);
+    const sidebarRef = useRef<HTMLDivElement | null>(null);
 
     const [isEditingMetadata, setIsEditingMetadata] = useState(false);
     const [editTranscriptContent, setEditTranscriptContent] = useState('');
     const [isLoading, setIsLoading] = useState(true);
 
+    // useEffects for loading/navigation (remain the same)
     useEffect(() => {
         setIsLoading(true);
         const currentSessionIdNum = sessionIdParam ? parseInt(sessionIdParam, 10) : NaN;
@@ -66,14 +77,51 @@ export function SessionView() {
         setActiveChatId(isNaN(targetChatId) ? null : targetChatId);
         setChatError('');
         setIsLoading(false);
-    }, [sessionIdParam, chatIdParam, allSessions, navigate, setActiveSessionId, setActiveChatId, setChatError, location.pathname]);
+     }, [sessionIdParam, chatIdParam, allSessions, navigate, setActiveSessionId, setActiveChatId, setChatError, location.pathname]);
+    useEffect(() => { if (session) setEditTranscriptContent(session.transcription || ''); }, [session]);
 
-    useEffect(() => {
-        if (session) {
-            setEditTranscriptContent(session.transcription || '');
+    // Sidebar Resizing Logic (moved from SessionContent)
+    const handleMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        isResizing.current = true;
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        document.addEventListener('mousemove', handleMouseMove);
+        document.addEventListener('mouseup', handleMouseUp);
+     }, []); // Empty dependency array assuming handleMouseMove/Up are stable refs or defined outside
+
+    const handleMouseMove = useCallback((e: MouseEvent) => {
+        if (!isResizing.current || !sidebarRef.current) return;
+        const containerRect = sidebarRef.current.parentElement?.getBoundingClientRect();
+        if (!containerRect) return;
+        let newWidth = e.clientX - containerRect.left;
+        // Clamp here directly as well, or rely on atom setter's clamping
+        newWidth = Math.max(MIN_SIDEBAR_WIDTH, Math.min(newWidth, MAX_SIDEBAR_WIDTH));
+        setSidebarWidth(newWidth); // Uses the derived writable atom setter
+    }, [setSidebarWidth]); // Depends on setSidebarWidth
+
+    const handleMouseUp = useCallback(() => {
+        if (isResizing.current) {
+            isResizing.current = false;
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
         }
-    }, [session]);
+    }, [handleMouseMove]); // Depends on handleMouseMove
 
+    // Cleanup listeners on component unmount
+    useEffect(() => {
+        return () => {
+            if (isResizing.current) {
+                document.removeEventListener('mousemove', handleMouseMove);
+                document.removeEventListener('mouseup', handleMouseUp);
+            }
+        };
+    }, [handleMouseMove, handleMouseUp]);
+
+
+    // Handlers (remain the same)
     const handleStartFirstChat = async () => {
         if (!session) return;
         const currentSessionId = session.id;
@@ -83,14 +131,13 @@ export function SessionView() {
         } else {
             setChatError(result.error);
         }
-    };
-
+     };
     const handleOpenEditMetadataModal = () => setIsEditingMetadata(true);
     const handleTranscriptContentChange = (newContent: string) => {
         if (!session) return;
         saveTranscriptAction({ sessionId: session.id, transcript: newContent });
         setEditTranscriptContent(newContent);
-    };
+     };
     const handleNavigateBack = () => navigate('/');
 
     if (isLoading || !session) {
@@ -100,20 +147,65 @@ export function SessionView() {
     const hasChats = Array.isArray(session.chats) && session.chats.length > 0;
 
     return (
-        <Flex direction="column" style={{ height: '100vh' }}>
-            <SessionHeader
-                session={session}
-                onEditDetailsClick={handleOpenEditMetadataModal}
-                onNavigateBack={handleNavigateBack}
-            />
-            <SessionContent
-                session={session}
-                editTranscriptContent={editTranscriptContent}
-                onTranscriptContentChange={handleTranscriptContentChange}
-                activeChatId={activeChatId}
-                hasChats={hasChats}
-                onStartFirstChat={handleStartFirstChat}
-            />
+        // Main container for the whole Session view (Sidebar + Main)
+        <Flex flexGrow="1" style={{ height: '100vh', overflow: 'hidden' }}>
+             {/* --- Sidebar --- */}
+            <Box
+                ref={sidebarRef}
+                className="relative flex-shrink-0 hidden lg:flex flex-col"
+                style={{ width: `${sidebarWidth}px`, backgroundColor: 'var(--color-panel-solid)' }}
+            >
+                {/* Render Sidebar Directly */}
+                <SessionSidebar />
+            </Box>
+
+            {/* --- Resizer --- */}
+            <Box
+                className="hidden lg:block flex-shrink-0 w-1.5 cursor-col-resize group hover:bg-[--gray-a4]"
+                onMouseDown={handleMouseDown}
+                title="Resize sidebar"
+            >
+                <Box className="h-full w-[1px] bg-[--gray-a5] group-hover:bg-[--accent-9] mx-auto" />
+            </Box>
+
+            {/* --- Main Content Column (Header + Panels) --- */}
+            <Flex direction="column" flexGrow="1" style={{ minWidth: 0, height: '100vh', overflow: 'hidden' }}>
+                 {/* --- NEW HEADER for Main Panel Area --- */}
+                 <Box
+                    px={{ initial: '4', md: '6', lg: '8' }} // Consistent padding
+                    py="3"
+                    flexShrink="0"
+                    className="border-b" // Add border below header
+                    style={{ backgroundColor: 'var(--color-panel-solid)'}} // Match sidebar bg
+                >
+                    <Flex justify="between" align="center">
+                         {/* Back Button */}
+                         <Button onClick={handleNavigateBack} variant="ghost" color="gray" size="2">
+                             <ArrowLeftIcon />
+                             Sessions {/* Simplified text */}
+                         </Button>
+                         {/* User/Theme Dropdown */}
+                         <UserThemeDropdown />
+                    </Flex>
+                </Box>
+                 {/* --- END NEW HEADER --- */}
+
+                 {/* SessionContent now just renders the panels within the remaining space */}
+                 {/* Takes remaining vertical space and allows internal scrolling */}
+                 <Box flexGrow="1" style={{ overflowY: 'auto', minHeight: 0 }}>
+                    <SessionContent
+                        session={session}
+                        onEditDetailsClick={handleOpenEditMetadataModal} // Still needs to pass this down
+                        editTranscriptContent={editTranscriptContent}
+                        onTranscriptContentChange={handleTranscriptContentChange}
+                        activeChatId={activeChatId}
+                        hasChats={hasChats}
+                        onStartFirstChat={handleStartFirstChat}
+                    />
+                 </Box>
+            </Flex>
+
+            {/* Modal remains outside the main layout */}
             <EditDetailsModal
                 isOpen={isEditingMetadata}
                 onOpenChange={setIsEditingMetadata}
