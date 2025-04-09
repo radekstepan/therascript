@@ -6,11 +6,11 @@ import {
     Dialog, Button, Flex, Text, TextField, Select, Box, Spinner, Strong, Callout, Heading
 } from '@radix-ui/themes';
 import { UploadIcon, Cross1Icon, InfoCircledIcon, CheckCircledIcon } from '@radix-ui/react-icons';
-import { SESSION_TYPES, THERAPY_TYPES } from '../constants'; // Corrected path
-import { getTodayDateString } from '../helpers'; // Corrected path
-import type { SessionMetadata, UploadModalProps } from '../types'; // Corrected path
-import { closeUploadModalAtom, handleStartTranscriptionAtom } from '../store'; // Corrected path
-import { cn } from '../utils'; // Corrected path
+import { SESSION_TYPES, THERAPY_TYPES } from '../constants';
+import { getTodayDateString } from '../helpers';
+import type { SessionMetadata, UploadModalProps } from '../types';
+import { closeUploadModalAtom, handleStartTranscriptionAtom } from '../store';
+import { cn } from '../utils';
 
 export function UploadModal({ isOpen, isTranscribing, transcriptionError }: UploadModalProps) {
     const closeModalAction = useSetAtom(closeUploadModalAtom);
@@ -213,7 +213,6 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
                     <Flex direction="column" gap="3">
                          <label>
                              <Text as="div" size="2" mb="1" weight="medium">Session Name / Title</Text>
-                             {/* --- FIX APPLIED HERE: Simplified TextField.Root --- */}
                              <TextField.Root
                                 size="2"
                                 placeholder="e.g., Weekly Check-in"
@@ -228,7 +227,6 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
                          <Box className="grid grid-cols-1 md:grid-cols-2 gap-3">
                              <label>
                                  <Text as="div" size="2" mb="1" weight="medium">Client Name</Text>
-                                 {/* --- FIX APPLIED HERE: Simplified TextField.Root --- */}
                                  <TextField.Root
                                     size="2"
                                     placeholder="Client's Full Name"
@@ -237,18 +235,19 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
                                     disabled={isTranscribing}
                                     required
                                   />
-                                  {/* --- END FIXES --- */}
                              </label>
                              <label>
                                  <Text as="div" size="2" mb="1" weight="medium">Date</Text>
-                                 {/* Use standard HTML input, styled to match Radix */}
                                  <input
                                     type="date"
                                     value={sessionDate}
                                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSessionDate(e.target.value)}
                                     disabled={isTranscribing}
                                     required
-                                    className="rt-TextFieldInput rt-r-size-2 rt-variant-surface" // Apply Radix input classes
+                                    className={cn(
+                                         "rt-TextFieldInput rt-r-size-2 rt-variant-surface",
+                                         "h-8 text-sm"
+                                     )}
                                   />
                             </label>
                          </Box>
@@ -256,9 +255,9 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
                          <Box className="grid grid-cols-1 md:grid-cols-2 gap-3">
                              <label>
                                 <Text as="div" size="2" mb="1" weight="medium">Session Type</Text>
-                                 {/* Add size="2" for consistency */}
                                 <Select.Root value={sessionTypeInput} onValueChange={setSessionTypeInput} disabled={isTranscribing} required size="2">
-                                    <Select.Trigger placeholder="Select type..." />
+                                     {/* --- MODIFICATION HERE --- */}
+                                    <Select.Trigger placeholder="Select type..." style={{ width: '100%' }}/>
                                     <Select.Content>
                                          {SESSION_TYPES.map(type => (
                                              <Select.Item key={type} value={type}>
@@ -270,9 +269,9 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
                             </label>
                              <label>
                                 <Text as="div" size="2" mb="1" weight="medium">Therapy Modality</Text>
-                                 {/* Add size="2" for consistency */}
                                 <Select.Root value={therapyInput} onValueChange={setTherapyInput} disabled={isTranscribing} required size="2">
-                                    <Select.Trigger placeholder="Select therapy..." />
+                                     {/* --- MODIFICATION HERE --- */}
+                                    <Select.Trigger placeholder="Select therapy..." style={{ width: '100%' }}/>
                                     <Select.Content>
                                         {THERAPY_TYPES.map(type => ( <Select.Item key={type} value={type}>{type}</Select.Item> ))}
                                     </Select.Content>
@@ -294,14 +293,12 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
                  {/* Modal Action Buttons */}
                  <Flex gap="3" mt="5" justify="end">
                     <Dialog.Close>
-                         {/* Add type="button" */}
                         <Button type="button" variant="soft" color="gray" disabled={isTranscribing}>
                             Cancel
                         </Button>
                     </Dialog.Close>
                     <Button type="button" onClick={handleStartClick} disabled={!modalFile || isTranscribing} >
                         {isTranscribing ? (
-                             // Show spinner and text when transcribing
                              <> <Spinner size="2"/> <Text ml="2">Transcribing...</Text> </>
                         ) : ( 'Upload & Transcribe' )}
                     </Button>
