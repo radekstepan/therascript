@@ -1,6 +1,6 @@
 import React from 'react';
 import { ListBulletIcon } from '@radix-ui/react-icons';
-import { Card, Flex, Text, Separator, Box, ScrollArea } from '@radix-ui/themes'; // Use Themes components
+import { Flex, Text, Separator, Box, ScrollArea } from '@radix-ui/themes';
 import { formatTimestamp } from '../../helpers';
 import type { ChatSession, Session } from '../../types';
 
@@ -27,41 +27,35 @@ export function PastChatsList({ session, activeChatId, onSelectChatHistory }: Pa
     };
 
     return (
-        // Use Themes Card
-        <Card size="1" mt="4"> {/* Adjusted size and margin */}
-             {/* Header using Flex */}
-             <Flex align="center" gap="2" px="3" pt="2" pb="1">
-                 <ListBulletIcon className="text-[--gray-a10]" /> {/* Themes color */}
-                 <Text size="1" weight="medium" color="gray">Past Chats</Text>
-             </Flex>
-             <Separator size="4" /> {/* Use Themes Separator */}
-
-             {/* Scrollable list container */}
-             <ScrollArea type="auto" scrollbars="vertical" style={{ maxHeight: '9rem' }}> {/* Max height for scroll */}
-                 <Box p="1">
+        <Box mt="4" style={{ maxHeight: '100%' }}>
+            <Flex align="center" gap="2" px="3" pt="2" pb="1">
+                <ListBulletIcon className="text-[--gray-a10]" />
+                <Text size="1" weight="medium" color="gray">Past Chats</Text>
+            </Flex>
+            <Separator size="4" />
+            <ScrollArea type="auto" scrollbars="vertical" style={{ maxHeight: '12rem' }}>
+                <Box p="1">
                     {otherChats.map(chat => (
-                        // Use Box or Flex, style like a button item
                         <Box
                             key={chat.id}
                             onClick={() => onSelectChatHistory(chat.id)}
                             onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => {
                                 if (e.key === 'Enter' || e.key === ' ') {
-                                    e.preventDefault(); onSelectChatHistory(chat.id);
+                                    e.preventDefault();
+                                    onSelectChatHistory(chat.id);
                                 }
                             }}
                             tabIndex={0}
                             role="button"
                             aria-label={`Switch to: ${getChatDisplayTitle(chat)}`}
-                            className="block w-full p-2 rounded hover:bg-[--gray-a3] focus:outline-none focus:ring-2 focus:ring-[--accent-7] cursor-pointer transition-colors" // Themes hover, focus ring
-                            title={`Switch to: ${getChatDisplayTitle(chat)}`} // Keep title
+                            className="block w-full p-2 rounded hover:bg-[--gray-a3] focus:outline-none focus:ring-2 focus:ring-[--accent-7] cursor-pointer"
+                            title={`Switch to: ${getChatDisplayTitle(chat)}`}
                         >
-                            <Text size="2" truncate> {/* Themes Text with truncate */}
-                                {getChatDisplayTitle(chat)}
-                            </Text>
+                            <Text size="2" truncate>{getChatDisplayTitle(chat)}</Text>
                         </Box>
                     ))}
-                 </Box>
+                </Box>
             </ScrollArea>
-        </Card>
+        </Box>
     );
 }

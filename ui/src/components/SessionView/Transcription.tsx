@@ -1,7 +1,7 @@
 import React from 'react';
 import type { Session } from '../../types';
 import { TranscriptParagraph } from '../Transcription/TranscriptParagraph';
-import { Box, Text } from '@radix-ui/themes'; // Use Box for container
+import { Box, ScrollArea, Text } from '@radix-ui/themes';
 
 interface TranscriptionProps {
     session: Session | null;
@@ -14,9 +14,7 @@ export function Transcription({
     editTranscriptContent,
     onContentChange,
 }: TranscriptionProps) {
-
     if (!session) {
-        // Use Themes Text component correctly
         return <Box p="4"><Text color="gray" style={{ fontStyle: 'italic' }}>Loading transcript...</Text></Box>;
     }
 
@@ -25,14 +23,11 @@ export function Transcription({
 
     const handleSaveParagraph = (index: number, newText: string) => {
         const baseContentForSave = editTranscriptContent;
-        // Split using the same logic to ensure indices match
         const currentParagraphs = baseContentForSave.split(/\n\s*\n/);
         if (index >= 0 && index < currentParagraphs.length) {
-            // Find the *actual* paragraph corresponding to the visible one
-            // This handles potential empty strings from multiple newlines
             let paragraphIndexInFullSplit = -1;
             let visibleIndexCounter = -1;
-            for(let i = 0; i < currentParagraphs.length; i++) {
+            for (let i = 0; i < currentParagraphs.length; i++) {
                 if (currentParagraphs[i].trim() !== '') {
                     visibleIndexCounter++;
                     if (visibleIndexCounter === index) {
@@ -48,7 +43,6 @@ export function Transcription({
                 console.warn("Paragraph index mapping failed during save.");
                 return;
             }
-
         } else {
             console.warn("Paragraph index out of bounds during save.");
             return;
@@ -58,21 +52,24 @@ export function Transcription({
     };
 
     return (
-        // Apply padding to the outer Box, not the inner Text for the empty state
-        <Box p="3">
-            <div className="space-y-3"> {/* Keep Tailwind for spacing between paragraphs */}
-                 {paragraphs.length > 0 ? paragraphs.map((paragraph, index) => (
-                   <TranscriptParagraph
-                        key={index}
-                        paragraph={paragraph}
-                        index={index}
-                        onSave={handleSaveParagraph}
-                   />
-                 )) : (
-                   // Use Themes Text component correctly, REMOVE `p="3"` here
-                   <Text color="gray" style={{ fontStyle: 'italic' }}>No transcription available.</Text>
-                 )}
-              </div>
+        <Box style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+            <Box px="4" py="2" style={{ borderBottom: '1px solid var(--gray-a6)', flexShrink: 0 }}>
+                <Text weight="medium">Transcription</Text>
+            </Box>
+            <ScrollArea type="auto" scrollbars="vertical" style={{ flexGrow: 1, minHeight: 0 }}>
+                <Box p="3" className="space-y-3">
+                    {paragraphs.length > 0 ? paragraphs.map((paragraph, index) => (
+                        <TranscriptParagraph
+                            key={index}
+                            paragraph={paragraph}
+                            index={index}
+                            onSave={handleSaveParagraph}
+                        />
+                    )) : (
+                        <Text color="gray" style={{ fontStyle: 'italic' }}>No transcription available.</Text>
+                    )}
+                </Box>
+            </ScrollArea>
         </Box>
-      );
+    );
 }

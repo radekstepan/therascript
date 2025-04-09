@@ -1,29 +1,24 @@
-/* Import Radix Themes styles FIRST */
+/* src/styles/global.css */
 @import '@radix-ui/themes/styles.css';
 
 *,
 *::before,
 *::after {
-  box-sizing: border-box; /* Ensure box-sizing */
+  box-sizing: border-box;
 }
 
-/* Keep Tailwind base/utilities if using Tailwind for layout/spacing */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-
 #root {
   min-height: 100vh;
-  display: flex; /* Use flexbox to help App fill height */
+  display: flex;
   flex-direction: column;
 }
 
-/* Remove custom input/base styles previously added for shadcn/ui */
-/* Radix Themes handles input styling */
-
-/* Optional: Add global overrides or base styles if needed AFTER Themes import */
-/* body {
-    background-color: var(--color-background);
-} */
- 
+html, body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}

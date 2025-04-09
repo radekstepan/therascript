@@ -1,7 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Box, Flex, Separator, Spinner, Text } from '@radix-ui/themes';
+import { Box, Flex, Separator } from '@radix-ui/themes';
 import { ChatHeader, ChatInput, ChatMessages } from './';
 import {
     activeSessionAtom,
@@ -11,7 +11,6 @@ import {
     currentChatMessagesAtom,
     isChattingAtom
 } from '../../store';
-import { cn } from '../../utils';
 
 export function ChatInterface() {
     const { chatId } = useParams<{ chatId?: string }>();
@@ -21,7 +20,6 @@ export function ChatInterface() {
     const setChatError = useSetAtom(chatErrorAtom);
     const activeChatId = useAtomValue(activeChatIdAtom);
     const chatScrollRef = useRef<HTMLDivElement | null>(null);
-
     const chatMessages = useAtomValue(currentChatMessagesAtom);
     const isChatting = useAtomValue(isChattingAtom);
 
@@ -32,7 +30,7 @@ export function ChatInterface() {
             if (result.success) {
                 navigate(`/sessions/${currentSessionId}/chats/${result.newChatId}`);
             } else {
-                 setChatError(result.error);
+                setChatError(result.error);
             }
         } else {
             setChatError("Cannot start new chat: Session context is missing.");
@@ -41,42 +39,30 @@ export function ChatInterface() {
 
     useEffect(() => {
         if (chatScrollRef.current) {
-            requestAnimationFrame(() => {
-               if (chatScrollRef.current) {
-                  chatScrollRef.current.scrollTo({
-                      top: chatScrollRef.current.scrollHeight,
-                      behavior: 'auto'
-                  });
-               }
-            });
+            chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
         }
     }, [chatMessages, isChatting]);
 
-    if (activeChatId === null && !session) {
-      return (
-        <Flex flexGrow="1" align="center" justify="center" p="4">
-          <Spinner size="3"/>
-          <Text ml="2" color="gray">Loading chat...</Text>
-        </Flex>
-      );
-    }
-
     return (
-        <Flex direction="column" flexGrow="1" height="100%" style={{ minHeight: 0 }}>
+        <Flex direction="column" style={{ height: '100%', minHeight: 0 }}>
             <ChatHeader activeChatId={activeChatId} onNewChatClick={handleNewChatClick} />
             <Separator size="4" />
-
-            <Box ref={chatScrollRef} flexGrow="1" style={{ overflowY: 'auto', minHeight: 0 }} p="4">
+            <Box
+                ref={chatScrollRef}
+                style={{ flexGrow: 1, overflowY: 'auto', minHeight: 0 }}
+                p="4"
+            >
                 <ChatMessages activeChatId={activeChatId} />
             </Box>
-
             <Box
-               p="4"
-               flexShrink="0"
-               className="border-t"
-               style={{
-                   backgroundColor: 'var(--card-background)',
-                   zIndex: 10 // Changed from number 10 to string "10" - although zIndex often works with numbers, let's be consistent
+                p="4"
+                style={{
+                    flexShrink: 0,
+                    borderTop: '1px solid var(--gray-a6)',
+                    backgroundColor: 'var(--card-background)',
+                    position: 'sticky',
+                    bottom: 0,
+                    zIndex: 10
                 }}
             >
                 <ChatInput />

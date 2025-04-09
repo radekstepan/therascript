@@ -44,7 +44,7 @@ function App() {
         // Wrap the entire app (or relevant part) with Toast.Provider
         <Toast.Provider swipeDirection="right">
              {/* Add Radix Themes Provider */}
-            <Theme appearance={effectiveTheme} accentColor="teal" panelBackground="solid" radius="small" scaling="90%">
+            <Theme appearance={effectiveTheme} accentColor="teal" panelBackground="solid" radius="small" scaling="100%">
                 <div className="flex flex-col min-h-screen"> {/* Use Tailwind for base layout */}
                     {/* Header */}
                      {/* Use Flex from Themes for layout inside header */}
