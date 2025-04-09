@@ -50,7 +50,7 @@ export function TranscriptParagraph({ paragraph, index, onSave /*, onPlay */ }: 
     // --- End simulation function ---
 
     if (isEditing) {
-        // --- Editing View (Unchanged) ---
+        // --- Editing View ---
         return (
             <Card size="1" variant="surface">
                 <Flex direction="column" gap="2">
@@ -71,10 +71,12 @@ export function TranscriptParagraph({ paragraph, index, onSave /*, onPlay */ }: 
                         onKeyDown={handleKeyDown}
                         aria-label={`Edit paragraph ${index + 1}`}
                     />
+                    {/* --- MODIFICATION: Swapped Button Order --- */}
                     <Flex justify="end" gap="2" mt="1">
-                         <Button onClick={handleSave} size="1" variant="solid" title="Save (Ctrl+Enter)"> <CheckIcon /> Save </Button>
                          <Button onClick={handleCancel} size="1" variant="soft" color="gray" title="Cancel (Esc)"> <Cross1Icon /> Cancel </Button>
+                         <Button onClick={handleSave} size="1" variant="solid" title="Save (Ctrl+Enter)"> <CheckIcon /> Save </Button>
                     </Flex>
+                    {/* --- END MODIFICATION --- */}
                 </Flex>
             </Card>
         );
@@ -100,8 +102,7 @@ export function TranscriptParagraph({ paragraph, index, onSave /*, onPlay */ }: 
                     {paragraph || <span style={{ fontStyle: 'italic', color: 'var(--gray-a9)'}}>[Empty Paragraph]</span>}
                 </Box>
 
-                 {/* --- MODIFICATION START: Container for Icons --- */}
-                 {/* Wrap icons in a Flex to control their layout and spacing */}
+                 {/* Container for Icons */}
                  <Flex align="center" gap="1" className="flex-shrink-0 mt-0.5">
                       {/* Play Button */}
                       <IconButton
@@ -125,7 +126,6 @@ export function TranscriptParagraph({ paragraph, index, onSave /*, onPlay */ }: 
                         <Pencil1Icon />
                     </IconButton>
                  </Flex>
-                 {/* --- MODIFICATION END --- */}
             </Flex>
         </Box>
     );
