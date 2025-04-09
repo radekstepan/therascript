@@ -1,7 +1,7 @@
-// src/components/SessionView/Transcription.tsx
 import React from 'react';
 import type { Session } from '../../types';
-import { TranscriptParagraph } from '../Transcription/TranscriptParagraph'; // Import the new component
+import { TranscriptParagraph } from '../Transcription/TranscriptParagraph';
+import { Box, Text } from '@radix-ui/themes'; // Use Box for container
 
 interface TranscriptionProps {
     session: Session | null;
@@ -16,50 +16,63 @@ export function Transcription({
 }: TranscriptionProps) {
 
     if (!session) {
-      return <p className="italic text-gray-500 dark:text-gray-400 p-4">Loading transcript...</p>;
+        // Use Themes Text component correctly
+        return <Box p="4"><Text color="gray" style={{ fontStyle: 'italic' }}>Loading transcript...</Text></Box>;
     }
 
     const sourceContent = editTranscriptContent;
-    // Split into paragraphs, ensuring empty lines between paragraphs are handled
-    // and filter out paragraphs that are only whitespace.
     const paragraphs = sourceContent.split(/\n\s*\n/).filter(p => p.trim() !== '');
 
-
-    // Handler to update the full transcript when a single paragraph is saved
     const handleSaveParagraph = (index: number, newText: string) => {
-        // Use the current state value of editTranscriptContent for consistency
-        const baseContentForSave = editTranscriptContent; // Or pass session.transcription if preferred
-        const currentParagraphs = baseContentForSave.split(/\n\s*\n/).filter(p => p.trim() !== ''); // Use same split logic
-
+        const baseContentForSave = editTranscriptContent;
+        // Split using the same logic to ensure indices match
+        const currentParagraphs = baseContentForSave.split(/\n\s*\n/);
         if (index >= 0 && index < currentParagraphs.length) {
-            currentParagraphs[index] = newText; // Update the specific paragraph
+            // Find the *actual* paragraph corresponding to the visible one
+            // This handles potential empty strings from multiple newlines
+            let paragraphIndexInFullSplit = -1;
+            let visibleIndexCounter = -1;
+            for(let i = 0; i < currentParagraphs.length; i++) {
+                if (currentParagraphs[i].trim() !== '') {
+                    visibleIndexCounter++;
+                    if (visibleIndexCounter === index) {
+                        paragraphIndexInFullSplit = i;
+                        break;
+                    }
+                }
+            }
+
+            if (paragraphIndexInFullSplit !== -1) {
+                currentParagraphs[paragraphIndexInFullSplit] = newText;
+            } else {
+                console.warn("Paragraph index mapping failed during save.");
+                return;
+            }
+
         } else {
             console.warn("Paragraph index out of bounds during save.");
-            return; // Avoid proceeding if index is invalid
+            return;
         }
-
-        // Re-join with double newlines to preserve paragraph structure
         const newTranscript = currentParagraphs.join('\n\n');
-        onContentChange(newTranscript); // Call the prop function passed from SessionView
+        onContentChange(newTranscript);
     };
 
     return (
-        <div className="flex flex-col flex-grow min-h-0">
-          {/* Add padding to the container, not individual paragraphs directly unless needed */}
-          <div className="space-y-3 p-3"> {/* Adjust spacing/padding as needed */}
-             {paragraphs.length > 0 ? paragraphs.map((paragraph, index) => (
-               <TranscriptParagraph
-                    key={index} // Use index as key, assuming paragraphs don't drastically reorder
-                    paragraph={paragraph}
-                    index={index}
-                    onSave={handleSaveParagraph}
-               />
-             )) : (
-               <p className="italic text-gray-500 dark:text-gray-400 p-3">
-                 No transcription available.
-               </p>
-             )}
-          </div>
-        </div>
+        // Apply padding to the outer Box, not the inner Text for the empty state
+        <Box p="3">
+            <div className="space-y-3"> {/* Keep Tailwind for spacing between paragraphs */}
+                 {paragraphs.length > 0 ? paragraphs.map((paragraph, index) => (
+                   <TranscriptParagraph
+                        key={index}
+                        paragraph={paragraph}
+                        index={index}
+                        onSave={handleSaveParagraph}
+                   />
+                 )) : (
+                   // Use Themes Text component correctly, REMOVE `p="3"` here
+                   <Text color="gray" style={{ fontStyle: 'italic' }}>No transcription available.</Text>
+                 )}
+              </div>
+        </Box>
       );
 }

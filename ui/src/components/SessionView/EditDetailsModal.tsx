@@ -1,25 +1,19 @@
-// src/components/SessionView/EditDetailsModal.tsx
 import React, { useState, useEffect } from 'react';
 import { useSetAtom } from 'jotai';
-import { Button } from '../ui/Button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '../ui/Dialog';
-import { Input } from '../ui/Input';
-import { Label } from '../ui/Label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/Select';
-import { SESSION_TYPES, THERAPY_TYPES } from '../../constants';
-import { updateSessionMetadataAtom } from '../../store';
-import type { Session } from '../../types';
+import { Button, Dialog, Flex, Text, TextField, Select, Box, Heading, Callout } from '@radix-ui/themes';
+import { InfoCircledIcon } from '@radix-ui/react-icons';
+import { SESSION_TYPES, THERAPY_TYPES } from '../../constants'; // Corrected path check
+import { updateSessionMetadataAtom } from '../../store'; // Corrected path check
+import type { Session } from '../../types'; // Corrected path check
 
 interface EditDetailsModalProps {
     isOpen: boolean;
     onOpenChange: (open: boolean) => void;
-    session: Session | null; // Pass the whole session for context
+    session: Session | null;
 }
 
 export function EditDetailsModal({ isOpen, onOpenChange, session }: EditDetailsModalProps) {
     const updateMetadataAction = useSetAtom(updateSessionMetadataAtom);
-
-    // Local state for the form fields within the modal
     const [editClientName, setEditClientName] = useState('');
     const [editSessionName, setEditSessionName] = useState('');
     const [editDate, setEditDate] = useState('');
@@ -27,120 +21,86 @@ export function EditDetailsModal({ isOpen, onOpenChange, session }: EditDetailsM
     const [editTherapy, setEditTherapy] = useState('');
     const [validationError, setValidationError] = useState<string | null>(null);
 
-    // Initialize form state when the modal opens or the session changes
     useEffect(() => {
         if (isOpen && session) {
             setEditClientName(session.clientName || '');
             setEditSessionName(session.sessionName || session.fileName || '');
             setEditDate(session.date || '');
-            setEditType(session.sessionType || SESSION_TYPES[0]); // Default if undefined
-            setEditTherapy(session.therapy || THERAPY_TYPES[0]);   // Default if undefined
-            setValidationError(null); // Clear validation error on open
+            setEditType(session.sessionType || SESSION_TYPES[0]);
+            setEditTherapy(session.therapy || THERAPY_TYPES[0]);
+            setValidationError(null);
         }
     }, [isOpen, session]);
 
     const handleSave = () => {
         if (!session) return;
-
         const trimmedName = editSessionName.trim();
         const trimmedClient = editClientName.trim();
-
         if (!trimmedName || !trimmedClient || !editDate) {
             setValidationError("Please ensure Session Name, Client Name, and Date are filled.");
-            return; // Keep modal open if validation fails
+            return;
         }
-
         updateMetadataAction({
             sessionId: session.id,
-            metadata: { // Pass only the updatable metadata fields
-                clientName: trimmedClient,
-                sessionName: trimmedName,
-                date: editDate,
-                sessionType: editType,
-                therapy: editTherapy,
-            }
+            metadata: { clientName: trimmedClient, sessionName: trimmedName, date: editDate, sessionType: editType, therapy: editTherapy }
         });
         setValidationError(null);
-        onOpenChange(false); // Close modal on success
+        onOpenChange(false);
     };
 
-     // Close handler resets error if modal is closed manually
-     const handleManualClose = (open: boolean) => {
-         if (!open) {
-             setValidationError(null);
-         }
-         onOpenChange(open);
-     }
+    const handleManualClose = (open: boolean) => {
+        if (!open) setValidationError(null);
+        onOpenChange(open);
+    }
 
     return (
-        <Dialog open={isOpen} onOpenChange={handleManualClose}>
-            <DialogContent className="sm:max-w-[525px]">
-                <DialogHeader>
-                    <DialogTitle>Edit Session Details</DialogTitle>
-                    {/* Optional: <DialogDescription>Update the metadata for this session.</DialogDescription> */}
-                </DialogHeader>
-                <div className="grid gap-4 py-4">
-                    {/* Session Name */}
-                    <div className="grid grid-cols-4 items-center gap-4">
-                        <Label htmlFor="sessionNameEditModal" className="text-right">Session Name</Label>
-                        <Input id="sessionNameEditModal" value={editSessionName} onChange={(e) => setEditSessionName(e.target.value)} className="col-span-3" placeholder="e.g., Weekly Check-in" required />
-                    </div>
-                    {/* Client Name */}
-                    <div className="grid grid-cols-4 items-center gap-4">
-                        <Label htmlFor="clientNameEditModal" className="text-right">Client Name</Label>
-                        <Input id="clientNameEditModal" value={editClientName} onChange={(e) => setEditClientName(e.target.value)} className="col-span-3" placeholder="Client's Full Name" required />
-                    </div>
-                    {/* Date */}
-                    <div className="grid grid-cols-4 items-center gap-4">
-                        <Label htmlFor="sessionDateEditModal" className="text-right">Date</Label>
-                        {/* Use standard HTML date input, styled via global.css */}
-                        <input
-                            id="sessionDateEditModal"
-                            type="date"
-                            value={editDate}
-                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditDate(e.target.value)}
-                            required
-                            className="col-span-3" // Apply Tailwind classes directly
-                        />
-                    </div>
-                    {/* Session Type */}
-                    <div className="grid grid-cols-4 items-center gap-4">
-                        <Label htmlFor="sessionTypeEditModal" className="text-right">Session Type</Label>
-                        <Select value={editType} onValueChange={setEditType}>
-                            <SelectTrigger id="sessionTypeEditModal" className="col-span-3">
-                                <SelectValue placeholder="Select type..." />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {SESSION_TYPES.map(type => (
-                                    <SelectItem key={type} value={type}>{type.charAt(0).toUpperCase() + type.slice(1)}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                    </div>
-                    {/* Therapy Type */}
-                    <div className="grid grid-cols-4 items-center gap-4">
-                        <Label htmlFor="therapyTypeEditModal" className="text-right">Therapy Type</Label>
-                        <Select value={editTherapy} onValueChange={setEditTherapy}>
-                            <SelectTrigger id="therapyTypeEditModal" className="col-span-3">
-                                <SelectValue placeholder="Select therapy..." />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {THERAPY_TYPES.map(type => (<SelectItem key={type} value={type}>{type}</SelectItem>))}
-                            </SelectContent>
-                        </Select>
-                    </div>
-                     {/* Validation Error */}
+        <Dialog.Root open={isOpen} onOpenChange={handleManualClose}>
+            <Dialog.Content style={{ maxWidth: 525 }}>
+                <Dialog.Title>
+                    Edit Session Details
+                </Dialog.Title>
+                <Flex direction="column" gap="4" py="4">
+                    <Box className="grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-3">
+                         <Text as="label" size="2" weight="medium" htmlFor="sessionNameEditModal" className="text-right">Session Name</Text>
+                         {/* Corrected TextField Usage */}
+                         <TextField.Root size="2">
+                             <TextField.Root id="sessionNameEditModal" value={editSessionName} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditSessionName(e.target.value)} placeholder="e.g., Weekly Check-in" required />
+                         </TextField.Root>
+
+                         <Text as="label" size="2" weight="medium" htmlFor="clientNameEditModal" className="text-right">Client Name</Text>
+                         {/* Corrected TextField Usage */}
+                         <TextField.Root size="2">
+                             <TextField.Root id="clientNameEditModal" value={editClientName} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditClientName(e.target.value)} placeholder="Client's Full Name" required />
+                         </TextField.Root>
+
+                         <Text as="label" size="2" weight="medium" htmlFor="sessionDateEditModal" className="text-right">Date</Text>
+                         {/* Use standard HTML input, styled to match Radix */}
+                         <input id="sessionDateEditModal" type="date" value={editDate} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditDate(e.target.value)} required className="rt-TextFieldInput rt-r-size-2 rt-variant-surface" />
+
+                         <Text as="label" size="2" weight="medium" htmlFor="sessionTypeEditModal" className="text-right">Session Type</Text>
+                         <Select.Root value={editType} onValueChange={setEditType} required size="2"> {/* Added size */}
+                            <Select.Trigger id="sessionTypeEditModal" placeholder="Select type..." />
+                            <Select.Content> {SESSION_TYPES.map(type => (<Select.Item key={type} value={type}>{type.charAt(0).toUpperCase() + type.slice(1)}</Select.Item>))} </Select.Content>
+                         </Select.Root>
+
+                         <Text as="label" size="2" weight="medium" htmlFor="therapyTypeEditModal" className="text-right">Therapy Type</Text>
+                         <Select.Root value={editTherapy} onValueChange={setEditTherapy} required size="2"> {/* Added size */}
+                            <Select.Trigger id="therapyTypeEditModal" placeholder="Select therapy..." />
+                            <Select.Content> {THERAPY_TYPES.map(type => (<Select.Item key={type} value={type}>{type}</Select.Item>))} </Select.Content>
+                         </Select.Root>
+                    </Box>
+
                     {validationError && (
-                         <p className="col-span-4 text-sm text-red-600 dark:text-red-500 text-center px-2">{validationError}</p>
+                         <Callout.Root color="red" role="alert" size="1" mt="2"> <Callout.Icon><InfoCircledIcon /></Callout.Icon> <Callout.Text>{validationError}</Callout.Text> </Callout.Root>
                     )}
-                </div>
-                <DialogFooter>
-                    <DialogClose asChild>
-                        <Button type="button" variant="secondary">Cancel</Button>
-                    </DialogClose>
+                </Flex>
+                <Flex gap="3" mt="4" justify="end">
+                    <Dialog.Close>
+                        <Button type="button" variant="soft" color="gray">Cancel</Button>
+                    </Dialog.Close>
                     <Button type="button" onClick={handleSave}>Save Changes</Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
+                </Flex>
+            </Dialog.Content>
+        </Dialog.Root>
     );
 }

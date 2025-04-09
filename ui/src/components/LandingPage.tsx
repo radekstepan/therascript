@@ -1,35 +1,31 @@
-// src/components/LandingPage.tsx
 import React from 'react';
-import { useAtomValue, useSetAtom } from 'jotai'; // Removed useAtom if not needed directly here
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useNavigate } from 'react-router-dom';
 import {
-    CounterClockwiseClockIcon, // Available
-    PlusCircledIcon, // Available
-    // Icons for table moved to SessionListTable
+    CounterClockwiseClockIcon,
+    PlusCircledIcon,
 } from '@radix-ui/react-icons';
-import { SessionListTable } from './LandingPage/SessionListTable'; // Import the new table component
-import { Button } from './ui/Button'; // Keep Button import
-import { Card, CardContent, CardHeader, CardTitle } from './ui/Card';
+import { SessionListTable } from './LandingPage/SessionListTable';
+import { Button, Card, Flex, Heading, Text, Box } from '@radix-ui/themes'; // Use Themes components
 import {
-    openUploadModalAtom, // This atom's action is still used
+    openUploadModalAtom,
     sortedSessionsAtom,
     sessionSortCriteriaAtom,
     sessionSortDirectionAtom,
     setSessionSortAtom,
     SessionSortCriteria
-} from '../store'; // Store path remains the same
-// Session type is likely implicitly handled by sortedSessionsAtom or needed by SessionListTable
-import { getBadgeClasses } from '../helpers';
+} from '../store';
+// import { getBadgeClasses } from '../helpers'; // Badges handled by Themes.Badge now
 import { cn } from '../utils';
 
 export function LandingPage() {
   const sortedSessions = useAtomValue(sortedSessionsAtom);
-  const openUploadModal = useSetAtom(openUploadModalAtom); // Use the action atom
+  const openUploadModal = useSetAtom(openUploadModalAtom);
 
   const currentSortCriteria = useAtomValue(sessionSortCriteriaAtom);
   const currentSortDirection = useAtomValue(sessionSortDirectionAtom);
   const setSort = useSetAtom(setSessionSortAtom);
-  const navigate = useNavigate(); // Keep navigate if used outside the table
+  const navigate = useNavigate(); // Keep navigate if used by table
 
   // Handler for sorting to pass down
   const handleSort = (criteria: SessionSortCriteria) => {
@@ -38,30 +34,37 @@ export function LandingPage() {
 
 
   return (
-      <div className="w-full max-w-4xl mx-auto flex-grow flex flex-col p-4 md:p-6 lg:p-8">
-          <Card className="flex-grow flex flex-col overflow-hidden h-full"> {/* Ensure Card fills height */}
-              <CardHeader className="flex-row items-center justify-between px-4 pt-4 pb-2 sm:px-6 border-b dark:border-gray-700"> {/* Add border */}
-                  <h2 className="text-xl font-semibold flex items-center text-gray-900 dark:text-gray-100">
-                     <CounterClockwiseClockIcon className="mr-2 h-5 w-5 text-gray-600 dark:text-gray-400" aria-hidden="true" />
-                     Session History
-                  </h2>
-                  {/* Use icon prop */}
+      // Use Box or Flex with Tailwind for overall page layout if needed outside Card
+      <Box className="w-full flex-grow flex flex-col py-4 md:py-6 lg:py-8">
+          {/* Card takes full height available */}
+          <Card size="3" className="flex-grow flex flex-col overflow-hidden h-full">
+              {/* Header using Flex */}
+              <Flex justify="between" align="center" px="4" pt="4" pb="3" className="border-b">
+                  <Heading as="h2" size="5" weight="medium">
+                    <Flex align="center" gap="2">
+                         <CounterClockwiseClockIcon /> {/* Icon directly in Flex */}
+                         Session History
+                    </Flex>
+                  </Heading>
                   <Button
-                       variant="light" size="sm" onClick={openUploadModal}
-                       title="Upload New Session" aria-label="Upload New Session"
-                       icon={PlusCircledIcon} // Use icon prop
+                       variant="soft" // Use Themes variant
+                       size="2" // Use Themes size
+                       onClick={openUploadModal}
+                       title="Upload New Session"
+                       aria-label="Upload New Session"
                   >
-                      New Session
+                      <PlusCircledIcon width="16" height="16" />
+                      <Text ml="2">New Session</Text>
                   </Button>
-             </CardHeader>
-            {/* Use CardContent to wrap the table/empty state, allow it to grow and scroll */}
-            <CardContent className="flex-grow flex flex-col overflow-hidden p-0"> {/* Remove padding */}
+             </Flex>
+            {/* Content Area */}
+            <Box className="flex-grow flex flex-col overflow-hidden"> {/* Remove CardContent padding */}
                 {sortedSessions.length === 0 ? (
-                    <div className="flex-grow flex items-center justify-center p-6 text-center">
-                         <p className="text-gray-600 dark:text-gray-400">
+                    <Flex flexGrow="1" align="center" justify="center" p="6">
+                         <Text color="gray">
                             No sessions found. Upload one to get started!
-                         </p>
-                    </div>
+                         </Text>
+                    </Flex>
                 ) : (
                     // Render the extracted table component
                     <SessionListTable
@@ -71,8 +74,8 @@ export function LandingPage() {
                         onSort={handleSort}
                     />
                 )}
-            </CardContent>
+            </Box>
         </Card>
-    </div>
+    </Box>
   );
 }

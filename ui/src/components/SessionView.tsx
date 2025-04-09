@@ -1,23 +1,20 @@
-// src/components/SessionView.tsx
 import React, { useEffect, useState, useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useParams, useNavigate, Navigate, useLocation } from 'react-router-dom';
 
-// UI Components & Icons
-import { Card } from './ui/Card'; // Keep Card if used for loading state
-import { Button } from './ui/Button'; // Keep Button if used for loading state
-import { ReloadIcon } from '@radix-ui/react-icons'; // Keep ReloadIcon for loading
+// Radix Themes & Icons
+import { Card, Button, Flex, Text, Spinner } from '@radix-ui/themes'; // Use Themes components for loading state
+import { ReloadIcon } from '@radix-ui/react-icons'; // Keep ReloadIcon
 
-// Sidebar
-// No longer need direct SessionSidebar import here
-
-// New Sub-components
+// App Sub-components
 import { SessionHeader } from './SessionView/SessionHeader';
 import { SessionContent } from './SessionView/SessionContent';
 import { EditDetailsModal } from './SessionView/EditDetailsModal';
 
 // Constants, Types
-import type { Session, ChatSession } from '../types';
+// import { SESSION_TYPES, THERAPY_TYPES } from '../constants'; // Path corrected - Not needed here anymore
+import type { Session, ChatSession } from '../types'; // Path corrected
+import { cn } from '../utils'; // Path corrected
 
 // Atoms
 import {
@@ -28,38 +25,31 @@ import {
     chatErrorAtom,
     updateSessionMetadataAtom,
     saveTranscriptAtom,
-    startNewChatAtom, // Import atom to start a chat
-} from '../store';
-
-// Sub-components
-// No longer need direct imports of Transcription, ChatInterface, StartChatPrompt here
+    startNewChatAtom,
+} from '../store'; // Path corrected
 
 export function SessionView() {
     const { sessionId: sessionIdParam, chatId: chatIdParam } = useParams<{ sessionId: string; chatId?: string }>();
     const navigate = useNavigate();
     const location = useLocation();
 
-    // Atoms - Keep the ones needed for coordination and data fetching
+    // Atoms
     const allSessions = useAtomValue(pastSessionsAtom);
     const setActiveSessionId = useSetAtom(activeSessionIdAtom);
     const setActiveChatId = useSetAtom(activeChatIdAtom);
-    const session = useAtomValue(activeSessionAtom); // Use 'session' for clarity
+    const session = useAtomValue(activeSessionAtom);
     const setChatError = useSetAtom(chatErrorAtom);
-    const updateMetadataAction = useSetAtom(updateSessionMetadataAtom);
+    // const updateMetadataAction = useSetAtom(updateSessionMetadataAtom); // Action called within Modal
     const saveTranscriptAction = useSetAtom(saveTranscriptAtom);
     const activeChatId = useAtomValue(activeChatIdAtom);
-    const startNewChatAction = useSetAtom(startNewChatAtom); // Get the action setter
+    const startNewChatAction = useSetAtom(startNewChatAtom);
 
-    // --- Sidebar Resizing State ---
-    // This logic is moved to SessionContent.tsx
-
-    // --- State for Editing Details ---
-    const [isEditingMetadata, setIsEditingMetadata] = useState(false); // State to control the modal visibility
-    // --- Transcript State ---
-    const [editTranscriptContent, setEditTranscriptContent] = useState(''); // Still needed to pass down
+    // --- State ---
+    const [isEditingMetadata, setIsEditingMetadata] = useState(false);
+    const [editTranscriptContent, setEditTranscriptContent] = useState('');
     const [isLoading, setIsLoading] = useState(true);
 
-    // --- Effect to Sync Session ID and Chat ID --- (remains the same)
+    // --- Effect to Sync Session ID and Chat ID --- (Keep logic)
     useEffect(() => {
         setIsLoading(true);
         const currentSessionIdNum = sessionIdParam ? parseInt(sessionIdParam, 10) : NaN;
@@ -98,19 +88,15 @@ export function SessionView() {
         setIsLoading(false);
     }, [sessionIdParam, chatIdParam, allSessions, navigate, setActiveSessionId, setActiveChatId, setChatError, location.pathname]);
 
-
-    // --- Effect to Initialize Local Edit State --- (remains the same)
+    // --- Effect to Initialize Transcript State --- (Keep logic)
     useEffect(() => {
         if (session) {
-            // Initialize transcript edit state
-            setEditTranscriptContent(session.transcription || ''); // Initialize content directly
+            setEditTranscriptContent(session.transcription || '');
         }
-    }, [session]); // Depend on session now
+    }, [session]);
 
 
     // --- Handlers ---
-
-    // --- Start First Chat Handler ---
     const handleStartFirstChat = async () => {
         if (!session) return;
         const currentSessionId = session.id;
@@ -119,69 +105,46 @@ export function SessionView() {
             navigate(`/sessions/${currentSessionId}/chats/${result.newChatId}`);
         } else {
              setChatError(result.error);
-             // Optionally display a more visible error message/toast
-             alert(`Error starting chat: ${result.error}`); // Simple alert for now
+             alert(`Error starting chat: ${result.error}`);
         }
     };
-    // --- End Start First Chat Handler ---
 
-    // Handler to open the Edit Details modal and initialize state (remains the same)
-    const handleOpenEditMetadataModal = () => {
-        setIsEditingMetadata(true); // Open the modal
-    };
+    const handleOpenEditMetadataModal = () => setIsEditingMetadata(true);
+    // const handleCloseEditMetadataModal = () => setIsEditingMetadata(false); // Handled by Modal's onOpenChange
 
-    // Handler to close the Edit Details modal (remains the same)
-     const handleCloseEditMetadataModal = () => {
-        setIsEditingMetadata(false);
-    };
-
-    // Saving metadata is now handled INSIDE EditDetailsModal.tsx
-
-    // This handler updates the state when a paragraph is saved in Transcription.tsx (remains the same)
     const handleTranscriptContentChange = (newContent: string) => {
         if (!session) return;
-        saveTranscriptAction({
-            sessionId: session.id,
-            transcript: newContent // Use the content passed up from the component
-        });
-         setEditTranscriptContent(newContent); // Also update local state if needed for consistency
-    }
+        saveTranscriptAction({ sessionId: session.id, transcript: newContent });
+        setEditTranscriptContent(newContent);
+    };
 
-    const handleNavigateBack = () => navigate('/'); // Keep this
-
-    // Resizing logic is moved to SessionContent.tsx
-
+    const handleNavigateBack = () => navigate('/');
 
     // --- Render Logic ---
     if (isLoading) {
       return (
-        <div className="flex-grow flex items-center justify-center text-center p-10">
-          <Card className="max-w-sm mx-auto p-6">
-            <div className="flex justify-center mb-4">
-              <ReloadIcon className="h-8 w-8 animate-spin text-gray-400 dark:text-gray-500" />
-            </div>
-            <p className="text-gray-600 dark:text-gray-300">Loading session data...</p>
-            <Button onClick={handleNavigateBack} variant="secondary" className="mt-6 w-full">Go Back</Button>
+        <Flex flexGrow="1" align="center" justify="center" p="8">
+          <Card size="3">
+            <Flex direction="column" align="center" gap="4">
+              <Spinner size="3" />
+              <Text color="gray">Loading session data...</Text>
+              <Button onClick={handleNavigateBack} variant="soft" color="gray" mt="4">Go Back</Button>
+            </Flex>
           </Card>
-        </div>
+        </Flex>
       );
     }
     if (!session) { return <Navigate to="/" replace />; }
 
-    // Determine if there are any chats for the current session
     const hasChats = Array.isArray(session.chats) && session.chats.length > 0;
 
     return (
-      // Use a simpler container, layout handled by children
-      <div className="flex flex-col flex-grow min-h-0 h-screen">
-          {/* Render Session Header */}
+      <div className="flex flex-col flex-grow min-h-0 h-full">
           <SessionHeader
               session={session}
               onEditDetailsClick={handleOpenEditMetadataModal}
               onNavigateBack={handleNavigateBack}
           />
-
-          {/* Render Session Content (handles sidebar, resizer, main panels) */}
           <SessionContent
                 session={session}
                 editTranscriptContent={editTranscriptContent}
@@ -190,14 +153,11 @@ export function SessionView() {
                 hasChats={hasChats}
                 onStartFirstChat={handleStartFirstChat}
           />
-
-          {/* Render Edit Details Modal */}
           <EditDetailsModal
               isOpen={isEditingMetadata}
-              onOpenChange={setIsEditingMetadata} // Pass setter directly or use handleCloseEditMetadataModal
+              onOpenChange={setIsEditingMetadata}
               session={session}
           />
-
-          </div>
+      </div>
     );
 }
