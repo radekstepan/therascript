@@ -117,10 +117,6 @@ export function Transcription({
             >
                 {/* Left Section: Title and Details */}
                 <Flex direction="column" gap="1" style={{ minWidth: 0 }}> {/* Allow shrinking */}
-                    {/* Title */}
-                    <Heading as="h2" size="3" weight="bold" truncate title={displayTitle}>
-                         {displayTitle}
-                    </Heading>
                     {/* Details - smaller size, wrap */}
                     <Flex align="center" gap="3" wrap="wrap">
                          {renderHeaderDetail(PersonIcon, session.clientName, "Client")}

@@ -2,7 +2,8 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useAtomValue, useSetAtom, useAtom } from 'jotai'; // Import useAtom for sidebar width
 import { useParams, useNavigate, Navigate, useLocation } from 'react-router-dom';
-import { Flex, Box, Button, Text } from '@radix-ui/themes'; // Removed Link
+// Import Text component
+import { Flex, Box, Button, Text } from '@radix-ui/themes';
 import { ArrowLeftIcon } from '@radix-ui/react-icons'; // Icon for back button
 import { UserThemeDropdown } from '../components/UserThemeDropdown'; // Import dropdown
 import { SessionSidebar } from './SessionView/SessionSidebar'; // Import Sidebar
@@ -144,6 +145,8 @@ export function SessionView() {
         return <Navigate to="/" replace />;
     }
 
+    // --- Calculate displayTitle here ---
+    const displayTitle = session.sessionName || session.fileName;
     const hasChats = Array.isArray(session.chats) && session.chats.length > 0;
 
     return (
@@ -178,13 +181,25 @@ export function SessionView() {
                     className="border-b" // Add border below header
                     style={{ backgroundColor: 'var(--color-panel-solid)'}} // Match sidebar bg
                 >
+                    {/* Outer Flex: Pushes Left (Breadcrumb) and Right (Dropdown) apart */}
                     <Flex justify="between" align="center">
-                         {/* Back Button */}
-                         <Button onClick={handleNavigateBack} variant="ghost" color="gray" size="2">
-                             <ArrowLeftIcon />
-                             Sessions {/* Simplified text */}
-                         </Button>
-                         {/* User/Theme Dropdown */}
+                         {/* --- MODIFICATION START: Left Breadcrumb Section --- */}
+                         <Flex align="center" gap="2" style={{ minWidth: 0 }}> {/* Allow shrinking */}
+                            {/* Back Button */}
+                            <Button onClick={handleNavigateBack} variant="ghost" color="gray" size="2" style={{ flexShrink: 0 }}> {/* Prevent shrinking */}
+                                <ArrowLeftIcon />
+                                Sessions
+                            </Button>
+                            {/* Separator */}
+                            <Text color="gray" size="2" style={{ flexShrink: 0 }}> / </Text>
+                            {/* Current Session Title */}
+                            <Text size="2" weight="bold" truncate title={displayTitle} style={{ flexShrink: 1 }}> {/* Allow shrinking and truncation */}
+                                {displayTitle}
+                            </Text>
+                         </Flex>
+                         {/* --- MODIFICATION END --- */}
+
+                         {/* User/Theme Dropdown (Stays on the right) */}
                          <UserThemeDropdown />
                     </Flex>
                 </Box>
