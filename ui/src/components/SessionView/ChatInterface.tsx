@@ -29,10 +29,6 @@ export function ChatInterface() {
     return (
         // Flex column taking full height from parent (SessionContent panel)
         <Flex direction="column" style={{ height: '100%', minHeight: 0 }}>
-            {/* Header fixed */}
-            <ChatHeader activeChatId={activeChatId} />
-            <Separator size="4" />
-
             {/* Themes ScrollArea taking remaining space */}
             <ScrollArea
                 type="auto"
