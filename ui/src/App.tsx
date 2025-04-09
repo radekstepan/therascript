@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { useAtomValue, useAtom } from 'jotai';
 import { Routes, Route, Navigate } from 'react-router-dom';
 
@@ -23,7 +23,7 @@ import {
     effectiveThemeAtom,
     Theme as ThemeType // Renamed Theme type from store to avoid conflict
 } from './store';
-import { cn } from './utils';
+// Removed cn import as it's not used here anymore
 
 function App() {
     const isModalOpen = useAtomValue(isUploadModalOpenAtom);
@@ -32,7 +32,7 @@ function App() {
     const effectiveTheme = useAtomValue(effectiveThemeAtom);
     const [theme, setTheme] = useAtom(themeAtom);
 
-    // Effect for theme is no longer needed here, Theme component handles it
+    // Effect for theme is handled by Radix Theme component
 
     // Handle Sign Out (placeholder)
     const handleSignOut = () => {
@@ -49,8 +49,10 @@ function App() {
                     {/* Header */}
                      {/* Use Flex from Themes for layout inside header */}
                      {/* Use `className="border-b"` for border with Tailwind, or Themes Box with border */}
+                    {/* Header background spans full width */}
                     <Box className="border-b" style={{ backgroundColor: 'var(--color-panel-solid)'}}>
-                        <Container size="4"> {/* Optional: Use Container for max-width */}
+                        {/* Container constrains header *content* width */}
+                        <Container size="4">
                             <Flex align="center" justify="between" py={{ initial: '3', sm: '4' }} px={{ initial: '3', sm: '0' }}>
                                 {/* Logo/Spacer (Can use Themes Box or keep div) */}
                                  <Box className="w-24 md:w-32 flex-shrink-0"> {/* Keep spacer */} </Box>
@@ -97,16 +99,16 @@ function App() {
 
                     {/* Main Content Area */}
                     {/* Use Tailwind for flex-grow and overflow */}
+                    {/* REMOVED Container here to allow SessionView full width */}
                     <main className="flex-grow flex flex-col overflow-y-auto">
-                        {/* Use Container to constrain width */}
-                         <Container size="4" className="flex-grow flex flex-col">
-                            <Routes>
-                                <Route path="/" element={<LandingPage />} />
-                                <Route path="/sessions/:sessionId" element={<SessionView />} />
-                                <Route path="/sessions/:sessionId/chats/:chatId" element={<SessionView />} />
-                                <Route path="*" element={<Navigate replace to="/" />} />
-                            </Routes>
-                        </Container>
+                        <Routes>
+                            {/* LandingPage will now manage its own Container */}
+                            <Route path="/" element={<LandingPage />} />
+                            {/* SessionView manages its own layout, no Container needed here */}
+                            <Route path="/sessions/:sessionId" element={<SessionView />} />
+                            <Route path="/sessions/:sessionId/chats/:chatId" element={<SessionView />} />
+                            <Route path="*" element={<Navigate replace to="/" />} />
+                        </Routes>
                     </main>
 
                     <UploadModal

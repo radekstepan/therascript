@@ -1,7 +1,6 @@
 // src/helpers.ts
-import { cn } from './utils';
-// Import the mappings and defaults from constants
-import { BADGE_COLOR_MAP, defaultSessionClasses, defaultTherapyClasses } from './constants';
+// Removed cn import as it's not used here anymore
+// REMOVED: Unused badge color map imports
 
 // getTodayDateString and formatTimestamp functions remain the same...
 
@@ -28,6 +27,7 @@ export const formatTimestamp = (timestamp?: number): string => {
       if (isNaN(date.getTime())) {
          return 'Invalid Date';
       }
+      // Using standard Intl formatting for locale-awareness
       return date.toLocaleString(undefined, {
           dateStyle: 'short',
           timeStyle: 'short'
@@ -39,32 +39,13 @@ export const formatTimestamp = (timestamp?: number): string => {
 };
 
 
-/**
- * Generates Tailwind CSS classes for session/therapy type badges
- * using mappings defined in constants.ts.
- * @param type - The session or therapy type string.
- * @param category - Specifies whether the type is 'session' or 'therapy'.
- * @returns A string of Tailwind classes for the badge.
- */
+// --- REMOVED getBadgeClasses function ---
+// This function is no longer needed because Radix Themes Badge component
+// handles color variants directly via its `color` prop.
+// The logic to map session/therapy types to specific colors is now
+// handled within the SessionListTable component using color maps.
+/*
 export const getBadgeClasses = (type?: string, category: 'session' | 'therapy' = 'session'): string => {
-    // Base classes remain the same
-    const base = "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold capitalize";
-
-    const typeLower = type?.toLowerCase();
-    let colorClasses = '';
-
-    // Look up the color classes from the constant map
-    if (typeLower) {
-        if (category === 'session') {
-            colorClasses = BADGE_COLOR_MAP.session[typeLower] || defaultSessionClasses;
-        } else { // category === 'therapy'
-            colorClasses = BADGE_COLOR_MAP.therapy[typeLower] || defaultTherapyClasses;
-        }
-    } else {
-        // Handle undefined type - use default based on category
-        colorClasses = category === 'session' ? defaultSessionClasses : defaultTherapyClasses;
-    }
-
-    // Use cn() to merge base classes with the determined color classes
-    return cn(base, colorClasses);
+    // ... old implementation ...
 }
+*/

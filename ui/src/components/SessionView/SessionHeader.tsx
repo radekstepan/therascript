@@ -18,6 +18,7 @@ interface SessionHeaderProps {
     onNavigateBack: () => void;
 }
 
+// Consistent color maps as used elsewhere
 const sessionColorMap: Record<string, React.ComponentProps<typeof Badge>['color']> = {
     'individual': 'blue', 'phone': 'sky', 'skills group': 'teal',
     'family session': 'green', 'family skills': 'green', 'couples': 'indigo',
@@ -33,6 +34,7 @@ const getBadgeColor = (type: string | undefined, category: 'session' | 'therapy'
     return type ? (map[type.toLowerCase()] || map['default']) : map['default'];
 };
 
+// Helper to render header details consistently
 const renderHeaderDetail = (
     IconComponent: React.ElementType,
     value: string | undefined,
@@ -45,7 +47,7 @@ const renderHeaderDetail = (
     const badgeColor = isBadge ? getBadgeColor(value, category) : undefined;
 
     return (
-        // Changed gap from number to string
+        // Use Themes Flex for alignment and gap
         <Flex align="center" gap="1" title={label}>
             <IconComponent className={cn("flex-shrink-0", isBadge ? "opacity-80" : "text-[--gray-a10]")} width="14" height="14" />
             {isBadge && badgeColor ? (
@@ -64,10 +66,12 @@ export function SessionHeader({ session, onEditDetailsClick, onNavigateBack }: S
     const displayTitle = session.sessionName || session.fileName;
 
     return (
+        // Header outer box spans full width
         <Box className="border-b flex-shrink-0" style={{ backgroundColor: 'var(--color-panel-solid)' }}>
+            {/* Container constrains the content within the header */}
             <Container size="4">
-                 {/* Changed gap from number to string */}
                  <Flex align="center" justify="between" gap="4" py="3" px={{ initial: '3', sm: '0' }}>
+                    {/* Back Button */}
                     <Box flexShrink="0">
                         <Button onClick={onNavigateBack} variant="ghost" color="gray" size="2">
                             <ArrowLeftIcon />
@@ -75,12 +79,12 @@ export function SessionHeader({ session, onEditDetailsClick, onNavigateBack }: S
                         </Button>
                     </Box>
 
-                    {/* Changed gap from number to string */}
+                    {/* Session Title and Details (Centered) */}
                     <Flex direction="column" align="center" gap="1" style={{ minWidth: 0, flexGrow: 1 }} px="4">
                         <Heading as="h1" size="4" weight="bold" truncate title={displayTitle}>
                             {displayTitle}
                         </Heading>
-                        {/* Changed gap from number to string */}
+                        {/* Details rendered using the helper */}
                         <Flex align="center" justify="center" gap="3" wrap="wrap" mt="1">
                              {renderHeaderDetail(PersonIcon, session.clientName, "Client")}
                              {renderHeaderDetail(CalendarIcon, session.date, "Date")}
@@ -89,14 +93,17 @@ export function SessionHeader({ session, onEditDetailsClick, onNavigateBack }: S
                         </Flex>
                     </Flex>
 
+                    {/* Edit Button */}
                     <Box flexShrink="0">
                         <Button
                             variant="soft"
                             size="2"
                             onClick={onEditDetailsClick}
                             disabled={!session}
+                            aria-label="Edit session details" // Added aria-label
                         >
                             <Pencil1Icon width="16" height="16" />
+                             {/* Add margin to text instead of wrapping span */}
                              <Text ml="2">Edit Details</Text>
                         </Button>
                     </Box>

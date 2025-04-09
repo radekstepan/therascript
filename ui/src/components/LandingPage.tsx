@@ -6,7 +6,7 @@ import {
     PlusCircledIcon,
 } from '@radix-ui/react-icons';
 import { SessionListTable } from './LandingPage/SessionListTable';
-import { Button, Card, Flex, Heading, Text, Box } from '@radix-ui/themes'; // Use Themes components
+import { Button, Card, Flex, Heading, Text, Box, Container } from '@radix-ui/themes'; // Use Themes components
 import {
     openUploadModalAtom,
     sortedSessionsAtom,
@@ -15,8 +15,8 @@ import {
     setSessionSortAtom,
     SessionSortCriteria
 } from '../store';
-// import { getBadgeClasses } from '../helpers'; // Badges handled by Themes.Badge now
-import { cn } from '../utils';
+// REMOVED: Unused getBadgeClasses import
+// REMOVED: Unused cn import
 
 export function LandingPage() {
   const sortedSessions = useAtomValue(sortedSessionsAtom);
@@ -36,46 +36,49 @@ export function LandingPage() {
   return (
       // Use Box or Flex with Tailwind for overall page layout if needed outside Card
       <Box className="w-full flex-grow flex flex-col py-4 md:py-6 lg:py-8">
-          {/* Card takes full height available */}
-          <Card size="3" className="flex-grow flex flex-col overflow-hidden h-full">
-              {/* Header using Flex */}
-              <Flex justify="between" align="center" px="4" pt="4" pb="3" className="border-b">
-                  <Heading as="h2" size="5" weight="medium">
-                    <Flex align="center" gap="2">
-                         <CounterClockwiseClockIcon /> {/* Icon directly in Flex */}
-                         Session History
-                    </Flex>
-                  </Heading>
-                  <Button
-                       variant="soft" // Use Themes variant
-                       size="2" // Use Themes size
-                       onClick={openUploadModal}
-                       title="Upload New Session"
-                       aria-label="Upload New Session"
-                  >
-                      <PlusCircledIcon width="16" height="16" />
-                      <Text ml="2">New Session</Text>
-                  </Button>
-             </Flex>
-            {/* Content Area */}
-            <Box className="flex-grow flex flex-col overflow-hidden"> {/* Remove CardContent padding */}
-                {sortedSessions.length === 0 ? (
-                    <Flex flexGrow="1" align="center" justify="center" p="6">
-                         <Text color="gray">
-                            No sessions found. Upload one to get started!
-                         </Text>
-                    </Flex>
-                ) : (
-                    // Render the extracted table component
-                    <SessionListTable
-                        sessions={sortedSessions}
-                        sortCriteria={currentSortCriteria}
-                        sortDirection={currentSortDirection}
-                        onSort={handleSort}
-                    />
-                )}
-            </Box>
-        </Card>
-    </Box>
+          {/* Add Container here to constrain the LandingPage content width */}
+          <Container size="4" className="flex-grow flex flex-col">
+              {/* Card takes full height available within the Container */}
+              <Card size="3" className="flex-grow flex flex-col overflow-hidden h-full">
+                  {/* Header using Flex */}
+                  <Flex justify="between" align="center" px="4" pt="4" pb="3" className="border-b">
+                      <Heading as="h2" size="5" weight="medium">
+                        <Flex align="center" gap="2">
+                             <CounterClockwiseClockIcon /> {/* Icon directly in Flex */}
+                             Session History
+                        </Flex>
+                      </Heading>
+                      <Button
+                           variant="soft" // Use Themes variant
+                           size="2" // Use Themes size
+                           onClick={openUploadModal}
+                           title="Upload New Session"
+                           aria-label="Upload New Session"
+                      >
+                          <PlusCircledIcon width="16" height="16" />
+                          <Text ml="2">New Session</Text>
+                      </Button>
+                 </Flex>
+                {/* Content Area */}
+                <Box className="flex-grow flex flex-col overflow-hidden"> {/* Remove CardContent padding */}
+                    {sortedSessions.length === 0 ? (
+                        <Flex flexGrow="1" align="center" justify="center" p="6">
+                             <Text color="gray">
+                                No sessions found. Upload one to get started!
+                             </Text>
+                        </Flex>
+                    ) : (
+                        // Render the extracted table component
+                        <SessionListTable
+                            sessions={sortedSessions}
+                            sortCriteria={currentSortCriteria}
+                            sortDirection={currentSortDirection}
+                            onSort={handleSort}
+                        />
+                    )}
+                </Box>
+              </Card>
+           </Container>
+      </Box>
   );
 }

@@ -1,3 +1,4 @@
+// src/components/SessionView/EditDetailsModal.tsx
 import React, { useState, useEffect } from 'react';
 import { useSetAtom } from 'jotai';
 import { Button, Dialog, Flex, Text, TextField, Select, Box, Heading, Callout } from '@radix-ui/themes';
@@ -60,31 +61,46 @@ export function EditDetailsModal({ isOpen, onOpenChange, session }: EditDetailsM
                     Edit Session Details
                 </Dialog.Title>
                 <Flex direction="column" gap="4" py="4">
+                    {/* Using grid for alignment */}
                     <Box className="grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-3">
                          <Text as="label" size="2" weight="medium" htmlFor="sessionNameEditModal" className="text-right">Session Name</Text>
-                         {/* Corrected TextField Usage */}
-                         <TextField.Root size="2">
-                             <TextField.Root id="sessionNameEditModal" value={editSessionName} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditSessionName(e.target.value)} placeholder="e.g., Weekly Check-in" required />
-                         </TextField.Root>
+                         {/* --- FIX APPLIED HERE: Simplified TextField.Root --- */}
+                         <TextField.Root
+                             id="sessionNameEditModal" // Pass id for label association
+                             size="2"
+                             value={editSessionName}
+                             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditSessionName(e.target.value)}
+                             placeholder="e.g., Weekly Check-in"
+                             required
+                          />
 
                          <Text as="label" size="2" weight="medium" htmlFor="clientNameEditModal" className="text-right">Client Name</Text>
-                         {/* Corrected TextField Usage */}
-                         <TextField.Root size="2">
-                             <TextField.Root id="clientNameEditModal" value={editClientName} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditClientName(e.target.value)} placeholder="Client's Full Name" required />
-                         </TextField.Root>
+                         {/* --- FIX APPLIED HERE: Simplified TextField.Root --- */}
+                         <TextField.Root
+                             id="clientNameEditModal" // Pass id for label association
+                             size="2"
+                             value={editClientName}
+                             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditClientName(e.target.value)}
+                             placeholder="Client's Full Name"
+                             required
+                         />
+                         {/* --- END FIXES --- */}
 
                          <Text as="label" size="2" weight="medium" htmlFor="sessionDateEditModal" className="text-right">Date</Text>
                          {/* Use standard HTML input, styled to match Radix */}
+                         {/* Apply Radix input classes for consistency */}
                          <input id="sessionDateEditModal" type="date" value={editDate} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditDate(e.target.value)} required className="rt-TextFieldInput rt-r-size-2 rt-variant-surface" />
 
                          <Text as="label" size="2" weight="medium" htmlFor="sessionTypeEditModal" className="text-right">Session Type</Text>
-                         <Select.Root value={editType} onValueChange={setEditType} required size="2"> {/* Added size */}
+                         {/* Add size="2" to Select.Root for consistency */}
+                         <Select.Root value={editType} onValueChange={setEditType} required size="2">
                             <Select.Trigger id="sessionTypeEditModal" placeholder="Select type..." />
                             <Select.Content> {SESSION_TYPES.map(type => (<Select.Item key={type} value={type}>{type.charAt(0).toUpperCase() + type.slice(1)}</Select.Item>))} </Select.Content>
                          </Select.Root>
 
                          <Text as="label" size="2" weight="medium" htmlFor="therapyTypeEditModal" className="text-right">Therapy Type</Text>
-                         <Select.Root value={editTherapy} onValueChange={setEditTherapy} required size="2"> {/* Added size */}
+                         {/* Add size="2" to Select.Root for consistency */}
+                         <Select.Root value={editTherapy} onValueChange={setEditTherapy} required size="2">
                             <Select.Trigger id="therapyTypeEditModal" placeholder="Select therapy..." />
                             <Select.Content> {THERAPY_TYPES.map(type => (<Select.Item key={type} value={type}>{type}</Select.Item>))} </Select.Content>
                          </Select.Root>

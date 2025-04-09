@@ -8,8 +8,8 @@ import {
 import { Table, Badge, Text, Flex } from '@radix-ui/themes'; // Use Themes Table, Badge
 import type { Session } from '../../types';
 import type { SessionSortCriteria, SortDirection } from '../../store'; // Import types
-// import { getBadgeClasses } from '../../helpers'; // No longer needed for badges
-import { cn } from '../../utils';
+// REMOVED: Unused getBadgeClasses import
+import { cn } from '../../utils'; // Keep cn for potential future use if needed
 
 interface SessionListTableProps {
     sessions: Session[];

@@ -1,8 +1,9 @@
+// src/components/SessionView/ChatInput.tsx
 import React, { useState, useRef, useEffect } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { StarIcon, PaperPlaneIcon, StopIcon, Cross2Icon } from '@radix-ui/react-icons';
 import * as Toast from '@radix-ui/react-toast';
-// Import TextField ONLY for TextField.Root
+// Import TextField directly
 import { Button, TextField, Flex, Box, Text, IconButton } from '@radix-ui/themes';
 import { StarredTemplatesList } from '../StarredTemplates';
 import {
@@ -21,7 +22,7 @@ export function ChatInput() {
     const toastMessageContent = useAtomValue(toastMessageAtom);
     const setToastMessageAtom = useSetAtom(toastMessageAtom);
     const [isToastVisible, setIsToastVisible] = useState(false);
-    const inputRef = useRef<HTMLInputElement>(null);
+    const inputRef = useRef<HTMLInputElement>(null); // Keep ref if needed for focus management
     const [showTemplates, setShowTemplates] = useState(false);
 
     useEffect(() => { setIsToastVisible(!!toastMessageContent); }, [toastMessageContent]);
@@ -39,6 +40,7 @@ export function ChatInput() {
             return false;
         } else if (!currentQuery.trim()) {
             console.log("Submit blocked: Empty message.");
+            // Optionally set an error: setChatError("Cannot send an empty message.");
             return false;
         } else if (activeChatId === null) {
             setChatError("Please select a chat first.");
@@ -66,9 +68,7 @@ export function ChatInput() {
     const showCancelButton = isChatting;
     const sendButtonDisabled = !currentQuery.trim() || activeChatId === null || isChatting;
 
-    // Define the classes needed to style the input like Radix Themes
-    // Adjust 'rt-r-size-2' if you need a different size
-    const inputClasses = "rt-TextFieldInput rt-r-size-2";
+    // Removed inputClasses as they are no longer needed for the workaround
 
     return (
         <>
@@ -81,30 +81,22 @@ export function ChatInput() {
                         {showTemplates && ( <StarredTemplatesList onSelectTemplate={handleSelectTemplate} onClose={() => setShowTemplates(false)} /> )}
                     </Box>
 
-                    {/* --- WORKAROUND --- */}
-                    {/* Use TextField.Root for the container styling/structure */}
-                    {/* Use a standard <input> inside and apply Radix classes manually */}
+                    {/* --- FIX APPLIED HERE: Simplified TextField.Root --- */}
+                    {/* Use TextField.Root directly, passing props */}
                     <TextField.Root
-                        size="2" // Apply size to the Root container
+                        ref={inputRef} // Pass ref to the Root component
+                        size="2"
                         style={{ flexGrow: 1 }}
-                        // Add Radix data attributes for styling consistency if needed,
-                        // though Root usually handles container styles. Check browser inspector if needed.
-                        // data-radix-themes-system-props="size=2"
-                    >
-                        <input
-                            ref={inputRef}
-                            className={inputClasses} // Apply Radix input classes
-                            placeholder="Ask about the session..."
-                            value={currentQuery}
-                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCurrentQuery(e.target.value)}
-                            disabled={activeChatId === null || isChatting}
-                            aria-label="Chat input message"
-                            onKeyDown={handleKeyDown}
-                            // Add type="text" (though it's the default)
-                            type="text"
-                        />
-                    </TextField.Root>
-                    {/* --- END WORKAROUND --- */}
+                        placeholder="Ask about the session..."
+                        value={currentQuery}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCurrentQuery(e.target.value)}
+                        disabled={activeChatId === null || isChatting}
+                        aria-label="Chat input message"
+                        onKeyDown={handleKeyDown}
+                        // Type="text" is default but can be explicit if needed
+                        // type="text"
+                    />
+                    {/* --- END FIX --- */}
 
 
                     {showCancelButton ? (

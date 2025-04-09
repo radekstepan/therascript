@@ -1,8 +1,15 @@
+// src/components/SessionView/SessionSidebar.tsx
 import React, { useState } from 'react';
 import { NavLink, useParams, useNavigate } from 'react-router-dom';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { activeSessionAtom, renameChatAtom, deleteChatAtom, activeChatIdAtom } from '../../store';
-import { ChatBubbleIcon, DotsHorizontalIcon, Pencil1Icon, TrashIcon } from '@radix-ui/react-icons';
+import {
+    activeSessionAtom, renameChatAtom, deleteChatAtom, activeChatIdAtom,
+    startNewChatAtom, // Import action atom for new chat
+    chatErrorAtom // Import atom to set potential errors
+} from '../../store';
+import {
+    ChatBubbleIcon, DotsHorizontalIcon, Pencil1Icon, TrashIcon, PlusCircledIcon // Add Plus icon
+} from '@radix-ui/react-icons';
 import {
     Box, Flex, Text, Heading, Button, IconButton, TextField,
     DropdownMenu, AlertDialog, ScrollArea, Separator
@@ -17,8 +24,10 @@ export function SessionSidebar() {
     const session = useAtomValue(activeSessionAtom);
     const renameChatAction = useSetAtom(renameChatAtom);
     const deleteChatAction = useSetAtom(deleteChatAtom);
+    const startNewChatAction = useSetAtom(startNewChatAtom); // Hook for new chat action
+    const setChatError = useSetAtom(chatErrorAtom); // Hook to set errors
     const currentActiveChatIdAtomValue = useAtomValue(activeChatIdAtom);
-    // Removed unused setActiveChatId
+    // REMOVED: Unused setActiveChatId import
 
     const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
     const [renamingChat, setRenamingChat] = useState<ChatSession | null>(null);
@@ -30,11 +39,28 @@ export function SessionSidebar() {
 
     if (!session || !sessionIdParam) return null;
     const sessionId = parseInt(sessionIdParam, 10);
+    if (isNaN(sessionId)) {
+        // Handle invalid sessionIdParam if necessary, maybe navigate away
+        console.error("Invalid session ID in URL parameter:", sessionIdParam);
+        return null; // Or redirect
+    }
+
 
     const sortedChats = [...(session.chats || [])].sort((a, b) => b.timestamp - a.timestamp);
     const getChatDisplayTitle = (chat: ChatSession | null): string => {
         if (!chat) return 'Unknown Chat';
         return chat.name || `Chat (${formatTimestamp(chat.timestamp)})`;
+    };
+
+    // --- New Chat Handler ---
+    const handleNewChatClick = async () => {
+        const result = await startNewChatAction({ sessionId });
+        if (result.success) {
+            navigate(`/sessions/${sessionId}/chats/${result.newChatId}`);
+        } else {
+            setChatError(result.error); // Show error if creation fails
+             // Optionally display a toast message here as well
+        }
     };
 
     const handleRenameClick = (chat: ChatSession) => {
@@ -52,18 +78,23 @@ export function SessionSidebar() {
         setDeletingChat(chat); setIsDeleteConfirmOpen(true);
     };
     const confirmDelete = () => {
-        if (!deletingChat || isNaN(sessionId)) return;
+        if (!deletingChat) return; // sessionId already validated earlier
         const result = deleteChatAction({ chatId: deletingChat.id });
         if (result.success) {
              if (currentActiveChatIdAtomValue === deletingChat.id) {
                  if (result.newActiveChatId !== null) {
                      navigate(`/sessions/${sessionId}/chats/${result.newActiveChatId}`, { replace: true });
                  } else {
+                     // If no chats left, navigate back to session base or landing?
+                     // Navigating to session base for now, showing the StartChatPrompt.
                      navigate(`/sessions/${sessionId}`, { replace: true });
                  }
              }
+             // If a different chat was deleted, no navigation needed
         } else {
-            console.error("Failed to delete chat:", result.error); alert(`Error deleting chat: ${result.error}`);
+            console.error("Failed to delete chat:", result.error);
+            setChatError(result.error); // Show error
+            // Optionally display a toast message
         }
         cancelDelete();
     };
@@ -77,10 +108,19 @@ export function SessionSidebar() {
 
     return (
         <>
+            {/* Sidebar content */}
             <Box p="4" className="flex flex-col h-full w-full overflow-hidden" style={{ backgroundColor: 'var(--color-panel-solid)'}}>
-                <Box flexShrink="0" mb="2">
+                {/* Header and New Chat Button */}
+                <Flex justify="between" align="center" flexShrink="0" mb="2">
                     <Heading as="h3" size="1" color="gray" trim="start">Chats</Heading>
-                </Box>
+                    {/* --- Moved New Chat Button Here --- */}
+                    <Button onClick={handleNewChatClick} variant="soft" size="1" highContrast title="Start New Chat">
+                         <PlusCircledIcon width="14" height="14" />
+                         {/* Optional Text: <Text ml="1">New</Text> */}
+                    </Button>
+                </Flex>
+
+                {/* Chat List */}
                 {sortedChats.length === 0 ? (
                     <Text color="gray" size="2" style={{ fontStyle: 'italic' }}>No chats yet.</Text>
                 ) : (
@@ -94,6 +134,7 @@ export function SessionSidebar() {
                                             <ChatBubbleIcon className="mr-2 h-4 w-4 flex-shrink-0 text-[--gray-a9] group-hover:text-[--gray-a11]" />
                                             <Text size="2" truncate className="flex-grow">{getChatDisplayTitle(chat)}</Text>
                                         </NavLink>
+                                        {/* Dropdown for Rename/Delete */}
                                         <DropdownMenu.Root>
                                             <DropdownMenu.Trigger>
                                                 <IconButton variant="ghost" color="gray" size="1" className="absolute right-1 top-1/2 -translate-y-1/2 p-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity" aria-label="Chat options" onMouseDown={(e: React.MouseEvent<HTMLButtonElement>) => e.stopPropagation()} onClick={(e: React.MouseEvent<HTMLButtonElement>) => e.preventDefault()} >
@@ -113,27 +154,26 @@ export function SessionSidebar() {
                 )}
             </Box>
 
+            {/* Rename Dialog */}
             <AlertDialog.Root open={isRenameModalOpen} onOpenChange={(open) => !open && cancelRename()}>
                 <AlertDialog.Content style={{ maxWidth: 450 }}>
                     <AlertDialog.Title>
                         Rename Chat
                     </AlertDialog.Title>
                     {renamingChat && ( <AlertDialog.Description size="2" color="gray" mt="1" mb="4"> Enter a new name for "{getChatDisplayTitle(renamingChat)}". Leave empty to remove the name. </AlertDialog.Description> )}
-                    {/* Changed gap from number to string */}
                     <Flex direction="column" gap="3">
-                        {/* Corrected TextField Usage - Assuming previous fix applied */}
-                        <TextField.Root size="2">
-                            <TextField.Root
-                                value={currentRenameValue}
-                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCurrentRenameValue(e.target.value)}
-                                placeholder="Enter new name (optional)"
-                                autoFocus
-                                onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => { if (e.key === 'Enter') { e.preventDefault(); handleSaveRename(); }}}
-                            />
-                        </TextField.Root>
+                        {/* --- FIX APPLIED HERE: Simplified TextField.Root --- */}
+                        <TextField.Root
+                            size="2"
+                            value={currentRenameValue}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCurrentRenameValue(e.target.value)}
+                            placeholder="Enter new name (optional)"
+                            autoFocus
+                            onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => { if (e.key === 'Enter') { e.preventDefault(); handleSaveRename(); }}}
+                         />
+                        {/* --- END FIX --- */}
                          {renameError && (<Text color="red" size="1">{renameError}</Text>)}
                     </Flex>
-                    {/* Changed gap from number to string */}
                     <Flex gap="3" mt="4" justify="end">
                         <AlertDialog.Cancel>
                             <Button variant="soft" color="gray" onClick={cancelRename}>Cancel</Button>
@@ -145,13 +185,13 @@ export function SessionSidebar() {
                 </AlertDialog.Content>
             </AlertDialog.Root>
 
+            {/* Delete Confirmation Dialog */}
             <AlertDialog.Root open={isDeleteConfirmOpen} onOpenChange={(open) => !open && cancelDelete()}>
                 <AlertDialog.Content style={{ maxWidth: 450 }}>
                     <AlertDialog.Title>
                         Delete Chat
                     </AlertDialog.Title>
                     {deletingChat && ( <AlertDialog.Description size="2" color="gray" mt="1" mb="4"> Are you sure you want to delete "{getChatDisplayTitle(deletingChat)}"? This action cannot be undone. </AlertDialog.Description> )}
-                    {/* Changed gap from number to string */}
                     <Flex gap="3" mt="4" justify="end">
                         <AlertDialog.Cancel>
                             <Button variant="soft" color="gray" onClick={cancelDelete}>Cancel</Button>

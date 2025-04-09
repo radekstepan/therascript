@@ -2,10 +2,10 @@ import React, { useRef, useEffect } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Box, Flex, Separator } from '@radix-ui/themes';
-import { ChatHeader, ChatInput, ChatMessages } from './';
+import { ChatHeader, ChatInput, ChatMessages } from './'; // Keep ChatHeader import
 import {
     activeSessionAtom,
-    startNewChatAtom,
+    startNewChatAtom, // Keep startNewChatAtom
     chatErrorAtom,
     activeChatIdAtom,
     currentChatMessagesAtom,
@@ -13,30 +13,20 @@ import {
 } from '../../store';
 
 export function ChatInterface() {
-    const { chatId } = useParams<{ chatId?: string }>();
-    const navigate = useNavigate();
-    const session = useAtomValue(activeSessionAtom);
-    const startNewChatAction = useSetAtom(startNewChatAtom);
-    const setChatError = useSetAtom(chatErrorAtom);
+    // Removed unused useParams and useNavigate here as new chat is handled in sidebar now
+    // const { chatId } = useParams<{ chatId?: string }>();
+    // const navigate = useNavigate();
+    // const session = useAtomValue(activeSessionAtom);
+    // const startNewChatAction = useSetAtom(startNewChatAtom);
+    // const setChatError = useSetAtom(chatErrorAtom);
     const activeChatId = useAtomValue(activeChatIdAtom);
     const chatScrollRef = useRef<HTMLDivElement | null>(null);
     const chatMessages = useAtomValue(currentChatMessagesAtom);
     const isChatting = useAtomValue(isChattingAtom);
 
-    const handleNewChatClick = async () => {
-        const currentSessionId = session?.id;
-        if (currentSessionId) {
-            const result = await startNewChatAction({ sessionId: currentSessionId });
-            if (result.success) {
-                navigate(`/sessions/${currentSessionId}/chats/${result.newChatId}`);
-            } else {
-                setChatError(result.error);
-            }
-        } else {
-            setChatError("Cannot start new chat: Session context is missing.");
-        }
-    };
+    // REMOVED: handleNewChatClick logic is now in SessionSidebar
 
+    // Scroll to bottom when messages change or AI starts/stops chatting
     useEffect(() => {
         if (chatScrollRef.current) {
             chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
@@ -45,7 +35,8 @@ export function ChatInterface() {
 
     return (
         <Flex direction="column" style={{ height: '100%', minHeight: 0 }}>
-            <ChatHeader activeChatId={activeChatId} onNewChatClick={handleNewChatClick} />
+            {/* Pass necessary props to ChatHeader */}
+            <ChatHeader activeChatId={activeChatId} />
             <Separator size="4" />
             <Box
                 ref={chatScrollRef}
@@ -59,8 +50,8 @@ export function ChatInterface() {
                 style={{
                     flexShrink: 0,
                     borderTop: '1px solid var(--gray-a6)',
-                    backgroundColor: 'var(--card-background)',
-                    position: 'sticky',
+                    backgroundColor: 'var(--card-background)', // Use Radix variable if defined, else fallback
+                    position: 'sticky', // Keep sticky positioning
                     bottom: 0,
                     zIndex: 10
                 }}
