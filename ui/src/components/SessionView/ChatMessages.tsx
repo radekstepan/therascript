@@ -2,12 +2,14 @@
 import React, { useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import {
-    ChatBubbleIcon, PersonIcon, ReloadIcon, StarIcon, StarFilledIcon,
-    CheckIcon, Cross1Icon, InfoCircledIcon
+    // Star icons, Check/Cross/Info needed. No sender icons used anymore.
+    StarIcon, StarFilledIcon, CheckIcon, Cross1Icon, InfoCircledIcon
 } from '@radix-ui/react-icons';
 import {
     Button, TextField, Flex, Box, Text, IconButton, Dialog, Heading, Spinner, Strong, Callout
 } from '@radix-ui/themes';
+// Removed Bot icon import
+// import { Bot } from '../icons/Icons';
 import { currentChatMessagesAtom, isChattingAtom, starMessageAtom, activeChatIdAtom } from '../../store';
 import type { ChatMessage } from '../../types';
 import { cn } from '../../utils';
@@ -29,10 +31,8 @@ export function ChatMessages({ activeChatId }: ChatMessagesProps) {
     const handleStarClick = (message: ChatMessage) => {
         if (activeChatId === null) return;
         if (message.starred) {
-            // Action to unstar (clicking the filled star won't happen with new layout, but keep logic)
             starMessageAction({ chatId: activeChatId, messageId: message.id, shouldStar: false });
         } else {
-            // Action to star (clicking the empty star)
             setMessageToName(message);
             setTemplateNameInput(message.starredName || message.text.substring(0, 50) + (message.text.length > 50 ? '...' : ''));
             setNamingError(null);
@@ -57,27 +57,33 @@ export function ChatMessages({ activeChatId }: ChatMessagesProps) {
 
     return (
       <>
+          {/* Message Container */}
           <Box className="space-y-3 p-1">
+               {/* Empty States */}
                {chatMessages.length === 0 && activeChatId === null && (
                    <Text color="gray" size="2" align="center" my="4" style={{ fontStyle: 'italic' }}>Start a new chat or select one.</Text>
                )}
                {chatMessages.length === 0 && activeChatId !== null && (
                    <Text color="gray" size="2" align="center" my="4" style={{ fontStyle: 'italic' }}>No messages yet. Start typing below.</Text>
                )}
+
+               {/* Map through messages */}
                {chatMessages.map((msg) => (
                    <Flex
                        key={msg.id}
-                       gap="2" // Keep gap between elements like icon/bubble
+                       gap="2" // Gap between potential star icon and bubble
                        align="start" // Align items to the top
-                       className="group" // Keep group for hover effects if needed elsewhere
-                       justify={msg.sender === 'user' ? 'end' : 'start'} // Justify user messages right
+                       className="group relative"
+                       // Outer flex controls left/right justification
+                       justify={msg.sender === 'user' ? 'end' : 'start'}
                    >
-                        {/* AI Message Rendering (Unchanged) */}
+                        {/* --- AI Message Rendering (No Icon) --- */}
                        {msg.sender === 'ai' && (
                            <>
-                               <ChatBubbleIcon className="text-[--accent-9] flex-shrink-0 mt-1" width="20" height="20" />
+                               {/* Bot icon removed */}
                                <Box
-                                   style={{ maxWidth: '85%' }}
+                                   // AI bubble takes up almost full width available on its side
+                                   style={{ maxWidth: 'calc(100% - 1rem)' }} // Adjust if needed
                                    className={cn('rounded-lg p-2 px-3 text-sm shadow-sm break-words', 'bg-[--gray-a3] text-[--gray-a12]')}
                                >
                                    <Text size="2">{msg.text}</Text>
@@ -85,20 +91,17 @@ export function ChatMessages({ activeChatId }: ChatMessagesProps) {
                            </>
                        )}
 
-                        {/* User Message Rendering (Modified Layout) */}
+                        {/* --- User Message Rendering (No Bubble Icon, Star Aligned) --- */}
                        {msg.sender === 'user' && (
                            <>
-                               {/* Star Icon Area (Order 1 - Far Left for User) */}
-                               {/* Conditionally render EITHER the filled star OR the hoverable empty star */}
-                               <Box className="order-1 flex-shrink-0 mt-1 self-center"> {/* Aligns star vertically better */}
+                               {/* Star Icon Area */}
+                               <Box className="flex-shrink-0 self-center mt-px">
                                    {msg.starred ? (
-                                       // Always visible yellow star if starred
                                        <StarFilledIcon width="16" height="16" className="text-yellow-500" />
                                    ) : (
-                                       // Empty star, only visible on hover of the message row (group)
                                        <IconButton
                                            variant="ghost" color="gray" size="1"
-                                           className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity p-0" // Simplified classes
+                                           className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity p-0"
                                            onClick={() => handleStarClick(msg)}
                                            title="Star message as template" aria-label="Star message"
                                        >
@@ -107,13 +110,11 @@ export function ChatMessages({ activeChatId }: ChatMessagesProps) {
                                    )}
                                </Box>
 
-                               {/* Person Icon (Order 2) */}
-                               <PersonIcon className="text-[--gray-a9] flex-shrink-0 mt-1 order-2" width="20" height="20" />
-
-                               {/* Text Bubble (Order 3 - Farthest Right for User) */}
+                               {/* Text Bubble */}
                                <Box
-                                   style={{ maxWidth: '85%' }}
-                                   className={cn('rounded-lg p-2 px-3 text-sm shadow-sm break-words order-3', 'bg-blue-600 text-white dark:bg-blue-500 dark:text-white')}
+                                   // User bubble takes up almost full width available on its side
+                                   style={{ maxWidth: 'calc(100% - 2rem)' }} // Adjust to account for star button space
+                                   className={cn('rounded-lg p-2 px-3 text-sm shadow-sm break-words', 'bg-blue-600 text-white dark:bg-blue-500 dark:text-white')}
                                >
                                    <Text size="2">{msg.text}</Text>
                                </Box>
@@ -121,10 +122,12 @@ export function ChatMessages({ activeChatId }: ChatMessagesProps) {
                        )}
                    </Flex>
                ))}
-               {/* AI Thinking Indicator (Unchanged) */}
+
+               {/* AI Thinking Indicator (No Icon) */}
                {isChatting && (
-                    <Flex align="start" gap="2">
-                       <ChatBubbleIcon className="text-[--accent-9] flex-shrink-0 mt-1" width="20" height="20"/>
+                   // Justify start to align left like AI messages
+                   <Flex align="start" gap="2" justify="start">
+                        {/* Bot icon removed */}
                        <Box className="rounded-lg p-2 px-3 text-sm bg-[--gray-a3] text-[--gray-a11] shadow-sm">
                            <Flex align="center" gap="1" style={{ fontStyle: 'italic' }}>
                                <Spinner size="1"/> Thinking...
@@ -137,35 +140,35 @@ export function ChatMessages({ activeChatId }: ChatMessagesProps) {
            {/* --- Dialog for Naming Starred Template (Unchanged) --- */}
            <Dialog.Root open={isNamingDialogOpen} onOpenChange={(open) => !open && handleCancelName()}>
               <Dialog.Content style={{ maxWidth: 450 }}>
-                  <Dialog.Title>Name This Template</Dialog.Title>
-                  <Dialog.Description size="2" mb="4" color="gray"> Give a short, memorable name to easily reuse this message. </Dialog.Description>
-                  <Flex direction="column" gap="3">
-                      <label>
-                          <Text as="div" size="2" mb="1" weight="bold">Template Name</Text>
-                          <TextField.Root
-                              size="2"
-                              value={templateNameInput}
-                              onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setTemplateNameInput(e.target.value); if (namingError) setNamingError(null); }}
-                              placeholder="Enter a short name..."
-                              autoFocus
-                           />
-                      </label>
-                      <Text size="1" color="gray" mt="1"> Original: "<Text truncate>{messageToName?.text}</Text>" </Text>
-                      {namingError && (
-                          <Callout.Root color="red" size="1" mt="1">
-                               <Callout.Icon><InfoCircledIcon/></Callout.Icon>
-                               <Callout.Text>{namingError}</Callout.Text>
-                           </Callout.Root>
-                      )}
-                  </Flex>
-                  <Flex gap="3" mt="4" justify="end">
+                 <Dialog.Title>Name This Template</Dialog.Title>
+                 <Dialog.Description size="2" mb="4" color="gray"> Give a short, memorable name to easily reuse this message. </Dialog.Description>
+                 <Flex direction="column" gap="3">
+                    <label>
+                       <Text as="div" size="2" mb="1" weight="bold">Template Name</Text>
+                       <TextField.Root
+                          size="2"
+                          value={templateNameInput}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setTemplateNameInput(e.target.value); if (namingError) setNamingError(null); }}
+                          placeholder="Enter a short name..."
+                          autoFocus
+                       />
+                    </label>
+                    <Text size="1" color="gray" mt="1"> Original: "<Text truncate>{messageToName?.text}</Text>" </Text>
+                    {namingError && (
+                       <Callout.Root color="red" size="1" mt="1">
+                          <Callout.Icon><InfoCircledIcon/></Callout.Icon>
+                          <Callout.Text>{namingError}</Callout.Text>
+                       </Callout.Root>
+                    )}
+                 </Flex>
+                 <Flex gap="3" mt="4" justify="end">
                     <Dialog.Close>
-                        <Button variant="soft" color="gray" onClick={handleCancelName}>Cancel</Button>
+                       <Button variant="soft" color="gray" onClick={handleCancelName}>Cancel</Button>
                     </Dialog.Close>
                     <Button onClick={handleConfirmName}>Save Template</Button>
-                  </Flex>
+                 </Flex>
               </Dialog.Content>
-          </Dialog.Root>
-      </>
+           </Dialog.Root>
+       </>
     );
 }

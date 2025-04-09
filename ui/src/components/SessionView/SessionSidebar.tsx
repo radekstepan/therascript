@@ -92,9 +92,11 @@ export function SessionSidebar() {
     const cancelDelete = () => { setIsDeleteConfirmOpen(false); setDeletingChat(null); };
 
     const getNavLinkClass = ({ isActive }: { isActive: boolean }): string => {
-         const base = "group flex items-center w-full text-left px-2 py-1.5 rounded-md text-sm transition-colors duration-150 relative";
-         const active = "bg-[--accent-a4] text-[--accent-a11] font-medium";
-         const inactive = "text-[--gray-a11] hover:bg-[--gray-a3] hover:text-[--gray-a12]";
+         // Removed padding from NavLink base as it's now handled by the outer Flex container
+         // Added flex-grow and items-center
+         const base = "group/link flex flex-grow items-center w-full text-left rounded-md text-sm transition-colors duration-150 overflow-hidden"; // Added group/link for specificity if needed, overflow-hidden
+         const active = "text-[--accent-a11] font-medium"; // Active styles only affect text/font now
+         const inactive = "text-[--gray-a11] hover:text-[--gray-a12]"; // Inactive hover only affects text
          return cn(base, isActive ? active : inactive);
      };
 
@@ -105,10 +107,8 @@ export function SessionSidebar() {
                  {/* Sidebar Header */}
                  <Flex justify="between" align="center" flexShrink="0" mb="2">
                     <Heading as="h3" size="1" color="gray" trim="start">Chats</Heading>
-                    {/* Removed Flex wrapper and UserThemeDropdown */}
                     <Button onClick={handleNewChatClick} variant="soft" size="1" highContrast title="Start New Chat">
                          <PlusCircledIcon width="14" height="14" />
-                         {/* Optional Text: <Text ml="1">New</Text> */}
                     </Button>
                 </Flex>
 
@@ -120,24 +120,51 @@ export function SessionSidebar() {
                         <Flex direction="column" gap="1" asChild>
                             <nav>
                                 {sortedChats.map(chat => (
-                                    <div key={chat.id} className="group relative">
-                                        <NavLink to={`/sessions/${sessionId}/chats/${chat.id}`} className={getNavLinkClass} title={getChatDisplayTitle(chat)} end>
-                                            <ChatBubbleIcon className="mr-2 h-4 w-4 flex-shrink-0 text-[--gray-a9] group-hover:text-[--gray-a11]" />
+                                    // --- MODIFICATION START ---
+                                    // Apply group, flex, alignment, padding, and hover background here
+                                    <Flex
+                                        key={chat.id}
+                                        align="center" // Vertically center items
+                                        justify="between" // Space between link and button
+                                        className="group relative px-2 py-1.5 rounded-md hover:bg-[--gray-a3]" // Apply padding and hover bg here
+                                        // Add active background style conditionally based on NavLink's state (requires knowing the active chat ID)
+                                        style={ currentActiveChatIdAtomValue === chat.id ? { backgroundColor: 'var(--accent-a4)' } : {}}
+                                    >
+                                        <NavLink
+                                            to={`/sessions/${sessionId}/chats/${chat.id}`}
+                                            className={getNavLinkClass} // Updated class function applies flex-grow etc.
+                                            title={getChatDisplayTitle(chat)}
+                                            end // Add end prop for exact matching
+                                        >
+                                            <ChatBubbleIcon className="mr-2 h-4 w-4 flex-shrink-0 text-[--gray-a9] group-hover/link:text-[--gray-a11]" /> {/* Use group/link */}
                                             <Text size="2" truncate className="flex-grow">{getChatDisplayTitle(chat)}</Text>
                                         </NavLink>
-                                        {/* Dropdown for Rename/Delete */}
+
+                                        {/* Dropdown Trigger Button - No longer absolutely positioned */}
                                         <DropdownMenu.Root>
                                             <DropdownMenu.Trigger>
-                                                <IconButton variant="ghost" color="gray" size="1" className="absolute right-1 top-1/2 -translate-y-1/2 p-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity" aria-label="Chat options" onMouseDown={(e: React.MouseEvent<HTMLButtonElement>) => e.stopPropagation()} onClick={(e: React.MouseEvent<HTMLButtonElement>) => e.preventDefault()} >
+                                                <IconButton
+                                                    variant="ghost"
+                                                    color="gray"
+                                                    size="1"
+                                                    // Removed absolute positioning classes
+                                                    // Added flex-shrink-0 and slight margin for spacing
+                                                    className="flex-shrink-0 ml-1 p-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+                                                    aria-label="Chat options"
+                                                    // Prevent link navigation when clicking button
+                                                    onClick={(e) => e.preventDefault()}
+                                                    onMouseDown={(e) => e.stopPropagation()} // Also stop propagation
+                                                >
                                                     <DotsHorizontalIcon />
                                                 </IconButton>
                                             </DropdownMenu.Trigger>
-                                            <DropdownMenu.Content size="1" align="start" sideOffset={5} onMouseDown={(e: React.MouseEvent<HTMLDivElement>) => e.stopPropagation()} onClick={(e: React.MouseEvent<HTMLDivElement>) => e.preventDefault()}>
+                                            <DropdownMenu.Content size="1" align="start" sideOffset={5} onClick={(e) => e.preventDefault()} onMouseDown={(e) => e.stopPropagation()}>
                                                 <DropdownMenu.Item onSelect={() => handleRenameClick(chat)}> <Pencil1Icon className="mr-2 h-4 w-4" />Rename </DropdownMenu.Item>
                                                 <DropdownMenu.Item color="red" onSelect={() => handleDeleteClick(chat)}> <TrashIcon className="mr-2 h-4 w-4" />Delete </DropdownMenu.Item>
                                             </DropdownMenu.Content>
                                         </DropdownMenu.Root>
-                                    </div>
+                                    </Flex>
+                                    // --- MODIFICATION END ---
                                 ))}
                             </nav>
                         </Flex>
