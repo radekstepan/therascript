@@ -7,7 +7,8 @@ import {
     startNewChatAtom, chatErrorAtom
 } from '../../store';
 import {
-    ChatBubbleIcon, DotsHorizontalIcon, Pencil1Icon, TrashIcon, PlusCircledIcon
+    // ChatBubbleIcon removed from imports here as it's no longer used in this file
+    DotsHorizontalIcon, Pencil1Icon, TrashIcon, PlusCircledIcon
 } from '@radix-ui/react-icons';
 import {
     Box, Flex, Text, Heading, Button, IconButton, TextField,
@@ -104,13 +105,9 @@ export function SessionSidebar() {
             <Box p="4" className="flex flex-col h-full w-full overflow-hidden" style={{ backgroundColor: 'var(--color-panel-solid)'}}>
                  {/* Sidebar Header */}
                  <Flex justify="between" align="center" flexShrink="0" mb="2">
-                    {/* --- MODIFICATION: Sidebar Title Size --- */}
                     <Heading as="h3" size="2" color="gray" trim="start" weight="medium">Chats</Heading>
-                    {/* --- END MODIFICATION --- */}
                     <Button onClick={handleNewChatClick} variant="soft" size="1" highContrast title="Start New Chat">
-                         {/* --- MODIFICATION: New Chat Icon Size --- */}
                          <PlusCircledIcon width="16" height="16" />
-                         {/* --- END MODIFICATION --- */}
                     </Button>
                 </Flex>
 
@@ -135,23 +132,25 @@ export function SessionSidebar() {
                                             title={getChatDisplayTitle(chat)}
                                             end
                                         >
-                                            <ChatBubbleIcon className="mr-2 h-4 w-4 flex-shrink-0 text-[--gray-a9] group-hover/link:text-[--gray-a11]" />
                                             <Text size="2" truncate className="flex-grow">{getChatDisplayTitle(chat)}</Text>
                                         </NavLink>
 
                                         <DropdownMenu.Root>
                                             <DropdownMenu.Trigger>
+                                                {/* --- MODIFICATION: Added padding p-1 --- */}
                                                 <IconButton
                                                     variant="ghost"
                                                     color="gray"
                                                     size="1"
-                                                    className="flex-shrink-0 ml-1 p-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+                                                    // Removed p-0, added p-1 for larger click area
+                                                    className="flex-shrink-0 ml-1 p-1 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
                                                     aria-label="Chat options"
                                                     onClick={(e) => e.preventDefault()}
                                                     onMouseDown={(e) => e.stopPropagation()}
                                                 >
                                                     <DotsHorizontalIcon />
                                                 </IconButton>
+                                                {/* --- END MODIFICATION --- */}
                                             </DropdownMenu.Trigger>
                                             <DropdownMenu.Content size="1" align="start" sideOffset={5} onClick={(e) => e.preventDefault()} onMouseDown={(e) => e.stopPropagation()}>
                                                 <DropdownMenu.Item onSelect={() => handleRenameClick(chat)}> <Pencil1Icon className="mr-2 h-4 w-4" />Rename </DropdownMenu.Item>

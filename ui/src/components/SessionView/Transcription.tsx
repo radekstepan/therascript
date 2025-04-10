@@ -1,6 +1,7 @@
 /*
 Modified File: src/components/SessionView/Transcription.tsx
 Using @radix-ui/themes ScrollArea
++ Attempting baseline alignment for header items
 */
 import React from 'react';
 import type { Session } from '../../types';
@@ -13,7 +14,7 @@ import {
     CalendarIcon,
     PersonIcon,
     BadgeIcon as SessionTypeIcon,
-    PlayIcon
+    PlayIcon // Assuming PlayIcon might be used later or was intended
 } from '@radix-ui/react-icons';
 import { cn } from '../../utils';
 
@@ -77,7 +78,6 @@ export function Transcription({
     const paragraphs = sourceContent.split(/\n\s*\n/).filter(p => p.trim() !== '');
 
     const handleSaveParagraph = (index: number, newText: string) => {
-        // ... (save paragraph logic remains the same)
          const baseContentForSave = editTranscriptContent;
          const currentParagraphs = baseContentForSave.split(/\n\s*\n/);
          if (index >= 0 && index < currentParagraphs.length) {
@@ -109,17 +109,20 @@ export function Transcription({
 
     return (
         // Flex column taking full height from parent (SessionContent panel)
-        // Added border/rounding here
         <Flex direction="column" style={{ height: '100%', minHeight: 0, border: '1px solid var(--gray-a6)', borderRadius: 'var(--radius-3)' }}>
-             {/* Header fixed */}
+             {/* --- MODIFICATION: Header Flex Alignment --- */}
              <Flex
-                align="center"
+                // Changed align="start" to align="baseline"
+                align="baseline"
                 justify="between"
                 px="3" py="2"
                 style={{ borderBottom: '1px solid var(--gray-a6)', flexShrink: 0 }}
                 gap="3"
             >
+            {/* --- END MODIFICATION --- */}
+                {/* Left Side Details */}
                 <Flex direction="column" gap="1" style={{ minWidth: 0 }}>
+                    {/* The content here determines the height and baseline */}
                     <Flex align="center" gap="3" wrap="wrap">
                          {renderHeaderDetail(PersonIcon, session.clientName, "Client")}
                          {renderHeaderDetail(CalendarIcon, session.date, "Date")}
@@ -127,6 +130,8 @@ export function Transcription({
                          {renderHeaderDetail(BookmarkIcon, session.therapy, "Therapy Type", 'therapy')}
                     </Flex>
                 </Flex>
+
+                {/* Right Side Edit Button Container - Removed mt-px */}
                 <Box flexShrink="0">
                      <Button variant="ghost" size="1" onClick={onEditDetailsClick} aria-label="Edit session details">
                         <Pencil1Icon width="14" height="14" />

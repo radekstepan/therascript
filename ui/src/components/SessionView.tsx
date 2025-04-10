@@ -1,6 +1,7 @@
 /*
 Modified File: src/components/SessionView.tsx
 + Fixed header border color in dark mode
++ Increased horizontal padding in header
 */
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useAtomValue, useSetAtom, useAtom } from 'jotai';
@@ -90,7 +91,7 @@ export function SessionView() {
         document.body.style.userSelect = 'none';
         document.addEventListener('mousemove', handleMouseMove);
         document.addEventListener('mouseup', handleMouseUp);
-     }, []); // Assuming handleMouseMove/Up are stable refs or defined outside
+     }, []);
 
     const handleMouseMove = useCallback((e: MouseEvent) => {
         if (!isResizing.current || !sidebarRef.current) return;
@@ -99,7 +100,7 @@ export function SessionView() {
         let newWidth = e.clientX - containerRect.left;
         newWidth = Math.max(MIN_SIDEBAR_WIDTH, Math.min(newWidth, MAX_SIDEBAR_WIDTH));
         setSidebarWidth(newWidth);
-    }, [setSidebarWidth]); // Depends on setSidebarWidth
+    }, [setSidebarWidth]);
 
     const handleMouseUp = useCallback(() => {
         if (isResizing.current) {
@@ -109,7 +110,7 @@ export function SessionView() {
             document.removeEventListener('mousemove', handleMouseMove);
             document.removeEventListener('mouseup', handleMouseUp);
         }
-    }, [handleMouseMove]); // Depends on handleMouseMove
+    }, [handleMouseMove]);
 
     useEffect(() => {
         return () => {
@@ -142,10 +143,7 @@ export function SessionView() {
 
     if (isLoading || !session) {
         // Show loading state or redirect
-        // Using Navigate for now, consider a dedicated loading component
         return <Navigate to="/" replace />;
-        // Example loading state:
-        // return <Flex justify="center" align="center" style={{height: '100vh'}}><Spinner size="3" /></Flex>;
     }
 
     const displayTitle = session.sessionName || session.fileName;
@@ -174,19 +172,21 @@ export function SessionView() {
 
             {/* Main Content Column */}
             <Flex direction="column" flexGrow="1" style={{ minWidth: 0, height: '100vh', overflow: 'hidden' }}>
-                 {/* --- MODIFICATION: Header Border Style --- */}
+                 {/* Header */}
                  <Box
-                    px={{ initial: '4', md: '6', lg: '8' }}
+                    // --- MODIFICATION: Slightly Increased Horizontal Padding ---
+                    // Adjusted from 4->5, 6->7, 8->8 (kept lg the same)
+                    px={{ initial: '5', md: '7', lg: '8' }}
+                    // --- END MODIFICATION ---
                     py="3"
                     flexShrink="0"
-                    // Removed className="border-b"
                     style={{
                         backgroundColor: 'var(--color-panel-solid)',
                         borderBottom: '1px solid var(--gray-a6)' // Use Radix variable for border color
                     }}
                 >
-                {/* --- END MODIFICATION --- */}
                     <Flex justify="between" align="center">
+                         {/* This inner Flex container holds the button/title */}
                          <Flex align="center" gap="2" style={{ minWidth: 0 }}>
                             <Button onClick={handleNavigateBack} variant="ghost" color="gray" size="2" style={{ flexShrink: 0 }}>
                                 <ArrowLeftIcon /> Sessions
