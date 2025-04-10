@@ -59,4 +59,4 @@ Thumbs.db
 
 # Data directory (contains user data)
 data/
-scripts/preloadDb.ts
+# scripts/preloadDb.ts

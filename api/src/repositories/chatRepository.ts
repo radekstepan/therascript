@@ -13,7 +13,7 @@ const prepareStmt = (sql: string): Statement => {
 const insertChatStmt = prepareStmt('INSERT INTO chats (sessionId, timestamp, name) VALUES (?, ?, ?)');
 const insertMessageStmt = prepareStmt('INSERT INTO messages (chatId, sender, text, timestamp) VALUES (?, ?, ?, ?)');
 const selectChatsBySessionIdStmt = prepareStmt('SELECT * FROM chats WHERE sessionId = ? ORDER BY timestamp DESC');
-const selectMessagesByChatIdStmt = prepareStmt('SELECT * FROM messages WHERE chatId = ? ORDER BY timestamp ASC');
+const selectMessagesByChatIdStmt = prepareStmt('SELECT * FROM messages WHERE chatId = ? ORDER BY timestamp ASC, id ASC'); // Added id sort for stability
 const selectChatByIdStmt = prepareStmt('SELECT * FROM chats WHERE id = ?');
 const selectMessageByIdStmt = prepareStmt('SELECT * FROM messages WHERE id = ?');
 const updateChatNameStmt = prepareStmt('UPDATE chats SET name = ? WHERE id = ?');

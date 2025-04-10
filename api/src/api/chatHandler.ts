@@ -1,134 +1,124 @@
 // src/api/chatHandler.ts
-import { Request, Response, NextFunction } from 'express';
 // --- Corrected Relative Imports ---
 import { chatRepository } from '../repositories/chatRepository.js';
-// Keep sessionRepository import if you need to access session details beyond what middleware provides
-import { sessionRepository } from '../repositories/sessionRepository.js';
+import { sessionRepository } from '../repositories/sessionRepository.js'; // Keep if needed elsewhere, less direct use here
 // --- Other Imports ---
 import { loadTranscriptContent } from '../services/fileService.js';
 import { generateChatResponse } from '../services/ollamaService.js';
+// Import ApiError and other needed error types
+import { NotFoundError, BadRequestError, InternalServerError, ApiError } from '../errors.js';
 import type { BackendSession, BackendChatSession, BackendChatMessage } from '../types/index.js';
+// No need to import Context from 'elysia' if relying on inference
+
+// GET /:sessionId/chats/:chatId - Get details of a specific chat
+// Let Elysia infer the context type, which will include chatData from the derivation
+export const getChatDetails = ({ chatData, set }: any) => { // Use 'any' or let TS infer ctx
+    // chatData should be available due to the derive block in the route
+    if (!chatData) {
+        throw new NotFoundError(`Chat details not found in context.`);
+    }
+    set.status = 200;
+    return chatData;
+};
 
 // POST /:sessionId/chats - Create a new chat
-export const createChat = (req: Request, res: Response, next: NextFunction): void => {
-    const session: BackendSession = (req as any).sessionData; // Session guaranteed by middleware
-    const sessionId: number = session.id;
+// Let Elysia infer the context type, which will include sessionData
+export const createChat = ({ sessionData, set }: any) => { // Use 'any' or let TS infer ctx
+    const sessionId = sessionData.id;
     try {
-        // Create the chat record in the database
         const newChat = chatRepository.createChat(sessionId);
         console.log(`[API] Created new chat ${newChat.id} in session ${sessionId}`);
-        // Return metadata of the newly created chat (ID, timestamp, sessionId, name)
-        const { messages, ...chatMetadata } = newChat; // Exclude the empty messages array
-        res.status(201).json(chatMetadata);
+        const { messages, ...chatMetadata } = newChat;
+        set.status = 201;
+        return chatMetadata;
     } catch (error) {
         console.error(`[API Error] createChat (Session ID: ${sessionId}):`, error);
-        next(error); // Pass DB errors
+        throw new InternalServerError('Failed to create chat', error instanceof Error ? error : undefined);
     }
 };
 
 // POST /:sessionId/chats/:chatId/messages - Send message, get AI response
-export const addChatMessage = async (req: Request, res: Response, next: NextFunction): Promise<void | Response> => {
-    const session: BackendSession = (req as any).sessionData; // Session guaranteed by middleware
-    const chat: BackendChatSession = (req as any).chatData;   // Chat guaranteed by middleware
-    const { text } = req.body;
-
-    // --- Input Validation ---
-    if (!text || typeof text !== 'string' || text.trim() === '') {
-        return res.status(400).json({ error: 'Message text cannot be empty.' });
-    }
+// Let Elysia infer the context type, which will include sessionData, chatData, and validated body
+export const addChatMessage = async ({ sessionData, chatData, body, set }: any) => { // Use 'any' or let TS infer ctx
+    // Body type is validated by the schema in the route definition
+    const { text } = body;
     const trimmedText = text.trim();
-    // Consider adding length validation if necessary
-    // --- End Input Validation ---
 
     try {
         // 1. Add User Message to DB
-        const userMessage = chatRepository.addMessage(chat.id, 'user', trimmedText);
+        const userMessage = chatRepository.addMessage(chatData.id, 'user', trimmedText);
 
-        // 2. Load Transcript Content (Error handled within service, throws if critical)
-        const transcriptContent = await loadTranscriptContent(session.id);
+        // 2. Load Transcript Content
+        const transcriptContent = await loadTranscriptContent(sessionData.id);
         if (transcriptContent === null || transcriptContent === undefined) {
-             throw new Error(`Transcript for session ${session.id} could not be loaded or is missing.`);
+             throw new InternalServerError(`Transcript for session ${sessionData.id} could not be loaded or is missing.`);
         }
 
-        // 3. Get Current Chat History from DB (including the new user message)
-        // This ensures Ollama gets the most up-to-date context
-        const currentMessages = chatRepository.findMessagesByChatId(chat.id);
+        // 3. Get Current Chat History from DB
+        const currentMessages = chatRepository.findMessagesByChatId(chatData.id);
         if (currentMessages.length === 0) {
-             // This indicates a potential race condition or DB issue
-             throw new Error(`CRITICAL: Chat ${chat.id} has no messages immediately after adding one.`);
+             throw new InternalServerError(`CRITICAL: Chat ${chatData.id} has no messages immediately after adding one.`);
         }
 
-        // 4. Generate AI Response via Ollama Service
-        console.log(`[API] Sending context (transcript + ${currentMessages.length} messages) to Ollama for chat ${chat.id}...`);
+        // 4. Generate AI Response
+        console.log(`[API] Sending context (transcript + ${currentMessages.length} messages) to Ollama for chat ${chatData.id}...`);
         const aiResponseText = await generateChatResponse(transcriptContent, currentMessages);
-        console.log(`[API] Received Ollama response for chat ${chat.id}.`);
+        console.log(`[API] Received Ollama response for chat ${chatData.id}.`);
 
         // 5. Add AI Message to DB
-        const aiMessage = chatRepository.addMessage(chat.id, 'ai', aiResponseText);
+        const aiMessage = chatRepository.addMessage(chatData.id, 'ai', aiResponseText);
 
-        console.log(`[API] Added user (${userMessage.id}) and AI (${aiMessage.id}) messages to chat ${chat.id}.`);
-        // Return *only* the newly added messages (user + AI)
-        res.status(201).json({ userMessage, aiMessage });
+        console.log(`[API] Added user (${userMessage.id}) and AI (${aiMessage.id}) messages to chat ${chatData.id}.`);
+        set.status = 201;
+        return { userMessage, aiMessage };
 
     } catch (error) {
-         // Log errors from DB, file loading, or Ollama
-         console.error(`[API Error] addChatMessage (Chat ID: ${chat?.id}, Session ID: ${session?.id}):`, error);
-         // Note: User message persists even if AI fails. Implement rollback logic if desired.
-        next(error); // Pass error to central handler
+         console.error(`[API Error] addChatMessage (Chat ID: ${chatData?.id}, Session ID: ${sessionData?.id}):`, error);
+         // Re-throw the error for Elysia's central handler
+         if (error instanceof ApiError) throw error; // Check against imported ApiError
+         throw new InternalServerError('Failed to process chat message', error instanceof Error ? error : undefined);
     }
 };
 
 // PATCH /:sessionId/chats/:chatId/name - Rename a chat
-export const renameChat = (req: Request, res: Response, next: NextFunction): void | Response => {
-    const chat: BackendChatSession = (req as any).chatData; // Chat guaranteed by middleware
-    const { name } = req.body;
-
-    // --- Input Validation ---
-    // Allow undefined or null to signify removing the name
-    if (name !== undefined && name !== null && typeof name !== 'string') {
-        return res.status(400).json({ error: 'Invalid body: "name" must be a string, null, or omitted.' });
-    }
-    // --- End Input Validation ---
-
-    // Determine the name to save: undefined if empty/null/undefined, otherwise the trimmed string
+// Let Elysia infer the context type
+export const renameChat = ({ chatData, body, set }: any) => { // Use 'any' or let TS infer ctx
+    // Body type validated by schema
+    const { name } = body;
     const nameToSave = (typeof name === 'string' && name.trim() !== '') ? name.trim() : undefined;
 
     try {
-        // Update name in the repository
-        const updatedChat = chatRepository.updateChatName(chat.id, nameToSave);
-        // Check if update was successful
+        const updatedChat = chatRepository.updateChatName(chatData.id, nameToSave);
         if (!updatedChat) {
-            // This implies chat was deleted between middleware load and handler execution
-            return res.status(404).json({ error: `Chat with ID ${chat.id} not found during update attempt.` });
+            throw new NotFoundError(`Chat with ID ${chatData.id} not found during update attempt.`);
         }
-        console.log(`[API] Renamed chat ${chat.id} to "${updatedChat.name || '(no name)'}"`);
+        console.log(`[API] Renamed chat ${chatData.id} to "${updatedChat.name || '(no name)'}"`);
 
-        // Return updated chat metadata (excluding potentially large messages array)
         const { messages, ...chatMetadata } = updatedChat;
-        res.status(200).json(chatMetadata);
+        set.status = 200;
+        return chatMetadata;
 
     } catch (error) {
-        console.error(`[API Error] renameChat (Chat ID: ${chat?.id}):`, error);
-        next(error); // Pass DB errors
+        console.error(`[API Error] renameChat (Chat ID: ${chatData?.id}):`, error);
+        if (error instanceof ApiError) throw error; // Check against imported ApiError
+        throw new InternalServerError('Failed to rename chat', error instanceof Error ? error : undefined);
     }
 };
 
 // DELETE /:sessionId/chats/:chatId - Delete a chat
-export const deleteChat = (req: Request, res: Response, next: NextFunction): void | Response => {
-    const chat: BackendChatSession = (req as any).chatData; // Chat guaranteed by middleware
+// Let Elysia infer the context type
+export const deleteChat = ({ chatData, set }: any) => { // Use 'any' or let TS infer ctx
     try {
-        // Attempt to delete the chat (DB cascade handles messages)
-        const deleted = chatRepository.deleteChatById(chat.id);
-        // Check if deletion was successful
+        const deleted = chatRepository.deleteChatById(chatData.id);
         if (!deleted) {
-            // This implies chat was deleted between middleware load and handler execution
-            return res.status(404).json({ error: `Chat with ID ${chat.id} not found during deletion attempt.` });
+            throw new NotFoundError(`Chat with ID ${chatData.id} not found during deletion attempt.`);
         }
-        console.log(`[API] Deleted chat ${chat.id}`);
-        // Send success confirmation
-        res.status(200).json({ message: `Chat ${chat.id} deleted successfully.` });
+        console.log(`[API] Deleted chat ${chatData.id}`);
+        set.status = 200;
+        return { message: `Chat ${chatData.id} deleted successfully.` };
     } catch (error) {
-        console.error(`[API Error] deleteChat (Chat ID: ${chat?.id}):`, error);
-        next(error); // Pass DB errors
+        console.error(`[API Error] deleteChat (Chat ID: ${chatData?.id}):`, error);
+        if (error instanceof ApiError) throw error; // Check against imported ApiError
+        throw new InternalServerError('Failed to delete chat', error instanceof Error ? error : undefined);
     }
 };

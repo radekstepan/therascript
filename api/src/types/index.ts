@@ -25,7 +25,7 @@ export interface BackendSession {
   sessionType: string;
   therapy: string;
   transcriptPath: string;
-  chats?: BackendChatSession[]; // Optional, loaded on demand
+  chats?: Pick<BackendChatSession, 'id' | 'sessionId' | 'timestamp' | 'name'>[]; // Optional, only metadata usually loaded
 }
 
 // Metadata used for creation/update, excluding generated fields

@@ -65,6 +65,14 @@ async function preloadDatabase() {
     const transcriptsDir = path.resolve(process.cwd(), 'data/transcripts');
     await fs.mkdir(transcriptsDir, { recursive: true });
 
+    // Clear existing data before preloading
+    console.log('[Preload] Clearing existing data...');
+    // Order matters due to foreign key constraints (delete children first)
+    db.exec('DELETE FROM messages');
+    db.exec('DELETE FROM chats');
+    db.exec('DELETE FROM sessions');
+    console.log('[Preload] Existing data cleared.');
+
     // Prepare statements
     const insertSession = db.prepare(`
       INSERT INTO sessions (fileName, clientName, sessionName, date, sessionType, therapy, transcriptPath)
