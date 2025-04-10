@@ -1,13 +1,13 @@
 // src/api/chatHandler.ts
 import { Request, Response, NextFunction } from 'express';
 // --- Corrected Relative Imports ---
-import { chatRepository } from '../repositories/chatRepository';
+import { chatRepository } from '../repositories/chatRepository.js';
 // Keep sessionRepository import if you need to access session details beyond what middleware provides
-import { sessionRepository } from '../repositories/sessionRepository';
+import { sessionRepository } from '../repositories/sessionRepository.js';
 // --- Other Imports ---
-import { loadTranscriptContent } from '../services/fileService';
-import { generateChatResponse } from '../services/ollamaService';
-import type { BackendSession, BackendChatSession, BackendChatMessage } from '../types';
+import { loadTranscriptContent } from '../services/fileService.js';
+import { generateChatResponse } from '../services/ollamaService.js';
+import type { BackendSession, BackendChatSession, BackendChatMessage } from '../types/index.js';
 
 // POST /:sessionId/chats - Create a new chat
 export const createChat = (req: Request, res: Response, next: NextFunction): void => {

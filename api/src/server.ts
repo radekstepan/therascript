@@ -1,121 +1,199 @@
 // src/server.ts
-import express, { Express, Request, Response, NextFunction } from 'express';
-import cors from 'cors';
-import path from 'path'; // Import path
-import config from './config'; // Relative
-import { registerRoutes } from './routes'; // Relative
-import { ApiErrorResponse, ActionSchema } from './types'; // Relative
-import { db } from './db/sqliteService'; // Import db instance for potential direct use or logging
+import { Elysia, ParseError, ValidationError } from 'elysia';
+import { cors } from '@elysiajs/cors';
+import { swagger } from '@elysiajs/swagger';
+import config from './config/index.js';
+import { checkDatabaseHealth } from './db/dbAccess.js';
+import { sessionRoutes } from './routes/sessionRoutes.js';
+import { chatRoutes } from './routes/chatRoutes.js';
+import { ApiError, NotFoundError, BadRequestError, InternalServerError, ConflictError } from './errors.js';
+import type { ActionSchema } from './types/index.js';
+import http from 'http';
 
-const app: Express = express();
-const port = config.server.port;
+console.log(`[Server] Starting Elysia application in ${config.server.nodeEnv} mode...`);
 
-// --- Middleware ---
-// CORS configuration
-app.use(cors({ origin: config.server.corsOrigin, credentials: true })); // Adjust origin as needed
-// Body Parsers
-app.use(express.json({ limit: '10mb' })); // For JSON payloads
-app.use(express.urlencoded({ extended: true, limit: '10mb' })); // For form data
-
-// Simple Request Logger
-app.use((req, res, next) => {
-  const start = Date.now();
-  res.on('finish', () => {
-     const duration = Date.now() - start;
-     console.log(`[${new Date().toISOString()}] ${req.method} ${req.url} ${res.statusCode} - ${duration}ms`);
-  });
-  next();
-});
-
-// --- API Routes & Schema Generation ---
-// registerRoutes attaches all defined routes to the 'app' instance
-const apiSchema: ActionSchema[] = registerRoutes(app);
-
-// --- Static Endpoints (Registered via registerRoutes now) ---
-// GET /api/health
-app.get('/api/health', (req: Request, res: Response) => {
+const getErrorMessage = (error: unknown): string => {
+    if (error instanceof Error) return error.message;
     try {
-        // Check DB connection basic liveness
-        db.pragma('integrity_check'); // Basic check
-        res.status(200).json({
-            status: 'OK',
-            database: 'connected',
-            timestamp: new Date().toISOString()
-        });
-    } catch(dbError) {
-         console.error("[Health Check] Database error:", dbError);
-         res.status(503).json({
-            status: 'Error',
-            database: 'disconnected',
-            error: (dbError as Error).message,
-            timestamp: new Date().toISOString()
-        });
+        return JSON.stringify(error);
+    } catch {
+        return String(error) || 'An unknown error occurred';
     }
-});
+};
+const getErrorStack = (error: unknown): string | undefined => {
+    if (error instanceof Error) return error.stack;
+    return undefined;
+};
 
-// GET /api/schema
-app.get('/api/schema', (req: Request, res: Response) => {
-    res.status(200).json(apiSchema); // Serve the dynamically generated schema
-});
+const app = new Elysia()
+  .use(cors({
+    origin: config.server.corsOrigin,
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  }))
+  .use(swagger({
+    path: '/api/docs',
+    exclude: ['/api/docs', '/api/docs/json', '/api/health', '/api/schema'],
+    documentation: {
+      info: { title: 'Therapy Analyzer API (Elysia)', version: '1.0.0' },
+      tags: []
+    }
+  }))
+  .onRequest(({ request }) => {
+    console.log(`[Request] --> ${request.method} ${new URL(request.url).pathname}`);
+  })
+  .onAfterHandle(({ request, set }) => {
+    console.log(`[Request] <-- ${request.method} ${new URL(request.url).pathname} ${set.status ?? '???'}`);
+  })
+  .onError(({ code, error, set, request }) => {
+    const errorMessage = getErrorMessage(error);
+    let path = 'N/A';
+    try {
+      if (request?.url) path = new URL(request.url).pathname;
+    } catch {}
 
+    console.error(`[Error] Code: ${code} | Path: ${path} | Message: ${errorMessage}`);
+    if (!config.server.isProduction) {
+      const stack = getErrorStack(error);
+      if (stack) console.error("Stack:", stack);
+      if (!(error instanceof Error)) console.error("Full Error Object:", error);
+    }
 
-// --- Default Route ---
-app.get('/', (req: Request, res: Response) => {
-  res.contentType('text/plain').status(200).send('Therapy Analyzer Backend API (SQLite)');
-});
+    if (error instanceof ApiError) {
+      set.status = error.status;
+      return { error: error.name, message: error.message, details: error.details };
+    }
+    switch (code) {
+      case 'NOT_FOUND':
+        set.status = 404;
+        return { error: 'NotFound', message: `Route ${request.method} ${path} not found.` };
+      case 'INTERNAL_SERVER_ERROR':
+        const internalError = new InternalServerError('An unexpected internal error occurred.', error instanceof Error ? error : undefined);
+        set.status = internalError.status;
+        return { error: internalError.name, message: internalError.message, details: internalError.details };
+      case 'PARSE':
+        set.status = 400;
+        return { error: 'ParseError', message: 'Failed to parse request body.', details: errorMessage };
+      case 'VALIDATION':
+        const validationDetails = error instanceof ValidationError ? error.all : undefined;
+        return { error: 'ValidationError', message: 'Request validation failed.', details: errorMessage, validationErrors: validationDetails };
+      case 'UNKNOWN':
+        console.error("[Error] Unknown Elysia Error Code:", error);
+        const unknownInternalError = new InternalServerError('An unknown internal error occurred.', error instanceof Error ? error : undefined);
+        set.status = unknownInternalError.status;
+        return { error: unknownInternalError.name, message: unknownInternalError.message, details: unknownInternalError.details };
+      default:
+        break;
+    }
+    const sqliteCode = (error as any)?.code;
+    if (typeof sqliteCode === 'string' && sqliteCode.startsWith('SQLITE_')) {
+      if (sqliteCode === 'SQLITE_CONSTRAINT_UNIQUE' || sqliteCode.includes('CONSTRAINT')) {
+        const conflictError = new ConflictError('Database constraint violation.', config.server.isProduction ? undefined : errorMessage);
+        set.status = conflictError.status;
+        return { error: conflictError.name, message: conflictError.message, details: conflictError.details };
+      } else {
+        const dbError = new InternalServerError('A database operation failed.', error instanceof Error ? error : undefined);
+        set.status = dbError.status;
+        return { error: dbError.name, message: dbError.message, details: dbError.details };
+      }
+    }
+    console.error("[Error] Unhandled Error Type:", error);
+    const fallbackError = new InternalServerError('An unexpected server error occurred.', error instanceof Error ? error : undefined);
+    set.status = fallbackError.status;
+    return { error: fallbackError.name, message: fallbackError.message, details: fallbackError.details };
+  })
+  .get('/api/health', ({ set }) => {
+    try {
+      checkDatabaseHealth();
+      set.status = 200;
+      return { status: 'OK', database: 'connected', timestamp: new Date().toISOString() };
+    } catch (dbError) {
+      console.error("[Health Check] Database error:", dbError);
+      throw new InternalServerError('Database connection failed', dbError instanceof Error ? dbError : undefined);
+    }
+  }, { detail: { tags: ['Meta'] } })
+  .get('/api/schema', ({ set }) => {
+    set.status = 501;
+    return { message: "Use /api/docs for Swagger UI." };
+  }, { detail: { tags: ['Meta'] } })
+  .use(sessionRoutes)
+  .use(chatRoutes)
+  .get('/', () => 'Therapy Analyzer Backend API (ElysiaJS)');
 
-// --- Not Found Handler (404) ---
-// This should come after all other routes
-app.use((req: Request, res: Response) => {
-  res.status(404).json({ error: 'Not Found', message: `The requested resource ${req.method} ${req.path} does not exist.` });
-});
+// Adapt Elysia’s handle to Node.js http with proper body buffering and full URL
+console.log(`[Server] Starting standalone Node.js server on port ${config.server.port}...`);
+const server = http.createServer((req, res) => {
+  // Construct full URL from req.headers.host and req.url
+  const host = req.headers.host || `localhost:${config.server.port}`;
+  const url = `http://${host}${req.url || '/'}`;
 
-// --- Global Error Handler ---
-// Must have these 4 arguments for Express to recognize it as an error handler
-app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
-  console.error(`[Error Handler] Path: ${req.path}, Error:`, err);
-
-  let statusCode = 500; // Default to Internal Server Error
-  let errorMessage = 'Internal Server Error';
-
-  // Check for specific error types or codes if needed
-  if ((err as any).code === 'SQLITE_CONSTRAINT_UNIQUE') {
-       statusCode = 409; // Conflict
-       errorMessage = 'Resource conflict (e.g., duplicate entry).';
-  } else if ((err as any).message?.includes('not found')) { // Generic not found check
-      statusCode = 404;
-      errorMessage = err.message;
-  }
-  // Add more specific checks for validation errors, auth errors, etc.
-
-
-  // Structure the response
-  const responseBody: ApiErrorResponse = {
-    error: errorMessage,
-    // Provide more details only in non-production environments
-    details: config.server.isProduction ? undefined : err.message + (err.stack ? `\n${err.stack}` : ''),
-  };
-
-  // Ensure response headers haven't already been sent
-  if (!res.headersSent) {
-       res.status(statusCode).json(responseBody);
+  if (req.method === 'GET' || req.method === 'HEAD') {
+    // For GET/HEAD, no body is expected
+    app.handle(new Request(url, {
+      method: req.method,
+      headers: req.headers as HeadersInit,
+    })).then((response) => {
+      res.writeHead(response.status, Object.fromEntries(response.headers));
+      response.body?.pipeTo(new WritableStream({
+        write(chunk) { res.write(chunk); },
+        close() { res.end(); },
+        abort(err) {
+          console.error('Response stream aborted:', err);
+          res.destroy(err);
+        }
+      }));
+    }).catch((err) => {
+      console.error('Error handling request:', err);
+      res.writeHead(500);
+      res.end('Internal Server Error');
+    });
   } else {
-      // If headers are sent, delegate to Express default handler
-       next(err);
+    // For methods with potential bodies (POST, PUT, etc.), buffer the body
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      app.handle(new Request(url, {
+        method: req.method,
+        headers: req.headers as HeadersInit,
+        body: body || undefined, // Pass the buffered string or undefined if empty
+      })).then((response) => {
+        res.writeHead(response.status, Object.fromEntries(response.headers));
+        response.body?.pipeTo(new WritableStream({
+          write(chunk) { res.write(chunk); },
+          close() { res.end(); },
+          abort(err) {
+            console.error('Response stream aborted:', err);
+            res.destroy(err);
+          }
+        }));
+      }).catch((err) => {
+        console.error('Error handling request:', err);
+        res.writeHead(500);
+        res.end('Internal Server Error');
+      });
+    });
+    req.on('error', (err) => {
+      console.error('Request stream error:', err);
+      res.writeHead(400);
+      res.end('Bad Request');
+    });
   }
 });
 
-// --- Start Server ---
-app.listen(port, () => {
+server.listen(config.server.port, () => {
   console.log(`-------------------------------------------------------`);
-  console.log(`🚀 Therapy Analyzer Backend listening on port ${port}`);
-  console.log(`   Mode: ${config.server.isProduction ? 'Production' : 'Development'}`);
+  console.log(`🚀 Therapy Analyzer Backend (Elysia/Node) listening on port ${config.server.port}`);
+  console.log(`   Mode: ${config.server.nodeEnv}`);
   console.log(`   DB Path: ${config.db.sqlitePath}`);
   console.log(`   CORS Origin: ${config.server.corsOrigin}`);
   console.log(`   Ollama URL: ${config.ollama.baseURL}`);
   console.log(`   Ollama Model: ${config.ollama.model}`);
   console.log(`-------------------------------------------------------`);
-  console.log(`Access API Schema at: http://localhost:${port}/api/schema`);
-  console.log(`Health Check: http://localhost:${port}/api/health`);
+  console.log(`Access API Docs at: http://localhost:${config.server.port}/api/docs`);
+  console.log(`Health Check: http://localhost:${config.server.port}/api/health`);
   console.log(`-------------------------------------------------------`);
 });
+
+export default app;
+export type App = typeof app;

@@ -2,19 +2,19 @@
 import { Request, Response, NextFunction } from 'express';
 import path from 'path';
 // --- Corrected Relative Imports ---
-import { sessionRepository } from '../repositories/sessionRepository';
-import { chatRepository } from '../repositories/chatRepository';
+import { sessionRepository } from '../repositories/sessionRepository.js';
+import { chatRepository } from '../repositories/chatRepository.js';
 // --- Other Imports ---
 import {
     loadTranscriptContent,
     saveTranscriptContent,
     deleteTranscriptFile,
     deleteUploadedFile
-} from '../services/fileService';
-import { transcribeAudio } from '../services/transcriptionService';
-import { createSessionListDTO, updateParagraphInTranscript, isNodeError } from '../utils/helpers';
-import type { BackendSession, BackendSessionMetadata, BackendChatSession } from '../types';
-import config from '../config';
+} from '../services/fileService.js';
+import { transcribeAudio } from '../services/transcriptionService.js';
+import { createSessionListDTO, updateParagraphInTranscript, isNodeError } from '../utils/helpers.js';
+import type { BackendSession, BackendSessionMetadata, BackendChatSession } from '../types/index.js';
+import config from '../config/index.js'; // Corrected import for config
 
 // GET / - List all sessions (metadata only)
 export const listSessions = (req: Request, res: Response, next: NextFunction): void => {

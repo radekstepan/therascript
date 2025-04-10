@@ -1,14 +1,24 @@
 {
   "compilerOptions": {
-    "target": "ES2020",
-    "module": "commonjs",
+    "target": "ES2022", // Modern target
+    "module": "ESNext", // Use ES modules
+    "moduleResolution": "NodeNext", // Modern module resolution
+    "outDir": "./dist",
+    "rootDir": "./src",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "outDir": "./dist",
-    "rootDir": "./",
-    "types": ["node"]
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "sourceMap": true,
+    "declaration": true, // Optional: generate declaration files
+    "declarationMap": true, // Optional: generate declaration maps
+    // Required by Elysia for decorators / advanced features if used
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+     // Add Bun types if using Bun
+     "types": ["bun-types"]
   },
-  "include": ["*.ts"],
-  "exclude": ["node_modules"]
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
 }

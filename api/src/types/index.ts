@@ -1,53 +1,49 @@
-// src/types/index.ts
+// src/types.ts
 
 export interface BackendChatMessage {
-  id: number; // Auto-incremented ID from DB
-  chatId: number; // Foreign key
+  id: number;
+  chatId: number;
   sender: 'user' | 'ai';
   text: string;
-  timestamp: number; // Unix ms timestamp
+  timestamp: number;
 }
 
 export interface BackendChatSession {
-  id: number; // Auto-incremented ID from DB
-  sessionId: number; // Foreign key
-  timestamp: number; // Unix ms timestamp
+  id: number;
+  sessionId: number;
+  timestamp: number;
   name?: string;
-  // Messages are fetched separately when needed, not stored directly on the object
-  messages?: BackendChatMessage[]; // Optional: include when returning full chat details
+  messages?: BackendChatMessage[]; // Optional, loaded on demand
 }
 
-// Represents the data stored in the 'sessions' table
 export interface BackendSession {
-  id: number; // Auto-incremented ID from DB
+  id: number;
   fileName: string;
   clientName: string;
   sessionName: string;
-  date: string; // YYYY-MM-DD
+  date: string;
   sessionType: string;
   therapy: string;
-  transcriptPath: string; // Path to the transcript file
-   // Chats are fetched separately, not stored directly
-   chats?: BackendChatSession[]; // Optional: include when returning full session details
+  transcriptPath: string;
+  chats?: BackendChatSession[]; // Optional, loaded on demand
 }
 
-// Type used specifically for creating/updating session metadata
+// Metadata used for creation/update, excluding generated fields
 export type BackendSessionMetadata = Omit<BackendSession, 'id' | 'transcriptPath' | 'chats' | 'fileName'>;
 
 
-// Type for the API action schema
 export interface ActionSchema {
     endpoint: string;
     method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
     description: string;
-    requestBody?: Record<string, unknown> | string; // Allow string for file descriptions
+    requestBody?: Record<string, unknown> | string;
     pathParams?: Record<string, string>;
     queryParams?: Record<string, string>;
     responseBody?: Record<string, unknown> | string;
 }
 
-// Error structure for consistent API responses
 export interface ApiErrorResponse {
     error: string;
-    details?: string;
+    details?: string | Record<string, any>; // Allow details object, e.g., for validation
+    validationErrors?: any; // Specifically for validation errors
 }
