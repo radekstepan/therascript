@@ -7,7 +7,8 @@ import { cn } from '../../utils';
 interface TranscriptParagraphProps {
     paragraph: string;
     index: number;
-    onSave: (index: number, newText: string) => void;
+    // onSave prop now expects the async function passed down from SessionView via Transcription
+    onSave: (index: number, newText: string) => Promise<void>;
     activeEditIndex: number | null;
     setActiveEditIndex: Dispatch<SetStateAction<number | null>>;
 }
@@ -21,98 +22,126 @@ export function TranscriptParagraph({
 }: TranscriptParagraphProps) {
     const [editValue, setEditValue] = useState(paragraph);
     const containerRef = useRef<HTMLDivElement>(null);
+    const textareaRef = useRef<HTMLTextAreaElement>(null); // Ref for the textarea
     const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
     const isEditing = activeEditIndex === index;
 
+    // Update dimensions and focus textarea when editing starts
     useEffect(() => {
-        // Update dimensions whenever isEditing becomes true
         if (isEditing && containerRef.current) {
             const rect = containerRef.current.getBoundingClientRect();
             setDimensions({
                 width: rect.width,
                 height: rect.height
             });
+            // Focus and select text in the textarea when it becomes visible
+             requestAnimationFrame(() => { // Ensure textarea is rendered
+                 if(textareaRef.current) {
+                     textareaRef.current.focus();
+                     textareaRef.current.select();
+                 }
+             });
         }
-        // Reset editValue if paragraph changes while not editing this specific item
-        if (!isEditing) {
+        // Reset editValue if the paragraph prop changes externally while not editing this specific item
+        if (!isEditing && paragraph !== editValue) {
             setEditValue(paragraph);
         }
-    }, [isEditing, paragraph]); // Add paragraph dependency to reset editValue if needed
+    }, [isEditing, paragraph]); // Rerun effect if isEditing or paragraph changes
+
 
     const handleEditClick = () => {
-        setEditValue(paragraph); // Ensure edit starts with current paragraph value
-        setActiveEditIndex(index);
+        setEditValue(paragraph); // Ensure edit starts with the current, potentially updated, paragraph value
+        setActiveEditIndex(index); // Set this paragraph as the one being edited
     };
 
     const handleCancel = () => {
-        setActiveEditIndex(null);
-        // Optionally reset editValue, although useEffect handles external changes
-        // setEditValue(paragraph);
+        setActiveEditIndex(null); // Exit edit mode for this paragraph
+        setEditValue(paragraph); // Reset textarea value to original on cancel
     };
 
-    const handleSave = () => {
-        // Trim whitespace and check if it actually changed
+    // Make handleSave async to await the onSave prop
+    const handleSave = async () => {
         const trimmedValue = editValue.trim();
+        // Only call save if the trimmed text actually changed
         if (trimmedValue !== paragraph.trim()) {
-            onSave(index, trimmedValue);
+            try {
+                // Call the async onSave function passed from parent (waits for API call)
+                await onSave(index, trimmedValue);
+                // Parent's onSave handler (handleSaveParagraphInternal) will call setActiveEditIndex(null) on success
+            } catch (error) {
+                console.error(`Error saving paragraph ${index} from TranscriptParagraph:`, error);
+                // Decide if you want to keep the editor open on error or close it
+                // setActiveEditIndex(null); // Optionally close even on error
+            }
+        } else {
+            // If no change, just close edit mode
+            setActiveEditIndex(null);
         }
-        setActiveEditIndex(null);
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault(); handleSave();
+            e.preventDefault();
+            handleSave(); // Trigger save on Ctrl/Cmd+Enter
         } else if (e.key === 'Escape') {
-            e.preventDefault(); handleCancel();
+            e.preventDefault();
+            handleCancel(); // Trigger cancel on Escape
         }
     };
 
+    // Placeholder for play functionality
     const handlePlayClick = () => {
         console.log(`▶️ Simulate PLAY event for paragraph index ${index}: "${paragraph.substring(0, 70)}..."`);
+        // Add actual audio playback logic here if needed
     };
 
+    // Common text styles for display and edit modes
     const textStyles = {
         whiteSpace: 'pre-wrap' as const,
         fontFamily: 'var(--font-mono)',
-        lineHeight: 'var(--line-height-4)',
+        fontSize: 'var(--font-size-2)', // Use theme font size
+        lineHeight: 'var(--line-height-3)', // Use theme line height
         wordBreak: 'break-word' as const,
+        color: 'var(--gray-a12)', // Use theme text color
     };
 
-    // Function to render the paragraph content (visible or hidden)
+    // Function to render the paragraph content (visible or hidden for layout)
     const renderContent = (isVisible: boolean = true) => (
         <Flex align="start" gap="2" className="group p-1" style={{ visibility: isVisible ? 'visible' : 'hidden' }}>
             <Box
                 as="div"
-                className="text-sm text-[--gray-a12] flex-grow"
+                className="flex-grow" // Takes available space
                 style={textStyles}
             >
-                {paragraph || <span style={{ fontStyle: 'italic', color: 'var(--gray-a9)'}}>[Empty Paragraph]</span>}
+                {/* Handle potentially empty paragraphs gracefully */}
+                {paragraph.trim() ? paragraph : <span style={{ fontStyle: 'italic', color: 'var(--gray-a9)'}}>[Empty Paragraph]</span>}
             </Box>
+            {/* Action Icons */}
             <Flex align="center" gap="1" className="flex-shrink-0 mt-0.5">
+                 {/* Play Button */}
                 <IconButton
                     variant="ghost"
                     color="gray"
                     size="1"
                     className={cn(
                         "transition-opacity p-0 h-5 w-5",
-                         // Only show hover effect if not editing THIS paragraph
-                        !isEditing && "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                        !isEditing && "opacity-0 group-hover:opacity-100 focus-visible:opacity-100" // Show on hover/focus when not editing
                     )}
                     onClick={handlePlayClick}
-                    title="Play paragraph"
+                    title="Play paragraph (Not Implemented)"
                     aria-label="Play paragraph"
                     disabled={isEditing} // Disable while editing this one
                 >
                     <PlayIcon />
                 </IconButton>
+                {/* Edit Button */}
                 <IconButton
                     variant="ghost"
                     color="gray"
                     size="1"
                     className={cn(
                         "transition-opacity p-0 h-5 w-5",
-                         // Only show hover effect if not editing THIS paragraph
-                        !isEditing && "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                         !isEditing && "opacity-0 group-hover:opacity-100 focus-visible:opacity-100" // Show on hover/focus when not editing
                     )}
                     onClick={handleEditClick}
                     title="Edit this paragraph"
@@ -128,53 +157,51 @@ export function TranscriptParagraph({
     return (
         <Box
             ref={containerRef}
-            // Apply hover background only when NOT editing this specific paragraph
             className={cn(
                 "rounded transition-colors duration-150",
+                // Apply hover background only when NOT editing this specific paragraph
                 !isEditing && "hover:bg-[--gray-a3]"
              )}
-            style={{ position: 'relative' }} // Keep as positioning context
+            style={{ position: 'relative' }} // Positioning context for the editor overlay
         >
             {isEditing ? (
                 <>
-                    {/* Edit mode overlay with solid background */}
+                    {/* Editor Overlay */}
                     <Box
                         style={{
                             position: 'absolute',
                             top: 0,
                             left: 0,
-                            width: '100%', // Cover the container
+                            width: '100%',
                             zIndex: 10,
-                            padding: 'var(--space-1)', // Use theme spacing, matches p-1 class
-                            // --- SOLID BACKGROUND ---
-                            backgroundColor: 'var(--color-panel-solid)', // Use Radix solid panel color
-                            // ------------------------
-                            borderRadius: 'var(--radius-2)', // Match container rounding
-                            boxShadow: 'var(--shadow-3)', // Add shadow for visual separation
+                            padding: 'var(--space-1)',
+                            backgroundColor: 'var(--color-panel-solid)',
+                            borderRadius: 'var(--radius-2)',
+                            boxShadow: 'var(--shadow-3)',
+                            border: `1px solid var(--gray-a6)` // Add border to overlay
                         }}
+                        // Prevent click propagation to avoid exiting edit mode accidentally
+                        onClick={(e) => e.stopPropagation()}
                     >
                         <Flex direction="column" gap="2">
                             <TextArea
+                                ref={textareaRef} // Assign ref
                                 value={editValue}
                                 onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setEditValue(e.target.value)}
                                 placeholder="Enter paragraph text..."
-                                size="2" // Use Radix size prop for padding etc.
+                                size="2"
                                 style={{
-                                    ...textStyles, // Keep text formatting consistent
-                                    width: '100%', // Fill the overlay box width
-                                    // Use minHeight based on original content, allows expansion
-                                    minHeight: dimensions.height > 0 ? `${dimensions.height}px` : 'auto',
-                                    // Match overlay background or let it use default TextArea bg
-                                    backgroundColor: 'var(--color-panel-solid)',
-                                    resize: 'none',
+                                    ...textStyles,
+                                    width: '100%',
+                                    minHeight: dimensions.height > 50 ? `${dimensions.height}px` : '80px', // Ensure a minimum height, use measured height if larger
+                                    backgroundColor: 'var(--color-panel-translucent)', // Slightly different bg for textarea? Or keep solid.
+                                    resize: 'vertical', // Allow vertical resize
                                     boxSizing: 'border-box',
-                                    borderRadius: 'var(--radius-2)', // Consistent rounding
-                                    border: '1px solid var(--gray-a6)', // Slightly more visible border
-                                    color: 'var(--gray-a12)', // Ensure text color contrasts
-                                    // Remove explicit padding: '8px', rely on size="2"
+                                    borderRadius: 'var(--radius-2)',
+                                    border: '1px solid var(--gray-a7)', // Internal border for textarea
+                                    // Remove specific padding, rely on size="2"
                                 }}
-                                autoFocus // Focus the textarea when it appears
-                                onFocus={(e) => e.currentTarget.select()} // Select text on focus
+                                // autoFocus // Handled by useEffect now
                                 onKeyDown={handleKeyDown}
                                 aria-label={`Edit paragraph ${index + 1}`}
                             />
@@ -188,7 +215,7 @@ export function TranscriptParagraph({
                             </Flex>
                         </Flex>
                     </Box>
-                    {/* Render the original content invisibly to maintain layout space */}
+                    {/* Render original content invisibly below overlay to maintain layout space */}
                     {renderContent(false)}
                 </>
             ) : (

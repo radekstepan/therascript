@@ -8,7 +8,7 @@ export type SessionSortCriteria = 'sessionName' | 'clientName' | 'sessionType' |
 export type SortDirection = 'asc' | 'desc';
 
 // Core State Atoms
-export const pastSessionsAtom = atom<Session[]>([]); // Holds all session data, including full details when fetched
+export const pastSessionsAtom = atom<Session[]>([]);
 export const activeSessionIdAtom = atom<number | null>(null);
 export const activeChatIdAtom = atom<number | null>(null);
 
@@ -16,57 +16,40 @@ export const activeChatIdAtom = atom<number | null>(null);
 export const sessionSortCriteriaAtom = atomWithStorage<SessionSortCriteria>('session-sort-criteria', 'date');
 export const sessionSortDirectionAtom = atomWithStorage<SortDirection>('session-sort-direction', 'desc');
 
-// --- Derived Read Atoms ---
-
-// Derives the currently active session object from the list
+// Derived Read Atoms
 export const activeSessionAtom = atom<Session | null>((get) => {
-  const sessions = get(pastSessionsAtom);
-  const id = get(activeSessionIdAtom);
-  if (id === null) {
-      console.log("activeSessionAtom: No activeSessionIdAtom");
-      return null;
-  }
-  const activeSession = sessions.find((s) => s.id === id);
-  if (!activeSession) {
-      console.log(`activeSessionAtom: Session with ID ${id} not found in pastSessionsAtom.`);
-      // console.log("Available session IDs:", sessions.map(s => s.id));
-      return null;
-  }
-  // Log the chats whenever the active session is derived
-  // console.log(`activeSessionAtom: Found session ${id}. Chats:`, activeSession.chats);
-  return activeSession;
+    const sessions = get(pastSessionsAtom);
+    const id = get(activeSessionIdAtom);
+    // --- LOGGING START ---
+    console.log('[activeSessionAtom] Deriving: activeSessionId =', id);
+    // console.log('[activeSessionAtom] Deriving: pastSessions =', sessions); // Can be noisy
+    const foundSession = id !== null ? sessions.find((s) => s.id === id) ?? null : null;
+    console.log('[activeSessionAtom] Result:', foundSession ? { id: foundSession.id, name: foundSession.sessionName, hasChats: Array.isArray(foundSession.chats) } : null);
+    if (foundSession) {
+       // Log existence and type of chats array if session is found
+       console.log('[activeSessionAtom] Found session chats property exists:', foundSession.hasOwnProperty('chats'));
+       console.log('[activeSessionAtom] Found session chats is array:', Array.isArray(foundSession.chats));
+       // console.log('[activeSessionAtom] Found session chats content:', foundSession.chats); // Potentially noisy
+    }
+    // --- LOGGING END ---
+    return foundSession;
 });
 
-// Derives the currently active chat object within the active session
+
 export const activeChatAtom = atom<ChatSession | null>((get) => {
-  const session = get(activeSessionAtom); // Relies on the above atom
-  const chatId = get(activeChatIdAtom);
-
-  if (!session) {
-      // console.log("activeChatAtom: No active session found.");
-      return null;
-  }
-  if (chatId === null) {
-      // console.log("activeChatAtom: No active chatId set.");
-      return null;
-  }
-
-  // Ensure session.chats is treated as an array
-  const chats = Array.isArray(session.chats) ? session.chats : [];
-  const activeChat = chats.find((c) => c.id === chatId);
-
-  if (!activeChat) {
-      // console.log(`activeChatAtom: Chat with ID ${chatId} not found in active session ${session.id}.`);
-      // console.log("Available chat IDs in session:", chats.map(c => c.id));
-      return null;
-  }
-  // console.log(`activeChatAtom: Found active chat ${chatId}.`);
-  return activeChat;
+    const session = get(activeSessionAtom); // Relies on the atom above
+    const chatId = get(activeChatIdAtom);
+    if (!session || chatId === null) return null;
+    // Ensure session.chats exists and is an array before searching
+    const chats = Array.isArray(session.chats) ? session.chats : [];
+    const foundChat = chats.find((c) => c.id === chatId) ?? null;
+    // Optional: Log found chat details
+    // console.log('[activeChatAtom] Found chat:', foundChat ? { id: foundChat.id, name: foundChat.name, hasMessages: Array.isArray(foundChat.messages) } : null);
+    return foundChat;
 });
 
-// Derives starred messages from ALL sessions (unchanged)
+
 export const starredMessagesAtom = atom<Pick<ChatMessage, 'id' | 'text' | 'starredName'>[]>((get) => {
-    // ... logic remains the same ...
     const sessions = get(pastSessionsAtom);
     const allStarred: Pick<ChatMessage, 'id' | 'text' | 'starredName'>[] = [];
     sessions.forEach((session) => {
@@ -83,49 +66,48 @@ export const starredMessagesAtom = atom<Pick<ChatMessage, 'id' | 'text' | 'starr
     return allStarred;
 });
 
-// Derives sorted sessions for the landing page (unchanged)
 export const sortedSessionsAtom = atom<Session[]>((get) => {
-    // ... logic remains the same ...
     const sessions = get(pastSessionsAtom);
     const criteria = get(sessionSortCriteriaAtom);
     const direction = get(sessionSortDirectionAtom);
 
     const sorted = [...sessions].sort((a, b) => {
-      let valA: any;
-      let valB: any;
+        let valA: any;
+        let valB: any;
 
-      if (criteria === 'sessionName') {
-        valA = a.sessionName || a.fileName || '';
-        valB = b.sessionName || b.fileName || '';
-      } else if (criteria === 'date') {
-        // Handle potential invalid dates during sorting
-        const dateA = a.date ? new Date(a.date) : null;
-        const dateB = b.date ? new Date(b.date) : null;
-        const timeA = dateA?.getTime();
-        const timeB = dateB?.getTime();
+        if (criteria === 'sessionName') {
+            valA = a.sessionName || a.fileName || '';
+            valB = b.sessionName || b.fileName || '';
+        } else if (criteria === 'date') {
+            const dateA = a.date ? new Date(a.date) : null;
+            const dateB = b.date ? new Date(b.date) : null;
+            // Handle invalid dates during sort
+            const timeA = dateA ? dateA.getTime() : NaN;
+            const timeB = dateB ? dateB.getTime() : NaN;
+            if (isNaN(timeA)) return isNaN(timeB) ? 0 : 1; // Invalid dates go to the end
+            if (isNaN(timeB)) return -1;
+            return timeA - timeB; // Sort valid dates
+        } else {
+            // Safely access other potential criteria
+            valA = criteria in a ? (a as any)[criteria] : null;
+            valB = criteria in b ? (b as any)[criteria] : null;
+        }
 
-        if (timeA === undefined || timeA === null || isNaN(timeA)) return (timeB === undefined || timeB === null || isNaN(timeB)) ? 0 : 1; // Invalid date A goes last
-        if (timeB === undefined || timeB === null || isNaN(timeB)) return -1; // Invalid date B goes last (A is valid)
-        return timeA - timeB; // Both dates valid
-      } else {
-        valA = a[criteria as keyof Session] ?? null; // Use keyof Session
-        valB = b[criteria as keyof Session] ?? null;
-      }
 
-      // Handle nulls
-      if (valA === null && valB !== null) return 1;
-      if (valA !== null && valB === null) return -1;
-      if (valA === null && valB === null) return 0;
+        // Handle nulls during sort
+        if (valA === null && valB !== null) return 1; // Nulls go to the end
+        if (valA !== null && valB === null) return -1;
+        if (valA === null && valB === null) return 0;
 
-      // Compare values
-      if (typeof valA === 'string' && typeof valB === 'string') {
-        return valA.localeCompare(valB, undefined, { sensitivity: 'base' });
-      } else if (typeof valA === 'number' && typeof valB === 'number') {
-        return valA - valB;
-      } else {
-        // Fallback comparison
-        return String(valA).localeCompare(String(valB), undefined, { sensitivity: 'base' });
-      }
+        // Compare values
+        if (typeof valA === 'string' && typeof valB === 'string') {
+            return valA.localeCompare(valB, undefined, { sensitivity: 'base' });
+        } else if (typeof valA === 'number' && typeof valB === 'number') {
+            return valA - valB;
+        } else {
+            // Fallback comparison as strings
+            return String(valA).localeCompare(String(valB), undefined, { sensitivity: 'base' });
+        }
     });
 
     if (direction === 'desc') sorted.reverse();

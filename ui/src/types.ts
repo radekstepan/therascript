@@ -1,22 +1,19 @@
 // src/types.ts
 
 export interface ChatMessage {
-    id: number; // Matches API
-    sender: 'user' | 'ai'; // Matches API
-    text: string; // Matches API
-    timestamp?: number; // Matches API (Optional in base message, check if present)
-    starred?: boolean; // Frontend state, not in API base response
-    starredName?: string; // Frontend state
-    // Ensure chatId is present if API sends it, else it's inferred
-    chatId?: number; // Matches API
+    id: number;
+    sender: 'user' | 'ai';
+    text: string;
+    starred?: boolean;
+    starredName?: string; // Add this field to store the custom name
 }
 
 export interface ChatSession {
-    id: number; // Matches API
-    timestamp: number; // Matches API
-    name?: string | null; // Matches API (allows null)
-    messages: ChatMessage[]; // Assumes API sends this in the full session response
-    sessionId?: number; // Matches API
+    id: number;
+    timestamp: number; // Keep timestamp for sorting/display
+    name?: string; // Optional name for the chat
+    // Messages are optional, as they might be loaded on demand when a chat is selected
+    messages?: ChatMessage[];
 }
 
 export interface SessionMetadata {
@@ -27,14 +24,17 @@ export interface SessionMetadata {
     therapy: string;
 }
 
+// Ensure this Session interface definitely includes transcription
 export interface Session extends SessionMetadata {
     id: number;
     fileName: string;
-    transcriptContent: string; // Corrected field name
-    chats: ChatSession[]; // Array of chat sessions
+    transcription: string;
+    // Chats array might initially contain only metadata (ChatSession without messages)
+    chats: ChatSession[];
 }
 
 // --- Component Props ---
+
 export interface UploadModalProps {
     isOpen: boolean;
     isTranscribing: boolean;

@@ -1,26 +1,22 @@
-/*
-Modified File: src/components/SessionView/ChatInterface.tsx
-* Using @radix-ui/themes ScrollArea
-+ Reduced bottom padding AGAIN for the ChatInput area
-+ Revised scroll restoration logic for reliability
-*/
+// src/components/SessionView/ChatInterface.tsx
 import React, { useRef, useEffect, useCallback } from 'react';
 import { useAtomValue } from 'jotai';
-import { Box, Flex, ScrollArea } from '@radix-ui/themes';
+import { Box, Flex, ScrollArea, Spinner, Text } from '@radix-ui/themes'; // Add Spinner, Text
 import { ChatInput, ChatMessages } from './';
 import {
     activeChatIdAtom,
-    currentChatMessagesAtom,
-    isChattingAtom
+    currentChatMessagesAtom, // This atom derives messages from the activeChatAtom
+    isChattingAtom // Keep this for AI response loading
 } from '../../store';
 
 interface ChatInterfaceProps {
-    isTabActive?: boolean; // Is this tab currently visible? (for small screens)
-    initialScrollTop?: number; // Where to scroll when becoming active
-    onScrollUpdate?: (scrollTop: number) => void; // Callback to report scroll position
+    isTabActive?: boolean;
+    initialScrollTop?: number;
+    onScrollUpdate?: (scrollTop: number) => void;
+    isLoadingChat: boolean; // <-- Add prop for message loading state
 }
 
-// Simple debounce utility
+// Simple debounce utility (Keep as is)
 const debounce = <F extends (...args: any[]) => any>(func: F, waitFor: number) => {
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     return (...args: Parameters<F>): void => {
@@ -29,98 +25,77 @@ const debounce = <F extends (...args: any[]) => any>(func: F, waitFor: number) =
     };
 };
 
+
 export function ChatInterface({
     isTabActive,
     initialScrollTop = 0,
-    onScrollUpdate
+    onScrollUpdate,
+    isLoadingChat // <-- Destructure prop
 }: ChatInterfaceProps) {
     const activeChatId = useAtomValue(activeChatIdAtom);
     const chatContentRef = useRef<HTMLDivElement | null>(null);
     const viewportRef = useRef<HTMLDivElement | null>(null);
-    const chatMessages = useAtomValue(currentChatMessagesAtom);
-    const isChatting = useAtomValue(isChattingAtom);
-    // Ref to track if a scroll restoration is pending after activation
+    const chatMessages = useAtomValue(currentChatMessagesAtom); // Reads messages from global state
+    const isAiResponding = useAtomValue(isChattingAtom);
     const restoreScrollRef = useRef(false);
 
-    // --- Scroll Saving ---
-    const debouncedScrollSave = useCallback(
-        debounce((scrollTop: number) => {
-            // console.log("Chat Saving scroll:", scrollTop);
-            if (onScrollUpdate) {
-                onScrollUpdate(scrollTop);
-            }
-        }, 150), // Debounce time
-    [onScrollUpdate]);
+    // --- Scroll Saving & Restoration Logic (Unchanged) ---
+     const debouncedScrollSave = useCallback(
+         debounce((scrollTop: number) => {
+             if (onScrollUpdate) {
+                 onScrollUpdate(scrollTop);
+             }
+         }, 150),
+     [onScrollUpdate]);
 
-    const handleScroll = (event: React.UIEvent<HTMLDivElement>) => {
-        // Prevent saving scroll position during programmatic restoration
-        if (!restoreScrollRef.current && event.currentTarget) {
-            debouncedScrollSave(event.currentTarget.scrollTop);
-        }
-        // Reset the flag after the user manually scrolls *after* a restoration
-        // OR if the programmatic scroll event fires (which it should)
-        if (restoreScrollRef.current) {
+     const handleScroll = (event: React.UIEvent<HTMLDivElement>) => {
+         if (!restoreScrollRef.current && event.currentTarget) {
+             debouncedScrollSave(event.currentTarget.scrollTop);
+         }
+         if (restoreScrollRef.current) {
+              restoreScrollRef.current = false;
+         }
+     };
+
+     useEffect(() => {
+         if (isTabActive) {
+             restoreScrollRef.current = true;
+         } else {
              restoreScrollRef.current = false;
-             // console.log("Chat reset restoreScrollRef on scroll");
-        }
-    };
+         }
+     }, [isTabActive]);
 
-    // --- Scroll Restoration ---
+     useEffect(() => {
+         if (restoreScrollRef.current && viewportRef.current) {
+             requestAnimationFrame(() => {
+                  if (restoreScrollRef.current && viewportRef.current) {
+                     if (viewportRef.current.scrollTop !== initialScrollTop) {
+                         viewportRef.current.scrollTop = initialScrollTop;
+                     } else {
+                         restoreScrollRef.current = false;
+                     }
+                 }
+             });
+         }
+     }, [isTabActive, initialScrollTop]);
+    // --- End Scroll Logic ---
+
+
+    // --- Scroll to Bottom on New Messages (or initial load finish) ---
     useEffect(() => {
-        // When tab becomes active, mark that restoration is needed
-        if (isTabActive) {
-            restoreScrollRef.current = true;
-            // console.log(`Chat marked for restoration to: ${initialScrollTop}`);
-        } else {
-            // Ensure flag is false if tab becomes inactive
-            restoreScrollRef.current = false;
-        }
-    }, [isTabActive]); // Only depends on isTabActive changing
-
-    useEffect(() => {
-        // If restoration is marked and ref is available, perform the scroll
-        if (restoreScrollRef.current && viewportRef.current) {
-            requestAnimationFrame(() => {
-                // Double-check the flag hasn't been reset by an intervening scroll event
-                if (restoreScrollRef.current && viewportRef.current) {
-                     // Check if the position actually needs changing
-                    if (viewportRef.current.scrollTop !== initialScrollTop) {
-                        viewportRef.current.scrollTop = initialScrollTop;
-                        // console.log(`Chat RESTORED scroll to: ${initialScrollTop}`);
-                        // Programmatic scroll WILL trigger handleScroll, which resets the ref.
-                    } else {
-                        // If already at the correct position, manually reset the flag
-                        restoreScrollRef.current = false;
-                        // console.log("Chat already at target, reset restoreScrollRef");
-                    }
-                }
-            });
-        }
-        // This effect depends on initialScrollTop as well, in case the saved
-        // position changes while the tab is inactive
-    }, [isTabActive, initialScrollTop]);
-
-
-    // --- Scroll to Bottom on New Messages ---
-    useEffect(() => {
-        // Only auto-scroll if:
-        // 1. The tab is active (or large screen: isTabActive is undefined)
-        // 2. Restoration is NOT currently pending (don't fight the restoration)
-        if ((isTabActive === undefined || isTabActive) && !restoreScrollRef.current) {
-            // console.log("Chat considering scroll to bottom");
+        // Only auto-scroll if tab is active (or large screen) AND not restoring scroll AND not loading chat messages
+        if ((isTabActive === undefined || isTabActive) && !restoreScrollRef.current && !isLoadingChat) {
             if (chatContentRef.current) {
                 const lastElement = chatContentRef.current.lastElementChild;
                 if (lastElement) {
                     requestAnimationFrame(() => {
-                        // console.log("Chat scrolling to bottom");
                         lastElement.scrollIntoView({ behavior: "smooth", block: "end" });
                     });
                 }
             }
         }
-    // Run when messages or chatting state change, or tab becomes active
-    // (the restoreScrollRef check prevents immediate scroll on activation)
-    }, [chatMessages, isChatting, isTabActive]);
+    // Run when messages change, AI stops responding, tab becomes active, OR chat loading finishes
+    }, [chatMessages, isAiResponding, isTabActive, isLoadingChat]);
 
 
     return (
@@ -130,9 +105,28 @@ export function ChatInterface({
                 scrollbars="vertical"
                 ref={viewportRef}
                 onScroll={handleScroll}
-                style={{ flexGrow: 1, minHeight: 0 }}
+                style={{ flexGrow: 1, minHeight: 0, position: 'relative' }} // Added relative positioning
             >
-                <Box p="4" ref={chatContentRef}>
+                {/* Conditionally render loading overlay */}
+                {isLoadingChat && (
+                    <Flex
+                       align="center"
+                       justify="center"
+                       style={{
+                           position: 'absolute',
+                           inset: 0, // Cover the entire scroll area
+                           backgroundColor: 'var(--color-panel-translucent)', // Semi-transparent overlay
+                           zIndex: 10, // Ensure it's above messages
+                           borderRadius: 'var(--radius-3)', // Optional: match container radius
+                       }}
+                       >
+                        <Spinner size="3" />
+                        <Text ml="2" color="gray">Loading messages...</Text>
+                    </Flex>
+                )}
+                {/* Message content area */}
+                <Box p="4" ref={chatContentRef} style={{ opacity: isLoadingChat ? 0.5 : 1, transition: 'opacity 0.2s ease-in-out' }}>
+                    {/* ChatMessages reads from currentChatMessagesAtom, which gets updated when fetch completes */}
                     <ChatMessages activeChatId={activeChatId} />
                 </Box>
             </ScrollArea>
@@ -145,9 +139,13 @@ export function ChatInterface({
                     flexShrink: 0,
                     borderTop: '1px solid var(--gray-a6)',
                     backgroundColor: 'var(--card-background)',
+                    opacity: isLoadingChat ? 0.6 : 1, // Dim input area while loading
+                    pointerEvents: isLoadingChat ? 'none' : 'auto', // Disable interactions while loading
+                    transition: 'opacity 0.2s ease-in-out',
                 }}
             >
-                <ChatInput />
+                {/* Pass disabled state to ChatInput */}
+                <ChatInput disabled={isLoadingChat} />
             </Box>
         </Flex>
     );

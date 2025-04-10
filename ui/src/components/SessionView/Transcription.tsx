@@ -1,9 +1,8 @@
 /*
 Modified File: src/components/SessionView/Transcription.tsx
-Using @radix-ui/themes ScrollArea
-+ Attempting baseline alignment for header items
-+ Added state management for activeEditIndex
-+ Revised scroll restoration logic for reliability
++ Updated props interface for onSaveParagraph
++ Removed internal state management that's now handled in SessionView
++ Calls onSaveParagraph prop via internal handler
 */
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import type { Session } from '../../types';
@@ -19,7 +18,7 @@ import {
 } from '@radix-ui/react-icons';
 import { cn } from '../../utils';
 
-// --- Helper functions (Keep unchanged) ---
+// --- Helper functions (Unchanged) ---
 const sessionColorMap: Record<string, React.ComponentProps<typeof Badge>['color']> = {
     'individual': 'blue', 'phone': 'sky', 'skills group': 'teal',
     'family session': 'green', 'family skills': 'green', 'couples': 'indigo',
@@ -65,12 +64,11 @@ const debounce = <F extends (...args: any[]) => any>(func: F, waitFor: number) =
     };
 };
 
-
 interface TranscriptionProps {
-    session: Session | null;
+    session: Session | null; // Session now guaranteed to have transcription if not null
     onEditDetailsClick: () => void;
-    editTranscriptContent: string;
-    onContentChange: (value: string) => void;
+    // Removed editTranscriptContent and onContentChange props
+    onSaveParagraph: (index: number, newText: string) => Promise<void>; // Prop to handle saving
     isTabActive?: boolean;
     initialScrollTop?: number;
     onScrollUpdate?: (scrollTop: number) => void;
@@ -79,162 +77,136 @@ interface TranscriptionProps {
 export function Transcription({
     session,
     onEditDetailsClick,
-    editTranscriptContent,
-    onContentChange,
+    onSaveParagraph, // Use the specific save handler prop
     isTabActive,
     initialScrollTop = 0,
     onScrollUpdate,
 }: TranscriptionProps) {
+    // State to track WHICH paragraph is currently being edited
     const [activeEditIndex, setActiveEditIndex] = useState<number | null>(null);
     const viewportRef = useRef<HTMLDivElement | null>(null);
-    // Ref to track if a scroll restoration is pending after activation
-    const restoreScrollRef = useRef(false);
+    const restoreScrollRef = useRef(false); // For scroll restoration logic
 
-    // --- Scroll Saving ---
+    // --- Scroll Saving & Restoration Logic (Unchanged) ---
     const debouncedScrollSave = useCallback(
         debounce((scrollTop: number) => {
-            // console.log("Transcript Saving scroll:", scrollTop);
             if (onScrollUpdate) {
                 onScrollUpdate(scrollTop);
             }
-        }, 150), // Debounce time
+        }, 150),
     [onScrollUpdate]);
 
     const handleScroll = (event: React.UIEvent<HTMLDivElement>) => {
-        // Prevent saving scroll position during programmatic restoration
         if (!restoreScrollRef.current && event.currentTarget) {
             debouncedScrollSave(event.currentTarget.scrollTop);
         }
-        // Reset the flag after the user manually scrolls *after* a restoration
-        // OR if the programmatic scroll event fires (which it should)
         if (restoreScrollRef.current) {
              restoreScrollRef.current = false;
-             // console.log("Transcript reset restoreScrollRef on scroll");
         }
     };
 
-    // --- Scroll Restoration ---
     useEffect(() => {
-        // When tab becomes active, mark that restoration is needed
         if (isTabActive) {
             restoreScrollRef.current = true;
-            // console.log(`Transcript marked for restoration to: ${initialScrollTop}`);
         } else {
-            // Ensure flag is false if tab becomes inactive
             restoreScrollRef.current = false;
         }
-    }, [isTabActive]); // Only depends on isTabActive changing
+    }, [isTabActive]);
 
     useEffect(() => {
-        // If restoration is marked and ref is available, perform the scroll
         if (restoreScrollRef.current && viewportRef.current) {
             requestAnimationFrame(() => {
-                 // Double-check the flag hasn't been reset by an intervening scroll event
                  if (restoreScrollRef.current && viewportRef.current) {
-                     // Check if the position actually needs changing
                     if (viewportRef.current.scrollTop !== initialScrollTop) {
                         viewportRef.current.scrollTop = initialScrollTop;
-                        // console.log(`Transcript RESTORED scroll to: ${initialScrollTop}`);
-                        // Programmatic scroll WILL trigger handleScroll, which resets the ref.
                     } else {
-                         // If already at the correct position, manually reset the flag
                         restoreScrollRef.current = false;
-                        // console.log("Transcript already at target, reset restoreScrollRef");
                     }
                 }
             });
         }
-        // This effect depends on initialScrollTop as well, in case the saved
-        // position changes while the tab is inactive
     }, [isTabActive, initialScrollTop]);
+    // --- End Scroll Logic ---
 
-
-    // --- Other Component Logic ---
     if (!session) {
-         return <Box p="4"><Text color="gray" style={{ fontStyle: 'italic' }}>Loading session data...</Text></Box>;
+        // This case should ideally not be hit if SessionView handles loading state correctly
+        return <Box p="4"><Text color="gray" style={{ fontStyle: 'italic' }}>Loading session data...</Text></Box>;
     }
-    const sourceContent = editTranscriptContent;
+
+    // Get the transcript content directly from the session prop. It should exist.
+    const sourceContent = session.transcription || '';
+
     const paragraphs = sourceContent
-        .replace(/\r\n/g, '\n') // Normalize Windows line breaks
-        .split(/\n\s*\n/)       // Split on one or more blank lines
-        .filter(p => p.trim() !== ''); // Remove empty paragraphs resulting from split
+        .replace(/\r\n/g, '\n')       // Normalize line breaks
+        .split(/\n\s*\n/)             // Split on blank lines
+        .filter(p => p.trim() !== ''); // Remove empty paragraphs
 
-    const handleSaveParagraph = (index: number, newText: string) => {
-        const baseContentForSave = editTranscriptContent;
-        const currentParagraphsWithBlanks = baseContentForSave
-            .replace(/\r\n/g, '\n')
-            .split(/(\n\s*\n)/); // Split but keep delimiters
-
-        let paragraphIndexInFullSplit = -1;
-        let visibleIndexCounter = -1;
-
-        for (let i = 0; i < currentParagraphsWithBlanks.length; i += 2) { // Step by 2 (content + delimiter)
-            const contentPart = currentParagraphsWithBlanks[i];
-            if (contentPart.trim() !== '') {
-                visibleIndexCounter++;
-                if (visibleIndexCounter === index) {
-                    paragraphIndexInFullSplit = i;
-                    break;
-                }
-            }
-        }
-
-        if (paragraphIndexInFullSplit !== -1) {
-            currentParagraphsWithBlanks[paragraphIndexInFullSplit] = newText;
-            const newTranscript = currentParagraphsWithBlanks.join('');
-            onContentChange(newTranscript);
-            setActiveEditIndex(null);
-        } else {
-            console.warn("Paragraph index mapping failed during save. Index:", index);
-            setActiveEditIndex(null);
+    // This internal handler calls the prop passed down from SessionView
+    // It also manages closing the edit state locally
+    const handleSaveParagraphInternal = async (index: number, newText: string) => {
+        try {
+            await onSaveParagraph(index, newText); // Call the actual save handler passed from SessionView
+            setActiveEditIndex(null); // Close edit mode for this paragraph on success
+        } catch (error) {
+            console.error(`Error saving paragraph ${index} from Transcription component:`, error);
+            // Optionally keep the editor open or show an error specific to the paragraph
+            // setActiveEditIndex(null); // Decide whether to close on error
         }
     };
 
     return (
         <Flex direction="column" style={{ height: '100%', minHeight: 0, border: '1px solid var(--gray-a6)', borderRadius: 'var(--radius-3)' }}>
-            {/* Header (Keep existing) */}
+            {/* Header (Unchanged) */}
              <Flex
-                align="baseline"
+                align="baseline" // Changed from center for better alignment with button
                 justify="between"
                 px="3" py="2"
                 style={{ borderBottom: '1px solid var(--gray-a6)', flexShrink: 0 }}
                 gap="3"
-                wrap="wrap"
+                wrap="wrap" // Allow wrapping on small screens
             >
-                <Flex align="center" gap="3" wrap="wrap" style={{ minWidth: 0 }}>
+                {/* Details */}
+                <Flex align="center" gap="3" wrap="wrap" style={{ minWidth: 0, flexGrow: 1 }}>
                     {renderHeaderDetail(PersonIcon, session.clientName, "Client")}
                     {renderHeaderDetail(CalendarIcon, session.date, "Date")}
                     {renderHeaderDetail(SessionTypeIcon, session.sessionType, "Session Type", 'session')}
                     {renderHeaderDetail(BookmarkIcon, session.therapy, "Therapy Type", 'therapy')}
                 </Flex>
+                 {/* Edit Button */}
                 <Box flexShrink="0">
                     <Button variant="ghost" size="1" onClick={onEditDetailsClick} aria-label="Edit session details">
                         <Pencil1Icon width="14" height="14" />
-                        <Text ml="1">Edit</Text>
+                        <Text ml="1">Edit Details</Text>
                     </Button>
                 </Box>
             </Flex>
-            {/* Scrollable Content */}
+
+            {/* Scrollable Content Area */}
             <ScrollArea
                 type="auto"
                 scrollbars="vertical"
                 ref={viewportRef}
-                onScroll={handleScroll} // Attach scroll handler
+                onScroll={handleScroll}
                 style={{ flexGrow: 1, minHeight: 0 }}
             >
                 <Box p="3" className="space-y-3">
-                    {/* Map paragraphs (Keep existing) */}
                      {paragraphs.length > 0 ? paragraphs.map((paragraph, index) => (
                         <TranscriptParagraph
-                            key={`${session.id}-${index}`} // More robust key
+                            // Use a combination of session ID and index for a more stable key
+                            key={`${session.id}-p-${index}`}
                             paragraph={paragraph}
                             index={index}
-                            onSave={handleSaveParagraph}
+                            // Pass the internal handler which calls the prop from SessionView
+                            onSave={handleSaveParagraphInternal}
                             activeEditIndex={activeEditIndex}
-                            setActiveEditIndex={setActiveEditIndex}
+                            setActiveEditIndex={setActiveEditIndex} // Allow paragraph to control its edit state
                         />
                     )) : (
-                        <Text color="gray" style={{ fontStyle: 'italic' }}>No transcription available.</Text>
+                        <Flex align="center" justify="center" style={{minHeight: '100px'}}>
+                            <Text color="gray" style={{ fontStyle: 'italic' }}>
+                                No transcription available for this session.
+                            </Text>
+                        </Flex>
                     )}
                 </Box>
             </ScrollArea>
