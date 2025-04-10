@@ -1,8 +1,6 @@
 /*
 Modified File: src/components/SessionView/SessionContent.tsx
-+Added Tabs layout for screens smaller than lg (1024px)
-+Fixed TypeScript errors for Tabs component props
-+Reduced top padding
++ Restored top padding. Fix for padding below input is in ChatInterface.tsx.
 */
 import React, { useState } from 'react';
 import { Box, Flex, Text, Tabs } from '@radix-ui/themes'; // Import Tabs
@@ -43,11 +41,11 @@ export function SessionContent({
             <Flex
                 className="hidden lg:flex flex-grow" // Show only on lg+
                 gap="6"
-                // --- MODIFICATION: Changed p to px, reduced pt ---
+                // --- RESTORED top padding ---
                 px={{ initial: '4', md: '6', lg: '8' }} // Keep horizontal padding
-                pt={{ initial: '2', md: '3', lg: '4' }} // Reduced top padding
-                pb={{ initial: '4', md: '6', lg: '8' }} // Keep bottom padding
-                // --- END MODIFICATION ---
+                pt="3" // RESTORED top padding (e.g., to size 3 consistently)
+                pb={{ initial: '2', md: '2', lg: '2' }} // Keep bottom padding
+                // --- END RESTORATION ---
                 style={{ minHeight: 0 }}
             >
                 {/* Chat Panel */}
@@ -84,18 +82,18 @@ export function SessionContent({
                     className="flex flex-col flex-grow"
                     style={{ minHeight: 0 }}
                 >
-                    {/* --- MODIFICATION: Reduced top padding for Tab List --- */}
-                    <Box px={{ initial: '4', md: '6' }} pt="2"> {/* Changed pt="3" to pt="2" */}
+                    {/* --- RESTORED top padding for Tab List wrapper --- */}
+                    <Box px={{ initial: '4', md: '6' }} pt="2"> {/* RESTORED pt="2" */}
                         <Tabs.List>
                             <Tabs.Trigger value="chat">Chat</Tabs.Trigger>
                             <Tabs.Trigger value="transcription">Transcription</Tabs.Trigger>
                         </Tabs.List>
                     </Box>
-                    {/* --- END MODIFICATION --- */}
+                    {/* --- END RESTORATION --- */}
 
-                    {/* --- MODIFICATION: Reduced top padding for Tab Content --- */}
-                    <Box px={{ initial: '4', md: '6' }} pb={{ initial: '4', md: '6' }} pt="2" className="flex-grow" style={{ minHeight: 0, overflow: 'hidden' }}> {/* Changed pt="3" to pt="2" */}
-                        {/* --- END MODIFICATION --- */}
+                    {/* --- RESTORED top padding for Tab Content wrapper --- */}
+                    <Box px={{ initial: '4', md: '6' }} pb={{ initial: '4', md: '6' }} pt="2" className="flex-grow" style={{ minHeight: 0, overflow: 'hidden' }}> {/* RESTORED pt="2" */}
+                        {/* --- END RESTORATION --- */}
                         <Tabs.Content value="chat" className="h-full">
                             {activeChatId !== null ? <ChatInterface /> :
                              hasChats ? <Box className="flex flex-grow items-center justify-center h-full"><Text color="gray" align="center">Select a chat from the sidebar.</Text></Box> :
