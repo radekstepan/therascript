@@ -1,59 +1,10 @@
-// src/store/sessionAtoms.ts
 import { atom } from 'jotai';
-import { atomWithStorage } from 'jotai/utils';
-import type { Session, ChatSession, ChatMessage } from '../types';
-
-// Define Sort Types
-export type SessionSortCriteria = 'sessionName' | 'clientName' | 'sessionType' | 'therapy' | 'date' | 'id';
-export type SortDirection = 'asc' | 'desc';
-
-// Core State Atoms
-export const pastSessionsAtom = atom<Session[]>([]); // This atom should be populated by LandingPage fetch
-export const activeSessionIdAtom = atom<number | null>(null);
-export const activeChatIdAtom = atom<number | null>(null);
-
-// Sorting Atoms
-export const sessionSortCriteriaAtom = atomWithStorage<SessionSortCriteria>('session-sort-criteria', 'date');
-export const sessionSortDirectionAtom = atomWithStorage<SortDirection>('session-sort-direction', 'desc');
-
-// Derived Read Atoms
-export const activeSessionAtom = atom<Session | null>((get) => {
-    const sessions = get(pastSessionsAtom);
-    const id = get(activeSessionIdAtom);
-    // console.log('[activeSessionAtom] Deriving: activeSessionId =', id);
-    const foundSession = id !== null ? sessions.find((s) => s.id === id) ?? null : null;
-    // console.log('[activeSessionAtom] Result:', foundSession ? { id: foundSession.id, name: foundSession.sessionName, hasChats: Array.isArray(foundSession.chats) } : null);
-    // if (foundSession) { console.log('[activeSessionAtom] Found session chats property exists:', foundSession.hasOwnProperty('chats')); console.log('[activeSessionAtom] Found session chats is array:', Array.isArray(foundSession.chats)); }
-    return foundSession;
-});
-
-
-export const activeChatAtom = atom<ChatSession | null>((get) => {
-    const session = get(activeSessionAtom);
-    const chatId = get(activeChatIdAtom);
-    if (!session || chatId === null) return null;
-    const chats = Array.isArray(session.chats) ? session.chats : [];
-    const foundChat = chats.find((c) => c.id === chatId) ?? null;
-    return foundChat;
-});
-
-
-export const starredMessagesAtom = atom<Pick<ChatMessage, 'id' | 'text' | 'starredName'>[]>((get) => {
-    const sessions = get(pastSessionsAtom);
-    const allStarred: Pick<ChatMessage, 'id' | 'text' | 'starredName'>[] = [];
-    sessions.forEach((session) => {
-        (Array.isArray(session.chats) ? session.chats : []).forEach((chat) => {
-            (Array.isArray(chat.messages) ? chat.messages : []).forEach((msg) => {
-                if (msg.starred) {
-                    if (!allStarred.some((starred) => starred.id === msg.id)) {
-                        allStarred.push({ id: msg.id, text: msg.text, starredName: msg.starredName });
-                    }
-                }
-            });
-        });
-    });
-    return allStarred;
-});
+import {
+    pastSessionsAtom,
+    sessionSortCriteriaAtom,
+    sessionSortDirectionAtom
+} from '..'; // Import from the main store index
+import type { Session } from '../../types'; // Assuming types is ../../
 
 // ** This atom performs the sorting based on global state **
 export const sortedSessionsAtom = atom<Session[]>((get) => {
@@ -104,6 +55,8 @@ export const sortedSessionsAtom = atom<Session[]>((get) => {
                  break;
             default:
                 // Should not happen if criteria is typed correctly
+                 // Use assertion to help TypeScript, though it won't prevent runtime issues if type isn't exhaustive
+                 const _exhaustiveCheck: never = criteria;
                  console.warn(`[sortedSessionsAtom] Unknown sort criteria: ${criteria}`);
                  return 0;
         }
