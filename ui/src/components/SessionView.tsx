@@ -9,7 +9,7 @@ import { SessionSidebar } from './SessionView/SessionSidebar';
 import { SessionContent } from './SessionView/SessionContent';
 import { EditDetailsModal } from './SessionView/EditDetailsModal';
 import { fetchSession, fetchTranscript, startNewChat, updateTranscriptParagraph, fetchChatDetails } from '../api/api';
-import type { Session, ChatSession } from '../types';
+import type { Session, ChatSession, SessionMetadata } from '../types';
 import {
     activeSessionIdAtom,
     activeChatIdAtom,
@@ -22,7 +22,7 @@ import {
 } from '../store';
 
 export function SessionView() {
-    // --- HOOKS ---
+    // --- HOOKS (ALL AT THE TOP) ---
     const { sessionId: sessionIdParam, chatId: chatIdParam } = useParams<{ sessionId: string; chatId?: string }>();
     const navigate = useNavigate();
     const setActiveSessionId = useSetAtom(activeSessionIdAtom);
@@ -30,7 +30,7 @@ export function SessionView() {
     const setChatError = useSetAtom(chatErrorAtom);
     const setPastSessions = useSetAtom(pastSessionsAtom);
     const activeChatId = useAtomValue(activeChatIdAtom);
-    const currentGlobalSession = useAtomValue(activeSessionAtom); // Can be used for checks if needed
+    const currentGlobalSession = useAtomValue(activeSessionAtom);
     const currentError = useAtomValue(chatErrorAtom);
     const [sidebarWidth, setSidebarWidth] = useAtom(clampedSidebarWidthAtom);
     const [localSession, setLocalSession] = useState<Session | null>(null);
@@ -44,300 +44,215 @@ export function SessionView() {
     const currentChatLoadIdRef = useRef<number | null>(null);
 
     // --- Computed Values ---
-    // Calculate sessionIdNum here, but use it carefully inside effects if params change
     const sessionIdNum = sessionIdParam ? parseInt(sessionIdParam, 10) : null;
+
+    // --- CALLBACKS (Define before effects that use them) ---
+
+    // Resizing Logic Callbacks
+    // Define handleMouseMove and handleMouseUp *before* the effect that uses them for cleanup
+     const handleMouseMove = useCallback((e: MouseEvent) => {
+         if (!isResizing.current || !sidebarRef.current) return;
+         const containerRect = sidebarRef.current.parentElement?.getBoundingClientRect();
+         if (!containerRect) return;
+         let newWidth = e.clientX - containerRect.left;
+         newWidth = Math.max(MIN_SIDEBAR_WIDTH, Math.min(newWidth, MAX_SIDEBAR_WIDTH));
+         setSidebarWidth(newWidth); // Use the setter from useAtom
+     }, [setSidebarWidth]); // Dependency on the setter function
+
+     const handleMouseUp = useCallback(() => {
+         if (isResizing.current) {
+             isResizing.current = false;
+             document.body.style.cursor = '';
+             document.body.style.userSelect = '';
+             // Pass the memoized handlers to removeEventListener
+             document.removeEventListener('mousemove', handleMouseMove);
+             document.removeEventListener('mouseup', handleMouseUp); // Pass itself
+         }
+     // IMPORTANT: Add handleMouseMove as a dependency here because it's used inside removeEventListener
+     }, [handleMouseMove]);
+
+     const handleMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+         e.preventDefault();
+         isResizing.current = true;
+         document.body.style.cursor = 'col-resize';
+         document.body.style.userSelect = 'none';
+         // Pass memoized handlers to addEventListener
+         document.addEventListener('mousemove', handleMouseMove);
+         document.addEventListener('mouseup', handleMouseUp);
+     // Add handleMouseMove and handleMouseUp as dependencies
+     }, [handleMouseMove, handleMouseUp]);
 
     // --- EFFECTS ---
     // Effect 1: Load Session Metadata and Transcript
     useEffect(() => {
-        // Use sessionIdParam directly for dependency check, derive inside for logic
         const currentSessionIdNum = sessionIdParam ? parseInt(sessionIdParam, 10) : null;
         if (!currentSessionIdNum || isNaN(currentSessionIdNum)) {
-             console.log("[SessionView Effect 1] Invalid or missing sessionIdParam, navigating away.");
-            navigate('/', { replace: true });
-            return;
+             navigate('/', { replace: true }); return;
         }
-
         const isNewSession = previousSessionIdRef.current !== currentSessionIdNum;
         previousSessionIdRef.current = currentSessionIdNum;
-
         const loadSessionCoreData = async () => {
-            console.log(`[SessionView Effect 1] Starting for session ${currentSessionIdNum}. Is new session: ${isNewSession}`);
-            setIsLoadingSession(true);
-            setLocalSession(null);
-            setEditTranscriptContent('');
-            setActiveChatId(null); // Reset active chat ID for the new session
-            currentChatLoadIdRef.current = null;
-
+            setIsLoadingSession(true); setLocalSession(null); setEditTranscriptContent('');
+            setActiveChatId(null); currentChatLoadIdRef.current = null;
             try {
-                console.log(`[SessionView Effect 1] Fetching session base and transcript for ${currentSessionIdNum}`);
-                const [sessionBaseData, transcriptContent] = await Promise.all([
-                    fetchSession(currentSessionIdNum),
-                    fetchTranscript(currentSessionIdNum)
-                ]);
-                 console.log(`[SessionView Effect 1] Fetched base data for ${currentSessionIdNum}:`, sessionBaseData);
-                 console.log(`[SessionView Effect 1] Fetched transcript length for ${currentSessionIdNum}:`, transcriptContent?.length);
-
-
-                // **Crucial Check:** Ensure chats array exists on base data, initialize properly
-                 const initialChats = (Array.isArray(sessionBaseData.chats) ? sessionBaseData.chats : []).map(chat => ({
-                    ...chat,
-                    messages: chat.messages || undefined // Keep messages undefined initially
-                }));
-                 console.log(`[SessionView Effect 1] Initial chats array created for ${currentSessionIdNum}:`, initialChats);
-
-
-                const fullSession: Session = {
-                    ...sessionBaseData,
-                    transcription: transcriptContent,
-                    chats: initialChats, // Use the processed chats array
-                };
-
-                // --- LOGGING BEFORE STATE UPDATE ---
-                console.log(`[SessionView Effect 1] Constructed fullSession for ${currentSessionIdNum}:`, {
-                   id: fullSession.id,
-                   name: fullSession.sessionName,
-                   transcription_exists: !!fullSession.transcription,
-                   chats_exist: fullSession.hasOwnProperty('chats'), // Check property existence
-                   chats_is_array: Array.isArray(fullSession.chats), // Check if it's an array
-                   chats_count: Array.isArray(fullSession.chats) ? fullSession.chats.length : 'N/A',
-                });
-                // --- END LOGGING ---
-
-                setLocalSession(fullSession);
-                setEditTranscriptContent(fullSession.transcription || '');
-                setActiveSessionId(currentSessionIdNum); // Set global active session ID
-                setChatError(''); // Clear any previous errors
-
-                // Update global pastSessions atom
-                setPastSessions(prevSessions => {
-                    console.log(`[SessionView Effect 1] Updating pastSessions atom for ${currentSessionIdNum}`);
+                const [sessionBaseData, transcriptContent] = await Promise.all([ fetchSession(currentSessionIdNum), fetchTranscript(currentSessionIdNum) ]);
+                const initialChats = (Array.isArray(sessionBaseData.chats) ? sessionBaseData.chats : []).map(chat => ({ ...chat, messages: chat.messages || undefined }));
+                const fullSession: Session = { ...sessionBaseData, transcription: transcriptContent, chats: initialChats, };
+                // console.log(`[Effect 1] Constructed fullSession for ${currentSessionIdNum}:`, { /* ... */ });
+                setLocalSession(fullSession); setEditTranscriptContent(fullSession.transcription || '');
+                setActiveSessionId(currentSessionIdNum); setChatError('');
+                setPastSessions(prevSessions => { /* ... update or add ... */
                     const sessionExists = prevSessions.some(s => s.id === currentSessionIdNum);
-                    if (sessionExists) {
-                        // Update existing session
-                        return prevSessions.map(s => s.id === currentSessionIdNum ? fullSession : s);
-                    } else {
-                        // Add new session
-                         console.log(`[SessionView Effect 1] Adding new session ${currentSessionIdNum} to pastSessions`);
-                        return [fullSession, ...prevSessions];
-                    }
-                });
-
-                // Determine target chat ID and necessary navigation AFTER session state is set
-                const chats = fullSession.chats || [];
-                let targetChatId: number | null = null;
-                let shouldNavigate = false;
-                let navigateTo: string | null = null;
-                const urlChatId = chatIdParam ? parseInt(chatIdParam, 10) : null;
-                const chatExistsInSession = urlChatId !== null && !isNaN(urlChatId) && chats.some(c => c.id === urlChatId);
-
-                 if (chatExistsInSession && urlChatId !== null) {
-                      targetChatId = urlChatId;
-                 } else if (chats.length > 0) {
-                      const sortedChats = [...chats].sort((a, b) => b.timestamp - a.timestamp);
-                      targetChatId = sortedChats[0].id;
-                      if (String(urlChatId) !== String(targetChatId)) {
-                          shouldNavigate = true;
-                          navigateTo = `/sessions/${currentSessionIdNum}/chats/${targetChatId}`;
-                      }
-                  } else {
-                       if (chatIdParam) {
-                          shouldNavigate = true;
-                          navigateTo = `/sessions/${currentSessionIdNum}`;
-                       }
-                  }
-
-                 console.log(`[SessionView Effect 1] Determined targetChatId for ${currentSessionIdNum}:`, targetChatId);
-                 setActiveChatId(targetChatId); // Set global active chat ID -> Triggers Effect 2
-
-                if (shouldNavigate && navigateTo) {
-                     console.log(`[SessionView Effect 1] Navigating for ${currentSessionIdNum} to:`, navigateTo);
-                    navigate(navigateTo, { replace: true });
-                }
-
-            } catch (err) {
-                console.error(`[SessionView Effect 1] Error loading session ${currentSessionIdNum}:`, err);
-                setChatError("Failed to load session data. Please try again.");
-                // Clear potentially partially loaded state
-                setLocalSession(null);
-                setIsLoadingSession(false); // Ensure loading stops on error
-            } finally {
-                // Ensure loading state is turned off even if error occurred before full processing
-                setIsLoadingSession(false);
-            }
+                    if (sessionExists) { return prevSessions.map(s => s.id === currentSessionIdNum ? fullSession : s); }
+                    else { return [fullSession, ...prevSessions]; }
+                 });
+                const chats = fullSession.chats || []; let targetChatId: number | null = null; let shouldNavigate = false; let navigateTo: string | null = null;
+                const urlChatId = chatIdParam ? parseInt(chatIdParam, 10) : null; const chatExistsInSession = urlChatId !== null && !isNaN(urlChatId) && chats.some(c => c.id === urlChatId);
+                if (chatExistsInSession && urlChatId !== null) { targetChatId = urlChatId; }
+                else if (chats.length > 0) { const sortedChats = [...chats].sort((a, b) => b.timestamp - a.timestamp); targetChatId = sortedChats[0].id; if (String(urlChatId) !== String(targetChatId)) { shouldNavigate = true; navigateTo = `/sessions/${currentSessionIdNum}/chats/${targetChatId}`; } }
+                else { if (chatIdParam) { shouldNavigate = true; navigateTo = `/sessions/${currentSessionIdNum}`; } }
+                setActiveChatId(targetChatId);
+                if (shouldNavigate && navigateTo) { navigate(navigateTo, { replace: true }); }
+            } catch (err) { console.error(`[Effect 1] Error loading session ${currentSessionIdNum}:`, err); setChatError("Failed to load session data."); setLocalSession(null); setIsLoadingSession(false); }
+            finally { setIsLoadingSession(false); }
         };
-
         loadSessionCoreData();
-    // Dependencies: Run when session ID or chat ID from URL change
     }, [sessionIdParam, chatIdParam, navigate, setActiveSessionId, setActiveChatId, setChatError, setPastSessions]);
-
 
     // Effect 2: Load Chat Messages
     useEffect(() => {
         const currentSessionIdNum = sessionIdParam ? parseInt(sessionIdParam, 10) : null;
-
-        // --- LOGGING START ---
-         console.log(`[SessionView Effect 2] Running: activeChatId=${activeChatId}, localSessionExists=${!!localSession}, isLoadingChat=${isLoadingChat}, currentChatLoadIdRef=${currentChatLoadIdRef.current}`);
-        // --- LOGGING END ---
-
-
-        if (!localSession || !currentSessionIdNum || activeChatId === null) {
-            currentChatLoadIdRef.current = null;
-             console.log(`[SessionView Effect 2] Bailing: No local session, session ID, or active chat ID.`);
-            return;
-        }
-
-        if (currentChatLoadIdRef.current === activeChatId) {
-             console.log(`[SessionView Effect 2] Skipping fetch for chat ${activeChatId}: already loading or loaded (ref match).`);
-            return;
-        }
-
-        // Use optional chaining for safety when accessing chats
+        // console.log(`[Effect 2] Running: activeChatId=${activeChatId}, ...`);
+        if (!localSession || !currentSessionIdNum || activeChatId === null) { currentChatLoadIdRef.current = null; return; }
+        if (currentChatLoadIdRef.current === activeChatId) { return; }
         const currentChat = localSession.chats?.find(c => c.id === activeChatId);
-
-        // Use optional chaining for safety when accessing messages
-        if (currentChat?.messages !== undefined) {
-             console.log(`[SessionView Effect 2] Skipping fetch for chat ${activeChatId}: messages array already exists (might be empty).`);
-            currentChatLoadIdRef.current = activeChatId;
-            setIsLoadingChat(false);
-            return;
-        }
-
-        if (currentChat) { // currentChat exists, but messages are undefined, so fetch them
+        if (currentChat?.messages !== undefined) { currentChatLoadIdRef.current = activeChatId; setIsLoadingChat(false); return; }
+        if (currentChat) {
             const loadChatMessages = async () => {
-                console.log(`[SessionView Effect 2] Fetching messages for chat ${activeChatId}...`);
-                currentChatLoadIdRef.current = activeChatId;
-                setIsLoadingChat(true);
-                setChatError('');
+                // console.log(`[Effect 2] Fetching messages chat ${activeChatId}...`);
+                currentChatLoadIdRef.current = activeChatId; setIsLoadingChat(true); setChatError('');
                 try {
                     const detailedChatData = await fetchChatDetails(currentSessionIdNum, activeChatId);
-                    console.log(`[SessionView Effect 2] Fetched messages for chat ${activeChatId}, count:`, detailedChatData.messages?.length);
-                    const chatWithMessages: ChatSession = {
-                       ...detailedChatData,
-                       messages: detailedChatData.messages || [], // Ensure messages is an array
-                    };
+                    const chatWithMessages: ChatSession = { ...detailedChatData, messages: detailedChatData.messages || [], };
 
-                    // Update local session state
+                    // ** FIX TS2345: Return the new state in functional updates **
                     setLocalSession(prevSession => {
-                        if (!prevSession) return null;
-                         console.log(`[SessionView Effect 2] Updating localSession with messages for chat ${activeChatId}`);
-                        return {
-                            ...prevSession,
-                            // Ensure prevSession.chats exists before mapping
-                            chats: (prevSession.chats || []).map(chat =>
-                                chat.id === activeChatId ? chatWithMessages : chat
-                            )
-                        };
+                        if (!prevSession) return null; // Handle null case
+                        return { ...prevSession, chats: (prevSession.chats || []).map(chat => chat.id === activeChatId ? chatWithMessages : chat) };
                     });
-
-                    // Update global state atom
                     setPastSessions(prevGlobalSessions => {
-                         console.log(`[SessionView Effect 2] Updating pastSessions atom with messages for chat ${activeChatId}`);
                         return prevGlobalSessions.map(session => {
                             if (session.id === currentSessionIdNum) {
-                                // Ensure session.chats exists before mapping
-                                const updatedChats = (session.chats || []).map(chat =>
-                                    chat.id === activeChatId ? chatWithMessages : chat
-                                );
-                                return { ...session, chats: updatedChats };
+                                return { ...session, chats: (session.chats || []).map(chat => chat.id === activeChatId ? chatWithMessages : chat) };
                             }
                             return session;
                         })
                     });
-
+                    // console.log(`[Effect 2] Success fetch messages chat ${activeChatId}.`);
                 } catch (err) {
-                    console.error(`[SessionView Effect 2] Failed to load messages for chat ${activeChatId}:`, err);
-                    setChatError(`Failed to load messages for chat ${activeChatId}.`);
-                    // Update state to indicate failed attempt (empty messages array)
+                    console.error(`[Effect 2] Failed load messages chat ${activeChatId}:`, err);
+                    setChatError(`Failed load messages chat ${activeChatId}.`);
+                    // ** FIX TS2345: Return the new state in functional updates **
                      setLocalSession(prevSession => {
-                         if (!prevSession) return null;
+                         if (!prevSession) return null; // Handle null case
+                         // Return session with chat marked as attempted (empty messages)
                          return { ...prevSession, chats: (prevSession.chats || []).map(chat => chat.id === activeChatId ? { ...chat, messages: [] } : chat) };
                      });
-                     setPastSessions(prevGlobalSessions => prevGlobalSessions.map(session => session.id === currentSessionIdNum ? { ...session, chats: (session.chats || []).map(chat => chat.id === activeChatId ? { ...chat, messages: [] } : chat) } : session));
-                } finally {
-                    if (currentChatLoadIdRef.current === activeChatId) {
-                       setIsLoadingChat(false);
-                    }
-                }
+                     setPastSessions(prevGlobalSessions => {
+                        return prevGlobalSessions.map(session => {
+                            if (session.id === currentSessionIdNum) {
+                                // Return session with chat marked as attempted (empty messages)
+                                return { ...session, chats: (session.chats || []).map(chat => chat.id === activeChatId ? { ...chat, messages: [] } : chat) };
+                            }
+                            return session;
+                        })
+                    });
+                } finally { if (currentChatLoadIdRef.current === activeChatId) { setIsLoadingChat(false); } }
             };
             loadChatMessages();
-        } else {
-             console.warn(`[SessionView Effect 2] Chat with ID ${activeChatId} not found in local session state when trying to load messages.`);
-             currentChatLoadIdRef.current = null;
-             setIsLoadingChat(false);
-        }
-    // Depend on activeChatId, localSession (to trigger when chats array populates initially), and sessionIdParam
+        } else { /* ... warn, reset loading ... */ }
     }, [activeChatId, localSession, setChatError, setPastSessions, setActiveChatId, sessionIdParam]);
 
+    // Effect 3: Cleanup for Resize Listeners
+    // Now defined *after* handleMouseMove and handleMouseUp
+    useEffect(() => {
+        // Return the cleanup function
+        return () => {
+            // Check if resizing was in progress when component unmounts
+            if (isResizing.current) {
+                 console.log("[SessionView] Cleanup: Removing resize listeners.");
+                // Use the memoized callbacks for removal
+                document.removeEventListener('mousemove', handleMouseMove);
+                document.removeEventListener('mouseup', handleMouseUp);
+                // Reset cursor and selection styles
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+                // Reset resizing flag just in case
+                isResizing.current = false;
+            }
+        };
+    // Depend on the memoized handlers
+    }, [handleMouseMove, handleMouseUp]);
 
-    // --- CALLBACKS & EVENT HANDLERS ---
-    // Resizing Logic
-    const handleMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-         e.preventDefault(); isResizing.current = true; document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none';
-         document.addEventListener('mousemove', handleMouseMove); document.addEventListener('mouseup', handleMouseUp);
-     }, []);
-     const handleMouseMove = useCallback((e: MouseEvent) => {
-         if (!isResizing.current || !sidebarRef.current) return; const containerRect = sidebarRef.current.parentElement?.getBoundingClientRect(); if (!containerRect) return;
-         let newWidth = e.clientX - containerRect.left; newWidth = Math.max(MIN_SIDEBAR_WIDTH, Math.min(newWidth, MAX_SIDEBAR_WIDTH)); setSidebarWidth(newWidth);
-     }, [setSidebarWidth]);
-     const handleMouseUp = useCallback(() => {
-         if (isResizing.current) { isResizing.current = false; document.body.style.cursor = ''; document.body.style.userSelect = '';
-         document.removeEventListener('mousemove', handleMouseMove); document.removeEventListener('mouseup', handleMouseUp); }
-     }, [handleMouseMove]); // Keep handleMouseMove dependency
-     useEffect(() => { /* resize cleanup */ return () => { if (isResizing.current) { handleMouseUp(); } } }, [handleMouseMove, handleMouseUp]); // Ensure cleanup happens
 
-     // Other Handlers
+    // --- EVENT HANDLERS ---
      const handleStartFirstChat = async () => {
-         const currentSessionIdNum = sessionIdParam ? parseInt(sessionIdParam, 10) : null; // Get current ID
-         if (!localSession || !currentSessionIdNum) return;
-         setIsLoadingChat(true);
+         const currentSessionIdNum = sessionIdParam ? parseInt(sessionIdParam, 10) : null;
+         if (!localSession || !currentSessionIdNum) return; setIsLoadingChat(true);
          try {
              const newChatMetaData = await startNewChat(currentSessionIdNum);
              const newChatFull = await fetchChatDetails(currentSessionIdNum, newChatMetaData.id);
-             const chatReadyForState: ChatSession = { ...newChatFull, messages: newChatFull.messages || [] };
+             const chatReadyForState: ChatSession = { ...newChatFull, messages: newChatFull.messages || [], };
              const updatedSession: Session = { ...localSession, chats: [...(localSession.chats || []), chatReadyForState] };
              setLocalSession(updatedSession);
              setPastSessions(prevSessions => prevSessions.map(s => s.id === currentSessionIdNum ? updatedSession : s));
              setActiveChatId(chatReadyForState.id);
              navigate(`/sessions/${currentSessionIdNum}/chats/${chatReadyForState.id}`);
-         } catch (err) { console.error("Failed to start new chat:", err); setChatError('Failed to start new chat.');
-         } finally { setIsLoadingChat(false); }
+         } catch (err) { console.error("Failed start new chat:", err); setChatError('Failed start new chat.'); }
+         finally { setIsLoadingChat(false); }
      };
      const handleOpenEditMetadataModal = () => setIsEditingMetadata(true);
      const handleTranscriptContentChange = (newContent: string) => setEditTranscriptContent(newContent);
      const handleSaveTranscriptParagraph = async (index: number, text: string) => {
-         const currentSessionIdNum = sessionIdParam ? parseInt(sessionIdParam, 10) : null; // Get current ID
+         const currentSessionIdNum = sessionIdParam ? parseInt(sessionIdParam, 10) : null;
          if (!localSession || !currentSessionIdNum) return;
-         console.log(`Attempting to save paragraph ${index} for session ${currentSessionIdNum}`);
          try {
              const updatedFullTranscript = await updateTranscriptParagraph(currentSessionIdNum, index, text);
              const updatedSession: Session = { ...localSession, transcription: updatedFullTranscript };
-             setLocalSession(updatedSession);
-             setEditTranscriptContent(updatedFullTranscript);
+             setLocalSession(updatedSession); setEditTranscriptContent(updatedFullTranscript);
              setPastSessions(prevSessions => prevSessions.map(s => s.id === currentSessionIdNum ? updatedSession : s));
-             console.log(`Successfully saved paragraph ${index}`);
-         } catch (err) { console.error(`Failed to save paragraph ${index}:`, err); setChatError('Failed to update transcript paragraph.'); }
+         } catch (err) { console.error(`Failed save paragraph ${index}:`, err); setChatError('Failed update transcript paragraph.'); }
      };
      const handleNavigateBack = () => navigate('/');
+
+    // Handler for successful metadata save (Optimistic Update)
+    const handleMetadataSaveSuccess = (updatedMetadata: Partial<SessionMetadata>) => {
+        const currentSessionIdNum = sessionIdParam ? parseInt(sessionIdParam, 10) : null;
+        if (!currentSessionIdNum) return;
+        // console.log("[SessionView] handleMetadataSaveSuccess called:", updatedMetadata);
+        setLocalSession(prevSession => {
+            if (!prevSession) return null;
+            const newLocalSession: Session = { ...prevSession, ...updatedMetadata };
+            // console.log("[SessionView] Optimistically updated localSession:", newLocalSession);
+            return newLocalSession;
+        });
+        setPastSessions(prevGlobalSessions => {
+            // console.log("[SessionView] Optimistically updating pastSessions atom...");
+            return prevGlobalSessions.map(session => {
+                if (session.id === currentSessionIdNum) { return { ...session, ...updatedMetadata }; }
+                return session;
+            });
+        });
+    };
 
 
     // --- RENDER LOGIC ---
     if (isLoadingSession) {
-        return (
-            <Flex justify="center" align="center" style={{ height: '100vh', backgroundColor: 'var(--color-panel-solid)' }}>
-                <Spinner size="3" /> <Text ml="2" color="gray">Loading session data...</Text>
-            </Flex>
-        );
-    }
-
+         return (<Flex justify="center" align="center" style={{ height: '100vh', backgroundColor: 'var(--color-panel-solid)' }}><Spinner size="3" /><Text ml="2" color="gray">Loading session data...</Text></Flex>);
+     }
     if (!localSession) {
-        return (
-             <Flex direction="column" justify="center" align="center" style={{ height: '100vh', backgroundColor: 'var(--color-panel-solid)' }}>
-                 <Text color="red" mb="4">{currentError || "Session data could not be loaded."}</Text>
-                 <Button onClick={handleNavigateBack} variant="soft" color="gray"><ArrowLeftIcon /> Go back to Sessions</Button>
-             </Flex>
-        );
-    }
+         return (<Flex direction="column" justify="center" align="center" style={{ height: '100vh', backgroundColor: 'var(--color-panel-solid)' }}><Text color="red" mb="4">{currentError || "Session data could not be loaded."}</Text><Button onClick={handleNavigateBack} variant="soft" color="gray"><ArrowLeftIcon /> Go back to Sessions</Button></Flex>);
+     }
 
     const displayTitle = localSession.sessionName || localSession.fileName;
     const hasChats = localSession.chats && localSession.chats.length > 0;
@@ -368,20 +283,25 @@ export function SessionView() {
                 {/* Content Body */}
                 <Box flexGrow="1" style={{ minHeight: 0, overflow: 'hidden' }}>
                     <SessionContent
-                        session={localSession} // Pass localSession which gets updated with messages
+                        session={localSession}
                         onEditDetailsClick={handleOpenEditMetadataModal}
                         editTranscriptContent={editTranscriptContent}
                         onTranscriptContentChange={handleTranscriptContentChange}
                         onSaveTranscriptParagraph={handleSaveTranscriptParagraph}
-                        activeChatId={activeChatId} // Pass the active chat ID from atom
+                        activeChatId={activeChatId}
                         hasChats={hasChats}
                         onStartFirstChat={handleStartFirstChat}
-                        isLoadingChat={isLoadingChat} // Pass chat loading state
+                        isLoadingChat={isLoadingChat}
                     />
                 </Box>
             </Flex>
-            {/* Edit Modal */}
-            <EditDetailsModal isOpen={isEditingMetadata} onOpenChange={setIsEditingMetadata} session={localSession} />
+            {/* Edit Modal - ** FIX TS2741: Pass the onSaveSuccess prop ** */}
+            <EditDetailsModal
+                isOpen={isEditingMetadata}
+                onOpenChange={setIsEditingMetadata}
+                session={localSession}
+                onSaveSuccess={handleMetadataSaveSuccess} // Pass the callback here
+             />
         </Flex>
     );
 }
