@@ -1,4 +1,7 @@
-// src/components/SessionView/SessionContent.tsx
+/*
+Modified File: src/components/SessionView/SessionContent.tsx
++ Added isLoadingChat prop
+*/
 import React, { useState, useCallback } from 'react';
 import { Box, Flex, Text, Tabs } from '@radix-ui/themes';
 import type { Session } from '../../types';
@@ -6,28 +9,29 @@ import { Transcription } from './Transcription';
 import { ChatInterface } from './ChatInterface';
 import { StartChatPrompt } from './StartChatPrompt';
 
-// Update Props Interface
 interface SessionContentProps {
     session: Session;
     onEditDetailsClick: () => void;
-    // REMOVED: editTranscriptContent, onTranscriptContentChange
-    onSaveTranscriptParagraph: (index: number, text: string) => Promise<void>;
+    editTranscriptContent: string; // Current value being edited (controlled input)
+    onTranscriptContentChange: (newContent: string) => void; // Handles live changes in edit mode
+    onSaveTranscriptParagraph: (index: number, text: string) => Promise<void>; // Handles saving a paragraph
     activeChatId: number | null;
     hasChats: boolean;
-    onStartFirstChat: () => void; // Check if this needs to be async based on hook
-    isLoadingChat: boolean;
+    onStartFirstChat: () => void;
+    isLoadingChat: boolean; // <-- Add prop
 }
 
 export function SessionContent({
     session,
     onEditDetailsClick,
-    // Remove from destructuring
+    editTranscriptContent,
+    onTranscriptContentChange,
     onSaveTranscriptParagraph,
     activeChatId,
     hasChats,
     onStartFirstChat,
-    isLoadingChat
- }: SessionContentProps) { // Props updated here
+    isLoadingChat // <-- Destructure prop
+ }: SessionContentProps) {
     const [activeTab, setActiveTab] = useState<'chat' | 'transcription'>('chat');
     const [chatScrollPosition, setChatScrollPosition] = useState(0);
     const [transcriptScrollPosition, setTranscriptScrollPosition] = useState(0);
@@ -35,17 +39,34 @@ export function SessionContent({
     const handleChatScroll = useCallback((scrollTop: number) => setChatScrollPosition(scrollTop), []);
     const handleTranscriptScroll = useCallback((scrollTop: number) => setTranscriptScrollPosition(scrollTop), []);
 
-    const activeChatData = activeChatId !== null ? session.chats.find(c => c.id === activeChatId) : null;
-    const messagesAvailable = activeChatData?.messages !== undefined; // Checks if messages array *exists*
+    // Determine if the current active chat actually has messages loaded
+    // This relies on the parent (SessionView) updating the session prop correctly
+    const activeChatData = activeChatId !== null
+        ? session.chats.find(c => c.id === activeChatId)
+        : null;
+    const messagesAvailable = activeChatData?.messages !== undefined;
 
     return (
-        <Flex direction="column" style={{ height: '100%', minHeight: 0 }}>
-            {/* Large Screens Layout */}
-            <Flex className="hidden lg:flex flex-grow" gap="6" px={{ initial: '4', md: '6', lg: '8' }} pt="3" pb="2" style={{ minHeight: 0 }}>
+        <Flex
+            direction="column"
+            style={{ height: '100%', minHeight: 0 }}
+        >
+            {/* --- Side-by-side Layout (Large Screens - lg and up) --- */}
+            <Flex
+                className="hidden lg:flex flex-grow"
+                gap="6"
+                px={{ initial: '4', md: '6', lg: '8' }}
+                pt="3"
+                pb={{ initial: '2', md: '2', lg: '2' }}
+                style={{ minHeight: 0 }}
+            >
                 {/* Chat Panel */}
                 <Flex direction="column" className="w-1/2 h-full" style={{ minHeight: 0 }}>
                     {activeChatId !== null ? (
-                        <ChatInterface isLoadingChat={isLoadingChat || !messagesAvailable} /> // Update loading condition
+                        // Pass isLoadingChat down
+                        <ChatInterface
+                            isLoadingChat={isLoadingChat || !messagesAvailable} // Show loading if fetching OR if messages aren't defined yet
+                        />
                     ) : hasChats ? (
                         <Box className="flex flex-grow items-center justify-center h-full" style={{ border: '2px dashed var(--gray-a6)', borderRadius: 'var(--radius-3)' }}>
                             <Text color="gray" align="center">Select a chat from the sidebar.</Text>
@@ -56,23 +77,27 @@ export function SessionContent({
                         </Box>
                     )}
                 </Flex>
+
                 {/* Transcription Panel */}
                 <Flex direction="column" className="w-1/2 h-full" style={{ minHeight: 0 }}>
                     <Transcription
                         session={session}
                         onEditDetailsClick={onEditDetailsClick}
                         onSaveParagraph={onSaveTranscriptParagraph}
-                        // Add scroll props if Transcription component needs them
-                        // isTabActive={true} // Always active in side-by-side
-                        // initialScrollTop={transcriptScrollPosition}
-                        // onScrollUpdate={handleTranscriptScroll}
                     />
                 </Flex>
             </Flex>
 
-            {/* Small Screens Layout (Tabs) */}
+            {/* --- Tabbed Layout (Small Screens - below lg) --- */}
             <Flex className="flex lg:hidden flex-grow flex-col" style={{ minHeight: 0 }}>
-                <Tabs.Root value={activeTab} onValueChange={(value) => setActiveTab(value as 'chat' | 'transcription')} className="flex flex-col flex-grow" style={{ minHeight: 0 }}>
+                <Tabs.Root
+                    value={activeTab}
+                    onValueChange={(value) => {
+                        setActiveTab(value as 'chat' | 'transcription');
+                    }}
+                    className="flex flex-col flex-grow"
+                    style={{ minHeight: 0 }}
+                >
                     <Box px={{ initial: '4', md: '6' }} pt="2">
                         <Tabs.List>
                             <Tabs.Trigger value="chat">Chat</Tabs.Trigger>
@@ -83,7 +108,7 @@ export function SessionContent({
                         <Tabs.Content value="chat" className="h-full" style={{ outline: 'none' }}>
                             {activeChatId !== null ?
                              <ChatInterface
-                                isLoadingChat={isLoadingChat || !messagesAvailable} // Update loading condition
+                                isLoadingChat={isLoadingChat || !messagesAvailable} // Show loading if fetching OR if messages aren't defined yet
                                 isTabActive={activeTab === 'chat'}
                                 initialScrollTop={chatScrollPosition}
                                 onScrollUpdate={handleChatScroll}
@@ -92,6 +117,7 @@ export function SessionContent({
                              <StartChatPrompt onStartFirstChat={onStartFirstChat} />
                             }
                         </Tabs.Content>
+
                         <Tabs.Content value="transcription" className="h-full" style={{ outline: 'none' }}>
                              <Transcription
                                 session={session}
