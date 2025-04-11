@@ -6,9 +6,9 @@ import { Theme } from '@radix-ui/themes';
 import * as Toast from '@radix-ui/react-toast';
 import axios from 'axios';
 
-import { LandingPage } from './components/LandingPage';
-import { SessionView } from './components/SessionView';
-import { UploadModal } from './components/UploadModal';
+import { LandingPage } from './components/LandingPage/LandingPage';
+import { SessionView } from './components/SessionView/SessionView';
+import { UploadModal } from './components/UploadModal/UploadModal';
 
 import {
   isUploadModalOpenAtom,

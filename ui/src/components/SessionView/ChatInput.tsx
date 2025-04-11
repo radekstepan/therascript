@@ -4,7 +4,7 @@ import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { StarIcon, PaperPlaneIcon, StopIcon, Cross2Icon } from '@radix-ui/react-icons';
 import * as Toast from '@radix-ui/react-toast';
 import { Button, TextField, Flex, Box, Text, IconButton } from '@radix-ui/themes';
-import { StarredTemplatesList } from '../StarredTemplates';
+import { StarredTemplatesList } from './StarredTemplates';
 import { addChatMessage } from '../../api/api';
 // Ensure atoms are correctly imported
 import {

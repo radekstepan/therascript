@@ -4,12 +4,12 @@ import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { useParams, useNavigate, Navigate } from 'react-router-dom';
 import { Flex, Box, Button, Text, Spinner } from '@radix-ui/themes';
 import { ArrowLeftIcon } from '@radix-ui/react-icons';
-import { UserThemeDropdown } from '../components/UserThemeDropdown';
-import { SessionSidebar } from './SessionView/SessionSidebar';
-import { SessionContent } from './SessionView/SessionContent';
-import { EditDetailsModal } from './SessionView/EditDetailsModal';
-import { fetchSession, fetchTranscript, startNewChat, updateTranscriptParagraph, fetchChatDetails } from '../api/api';
-import type { Session, ChatSession, SessionMetadata } from '../types';
+import { UserThemeDropdown } from '../User/UserThemeDropdown';
+import { SessionSidebar } from './SessionSidebar';
+import { SessionContent } from './SessionContent';
+import { EditDetailsModal } from './EditDetailsModal';
+import { fetchSession, fetchTranscript, startNewChat, updateTranscriptParagraph, fetchChatDetails } from '../../api/api';
+import type { Session, ChatSession, SessionMetadata } from '../../types';
 import {
     activeSessionIdAtom,
     activeChatIdAtom,
@@ -19,7 +19,7 @@ import {
     MAX_SIDEBAR_WIDTH,
     pastSessionsAtom,
     activeSessionAtom,
-} from '../store';
+} from '../../store';
 
 export function SessionView() {
     // --- HOOKS (ALL AT THE TOP) ---

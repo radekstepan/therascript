@@ -4,12 +4,12 @@ import { useSetAtom } from 'jotai';
 import { useNavigate } from 'react-router-dom';
 import { Dialog, Button, Flex, Text, TextField, Select, Box, Spinner, Strong, Callout, Heading } from '@radix-ui/themes';
 import { UploadIcon, Cross1Icon, InfoCircledIcon, CheckCircledIcon } from '@radix-ui/react-icons';
-import { SESSION_TYPES, THERAPY_TYPES } from '../constants';
-import { getTodayDateString } from '../helpers';
-import { uploadSession } from '../api/api';
-import type { SessionMetadata, UploadModalProps } from '../types';
-import { closeUploadModalAtom, isTranscribingAtom, transcriptionErrorAtom } from '../store';
-import { cn } from '../utils';
+import { SESSION_TYPES, THERAPY_TYPES } from '../../constants';
+import { getTodayDateString } from '../../helpers';
+import { uploadSession } from '../../api/api';
+import type { SessionMetadata, UploadModalProps } from '../../types';
+import { closeUploadModalAtom, isTranscribingAtom, transcriptionErrorAtom } from '../../store';
+import { cn } from '../../utils';
 
 export function UploadModal({ isOpen, isTranscribing, transcriptionError }: UploadModalProps) {
   const closeModalAction = useSetAtom(closeUploadModalAtom);

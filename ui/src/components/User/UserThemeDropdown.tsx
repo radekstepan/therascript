@@ -5,7 +5,7 @@ import { Button, DropdownMenu, Text } from '@radix-ui/themes';
 import {
     SunIcon, MoonIcon, DesktopIcon, ExitIcon, PersonIcon
 } from '@radix-ui/react-icons';
-import { themeAtom, Theme as ThemeType } from '../store'; // Import from store
+import { themeAtom, Theme as ThemeType } from '../../store'; // Import from store
 
 export function UserThemeDropdown() {
     const [theme, setTheme] = useAtom(themeAtom);

@@ -4,11 +4,11 @@ import React, { useEffect, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useNavigate } from 'react-router-dom';
 import { CounterClockwiseClockIcon, PlusCircledIcon } from '@radix-ui/react-icons';
-import { SessionListTable } from './LandingPage/SessionListTable';
+import { SessionListTable } from './SessionListTable';
 import { Button, Card, Flex, Heading, Text, Box, Container, Spinner } from '@radix-ui/themes';
-import { UserThemeDropdown } from './UserThemeDropdown';
-import { fetchSessions } from '../api/api';
-import type { Session } from '../types'; // Keep Session type import
+import { UserThemeDropdown } from '../User/UserThemeDropdown';
+import { fetchSessions } from '../../api/api';
+import type { Session } from '../../types'; // Keep Session type import
 // ** Import relevant atoms **
 import {
     openUploadModalAtom,
@@ -18,7 +18,7 @@ import {
     SessionSortCriteria,
     pastSessionsAtom,      // Atom holding the raw session list
     sortedSessionsAtom     // Atom deriving the sorted list
-} from '../store';
+} from '../../store';
 
 export function LandingPage() {
     // ** Remove local state for sessions list **
