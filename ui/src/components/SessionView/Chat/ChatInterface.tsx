@@ -1,19 +1,19 @@
-// src/components/SessionView/ChatInterface.tsx
 import React, { useRef, useEffect, useCallback } from 'react';
 import { useAtomValue } from 'jotai';
-import { Box, Flex, ScrollArea, Spinner, Text } from '@radix-ui/themes'; // Add Spinner, Text
-import { ChatInput, ChatMessages } from './';
+import { Box, Flex, ScrollArea, Spinner, Text } from '@radix-ui/themes';
+import { ChatInput } from './ChatInput'; // Adjusted path
+import { ChatMessages } from './ChatMessages'; // Adjusted path
 import {
     activeChatIdAtom,
-    currentChatMessagesAtom, // This atom derives messages from the activeChatAtom
-    isChattingAtom // Keep this for AI response loading
-} from '../../store';
+    currentChatMessagesAtom,
+    isChattingAtom
+} from '../../../store'; // Adjusted path
 
 interface ChatInterfaceProps {
     isTabActive?: boolean;
     initialScrollTop?: number;
     onScrollUpdate?: (scrollTop: number) => void;
-    isLoadingChat: boolean; // <-- Add prop for message loading state
+    isLoadingChat: boolean;
 }
 
 // Simple debounce utility (Keep as is)
@@ -30,16 +30,15 @@ export function ChatInterface({
     isTabActive,
     initialScrollTop = 0,
     onScrollUpdate,
-    isLoadingChat // <-- Destructure prop
+    isLoadingChat
 }: ChatInterfaceProps) {
     const activeChatId = useAtomValue(activeChatIdAtom);
     const chatContentRef = useRef<HTMLDivElement | null>(null);
     const viewportRef = useRef<HTMLDivElement | null>(null);
-    const chatMessages = useAtomValue(currentChatMessagesAtom); // Reads messages from global state
+    const chatMessages = useAtomValue(currentChatMessagesAtom);
     const isAiResponding = useAtomValue(isChattingAtom);
     const restoreScrollRef = useRef(false);
 
-    // --- Scroll Saving & Restoration Logic (Unchanged) ---
      const debouncedScrollSave = useCallback(
          debounce((scrollTop: number) => {
              if (onScrollUpdate) {
@@ -78,12 +77,8 @@ export function ChatInterface({
              });
          }
      }, [isTabActive, initialScrollTop]);
-    // --- End Scroll Logic ---
 
-
-    // --- Scroll to Bottom on New Messages (or initial load finish) ---
     useEffect(() => {
-        // Only auto-scroll if tab is active (or large screen) AND not restoring scroll AND not loading chat messages
         if ((isTabActive === undefined || isTabActive) && !restoreScrollRef.current && !isLoadingChat) {
             if (chatContentRef.current) {
                 const lastElement = chatContentRef.current.lastElementChild;
@@ -94,7 +89,6 @@ export function ChatInterface({
                 }
             }
         }
-    // Run when messages change, AI stops responding, tab becomes active, OR chat loading finishes
     }, [chatMessages, isAiResponding, isTabActive, isLoadingChat]);
 
 
@@ -105,32 +99,28 @@ export function ChatInterface({
                 scrollbars="vertical"
                 ref={viewportRef}
                 onScroll={handleScroll}
-                style={{ flexGrow: 1, minHeight: 0, position: 'relative' }} // Added relative positioning
+                style={{ flexGrow: 1, minHeight: 0, position: 'relative' }}
             >
-                {/* Conditionally render loading overlay */}
                 {isLoadingChat && (
                     <Flex
                        align="center"
                        justify="center"
                        style={{
                            position: 'absolute',
-                           inset: 0, // Cover the entire scroll area
-                           backgroundColor: 'var(--color-panel-translucent)', // Semi-transparent overlay
-                           zIndex: 10, // Ensure it's above messages
-                           borderRadius: 'var(--radius-3)', // Optional: match container radius
+                           inset: 0,
+                           backgroundColor: 'var(--color-panel-translucent)',
+                           zIndex: 10,
+                           borderRadius: 'var(--radius-3)',
                        }}
                        >
                         <Spinner size="3" />
                         <Text ml="2" color="gray">Loading messages...</Text>
                     </Flex>
                 )}
-                {/* Message content area */}
                 <Box p="4" ref={chatContentRef} style={{ opacity: isLoadingChat ? 0.5 : 1, transition: 'opacity 0.2s ease-in-out' }}>
-                    {/* ChatMessages reads from currentChatMessagesAtom, which gets updated when fetch completes */}
                     <ChatMessages activeChatId={activeChatId} />
                 </Box>
             </ScrollArea>
-             {/* Input Area */}
             <Box
                 px="4"
                 pt="4"
@@ -139,12 +129,11 @@ export function ChatInterface({
                     flexShrink: 0,
                     borderTop: '1px solid var(--gray-a6)',
                     backgroundColor: 'var(--card-background)',
-                    opacity: isLoadingChat ? 0.6 : 1, // Dim input area while loading
-                    pointerEvents: isLoadingChat ? 'none' : 'auto', // Disable interactions while loading
+                    opacity: isLoadingChat ? 0.6 : 1,
+                    pointerEvents: isLoadingChat ? 'none' : 'auto',
                     transition: 'opacity 0.2s ease-in-out',
                 }}
             >
-                {/* Pass disabled state to ChatInput */}
                 <ChatInput disabled={isLoadingChat} />
             </Box>
         </Flex>

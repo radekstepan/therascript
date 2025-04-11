@@ -1,11 +1,10 @@
-// src/components/SessionView/ChatHeader.tsx
 import React from 'react';
 import { useAtomValue } from 'jotai';
 import { ChatBubbleIcon } from '@radix-ui/react-icons';
 import { Flex, Text } from '@radix-ui/themes';
-import { activeChatAtom } from '../../store';
-import { formatTimestamp } from '../../helpers';
-import type { ChatSession } from '../../types';
+import { activeChatAtom } from '../../../store'; // Adjusted path
+import { formatTimestamp } from '../../../helpers'; // Adjusted path
+import type { ChatSession } from '../../../types'; // Adjusted path
 
 interface ChatHeaderProps {
   activeChatId: number | null;

@@ -1,36 +1,31 @@
-// src/components/StarredTemplates.tsx
 import React from 'react';
 import { useAtomValue } from 'jotai';
-import { Button, Box, Text, Flex, ScrollArea, Separator } from '@radix-ui/themes'; // Use Themes components
-import { starredMessagesAtom } from '../../store';
+import { Button, Box, Text, Flex, ScrollArea, Separator } from '@radix-ui/themes';
+import { starredMessagesAtom } from '../../../store'; // Adjusted path
 import { StarIcon, Cross1Icon } from '@radix-ui/react-icons';
-import type { StarredTemplatesProps } from '../../types';
-import { cn } from '../../utils';
+import type { StarredTemplatesProps } from '../../../types'; // Adjusted path
+import { cn } from '../../../utils'; // Adjusted path
 
 export function StarredTemplatesList({ onSelectTemplate, onClose }: StarredTemplatesProps) {
     const starredMessages = useAtomValue(starredMessagesAtom);
 
-    // --- MODIFICATION: Increase z-index ---
     const popoverClasses = cn(
-        "absolute bottom-full mb-2 right-0 z-50", // Changed z-10 to z-50
-        "w-72 max-h-60 overflow-hidden flex flex-col", // Flex direction column
-        "rounded-md border shadow-lg", // Keep base structure classes
-        // Explicit background and border for solid appearance in light/dark modes:
-        "bg-white dark:bg-gray-900", // Example: White/Dark Gray background
-        "border-gray-200 dark:border-gray-700" // Example: Matching border
+        "absolute bottom-full mb-2 right-0 z-50",
+        "w-72 max-h-60 overflow-hidden flex flex-col",
+        "rounded-md border shadow-lg",
+        "bg-white dark:bg-gray-900",
+        "border-gray-200 dark:border-gray-700"
     );
-    // --- END MODIFICATION ---
 
     return (
         <Box className={popoverClasses}>
              <Flex justify="between" align="center" p="2" flexShrink="0" className="border-b">
                  <Text size="1" weight="medium" color="gray">Starred Templates</Text>
                  <Button variant="ghost" size="1" color="gray" onClick={onClose} highContrast>
-                    <Cross1Icon/> {/* Use icon directly */}
+                    <Cross1Icon/>
                 </Button>
              </Flex>
-             {/* ScrollArea for the list */}
-             <ScrollArea type="auto" scrollbars="vertical" style={{ flexGrow: 1 }}> {/* Use flexGrow */}
+             <ScrollArea type="auto" scrollbars="vertical" style={{ flexGrow: 1 }}>
                  <Box p="1">
                     {(!starredMessages || starredMessages.length === 0) ? (
                          <Flex align="center" justify="center" p="4" style={{ minHeight: 80 }}>
@@ -46,12 +41,11 @@ export function StarredTemplatesList({ onSelectTemplate, onClose }: StarredTempl
                                     key={msg.id}
                                     variant="ghost"
                                     onClick={() => onSelectTemplate(msg.text)}
-                                    className="block w-full h-auto text-left p-2 text-sm rounded whitespace-normal justify-start" // Keep some Tailwind for layout
-                                    style={{ whiteSpace: 'normal', justifyContent: 'flex-start', textAlign: 'left' }} // Ensure multiline works
+                                    className="block w-full h-auto text-left p-2 text-sm rounded whitespace-normal justify-start"
+                                    style={{ whiteSpace: 'normal', justifyContent: 'flex-start', textAlign: 'left' }}
                                     title={`Insert: "${msg.text.substring(0, 100)}${msg.text.length > 100 ? '...' : ''}"`}
-                                    size="2" // Themes size
+                                    size="2"
                                  >
-                                    {/* Display the name or snippet */}
                                     {displayName}
                                 </Button>
                             );

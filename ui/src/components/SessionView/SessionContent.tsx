@@ -1,36 +1,36 @@
-/*
-Modified File: src/components/SessionView/SessionContent.tsx
-+ Added isLoadingChat prop
-*/
 import React, { useState, useCallback } from 'react';
 import { Box, Flex, Text, Tabs } from '@radix-ui/themes';
-import type { Session } from '../../types';
-import { Transcription } from './Transcription';
-import { ChatInterface } from './ChatInterface';
-import { StartChatPrompt } from './StartChatPrompt';
+import type { Session } from '../../types'; // Adjusted path
+import { Transcription } from './Transcription/Transcription'; // Adjusted path
+import { ChatInterface } from './Chat/ChatInterface'; // Adjusted path
+import { StartChatPrompt } from './Chat/StartChatPrompt'; // Adjusted path
 
+// --- Interface Update: Remove unused props ---
 interface SessionContentProps {
     session: Session;
     onEditDetailsClick: () => void;
-    editTranscriptContent: string; // Current value being edited (controlled input)
-    onTranscriptContentChange: (newContent: string) => void; // Handles live changes in edit mode
-    onSaveTranscriptParagraph: (index: number, text: string) => Promise<void>; // Handles saving a paragraph
+    // REMOVED: editTranscriptContent: string;
+    // REMOVED: onTranscriptContentChange: (newContent: string) => void;
+    onSaveTranscriptParagraph: (index: number, text: string) => Promise<void>; // Still needed by Transcription
     activeChatId: number | null;
     hasChats: boolean;
     onStartFirstChat: () => void;
-    isLoadingChat: boolean; // <-- Add prop
+    isLoadingChat: boolean;
 }
+// --- End Interface Update ---
 
 export function SessionContent({
     session,
     onEditDetailsClick,
-    editTranscriptContent,
-    onTranscriptContentChange,
-    onSaveTranscriptParagraph,
+    // --- Destructuring Update: Remove unused props ---
+    // REMOVED: editTranscriptContent,
+    // REMOVED: onTranscriptContentChange,
+    // --- End Destructuring Update ---
+    onSaveTranscriptParagraph, // Keep this one
     activeChatId,
     hasChats,
     onStartFirstChat,
-    isLoadingChat // <-- Destructure prop
+    isLoadingChat
  }: SessionContentProps) {
     const [activeTab, setActiveTab] = useState<'chat' | 'transcription'>('chat');
     const [chatScrollPosition, setChatScrollPosition] = useState(0);
@@ -39,8 +39,6 @@ export function SessionContent({
     const handleChatScroll = useCallback((scrollTop: number) => setChatScrollPosition(scrollTop), []);
     const handleTranscriptScroll = useCallback((scrollTop: number) => setTranscriptScrollPosition(scrollTop), []);
 
-    // Determine if the current active chat actually has messages loaded
-    // This relies on the parent (SessionView) updating the session prop correctly
     const activeChatData = activeChatId !== null
         ? session.chats.find(c => c.id === activeChatId)
         : null;
@@ -63,9 +61,8 @@ export function SessionContent({
                 {/* Chat Panel */}
                 <Flex direction="column" className="w-1/2 h-full" style={{ minHeight: 0 }}>
                     {activeChatId !== null ? (
-                        // Pass isLoadingChat down
                         <ChatInterface
-                            isLoadingChat={isLoadingChat || !messagesAvailable} // Show loading if fetching OR if messages aren't defined yet
+                            isLoadingChat={isLoadingChat || !messagesAvailable}
                         />
                     ) : hasChats ? (
                         <Box className="flex flex-grow items-center justify-center h-full" style={{ border: '2px dashed var(--gray-a6)', borderRadius: 'var(--radius-3)' }}>
@@ -80,6 +77,7 @@ export function SessionContent({
 
                 {/* Transcription Panel */}
                 <Flex direction="column" className="w-1/2 h-full" style={{ minHeight: 0 }}>
+                    {/* No changes needed here, Transcription component receives the props it needs */}
                     <Transcription
                         session={session}
                         onEditDetailsClick={onEditDetailsClick}
@@ -108,7 +106,7 @@ export function SessionContent({
                         <Tabs.Content value="chat" className="h-full" style={{ outline: 'none' }}>
                             {activeChatId !== null ?
                              <ChatInterface
-                                isLoadingChat={isLoadingChat || !messagesAvailable} // Show loading if fetching OR if messages aren't defined yet
+                                isLoadingChat={isLoadingChat || !messagesAvailable}
                                 isTabActive={activeTab === 'chat'}
                                 initialScrollTop={chatScrollPosition}
                                 onScrollUpdate={handleChatScroll}
@@ -119,6 +117,7 @@ export function SessionContent({
                         </Tabs.Content>
 
                         <Tabs.Content value="transcription" className="h-full" style={{ outline: 'none' }}>
+                             {/* No changes needed here, Transcription component receives the props it needs */}
                              <Transcription
                                 session={session}
                                 onEditDetailsClick={onEditDetailsClick}

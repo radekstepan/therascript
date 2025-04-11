@@ -1,16 +1,15 @@
-// src/components/SessionView/SessionSidebar.tsx
 import React, { useState } from 'react';
 import { NavLink, useParams, useNavigate } from 'react-router-dom';
 import { useAtomValue, useSetAtom } from 'jotai';
 import {
-    activeSessionAtom, // Reads the active session object
+    activeSessionAtom,
     renameChatAtom,
     deleteChatAtom,
-    activeChatIdAtom, // Reads the currently selected chat ID
+    activeChatIdAtom,
     startNewChatAtom,
     chatErrorAtom,
-} from '../../store';
-import { deleteChat as deleteChatApi } from '../../api/api';
+} from '../../../store'; // Adjusted path
+import { deleteChat as deleteChatApi } from '../../../api/api'; // Adjusted path
 import { DotsHorizontalIcon, Pencil1Icon, TrashIcon, PlusCircledIcon } from '@radix-ui/react-icons';
 import {
     Box,
@@ -25,22 +24,20 @@ import {
     ScrollArea,
     Spinner
 } from '@radix-ui/themes';
-import { formatTimestamp } from '../../helpers';
-import type { ChatSession } from '../../types';
-import { cn } from '../../utils';
+import { formatTimestamp } from '../../../helpers'; // Adjusted path
+import type { ChatSession } from '../../../types'; // Adjusted path
+import { cn } from '../../../utils'; // Adjusted path
 
 export function SessionSidebar() {
-    // Hooks
     const { sessionId: sessionIdParam } = useParams<{ sessionId: string; chatId?: string }>();
     const navigate = useNavigate();
-    const session = useAtomValue(activeSessionAtom); // Get the active session object
+    const session = useAtomValue(activeSessionAtom);
     const renameChatAction = useSetAtom(renameChatAtom);
     const deleteChatAction = useSetAtom(deleteChatAtom);
     const startNewChatAction = useSetAtom(startNewChatAtom);
     const setChatError = useSetAtom(chatErrorAtom);
     const currentActiveChatId = useAtomValue(activeChatIdAtom);
 
-    // Modal States
     const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
     const [renamingChat, setRenamingChat] = useState<ChatSession | null>(null);
     const [currentRenameValue, setCurrentRenameValue] = useState('');
@@ -49,18 +46,7 @@ export function SessionSidebar() {
     const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
     const [deletingChat, setDeletingChat] = useState<ChatSession | null>(null);
 
-    // --- LOGGING INSIDE SIDEBAR ---
-    console.log('[SessionSidebar] Rendering. Active session from atom:',
-       session ? { id: session.id, name: session.sessionName, chats_exist: session.hasOwnProperty('chats'), chats_is_array: Array.isArray(session.chats) } : null
-    );
-    if(session && session.chats) {
-       // console.log('[SessionSidebar] Chats array content:', session.chats); // Potentially noisy
-    }
-    // --- END LOGGING ---
-
-    // --- Loading / Validation ---
     if (!session || !sessionIdParam) {
-        console.log('[SessionSidebar] State: Loading session object...');
         return (
             <Box p="4" className="flex flex-col h-full w-full overflow-hidden items-center justify-center" style={{ backgroundColor: 'var(--color-panel-solid)' }}>
                <Spinner size="2" /> <Text size="1" color="gray" mt="2">Loading session...</Text>
@@ -78,36 +64,30 @@ export function SessionSidebar() {
         );
     }
 
-    // ** REFINED CHECK: Check if 'chats' property exists AND is an array **
     const chatsDefinedAndIsArray = session.hasOwnProperty('chats') && Array.isArray(session.chats);
-
-    // Prepare sorted chats only if defined and is an array
     const sortedChats = chatsDefinedAndIsArray
         ? [...session.chats].sort((a, b) => b.timestamp - a.timestamp)
-        : []; // Default to empty array if not defined/array
+        : [];
 
-
-    // Helper to get display title (unchanged)
     const getChatDisplayTitle = (chat: ChatSession | null): string => {
          if (!chat) return 'Unknown Chat';
          return chat.name || `Chat (${formatTimestamp(chat.timestamp)})`;
     };
 
-    // --- Action Handlers ---
     const handleNewChatClick = async () => {
-        // Check currentSessionIdNum again in case params changed? Or rely on session.id
         const result = await startNewChatAction({ sessionId: session.id });
-        if (result.success) { /* Navigation handled by SessionView */ }
-        else { setChatError(result.error); }
+        if (!result.success) { setChatError(result.error); }
     };
+
     const handleRenameClick = (chat: ChatSession) => { setRenamingChat(chat); setCurrentRenameValue(chat.name || ''); setRenameError(null); setIsRenameModalOpen(true); };
     const handleSaveRename = () => { if (!renamingChat) return; renameChatAction({ chatId: renamingChat.id, newName: currentRenameValue.trim() }); cancelRename(); };
     const cancelRename = () => { setIsRenameModalOpen(false); setRenamingChat(null); setCurrentRenameValue(''); setRenameError(null); };
+
     const handleDeleteClick = (chat: ChatSession) => { setDeletingChat(chat); setIsDeleteConfirmOpen(true); };
     const confirmDelete = async () => {
         if (!deletingChat) return;
         try {
-            await deleteChatApi(session.id, deletingChat.id); // Use session.id
+            await deleteChatApi(session.id, deletingChat.id);
             const result = deleteChatAction({ chatId: deletingChat.id });
             if (result.success) {
                 if (currentActiveChatId === deletingChat.id) {
@@ -119,20 +99,22 @@ export function SessionSidebar() {
         cancelDelete();
     };
     const cancelDelete = () => { setIsDeleteConfirmOpen(false); setDeletingChat(null); };
-    const getNavLinkClass = ({ isActive }: { isActive: boolean }): string => { const base = "..."; const active = "..."; const inactive = "..."; return cn(base, isActive ? active : inactive); };
 
+    const getNavLinkClass = ({ isActive }: { isActive: boolean }): string => {
+        const base = "block w-full px-2 py-1.5 rounded-md truncate";
+        const inactive = "text-[--gray-a11] hover:bg-[--gray-a3] focus:outline-none focus:ring-2 focus:ring-[--accent-7]";
+        const active = "bg-[--accent-a4] text-[--accent-11] font-medium";
+        return cn(base, isActive ? active : inactive);
+    };
 
-    // --- Render Logic ---
     return (
         <>
             <Box p="4" className="flex flex-col h-full w-full overflow-hidden" style={{ backgroundColor: 'var(--color-panel-solid)' }}>
-                {/* Header */}
                 <Flex justify="between" align="center" flexShrink="0" mb="2">
                     <Heading as="h3" size="2" color="gray" trim="start" weight="medium">Chats</Heading>
                     <Button onClick={handleNewChatClick} variant="soft" size="1" highContrast title="Start New Chat"><PlusCircledIcon width="16" height="16" /></Button>
                 </Flex>
 
-                {/* Chat List Area: Conditional rendering based on refined check */}
                 {!chatsDefinedAndIsArray ? (
                     <Flex flexGrow="1" align="center" justify="center">
                         <Spinner size="2"/>
@@ -148,7 +130,7 @@ export function SessionSidebar() {
                         <Flex direction="column" gap="1" asChild>
                             <nav>
                                 {sortedChats.map((chat) => (
-                                    <Flex key={chat.id} align="center" justify="between" className="group relative px-2 py-1.5 rounded-md hover:bg-[--gray-a3]" style={currentActiveChatId === chat.id ? { backgroundColor: 'var(--accent-a4)' } : {}}>
+                                    <Flex key={chat.id} align="center" justify="between" className="group relative">
                                         <NavLink to={`/sessions/${session.id}/chats/${chat.id}`} className={getNavLinkClass} title={getChatDisplayTitle(chat)} end>
                                             <Text size="2" truncate className="flex-grow">{getChatDisplayTitle(chat)}</Text>
                                         </NavLink>
@@ -171,9 +153,8 @@ export function SessionSidebar() {
                 )}
             </Box>
 
-            {/* Modals */}
             <AlertDialog.Root open={isRenameModalOpen} onOpenChange={(open) => !open && cancelRename()}>
-                 <AlertDialog.Content style={{ maxWidth: 450 }}> {/* ... Rename Modal Content ... */}
+                 <AlertDialog.Content style={{ maxWidth: 450 }}>
                     <AlertDialog.Title>Rename Chat</AlertDialog.Title>
                     {renamingChat && <AlertDialog.Description size="2" color="gray" mt="1" mb="4">Enter a new name for "{getChatDisplayTitle(renamingChat)}". Leave empty to remove the name.</AlertDialog.Description>}
                     <Flex direction="column" gap="3">
@@ -187,7 +168,7 @@ export function SessionSidebar() {
                  </AlertDialog.Content>
             </AlertDialog.Root>
             <AlertDialog.Root open={isDeleteConfirmOpen} onOpenChange={(open) => !open && cancelDelete()}>
-                <AlertDialog.Content style={{ maxWidth: 450 }}> {/* ... Delete Modal Content ... */}
+                <AlertDialog.Content style={{ maxWidth: 450 }}>
                     <AlertDialog.Title>Delete Chat</AlertDialog.Title>
                     {deletingChat && <AlertDialog.Description size="2" color="gray" mt="1" mb="4">Are you sure you want to delete "{getChatDisplayTitle(deletingChat)}"? This action cannot be undone.</AlertDialog.Description>}
                     <Flex gap="3" mt="4" justify="end">
