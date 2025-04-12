@@ -136,7 +136,7 @@ export function SessionSidebar() {
                                         </NavLink>
                                         <DropdownMenu.Root>
                                             <DropdownMenu.Trigger>
-                                                <IconButton variant="ghost" color="gray" size="1" className="flex-shrink-0 ml-1 p-1 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity" aria-label="Chat options" onClick={(e) => e.preventDefault()} onMouseDown={(e) => e.stopPropagation()}>
+                                                <IconButton variant="ghost" color="gray" size="1" className="flex-shrink-0 ml-1 mr-1 p-1 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 data-[state=open]:bg-[--accent-a4] transition-opacity" aria-label="Chat options" onClick={(e) => e.preventDefault()} onMouseDown={(e) => e.stopPropagation()}>
                                                     <DotsHorizontalIcon />
                                                 </IconButton>
                                             </DropdownMenu.Trigger>
