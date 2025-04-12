@@ -1,28 +1,22 @@
-// src/routes/sessionRoutes.ts
 import { Elysia, t, type Static } from 'elysia';
-import { swagger } from '@elysiajs/swagger';
-import path from 'path';
-import fs from 'fs/promises';
+import path from 'node:path';
+import fs from 'node:fs/promises';
 import { sessionRepository } from '../repositories/sessionRepository.js';
 import { chatRepository } from '../repositories/chatRepository.js';
-// Import the refactored Elysia-native handlers (excluding uploadSession)
 import {
     listSessions, getSessionDetails, updateSessionMetadata,
     getTranscript, updateTranscriptParagraph
 } from '../api/sessionHandler.js';
 import {
-    loadTranscriptContent, // Keep for use within handlers
     saveTranscriptContent,
     deleteTranscriptFile,
     deleteUploadedFile
 } from '../services/fileService.js';
 import { transcribeAudio } from '../services/transcriptionService.js';
-import { createSessionListDTO, updateParagraphInTranscript } from '../utils/helpers.js';
 import type { BackendSession, BackendSessionMetadata } from '../types/index.js';
-import { NotFoundError, BadRequestError, InternalServerError, ApiError } from '../errors.js';
+import { NotFoundError, InternalServerError, ApiError } from '../errors.js';
 import config from '../config/index.js';
 
-// --- Define TypeBox Schemas (Keep as they are, ensure they match handler returns) ---
 const SessionIdParamSchema = t.Object({ sessionId: t.Numeric({ minimum: 1, error: "Session ID must be a positive number" }) });
 const ParagraphUpdateBodySchema = t.Object({
     paragraphIndex: t.Numeric({ minimum: 0, error: "Paragraph index must be 0 or greater" }),
@@ -67,8 +61,10 @@ const TranscriptResponseSchema = t.Object({ transcriptContent: t.String() });
 // Schema for POST /upload request body
 const UploadBodySchema = t.Object({
     audioFile: t.File({
+        // TODO make sure we can transcribe these, move to a constants file
          type: ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-m4a', 'audio/ogg', 'audio/aac'],
-         maxSize: '100m', // Example max size
+         // TODO move max size to constants file
+         maxSize: '100m',
          error: "Invalid or missing audio file. Must be audio/* type and under 100MB."
     }),
     // Metadata fields directly in the body alongside the file
@@ -79,12 +75,9 @@ const UploadBodySchema = t.Object({
     therapy: t.String({ minLength: 1, error: "Therapy type required." }),
 });
 
-// --- Type Alias for Clarity ---
-type SessionListItem = Static<typeof SessionListResponseItemSchema>;
-
 // --- Elysia Plugin for Session Routes ---
 export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
-    .model({ // Keep model definitions
+    .model({
         sessionIdParam: SessionIdParamSchema,
         paragraphUpdateBody: ParagraphUpdateBodySchema,
         metadataUpdateBody: SessionMetadataUpdateBodySchema,
@@ -95,14 +88,12 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
     })
     .group('', { detail: { tags: ['Session'] } }, (app) => app
         // GET /api/sessions - List sessions
-        // Pass the handler function directly
         .get('/', listSessions, {
-            response: { 200: t.Array(SessionListResponseItemSchema) }, // Ensure this matches handler return
+            response: { 200: t.Array(SessionListResponseItemSchema) },
             detail: { summary: 'List all sessions (metadata only)' }
         })
 
         // POST /api/sessions/upload - Upload session
-        // Keep the logic inline here as it uses Elysia's ctx.body.audioFile directly
         .post('/upload', async ({ body, set }) => {
             const { audioFile, ...metadata } = body; // Destructure file and metadata
 
@@ -119,6 +110,7 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
                 console.log(`[API Upload] Temporary audio saved to ${tempAudioPath}`);
 
                 // 2. Transcribe Audio
+                // TODO expose being able to cancel the task
                 console.log(`[API Upload] Starting transcription for ${audioFile.name}...`);
                 const transcriptContent = await transcribeAudio(tempAudioPath);
                 console.log(`[API Upload] Transcription finished.`);
@@ -152,7 +144,6 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
                 if (!finalSessionState) throw new InternalServerError(`Failed to fetch final state for session ${sessionId}`);
                 const chatsRaw = chatRepository.findChatsBySessionId(sessionId);
                 const chatsMetadata = chatsRaw.map(c => ({id: c.id, sessionId: c.sessionId, timestamp: c.timestamp, name: c.name}));
-                // Construct response matching SessionWithChatsMetadataResponseSchema
                 const responseSession = {
                     id: finalSessionState.id,
                     fileName: finalSessionState.fileName,
@@ -190,43 +181,39 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
             }
         }, {
             body: 'uploadBody',
-            response: { 201: 'sessionWithChatsMetadataResponse', 400: t.Any(), 500: t.Any() }, // Ensure this matches handler return
+            response: { 201: 'sessionWithChatsMetadataResponse', 400: t.Any(), 500: t.Any() },
             detail: { summary: 'Upload session audio & metadata' }
         })
 
         // --- Routes requiring :sessionId ---
-        .guard({ params: 'sessionIdParam' }, (app) => app // Keep guard
-             .derive(({ params }) => { // Keep derivation
+        .guard({ params: 'sessionIdParam' }, (app) => app
+             .derive(({ params }) => {
                  const session = sessionRepository.findById(params.sessionId);
                  if (!session) throw new NotFoundError(`Session with ID ${params.sessionId}`);
                  return { sessionData: session };
              })
              // GET /:sessionId - Get session metadata & chat list
-             // Pass the handler function directly
              .get('/:sessionId', getSessionDetails, {
-                 response: { 200: 'sessionWithChatsMetadataResponse' }, // Ensure this matches handler return
+                 response: { 200: 'sessionWithChatsMetadataResponse' },
                  detail: { summary: 'Get session metadata & chat list' }
              })
              // PUT /:sessionId/metadata - Update session metadata
-             // Pass the handler function directly
              .put('/:sessionId/metadata', updateSessionMetadata, {
                  body: 'metadataUpdateBody',
-                 response: { 200: 'sessionMetadataResponse' }, // Ensure this matches handler return
+                 response: { 200: 'sessionMetadataResponse' },
                  detail: { summary: 'Update session metadata' }
              })
              // GET /:sessionId/transcript - Get transcript content only
-             // Pass the handler function directly
              .get('/:sessionId/transcript', getTranscript, {
-                 response: { 200: 'transcriptResponse' }, // Ensure this matches handler return
+                 response: { 200: 'transcriptResponse' },
                  detail: { summary: 'Get transcript content' }
              })
              // PATCH /:sessionId/transcript - Update transcript paragraph
-             // Pass the handler function directly
              .patch('/:sessionId/transcript', updateTranscriptParagraph, {
                  body: 'paragraphUpdateBody',
-                 response: { 200: 'transcriptResponse' }, // Ensure this matches handler return
+                 response: { 200: 'transcriptResponse' },
                  detail: { summary: 'Update transcript paragraph' }
              })
-         ) // End guard
-    ) // End group
+         )
+    )
     

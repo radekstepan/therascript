@@ -1,4 +1,3 @@
-// src/components/Transcription/TranscriptParagraph.tsx
 import React, { useState, useRef, useEffect, Dispatch, SetStateAction } from 'react';
 import { Button, TextArea, Flex, Box, IconButton } from '@radix-ui/themes';
 import { Pencil1Icon, CheckIcon, Cross1Icon, PlayIcon } from '@radix-ui/react-icons';
@@ -7,7 +6,6 @@ import { cn } from '../../utils';
 interface TranscriptParagraphProps {
     paragraph: string;
     index: number;
-    // onSave prop now expects the async function passed down from SessionView via Transcription
     onSave: (index: number, newText: string) => Promise<void>;
     activeEditIndex: number | null;
     setActiveEditIndex: Dispatch<SetStateAction<number | null>>;
@@ -22,7 +20,7 @@ export function TranscriptParagraph({
 }: TranscriptParagraphProps) {
     const [editValue, setEditValue] = useState(paragraph);
     const containerRef = useRef<HTMLDivElement>(null);
-    const textareaRef = useRef<HTMLTextAreaElement>(null); // Ref for the textarea
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
     const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
     const isEditing = activeEditIndex === index;
 
@@ -70,8 +68,6 @@ export function TranscriptParagraph({
                 // Parent's onSave handler (handleSaveParagraphInternal) will call setActiveEditIndex(null) on success
             } catch (error) {
                 console.error(`Error saving paragraph ${index} from TranscriptParagraph:`, error);
-                // Decide if you want to keep the editor open on error or close it
-                // setActiveEditIndex(null); // Optionally close even on error
             }
         } else {
             // If no change, just close edit mode
@@ -92,10 +88,11 @@ export function TranscriptParagraph({
     // Placeholder for play functionality
     const handlePlayClick = () => {
         console.log(`▶️ Simulate PLAY event for paragraph index ${index}: "${paragraph.substring(0, 70)}..."`);
-        // Add actual audio playback logic here if needed
+        // TODO Add actual audio playback logic here if needed
     };
 
     // Common text styles for display and edit modes
+    // TODO these should be outside of this component
     const textStyles = {
         whiteSpace: 'pre-wrap' as const,
         fontFamily: 'var(--font-mono)',
@@ -113,7 +110,7 @@ export function TranscriptParagraph({
                 className="flex-grow" // Takes available space
                 style={textStyles}
             >
-                {/* Handle potentially empty paragraphs gracefully */}
+                {/* TODO handle empty paragraphs on the backend and trim them too */}
                 {paragraph.trim() ? paragraph : <span style={{ fontStyle: 'italic', color: 'var(--gray-a9)'}}>[Empty Paragraph]</span>}
             </Box>
             {/* Action Icons */}
@@ -178,14 +175,14 @@ export function TranscriptParagraph({
                             backgroundColor: 'var(--color-panel-solid)',
                             borderRadius: 'var(--radius-2)',
                             boxShadow: 'var(--shadow-3)',
-                            border: `1px solid var(--gray-a6)` // Add border to overlay
+                            border: `1px solid var(--gray-a6)`
                         }}
                         // Prevent click propagation to avoid exiting edit mode accidentally
                         onClick={(e) => e.stopPropagation()}
                     >
                         <Flex direction="column" gap="2">
                             <TextArea
-                                ref={textareaRef} // Assign ref
+                                ref={textareaRef}
                                 value={editValue}
                                 onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setEditValue(e.target.value)}
                                 placeholder="Enter paragraph text..."
@@ -199,9 +196,7 @@ export function TranscriptParagraph({
                                     boxSizing: 'border-box',
                                     borderRadius: 'var(--radius-2)',
                                     border: '1px solid var(--gray-a7)', // Internal border for textarea
-                                    // Remove specific padding, rely on size="2"
                                 }}
-                                // autoFocus // Handled by useEffect now
                                 onKeyDown={handleKeyDown}
                                 aria-label={`Edit paragraph ${index + 1}`}
                             />

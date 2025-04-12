@@ -1,4 +1,3 @@
-// src/App.tsx
 import React from 'react';
 import { useAtomValue } from 'jotai';
 import { Routes, Route, Navigate } from 'react-router-dom';
@@ -17,15 +16,17 @@ import {
   effectiveThemeAtom,
 } from './store';
 
-// Configure axios base URL
-axios.defaults.baseURL = 'http://localhost:3001'; // Adjust based on your backend URL
+// TODO should be coming from config
+axios.defaults.baseURL = 'http://localhost:3001';
 
+// TODO include an Error Boundary
 function App() {
   const isModalOpen = useAtomValue(isUploadModalOpenAtom);
   const isTranscribing = useAtomValue(isTranscribingAtom);
   const transcriptionError = useAtomValue(transcriptionErrorAtom);
   const effectiveTheme = useAtomValue(effectiveThemeAtom);
 
+  // TODO wtf is 2147483647
   return (
     <Toast.Provider swipeDirection="right">
       <Theme appearance={effectiveTheme} accentColor="teal" panelBackground="solid" radius="small" scaling="100%">

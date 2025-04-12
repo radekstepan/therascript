@@ -1,8 +1,8 @@
-// src/repositories/sessionRepository.ts
-import { db } from '../db/sqliteService.js'; // ADDED .js
-import type { BackendSession, BackendSessionMetadata } from '../types/index.js'; // ADDED .js
+import { db } from '../db/sqliteService.js';
+import type { BackendSession, BackendSessionMetadata } from '../types/index.js';
 import { Statement, RunResult } from 'better-sqlite3';
 
+// TODO reuse
 // Helper function to safely prepare statements
 const prepareStmt = (sql: string): Statement => {
     try { return db.prepare(sql); }

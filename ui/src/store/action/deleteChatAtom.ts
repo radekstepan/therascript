@@ -3,7 +3,7 @@ import {
     pastSessionsAtom,
     activeSessionIdAtom,
     activeChatIdAtom
-} from '..'; // Import from the main store index
+} from '..';
 
 // Type for Action Result
 export type DeleteChatResult = { success: true; newActiveChatId: number | null } | { success: false; error: string };
@@ -23,6 +23,7 @@ export const deleteChatAtom = atom<null, [{ chatId: number }], DeleteChatResult>
             prevSessions.map((session) => {
                 if (session.id === sessionId) {
                     // Ensure chats is an array
+                    // TODO should be typed automatically
                     const currentChats = Array.isArray(session.chats) ? session.chats : [];
                     const remainingChats = currentChats.filter((c) => c.id !== chatId);
                     // Determine the next active chat ID *after* filtering

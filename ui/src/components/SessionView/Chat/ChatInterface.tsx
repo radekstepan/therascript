@@ -1,13 +1,13 @@
 import React, { useRef, useEffect, useCallback } from 'react';
 import { useAtomValue } from 'jotai';
 import { Box, Flex, ScrollArea, Spinner, Text } from '@radix-ui/themes';
-import { ChatInput } from './ChatInput'; // Adjusted path
-import { ChatMessages } from './ChatMessages'; // Adjusted path
+import { ChatInput } from './ChatInput';
+import { ChatMessages } from './ChatMessages';
 import {
     activeChatIdAtom,
     currentChatMessagesAtom,
     isChattingAtom
-} from '../../../store'; // Adjusted path
+} from '../../../store';
 
 interface ChatInterfaceProps {
     isTabActive?: boolean;
@@ -16,7 +16,7 @@ interface ChatInterfaceProps {
     isLoadingChat: boolean;
 }
 
-// Simple debounce utility (Keep as is)
+// TODO flipping reuse
 const debounce = <F extends (...args: any[]) => any>(func: F, waitFor: number) => {
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     return (...args: Parameters<F>): void => {

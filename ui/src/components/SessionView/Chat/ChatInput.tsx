@@ -2,9 +2,9 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { StarIcon, PaperPlaneIcon, StopIcon, Cross2Icon } from '@radix-ui/react-icons';
 import * as Toast from '@radix-ui/react-toast';
-import { Button, TextField, Flex, Box, Text, IconButton } from '@radix-ui/themes';
-import { StarredTemplatesList } from './StarredTemplates'; // Adjusted path
-import { addChatMessage } from '../../../api/api'; // Adjusted path
+import { TextField, Flex, Box, Text, IconButton } from '@radix-ui/themes';
+import { StarredTemplatesList } from './StarredTemplates';
+import { addChatMessage } from '../../../api/api';
 import {
     currentQueryAtom,
     activeSessionIdAtom,
@@ -13,8 +13,7 @@ import {
     toastMessageAtom,
     isChattingAtom,
     pastSessionsAtom,
-} from '../../../store'; // Adjusted path
-import type { ChatSession } from '../../../types'; // Adjusted path
+} from '../../../store';
 
 interface ChatInputProps {
     disabled?: boolean;

@@ -1,8 +1,4 @@
-// src/helpers.ts
-// Removed cn import as it's not used here anymore
-// REMOVED: Unused badge color map imports
-
-// getTodayDateString and formatTimestamp functions remain the same...
+// TODO merge in utils here
 
 /**
  * Gets today's date as a string in "YYYY-MM-DD" format.
@@ -37,15 +33,3 @@ export const formatTimestamp = (timestamp?: number): string => {
       return 'Invalid Date';
   }
 };
-
-
-// --- REMOVED getBadgeClasses function ---
-// This function is no longer needed because Radix Themes Badge component
-// handles color variants directly via its `color` prop.
-// The logic to map session/therapy types to specific colors is now
-// handled within the SessionListTable component using color maps.
-/*
-export const getBadgeClasses = (type?: string, category: 'session' | 'therapy' = 'session'): string => {
-    // ... old implementation ...
-}
-*/

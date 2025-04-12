@@ -1,18 +1,12 @@
-// src/api/chatHandler.ts
-// --- Corrected Relative Imports ---
 import { chatRepository } from '../repositories/chatRepository.js';
-import { sessionRepository } from '../repositories/sessionRepository.js'; // Keep if needed elsewhere, less direct use here
-// --- Other Imports ---
 import { loadTranscriptContent } from '../services/fileService.js';
 import { generateChatResponse } from '../services/ollamaService.js';
-// Import ApiError and other needed error types
-import { NotFoundError, BadRequestError, InternalServerError, ApiError } from '../errors.js';
-import type { BackendSession, BackendChatSession, BackendChatMessage } from '../types/index.js';
-// No need to import Context from 'elysia' if relying on inference
+import { NotFoundError, InternalServerError, ApiError } from '../errors.js';
 
 // GET /:sessionId/chats/:chatId - Get details of a specific chat
 // Let Elysia infer the context type, which will include chatData from the derivation
-export const getChatDetails = ({ chatData, set }: any) => { // Use 'any' or let TS infer ctx
+// TODO any
+export const getChatDetails = ({ chatData, set }: any) => {
     // chatData should be available due to the derive block in the route
     if (!chatData) {
         throw new NotFoundError(`Chat details not found in context.`);
@@ -23,7 +17,8 @@ export const getChatDetails = ({ chatData, set }: any) => { // Use 'any' or let 
 
 // POST /:sessionId/chats - Create a new chat
 // Let Elysia infer the context type, which will include sessionData
-export const createChat = ({ sessionData, set }: any) => { // Use 'any' or let TS infer ctx
+// TODO any
+export const createChat = ({ sessionData, set }: any) => {
     const sessionId = sessionData.id;
     try {
         const newChat = chatRepository.createChat(sessionId);
@@ -39,7 +34,8 @@ export const createChat = ({ sessionData, set }: any) => { // Use 'any' or let T
 
 // POST /:sessionId/chats/:chatId/messages - Send message, get AI response
 // Let Elysia infer the context type, which will include sessionData, chatData, and validated body
-export const addChatMessage = async ({ sessionData, chatData, body, set }: any) => { // Use 'any' or let TS infer ctx
+// TODO any
+export const addChatMessage = async ({ sessionData, chatData, body, set }: any) => {
     // Body type is validated by the schema in the route definition
     const { text } = body;
     const trimmedText = text.trim();
@@ -75,15 +71,15 @@ export const addChatMessage = async ({ sessionData, chatData, body, set }: any) 
     } catch (error) {
          console.error(`[API Error] addChatMessage (Chat ID: ${chatData?.id}, Session ID: ${sessionData?.id}):`, error);
          // Re-throw the error for Elysia's central handler
-         if (error instanceof ApiError) throw error; // Check against imported ApiError
+         if (error instanceof ApiError) throw error;
          throw new InternalServerError('Failed to process chat message', error instanceof Error ? error : undefined);
     }
 };
 
 // PATCH /:sessionId/chats/:chatId/name - Rename a chat
 // Let Elysia infer the context type
-export const renameChat = ({ chatData, body, set }: any) => { // Use 'any' or let TS infer ctx
-    // Body type validated by schema
+// TODO any
+export const renameChat = ({ chatData, body, set }: any) => {
     const { name } = body;
     const nameToSave = (typeof name === 'string' && name.trim() !== '') ? name.trim() : undefined;
 
@@ -100,14 +96,15 @@ export const renameChat = ({ chatData, body, set }: any) => { // Use 'any' or le
 
     } catch (error) {
         console.error(`[API Error] renameChat (Chat ID: ${chatData?.id}):`, error);
-        if (error instanceof ApiError) throw error; // Check against imported ApiError
+        if (error instanceof ApiError) throw error;
         throw new InternalServerError('Failed to rename chat', error instanceof Error ? error : undefined);
     }
 };
 
 // DELETE /:sessionId/chats/:chatId - Delete a chat
 // Let Elysia infer the context type
-export const deleteChat = ({ chatData, set }: any) => { // Use 'any' or let TS infer ctx
+// TODO any
+export const deleteChat = ({ chatData, set }: any) => {
     try {
         const deleted = chatRepository.deleteChatById(chatData.id);
         if (!deleted) {
@@ -118,7 +115,7 @@ export const deleteChat = ({ chatData, set }: any) => { // Use 'any' or let TS i
         return { message: `Chat ${chatData.id} deleted successfully.` };
     } catch (error) {
         console.error(`[API Error] deleteChat (Chat ID: ${chatData?.id}):`, error);
-        if (error instanceof ApiError) throw error; // Check against imported ApiError
+        if (error instanceof ApiError) throw error;
         throw new InternalServerError('Failed to delete chat', error instanceof Error ? error : undefined);
     }
 };

@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Button, Dialog, Flex, Text, TextField, Select, Box, Callout, Spinner } from '@radix-ui/themes';
 import { InfoCircledIcon } from '@radix-ui/react-icons';
-import { SESSION_TYPES, THERAPY_TYPES } from '../../../constants'; // Adjusted path
-import { updateSessionMetadata } from '../../../api/api'; // Adjusted path
-import type { Session, SessionMetadata } from '../../../types'; // Adjusted path
-import { cn } from '../../../utils'; // Adjusted path
+import { SESSION_TYPES, THERAPY_TYPES } from '../../../constants';
+import { updateSessionMetadata } from '../../../api/api';
+import type { Session, SessionMetadata } from '../../../types';
+import { cn } from '../../../utils';
 
 interface EditDetailsModalProps {
     isOpen: boolean;

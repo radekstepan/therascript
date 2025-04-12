@@ -5,11 +5,9 @@ import {
     ChevronUpIcon,
     ChevronDownIcon
 } from '@radix-ui/react-icons';
-import { Table, Badge, Text, Flex } from '@radix-ui/themes'; // Use Themes Table, Badge
+import { Table, Badge, Text, Flex } from '@radix-ui/themes';
 import type { Session } from '../../types';
-import type { SessionSortCriteria, SortDirection } from '../../store'; // Import types
-// REMOVED: Unused getBadgeClasses import
-import { cn } from '../../utils'; // Keep cn for potential future use if needed
+import type { SessionSortCriteria, SortDirection } from '../../store';
 
 interface SessionListTableProps {
     sessions: Session[];
@@ -19,18 +17,19 @@ interface SessionListTableProps {
 }
 
 // Define the specific allowed values for aria-sort
+// TODO import an enum from somewhere
 type AriaSort = 'none' | 'ascending' | 'descending' | 'other' | undefined;
 
-// Map session/therapy types to Radix Colors (adjust as needed)
+// TODO move these to constants
 const sessionColorMap: Record<string, React.ComponentProps<typeof Badge>['color']> = {
     'individual': 'blue',
     'phone': 'sky',
     'skills group': 'teal',
-    'family session': 'green', // Changed from emerald
+    'family session': 'green',
     'family skills': 'green',
     'couples': 'indigo',
     'couples individual': 'plum',
-    'default': 'gray' // Default color
+    'default': 'gray'
 };
 
 const therapyColorMap: Record<string, React.ComponentProps<typeof Badge>['color']> = {
@@ -42,26 +41,28 @@ const therapyColorMap: Record<string, React.ComponentProps<typeof Badge>['color'
     'couples act': 'violet',
     'couples dbt': 'yellow',
     'dbt skills': 'orange',
-    'default': 'pink' // Default color
+    'default': 'pink'
 };
 
 export function SessionListTable({ sessions, sortCriteria, sortDirection, onSort }: SessionListTableProps) {
     const navigate = useNavigate();
 
+    // TODO these urls should be defined in a router somewhere
     const handleSessionClick = (sessionId: number) => {
         navigate(`/sessions/${sessionId}`);
     };
 
     const renderSortIcon = (criteria: SessionSortCriteria) => {
         if (sortCriteria !== criteria) {
-            return <ChevronDownIcon className="h-3 w-3 ml-1 text-[--gray-a9] opacity-0 group-hover:opacity-100 transition-opacity" />; // Use Themes color var & Tailwind group-hover
+            return <ChevronDownIcon className="h-3 w-3 ml-1 text-[--gray-a9] opacity-0 group-hover:opacity-100 transition-opacity" />;
         }
         if (sortDirection === 'asc') {
-            return <ChevronUpIcon className="h-4 w-4 ml-1 text-[--gray-a11]" />; // Use Themes color var
+            return <ChevronUpIcon className="h-4 w-4 ml-1 text-[--gray-a11]" />;
         }
-        return <ChevronDownIcon className="h-4 w-4 ml-1 text-[--gray-a11]" />; // Use Themes color var
+        return <ChevronDownIcon className="h-4 w-4 ml-1 text-[--gray-a11]" />;
     };
 
+    // TODO annoying fns defined anew on each render
     const getHeaderCellProps = (criteria: SessionSortCriteria): React.ThHTMLAttributes<HTMLTableHeaderCellElement> => {
         const isActiveSortColumn = sortCriteria === criteria;
         const sortValue: AriaSort = isActiveSortColumn
@@ -69,14 +70,13 @@ export function SessionListTable({ sessions, sortCriteria, sortDirection, onSort
             : 'none';
 
         return {
-            // Use Table.ColumnHeaderCell props for styling, avoid spreading className directly if possible
-            // className: "group px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors duration-150",
             onClick: () => onSort(criteria),
             'aria-sort': sortValue,
-            style: { cursor: 'pointer', whiteSpace: 'nowrap' }, // Add cursor pointer and prevent wrap
+            style: { cursor: 'pointer', whiteSpace: 'nowrap' },
         };
     };
 
+    // TODO do this outside
     const getBadgeColor = (type: string | undefined, category: 'session' | 'therapy'): React.ComponentProps<typeof Badge>['color'] => {
         const map = category === 'session' ? sessionColorMap : therapyColorMap;
         return type ? (map[type.toLowerCase()] || map['default']) : map['default'];
@@ -84,13 +84,12 @@ export function SessionListTable({ sessions, sortCriteria, sortDirection, onSort
 
     return (
         // Use Themes Table component
-        // Add scrolling container around the table if needed, or let parent handle it
         <div className="flex-grow overflow-y-auto">
              <Table.Root variant="surface" size="2">
                 <Table.Header style={{ backgroundColor: 'var(--gray-a2)', position: 'sticky', top: 0, zIndex: 1 }}>
                     <Table.Row>
                         <Table.ColumnHeaderCell {...getHeaderCellProps('sessionName')} justify="start">
-                             <Flex align="center" className="group"> {/* Wrap in Flex, add group for hover icon */}
+                             <Flex align="center" className="group">
                                 Session / File {renderSortIcon('sessionName')}
                             </Flex>
                         </Table.ColumnHeaderCell>
@@ -113,15 +112,14 @@ export function SessionListTable({ sessions, sortCriteria, sortDirection, onSort
                         <Table.Row
                             key={session.id}
                             onClick={() => handleSessionClick(session.id)}
-                            className="cursor-pointer hover:bg-[--gray-a3] transition-colors duration-150" // Use Themes color var
+                            className="cursor-pointer hover:bg-[--gray-a3] transition-colors duration-150"
                             aria-label={`Load session: ${session.sessionName || session.fileName}`}
-                            // role="link" // Table rows aren't links by default
                             tabIndex={0}
                             onKeyDown={(e: React.KeyboardEvent<HTMLTableRowElement>) => e.key === 'Enter' && handleSessionClick(session.id)} // Added type and target element
                         >
                             <Table.RowHeaderCell justify="start">
                                 <Flex align="center" gap="2">
-                                    <FileTextIcon className="text-[--gray-a10]" /> {/* Use Themes color var */}
+                                    <FileTextIcon className="text-[--gray-a10]" />
                                     <Text weight="medium" truncate>{session.sessionName || session.fileName}</Text>
                                 </Flex>
                             </Table.RowHeaderCell>

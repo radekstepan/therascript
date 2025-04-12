@@ -1,21 +1,18 @@
-// src/services/transcriptionService.ts
-import fs from 'fs/promises';
-import path from 'path';
-import { isNodeError } from '../utils/helpers.js'; // ADDED .js
-import config from '../config/index.js'; // ADDED .js
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { isNodeError } from '../utils/helpers.js';
 
+// TODO use the whisper Docker API
 export const transcribeAudio = async (filePath: string): Promise<string> => {
   console.log(`[TranscriptionService] Simulating transcription for: ${path.basename(filePath)}`);
 
   try { await fs.access(filePath); }
   catch (error) {
-    // --- Use isNodeError ---
     if (isNodeError(error) && error.code === 'ENOENT') throw new Error(`Audio file not found.`);
-    // --- End Use ---
-    throw error; // Re-throw other errors
+    throw error;
   }
 
-  const simulationTime = 1500 + Math.random() * 2500; // Shorter simulation
+  const simulationTime = 1500 + Math.random() * 2500;
   console.log(`[TranscriptionService] Simulation duration: ${simulationTime.toFixed(0)}ms`);
   await new Promise(resolve => setTimeout(resolve, simulationTime));
 

@@ -3,8 +3,8 @@ import {
     pastSessionsAtom,
     activeSessionIdAtom,
     chatErrorAtom
-} from '..'; // Import from the main store index
-import { renameChat as renameChatApi } from '../../api/api'; // Assuming api is ../../
+} from '..';
+import { renameChat as renameChatApi } from '../../api/api';
 
 export const renameChatAtom = atom(null, async (get, set, payload: { chatId: number; newName: string }) => {
     const { chatId, newName } = payload;
@@ -17,7 +17,6 @@ export const renameChatAtom = atom(null, async (get, set, payload: { chatId: num
     }
 
     try {
-        // Use renamed API function
         const updatedChat = await renameChatApi(sessionId, chatId, newName.trim() || null);
         set(pastSessionsAtom, (prev) =>
             prev.map((s) =>
@@ -25,6 +24,7 @@ export const renameChatAtom = atom(null, async (get, set, payload: { chatId: num
                     ? {
                         ...s,
                         // Ensure chats is an array
+                        // TODO should be typed automatically
                         chats: (Array.isArray(s.chats) ? s.chats : []).map((c) =>
                             c.id === chatId ? { ...c, name: updatedChat.name } : c // Update name
                         ),

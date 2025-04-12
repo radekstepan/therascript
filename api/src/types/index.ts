@@ -1,5 +1,3 @@
-// src/types.ts
-
 export interface BackendChatMessage {
   id: number;
   chatId: number;
@@ -30,7 +28,6 @@ export interface BackendSession {
 
 // Metadata used for creation/update, excluding generated fields
 export type BackendSessionMetadata = Omit<BackendSession, 'id' | 'transcriptPath' | 'chats' | 'fileName'>;
-
 
 export interface ActionSchema {
     endpoint: string;

@@ -3,8 +3,12 @@ import { useAtomValue } from 'jotai';
 import { Button, Box, Text, Flex, ScrollArea, Separator } from '@radix-ui/themes';
 import { starredMessagesAtom } from '../../../store'; // Adjusted path
 import { StarIcon, Cross1Icon } from '@radix-ui/react-icons';
-import type { StarredTemplatesProps } from '../../../types'; // Adjusted path
 import { cn } from '../../../utils'; // Adjusted path
+
+interface StarredTemplatesProps {
+    onSelectTemplate: (text: string) => void;
+    onClose: () => void;
+}
 
 export function StarredTemplatesList({ onSelectTemplate, onClose }: StarredTemplatesProps) {
     const starredMessages = useAtomValue(starredMessagesAtom);

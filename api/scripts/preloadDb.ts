@@ -1,9 +1,8 @@
-// scripts/preloadDb.ts
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs/promises';
 
-// Define the database path (matching your config)
+// TODO use config path
 const dbPath = path.resolve(process.cwd(), 'data/therapy-analyzer.sqlite');
 
 // Sample data
@@ -15,6 +14,7 @@ const sampleSessions = [
     date: '2025-04-01',
     sessionType: 'Individual',
     therapy: 'CBT',
+    // TODO use config path for transcripts
     transcriptPath: path.resolve(process.cwd(), 'data/transcripts/1.txt'),
     transcriptContent: `Therapist: Hi Jane, how are you feeling today?\n\nJane: Not great, honestly. Work's been stressful.\n\nTherapist: Let’s explore that. What happened at work?`,
     chats: [
@@ -55,7 +55,6 @@ const sampleSessions = [
   },
 ];
 
-// Main function to preload the database
 async function preloadDatabase() {
   console.log(`[Preload] Connecting to database at ${dbPath}`);
   const db = new Database(dbPath, { verbose: console.log });

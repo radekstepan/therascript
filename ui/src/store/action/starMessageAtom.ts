@@ -2,8 +2,8 @@ import { atom } from 'jotai';
 import {
     pastSessionsAtom,
     activeSessionIdAtom
-} from '..'; // Import from the main store index
-import type { ChatMessage } from '../../types'; // Assuming types is ../../
+} from '..';
+import { type ChatMessage } from '../../types';
 
 export const starMessageAtom = atom(
     null,
@@ -20,6 +20,7 @@ export const starMessageAtom = atom(
             prevSessions.map((session) => {
                 if (session.id === sessionId) {
                     // Ensure session.chats is an array before mapping
+                    // TODO should be typed
                     const currentChats = Array.isArray(session.chats) ? session.chats : [];
                     const updatedChats = currentChats.map((chat) => {
                         if (chat.id === chatId) {

@@ -1,6 +1,6 @@
 import { atom } from 'jotai';
-import { pastSessionsAtom } from '..'; // Import from the main store index
-import type { ChatMessage } from '../../types'; // Assuming types is ../../
+import { pastSessionsAtom } from '..';
+import type { ChatMessage } from '../../types';
 
 export const starredMessagesAtom = atom<Pick<ChatMessage, 'id' | 'text' | 'starredName'>[]>((get) => {
     const sessions = get(pastSessionsAtom);

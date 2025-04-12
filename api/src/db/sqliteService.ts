@@ -1,10 +1,9 @@
-// src/db/sqliteService.ts
 import Database from 'better-sqlite3';
-import path from 'path';
-import fs from 'fs';
+import path from 'node:path';
+import fs from 'node:fs';
 import config from '../config/index.js';
 
-// Define the type explicitly (no need for separate alias unless you want it)
+// TODO move all to /services
 const dbFilePath = config.db.sqlitePath;
 const dbDir = path.dirname(dbFilePath);
 
@@ -25,10 +24,8 @@ try {
     process.exit(1);
 }
 
-// Export both the instance and its type explicitly
 export const db: Database.Database = dbInstance;
 
-// Rest of the file (PRAGMAs, schema, shutdown logic) remains unchanged
 try {
     db.pragma('journal_mode = WAL');
     db.pragma('busy_timeout = 5000');

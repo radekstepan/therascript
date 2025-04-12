@@ -1,6 +1,6 @@
 import { atom } from 'jotai';
-import { activeSessionAtom, activeChatIdAtom } from '..'; // Import from the main store index
-import type { ChatSession } from '../../types'; // Assuming types is ../../
+import { activeSessionAtom, activeChatIdAtom } from '..';
+import type { ChatSession } from '../../types';
 
 export const activeChatAtom = atom<ChatSession | null>((get) => {
     const session = get(activeSessionAtom);

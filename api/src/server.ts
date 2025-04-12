@@ -1,21 +1,16 @@
-// src/server.ts
-import { Elysia, ParseError, ValidationError } from 'elysia';
+import http from 'node:http';
+import { WritableStream } from 'node:stream/web';
+import { Elysia, ValidationError } from 'elysia';
 import { cors } from '@elysiajs/cors';
 import { swagger } from '@elysiajs/swagger';
 import config from './config/index.js';
 import { checkDatabaseHealth } from './db/dbAccess.js';
 import { sessionRoutes } from './routes/sessionRoutes.js';
 import { chatRoutes } from './routes/chatRoutes.js';
-import { ApiError, NotFoundError, BadRequestError, InternalServerError, ConflictError } from './errors.js';
-import type { ActionSchema } from './types/index.js';
-// Re-import Node.js http and WritableStream
-import http from 'http';
-import { WritableStream } from 'node:stream/web';
-
+import { ApiError, InternalServerError, ConflictError } from './errors.js';
 
 console.log(`[Server] Starting Elysia application in ${config.server.nodeEnv} mode...`);
 
-// --- Helper Functions (keep as is) ---
 const getErrorMessage = (error: unknown): string => {
     if (error instanceof Error) return error.message;
     try { return JSON.stringify(error); }
@@ -27,12 +22,11 @@ const getErrorStack = (error: unknown): string | undefined => {
 };
 
 const app = new Elysia()
-    // Apply CORS FIRST - Use permissive settings for debugging
     .use(cors({
         origin: '*', // Allow any origin for now (insecure for production!)
         methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
         allowedHeaders: ['Content-Type', 'Authorization', '*'], // Allow common headers + wildcard for testing
-        // credentials: true, // IMPORTANT: MUST be false when origin is '*'
+        // credentials: true, // must be false when origin is '*'
     }))
     // Logging middleware
     .onRequest(({ request }) => {
@@ -48,7 +42,8 @@ const app = new Elysia()
         path: '/api/docs',
         exclude: ['/api/docs', '/api/docs/json', '/api/health', '/api/schema'],
         documentation: {
-            info: { title: 'Therapy Analyzer API (Elysia)', version: '1.0.0' },
+            // TODO: sync with version from package.json
+            info: { title: 'Therascript API (Elysia)', version: '1.0.0' },
             tags: []
         }
     }))
@@ -62,11 +57,7 @@ const app = new Elysia()
             if (request?.method) method = request.method;
         } catch { }
 
-        // Log more details for debugging CORS/OPTIONS issues
         console.error(`[Error] Code: ${code} | Method: ${method} | Path: ${path} | Message: ${errorMessage}`);
-        if (method === 'OPTIONS') {
-             console.error("[Error] Potentially related to OPTIONS request handling / CORS preflight.");
-        }
 
         if (!config.server.isProduction) {
             const stack = getErrorStack(error);
@@ -78,14 +69,14 @@ const app = new Elysia()
             set.status = error.status;
             return { error: error.name, message: error.message, details: error.details };
         }
+
         switch (code) {
             case 'NOT_FOUND':
                 set.status = 404;
-                 // For OPTIONS requests, a 404 might happen if CORS didn't handle it and no route exists
                  if (method === 'OPTIONS') {
                      console.warn("[Error] OPTIONS request resulted in 404. Check CORS middleware order and config.");
                      // Avoid sending a typical JSON 404 body for OPTIONS, let browser handle it
-                     set.status = 204; // Often preferred for failed preflight if not handled by CORS middleware
+                     set.status = 204;
                      return;
                  }
                  return { error: 'NotFound', message: `Route ${method} ${path} not found.` };
@@ -106,9 +97,7 @@ const app = new Elysia()
                 set.status = unknownInternalError.status;
                 return { error: unknownInternalError.name, message: unknownInternalError.message, details: unknownInternalError.details };
             default:
-                 // If it's an OPTIONS request that fell through, likely a CORS config issue
                  if (method === 'OPTIONS') {
-                     console.warn(`[Error] OPTIONS request for ${path} was not handled by CORS middleware. Responding 204.`);
                      set.status = 204;
                      return;
                  }
@@ -148,10 +137,9 @@ const app = new Elysia()
     }, { detail: { tags: ['Meta'] } })
     .use(sessionRoutes) // Mount routes AFTER CORS and logging
     .use(chatRoutes)
-    .get('/', () => 'Therapy Analyzer Backend API (ElysiaJS)');
+    .get('/', () => 'Therascript API (ElysiaJS)');
 
 
-// --- Reinstate the http.createServer wrapper ---
 console.log(`[Server] Creating Node.js HTTP server wrapper on port ${config.server.port}...`);
 const server = http.createServer((req, res) => {
     // Construct full URL from req.headers.host and req.url
@@ -217,17 +205,10 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(config.server.port, () => {
-    // --- REMOVED THE PROBLEMATIC LOGGING LINE ---
-    // Just log the config value which reflects the intended setting
-    const intendedCorsOrigin = config.server.corsOrigin; // For '*' debugging, this won't reflect '*'
-
     console.log(`-------------------------------------------------------`);
     console.log(`🚀 Therapy Analyzer Backend (Elysia/Node) listening on port ${config.server.port}`);
     console.log(`   Mode: ${config.server.nodeEnv}`);
     console.log(`   DB Path: ${config.db.sqlitePath}`);
-    // Log the origin being used by the cors middleware (currently '*')
-    console.log(`   CORS Origin Setting: * (DEBUGGING)`); // Explicitly state we're using '*' for debug
-    console.log(`   (Configured CORS Origin: ${config.server.corsOrigin})`); // Show what's in config
     console.log(`   Ollama URL: ${config.ollama.baseURL}`);
     console.log(`   Ollama Model: ${config.ollama.model}`);
     console.log(`-------------------------------------------------------`);
@@ -235,7 +216,6 @@ server.listen(config.server.port, () => {
     console.log(`Health Check: http://localhost:${config.server.port}/api/health`);
     console.log(`-------------------------------------------------------`);
 });
-// --- End reinstate http.createServer wrapper ---
 
 export default app;
 export type App = typeof app;

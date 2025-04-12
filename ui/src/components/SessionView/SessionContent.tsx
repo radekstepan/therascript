@@ -1,32 +1,24 @@
 import React, { useState, useCallback } from 'react';
 import { Box, Flex, Text, Tabs } from '@radix-ui/themes';
-import type { Session } from '../../types'; // Adjusted path
-import { Transcription } from './Transcription/Transcription'; // Adjusted path
-import { ChatInterface } from './Chat/ChatInterface'; // Adjusted path
-import { StartChatPrompt } from './Chat/StartChatPrompt'; // Adjusted path
+import type { Session } from '../../types';
+import { Transcription } from './Transcription/Transcription';
+import { ChatInterface } from './Chat/ChatInterface';
+import { StartChatPrompt } from './Chat/StartChatPrompt';
 
-// --- Interface Update: Remove unused props ---
 interface SessionContentProps {
     session: Session;
     onEditDetailsClick: () => void;
-    // REMOVED: editTranscriptContent: string;
-    // REMOVED: onTranscriptContentChange: (newContent: string) => void;
-    onSaveTranscriptParagraph: (index: number, text: string) => Promise<void>; // Still needed by Transcription
+    onSaveTranscriptParagraph: (index: number, text: string) => Promise<void>;
     activeChatId: number | null;
     hasChats: boolean;
     onStartFirstChat: () => void;
     isLoadingChat: boolean;
 }
-// --- End Interface Update ---
 
 export function SessionContent({
     session,
     onEditDetailsClick,
-    // --- Destructuring Update: Remove unused props ---
-    // REMOVED: editTranscriptContent,
-    // REMOVED: onTranscriptContentChange,
-    // --- End Destructuring Update ---
-    onSaveTranscriptParagraph, // Keep this one
+    onSaveTranscriptParagraph,
     activeChatId,
     hasChats,
     onStartFirstChat,
@@ -77,7 +69,6 @@ export function SessionContent({
 
                 {/* Transcription Panel */}
                 <Flex direction="column" className="w-1/2 h-full" style={{ minHeight: 0 }}>
-                    {/* No changes needed here, Transcription component receives the props it needs */}
                     <Transcription
                         session={session}
                         onEditDetailsClick={onEditDetailsClick}
@@ -117,7 +108,6 @@ export function SessionContent({
                         </Tabs.Content>
 
                         <Tabs.Content value="transcription" className="h-full" style={{ outline: 'none' }}>
-                             {/* No changes needed here, Transcription component receives the props it needs */}
                              <Transcription
                                 session={session}
                                 onEditDetailsClick={onEditDetailsClick}

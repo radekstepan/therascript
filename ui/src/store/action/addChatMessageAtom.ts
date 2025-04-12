@@ -5,9 +5,8 @@ import {
   pastSessionsAtom,
   isChattingAtom,
   chatErrorAtom
-} from '..'; // Import from the main store index
-import { addChatMessage as addChatMessageApi } from '../../api/api'; // Assuming api is ../../
-import type { Session, ChatMessage, ChatSession } from '../../types'; // Assuming types is ../../
+} from '..';
+import { addChatMessage as addChatMessageApi } from '../../api/api';
 
 export const addChatMessageAtom = atom(null, async (get, set, messageText: string) => {
     const sessionId = get(activeSessionIdAtom);
@@ -24,6 +23,7 @@ export const addChatMessageAtom = atom(null, async (get, set, messageText: strin
             prevSessions.map((session) => {
                 if (session.id === sessionId) {
                     // Ensure session.chats is an array
+                    // TODO should be typed automatically
                     const currentChats = Array.isArray(session.chats) ? session.chats : [];
                     const updatedChats = currentChats.map((chat) => {
                         if (chat.id === chatId) {

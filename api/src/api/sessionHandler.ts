@@ -1,24 +1,15 @@
-// src/api/sessionHandler.ts
-import path from 'path';
-// --- Corrected Relative Imports ---
 import { sessionRepository } from '../repositories/sessionRepository.js';
 import { chatRepository } from '../repositories/chatRepository.js';
-// --- Other Imports ---
 import {
     loadTranscriptContent,
     saveTranscriptContent,
-    deleteTranscriptFile,
-    deleteUploadedFile
 } from '../services/fileService.js';
-import { transcribeAudio } from '../services/transcriptionService.js';
-import { createSessionListDTO, updateParagraphInTranscript, isNodeError } from '../utils/helpers.js';
-import type { BackendSession, BackendSessionMetadata, BackendChatSession } from '../types/index.js';
+import { updateParagraphInTranscript } from '../utils/helpers.js';
 import { NotFoundError, BadRequestError, InternalServerError, ApiError } from '../errors.js';
-import config from '../config/index.js';
-// No need to import Context
 
 // GET / - List all sessions (metadata only)
 // Let Elysia infer context
+// TODO any
 export const listSessions = ({ set }: any) => {
     try {
         const sessions = sessionRepository.findAll();
@@ -42,9 +33,9 @@ export const listSessions = ({ set }: any) => {
 };
 
 // POST /upload handler remains commented as the logic is inline in routes
-
 // GET /:sessionId - Get session metadata and list of chat metadata
 // Let Elysia infer context (will include sessionData)
+// TODO any
 export const getSessionDetails = ({ sessionData, set }: any) => {
     try {
         const chats = chatRepository.findChatsBySessionId(sessionData.id);
@@ -74,6 +65,7 @@ export const getSessionDetails = ({ sessionData, set }: any) => {
 
 // PUT /:sessionId/metadata - Update metadata
 // Let Elysia infer context (will include sessionData and validated body)
+// TODO any
 export const updateSessionMetadata = ({ sessionData, body, set }: any) => {
     const sessionId = sessionData.id;
     const updatedMetadata = body; // Body is already validated partial metadata
@@ -109,6 +101,7 @@ export const updateSessionMetadata = ({ sessionData, body, set }: any) => {
 
 // GET /:sessionId/transcript - Get transcript content only
 // Let Elysia infer context (will include sessionData)
+// TODO any
 export const getTranscript = async ({ sessionData, set }: any) => {
     const sessionId = sessionData.id;
     try {
@@ -123,6 +116,7 @@ export const getTranscript = async ({ sessionData, set }: any) => {
 
 // PATCH /:sessionId/transcript - Update a specific paragraph
 // Let Elysia infer context (will include sessionData and validated body)
+// TODO any
 export const updateTranscriptParagraph = async ({ sessionData, body, set }: any) => {
     const sessionId = sessionData.id;
     const { paragraphIndex, newText } = body; // Body validated by schema

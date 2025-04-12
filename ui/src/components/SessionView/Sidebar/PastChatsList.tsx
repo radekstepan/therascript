@@ -1,7 +1,7 @@
 import React from 'react';
 import { ListBulletIcon } from '@radix-ui/react-icons';
 import { Flex, Text, Separator, Box, ScrollArea } from '@radix-ui/themes';
-import { formatTimestamp } from '../../../helpers'; // Adjusted path
+import { formatTimestamp } from '../../../helpers';
 import type { ChatSession, Session } from '../../../types'; // Adjusted path
 
 interface PastChatsListProps {

@@ -1,4 +1,3 @@
-// src/config/index.ts
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
@@ -10,13 +9,10 @@ dotenv.config();
 const getEnvVar = (key: string, defaultValue?: string): string => {
   const value = process.env[key] ?? defaultValue;
   if (value === undefined) {
-    // Only throw error if no default value was provided
     throw new Error(`Missing required environment variable: ${key}`);
   }
   return value;
 };
-
-// --- Configuration Values ---
 
 // Server Configuration
 const port = parseInt(getEnvVar('PORT', '3001'), 10);
@@ -78,8 +74,7 @@ const ensureDirectoryExists = (dirPath: string, dirNameForLog: string) => {
 
 // Ensure all necessary directories exist before the application fully starts
 ensureDirectoryExists(path.dirname(config.db.sqlitePath), 'database'); // Directory containing the SQLite file
-ensureDirectoryExists(config.db.transcriptsDir, 'transcripts');      // Directory for storing transcript files
-ensureDirectoryExists(config.db.uploadsDir, 'uploads');            // Directory for temporary uploads
+ensureDirectoryExists(config.db.transcriptsDir, 'transcripts');        // Directory for storing transcript files
+ensureDirectoryExists(config.db.uploadsDir, 'uploads');                // Directory for temporary uploads
 
-// --- Export Configuration ---
 export default config;

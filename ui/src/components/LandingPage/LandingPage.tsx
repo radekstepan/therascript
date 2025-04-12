@@ -1,42 +1,31 @@
-// src/components/LandingPage.tsx
 import React, { useEffect, useState } from 'react';
-// ** Import Jotai hooks and atoms **
 import { useAtomValue, useSetAtom } from 'jotai';
-import { useNavigate } from 'react-router-dom';
 import { CounterClockwiseClockIcon, PlusCircledIcon } from '@radix-ui/react-icons';
 import { SessionListTable } from './SessionListTable';
 import { Button, Card, Flex, Heading, Text, Box, Container, Spinner } from '@radix-ui/themes';
 import { UserThemeDropdown } from '../User/UserThemeDropdown';
 import { fetchSessions } from '../../api/api';
-import type { Session } from '../../types'; // Keep Session type import
-// ** Import relevant atoms **
 import {
     openUploadModalAtom,
     sessionSortCriteriaAtom,
     sessionSortDirectionAtom,
     setSessionSortAtom,
     SessionSortCriteria,
-    pastSessionsAtom,      // Atom holding the raw session list
-    sortedSessionsAtom     // Atom deriving the sorted list
+    pastSessionsAtom,
+    sortedSessionsAtom
 } from '../../store';
 
 export function LandingPage() {
-    // ** Remove local state for sessions list **
-    // const [sessions, setSessions] = useState<Session[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
-    // ** Jotai state management **
     const openUploadModal = useSetAtom(openUploadModalAtom);
     const currentSortCriteria = useAtomValue(sessionSortCriteriaAtom);
     const currentSortDirection = useAtomValue(sessionSortDirectionAtom);
     const setSort = useSetAtom(setSessionSortAtom);
-    const setPastSessions = useSetAtom(pastSessionsAtom); // Setter for the global session list
-    const sortedSessions = useAtomValue(sortedSessionsAtom); // ** Read the sorted list directly from the atom **
+    const setPastSessions = useSetAtom(pastSessionsAtom);
+    const sortedSessions = useAtomValue(sortedSessionsAtom);
 
-    const navigate = useNavigate();
-
-    // ** useEffect to fetch sessions and update GLOBAL state **
     useEffect(() => {
         const loadSessions = async () => {
             try {
@@ -56,7 +45,6 @@ export function LandingPage() {
         };
         loadSessions();
     // Run only once on mount, or add dependencies if needed (e.g., user login)
-    // Pass the atom setter function to the dependency array
     }, [setPastSessions]);
 
     // Handler for sorting (passed to table)
@@ -64,8 +52,6 @@ export function LandingPage() {
         console.log("[LandingPage] handleSort called with criteria:", criteria);
         setSort(criteria); // Calls the action atom to update sort state
     };
-
-    // --- Render Logic ---
 
     if (isLoading) {
         return (
@@ -81,7 +67,7 @@ export function LandingPage() {
          return (
             <Flex direction="column" justify="center" align="center" style={{ height: '100vh', padding: '2rem' }}>
                 <Text color="red" mb="4">{error}</Text>
-                 <Button onClick={() => window.location.reload()} variant="soft"> {/* Simple refresh */}
+                 <Button onClick={() => window.location.reload()} variant="soft">
                     Try Again
                 </Button>
             </Flex>
@@ -129,11 +115,10 @@ export function LandingPage() {
                                 </Flex>
                             ) : (
                                 <SessionListTable
-                                    // ** Pass the sorted sessions from the atom **
                                     sessions={sortedSessions}
                                     sortCriteria={currentSortCriteria}
                                     sortDirection={currentSortDirection}
-                                    onSort={handleSort} // Pass the handler
+                                    onSort={handleSort}
                                 />
                             )}
                         </Box>

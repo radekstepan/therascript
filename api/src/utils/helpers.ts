@@ -1,9 +1,4 @@
-// src/utils/helpers.ts
-import { BackendSession } from "../types/index.js"; // ADDED .js
-import fs from 'fs/promises'; // Keep if needed, maybe not here
-import path from 'path'; // Keep if needed, maybe not here
-
-// generateId is no longer needed with SQLite's AUTOINCREMENT
+import { BackendSession } from "../types/index.js";
 
 // Type guard for file system errors
 export const isNodeError = (error: unknown): error is NodeJS.ErrnoException => {
@@ -11,6 +6,7 @@ export const isNodeError = (error: unknown): error is NodeJS.ErrnoException => {
 };
 
 // Function to reliably split transcript into paragraphs
+// TODO store transcripts as a JSON array of paragraphs
 export const splitTranscriptIntoParagraphs = (transcript: string): string[] => {
     if (!transcript) return [];
     return transcript.replace(/\r\n/g, '\n').split(/\n\s*\n/).filter(p => p.trim() !== '');

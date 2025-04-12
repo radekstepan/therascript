@@ -1,8 +1,7 @@
-// src/api/api.ts
 import axios from 'axios';
-// Ensure Session is imported correctly
 import type { Session, SessionMetadata, ChatSession, ChatMessage } from '../types';
 
+// TODO can we get types on all of the responses?
 // GET /api/sessions/
 export const fetchSessions = async (): Promise<Session[]> => {
     // This endpoint likely returns an array of objects that match SessionMetadata
@@ -38,15 +37,12 @@ export const fetchTranscript = async (sessionId: number): Promise<string> => {
     return response.data.transcriptContent;
 };
 
-// *** NEW FUNCTION ***
 // GET /api/sessions/{sessionId}/chats/{chatId} - Fetches full chat details including messages
 export const fetchChatDetails = async (sessionId: number, chatId: number): Promise<ChatSession> => {
     // This endpoint is expected to return the ChatSession with the 'messages' array populated.
     const response = await axios.get(`/api/sessions/${sessionId}/chats/${chatId}`);
     return response.data; // Should match the ChatSession type (with messages)
 };
-// *** END NEW FUNCTION ***
-
 
 // PUT /api/sessions/{sessionId}/metadata
 export const updateSessionMetadata = async (
@@ -67,7 +63,6 @@ export const updateTranscriptParagraph = async (
     // Assuming API returns the updated full transcript content
     return response.data.transcriptContent;
 };
-
 
 // POST /api/sessions/{sessionId}/chats/
 export const startNewChat = async (sessionId: number): Promise<ChatSession> => {

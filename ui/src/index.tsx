@@ -1,7 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { Provider } from 'jotai';
-import { BrowserRouter } from 'react-router-dom'; // Import BrowserRouter
+import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import './styles/global.css';
 
@@ -15,7 +15,6 @@ const root = ReactDOM.createRoot(rootElement);
 
 root.render(
   <React.StrictMode>
-    {/* Wrap App with Jotai Provider and BrowserRouter */}
     <Provider>
       <BrowserRouter>
         <App />

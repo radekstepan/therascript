@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { StarIcon, StarFilledIcon, CheckIcon, Cross1Icon, InfoCircledIcon } from '@radix-ui/react-icons';
-import { Button, TextField, Flex, Box, Text, IconButton, Dialog, Heading, Spinner, Strong, Callout } from '@radix-ui/themes';
-import { currentChatMessagesAtom, isChattingAtom, starMessageAtom, activeChatIdAtom } from '../../../store'; // Adjusted path
-import type { ChatMessage } from '../../../types'; // Adjusted path
-import { cn } from '../../../utils'; // Adjusted path
+import { StarIcon, StarFilledIcon, InfoCircledIcon } from '@radix-ui/react-icons';
+import { Button, TextField, Flex, Box, Text, IconButton, Dialog, Spinner, Callout } from '@radix-ui/themes';
+import { currentChatMessagesAtom, isChattingAtom, starMessageAtom } from '../../../store';
+import type { ChatMessage } from '../../../types';
+import { cn } from '../../../utils';
 
 interface ChatMessagesProps {
   activeChatId: number | null;

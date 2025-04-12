@@ -1,18 +1,17 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import type { Session } from '../../../types'; // Adjusted path
-import { TranscriptParagraph } from '../../Transcription/TranscriptParagraph'; // Adjusted path (Assuming TranscriptionParagraph is in a sibling folder)
-import { Box, ScrollArea, Text, Flex, Button, Heading, Badge } from '@radix-ui/themes';
+import type { Session } from '../../../types';
+import { TranscriptParagraph } from '../../Transcription/TranscriptParagraph';
+import { Box, ScrollArea, Text, Flex, Button, Badge } from '@radix-ui/themes';
 import {
     Pencil1Icon,
     BookmarkIcon,
     CalendarIcon,
     PersonIcon,
     BadgeIcon as SessionTypeIcon,
-    PlayIcon
 } from '@radix-ui/react-icons';
-import { cn } from '../../../utils'; // Adjusted path
+import { cn } from '../../../utils';
 
-// --- Helper functions (Unchanged) ---
+// TODO reuse these!!!
 const sessionColorMap: Record<string, React.ComponentProps<typeof Badge>['color']> = {
     'individual': 'blue', 'phone': 'sky', 'skills group': 'teal',
     'family session': 'green', 'family skills': 'green', 'couples': 'indigo',
@@ -23,6 +22,7 @@ const therapyColorMap: Record<string, React.ComponentProps<typeof Badge>['color'
     'mindfulness': 'cyan', 'couples act': 'violet', 'couples dbt': 'yellow',
     'dbt skills': 'orange', 'default': 'pink'
 };
+// TODO reuse
 const getBadgeColor = (type: string | undefined, category: 'session' | 'therapy'): React.ComponentProps<typeof Badge>['color'] => {
     const map = category === 'session' ? sessionColorMap : therapyColorMap;
     return type ? (map[type.toLowerCase()] || map['default']) : map['default'];
@@ -31,6 +31,7 @@ const renderHeaderDetail = (
     IconComponent: React.ElementType,
     value: string | undefined,
     label: string,
+    // TODO enum
     category?: 'session' | 'therapy'
 ) => {
     if (!value) return null;
@@ -47,8 +48,8 @@ const renderHeaderDetail = (
         </Flex>
     );
 };
-// --- End Helper functions ---
 
+// TODO move to utils
 const debounce = <F extends (...args: any[]) => any>(func: F, waitFor: number) => {
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     return (...args: Parameters<F>): void => {
@@ -123,6 +124,7 @@ export function Transcription({
 
     const sourceContent = session.transcription || '';
 
+    // TODO no, will come pre-split
     const paragraphs = sourceContent
         .replace(/\r\n/g, '\n')
         .split(/\n\s*\n/)

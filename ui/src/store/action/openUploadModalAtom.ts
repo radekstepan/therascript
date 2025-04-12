@@ -2,9 +2,10 @@ import { atom } from 'jotai';
 import {
     isUploadModalOpenAtom,
     transcriptionErrorAtom
-} from '..'; // Import from the main store index
+} from '..';
 
-export const openUploadModalAtom = atom(null, (get, set) => {
+// TODO what should be the type of these?
+export const openUploadModalAtom = atom(null, (_get, set) => {
     set(transcriptionErrorAtom, '');
     set(isUploadModalOpenAtom, true);
 });

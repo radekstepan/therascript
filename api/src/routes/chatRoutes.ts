@@ -1,16 +1,11 @@
-// src/routes/chatRoutes.ts
-import { Elysia, t, type Static } from 'elysia';
-import { swagger } from '@elysiajs/swagger';
+import { Elysia, t } from 'elysia';
 import { chatRepository } from '../repositories/chatRepository.js';
 import { sessionRepository } from '../repositories/sessionRepository.js';
-// Import the refactored Elysia-native handlers
 import {
     createChat, addChatMessage, renameChat, deleteChat, getChatDetails
 } from '../api/chatHandler.js';
-import { NotFoundError, BadRequestError, InternalServerError } from '../errors.js';
-import type { BackendSession, BackendChatSession, BackendChatMessage } from '../types/index.js';
+import { NotFoundError } from '../errors.js';
 
-// --- Define TypeBox Schemas (Keep these as they are) ---
 const SessionIdParamSchema = t.Object({ sessionId: t.Numeric({ minimum: 1 }) });
 const ChatIdParamSchema = t.Object({ chatId: t.Numeric({ minimum: 1 }) });
 const SessionAndChatParamsSchema = t.Intersect([SessionIdParamSchema, ChatIdParamSchema]);
@@ -22,7 +17,6 @@ const ChatRenameBodySchema = t.Object({
     name: t.Optional(t.Union([t.String({ minLength: 1 }), t.Null()]))
 });
 
-// Response Schemas (Keep these as they are)
 const ChatMetadataResponseSchema = t.Object({
     id: t.Number(),
     sessionId: t.Number(),
@@ -51,7 +45,7 @@ const DeleteChatResponseSchema = t.Object({ message: t.String() });
 
 // --- Elysia Plugin for Chat Routes ---
 export const chatRoutes = new Elysia({ prefix: '/api/sessions/:sessionId/chats' })
-    .model({ // Keep model definitions
+    .model({
         sessionIdParam: SessionIdParamSchema,
         chatIdParam: ChatIdParamSchema,
         sessionAndChatParams: SessionAndChatParamsSchema,
@@ -64,22 +58,21 @@ export const chatRoutes = new Elysia({ prefix: '/api/sessions/:sessionId/chats' 
     })
     // Apply session loading and tagging to all routes in this group
     .guard({ params: 'sessionIdParam' }, (app) => app
-        .derive(({ params }) => { // Keep derivation logic
+        .derive(({ params }) => {
             const session = sessionRepository.findById(params.sessionId);
             if (!session) throw new NotFoundError(`Session with ID ${params.sessionId}`);
             return { sessionData: session };
         })
         .group('', { detail: { tags: ['Chat'] } }, (app) => app
             // POST /api/sessions/:sessionId/chats - Create a new chat
-            // Pass the handler function directly
             .post('/', createChat, {
                 response: { 201: 'chatMetadataResponse' },
                 detail: { summary: 'Create a new chat' }
             })
 
             // --- Routes requiring :chatId ---
-            .guard({ params: 'chatIdParam' }, (app) => app // Keep guard
-                .derive(({ params, sessionData }) => { // Keep derivation
+            .guard({ params: 'chatIdParam' }, (app) => app
+                .derive(({ params, sessionData }) => {
                     const chat = chatRepository.findChatById(params.chatId);
                     if (!chat || chat.sessionId !== sessionData.id) {
                         throw new NotFoundError(`Chat ${params.chatId} in session ${sessionData.id}`);
@@ -90,14 +83,12 @@ export const chatRoutes = new Elysia({ prefix: '/api/sessions/:sessionId/chats' 
                 })
 
                 // GET /:chatId - Get full chat details (including messages)
-                // Pass the handler function directly
                 .get('/:chatId', getChatDetails, {
                     response: { 200: 'fullChatSessionResponse' },
                     detail: { summary: 'Get full details for a specific chat' }
                 })
 
                 // POST /:chatId/messages - Add message
-                // Pass the handler function directly
                 .post('/:chatId/messages', addChatMessage, {
                     body: 'chatMessageBody',
                     response: { 201: 'addMessageResponse' },
@@ -105,7 +96,6 @@ export const chatRoutes = new Elysia({ prefix: '/api/sessions/:sessionId/chats' 
                 })
 
                 // PATCH /:chatId/name - Rename chat
-                // Pass the handler function directly
                 .patch('/:chatId/name', renameChat, {
                     body: 'chatRenameBody',
                     response: { 200: 'chatMetadataResponse' },
@@ -113,12 +103,11 @@ export const chatRoutes = new Elysia({ prefix: '/api/sessions/:sessionId/chats' 
                 })
 
                  // DELETE /:chatId - Delete chat
-                 // Pass the handler function directly
                 .delete('/:chatId', deleteChat, {
                      response: { 200: 'deleteChatResponse' },
                      detail: { summary: 'Delete a chat' }
                 })
-            ) // End guard for routes needing :chatId
-        ) // End group with session guard and tag
-    ); // End main export
+            )
+        )
+    );
     

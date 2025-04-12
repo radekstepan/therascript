@@ -1,5 +1,3 @@
-// src/errors.ts - CORRECTED CONTENT
-
 /**
  * Base class for custom API errors.
  */
@@ -11,7 +9,7 @@ export class ApiError extends Error {
       super(message);
       this.status = status;
       this.details = details;
-      // Maintains proper stack trace (only available on V8)
+      // Maintains proper stack trace
       if (Error.captureStackTrace) {
           Error.captureStackTrace(this, this.constructor);
       }
@@ -48,7 +46,6 @@ export class ConflictError extends ApiError {
   }
 }
 
-
 /**
 * Represents a 500 Internal Server Error.
 * Used for unexpected server-side issues.
@@ -62,5 +59,3 @@ export class InternalServerError extends ApiError {
       super(500, message, details);
   }
 }
-
-// You can add other specific error types here if needed (e.g., UnauthorizedError, ForbiddenError)

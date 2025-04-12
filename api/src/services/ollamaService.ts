@@ -1,12 +1,12 @@
-// src/services/ollamaService.ts
 import ollama, { ChatResponse, Message } from 'ollama';
-import config from '../config/index.js'; // ADDED .js
-import { BackendChatMessage } from '../types/index.js'; // ADDED .js
+import config from '../config/index.js';
+import { BackendChatMessage } from '../types/index.js';
 
 console.log(`[OllamaService] Using Ollama host: ${config.ollama.baseURL} (or OLLAMA_HOST env var)`);
 
 const SYSTEM_PROMPT = `You are an AI assistant analyzing a therapy session transcript. Context transcript and chat history will follow. Answer user questions based *only* on this provided information. Be concise. If the answer isn't present, state that clearly. Do not invent information. Refer to participants as "Therapist" and "Patient" unless names are explicitly clear in the transcript.`;
 
+// TODO use an API to talk to Ollama in a Docker
 export const generateChatResponse = async (
   contextTranscript: string,
   chatHistory: BackendChatMessage[]
@@ -48,7 +48,7 @@ export const generateChatResponse = async (
   } catch (error) {
     console.error('[OllamaService] Error:', error);
     if (error instanceof Error) {
-        const isBrowser = typeof window !== 'undefined'; // Basic check
+        const isBrowser = typeof window !== 'undefined';
         const connectionError = isBrowser ? error.message.includes('Failed to fetch') : (error as NodeJS.ErrnoException).code === 'ECONNREFUSED';
         if (connectionError) throw new Error(`Connection refused: Could not connect to Ollama at ${config.ollama.baseURL}.`);
         if (error.message.includes('model') && (error.message.includes('not found') || error.message.includes('missing'))) throw new Error(`Ollama model '${config.ollama.model}' not found.`);

@@ -1,15 +1,20 @@
-// src/components/UploadModal.tsx
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useSetAtom } from 'jotai';
 import { useNavigate } from 'react-router-dom';
-import { Dialog, Button, Flex, Text, TextField, Select, Box, Spinner, Strong, Callout, Heading } from '@radix-ui/themes';
-import { UploadIcon, Cross1Icon, InfoCircledIcon, CheckCircledIcon } from '@radix-ui/react-icons';
+import { Dialog, Button, Flex, Text, TextField, Select, Box, Spinner, Strong, Callout } from '@radix-ui/themes';
+import { UploadIcon, InfoCircledIcon, CheckCircledIcon } from '@radix-ui/react-icons';
 import { SESSION_TYPES, THERAPY_TYPES } from '../../constants';
 import { getTodayDateString } from '../../helpers';
 import { uploadSession } from '../../api/api';
-import type { SessionMetadata, UploadModalProps } from '../../types';
+import type { SessionMetadata } from '../../types';
 import { closeUploadModalAtom, isTranscribingAtom, transcriptionErrorAtom } from '../../store';
 import { cn } from '../../utils';
+
+interface UploadModalProps {
+  isOpen: boolean;
+  isTranscribing: boolean;
+  transcriptionError: string;
+}
 
 export function UploadModal({ isOpen, isTranscribing, transcriptionError }: UploadModalProps) {
   const closeModalAction = useSetAtom(closeUploadModalAtom);
@@ -51,6 +56,7 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
     else if (e.type === "dragleave") setDragActive(false);
   };
 
+  // TODO the filetype should come from consts (API?)
   const handleFileSelection = (file: File | null) => {
     if (file && file.type === 'audio/mpeg') {
       setModalFile(file);
@@ -58,6 +64,7 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
       if (!sessionNameInput) setSessionNameInput(file.name.replace(/\.[^/.]+$/, ""));
     } else {
       setModalFile(null);
+      // TODO return the supported types
       if (file) setFormError('Invalid file type. Please upload an MP3 audio file.');
     }
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -105,6 +112,7 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
         setIsTranscribing(true);
         setTranscriptionError('');
         const newSession = await uploadSession(modalFile, metadata);
+        // TODO use a route
         navigate(`/sessions/${newSession.id}/chats/${newSession.chats[0].id}`);
         closeModalAction();
       } catch (err) {

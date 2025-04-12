@@ -3,8 +3,8 @@ import {
     pastSessionsAtom,
     sessionSortCriteriaAtom,
     sessionSortDirectionAtom
-} from '..'; // Import from the main store index
-import type { Session } from '../../types'; // Assuming types is ../../
+} from '..';
+import type { Session } from '../../types';
 
 // ** This atom performs the sorting based on global state **
 export const sortedSessionsAtom = atom<Session[]>((get) => {
@@ -81,6 +81,5 @@ export const sortedSessionsAtom = atom<Session[]>((get) => {
     if (direction === 'desc') {
         sorted.reverse();
     }
-    // console.log("[sortedSessionsAtom] Sorted result:", sorted.map(s => ({ id: s.id, name: s.sessionName, date: s.date }))); // Example log
     return sorted;
 });

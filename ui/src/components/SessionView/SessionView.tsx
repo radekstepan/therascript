@@ -1,14 +1,14 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-import { useParams, useNavigate, Navigate } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { Flex, Box, Button, Text, Spinner } from '@radix-ui/themes';
 import { ArrowLeftIcon } from '@radix-ui/react-icons';
-import { UserThemeDropdown } from '../User/UserThemeDropdown'; // Adjusted path (Assuming User folder is sibling to SessionView)
-import { SessionSidebar } from './Sidebar/SessionSidebar'; // Adjusted path
-import { SessionContent } from './SessionContent'; // Adjusted path
-import { EditDetailsModal } from './Modals/EditDetailsModal'; // Adjusted path
-import { fetchSession, fetchTranscript, startNewChat, updateTranscriptParagraph, fetchChatDetails } from '../../api/api'; // Adjusted path
-import type { Session, ChatSession, SessionMetadata } from '../../types'; // Adjusted path
+import { UserThemeDropdown } from '../User/UserThemeDropdown';
+import { SessionSidebar } from './Sidebar/SessionSidebar';
+import { SessionContent } from './SessionContent';
+import { EditDetailsModal } from './Modals/EditDetailsModal';
+import { fetchSession, fetchTranscript, startNewChat, updateTranscriptParagraph, fetchChatDetails } from '../../api/api';
+import type { Session, ChatSession, SessionMetadata } from '../../types';
 import {
     activeSessionIdAtom,
     activeChatIdAtom,
@@ -17,11 +17,9 @@ import {
     MIN_SIDEBAR_WIDTH,
     MAX_SIDEBAR_WIDTH,
     pastSessionsAtom,
-    activeSessionAtom,
-} from '../../store'; // Adjusted path
+} from '../../store';
 
 export function SessionView() {
-    // --- HOOKS ---
     const { sessionId: sessionIdParam, chatId: chatIdParam } = useParams<{ sessionId: string; chatId?: string }>();
     const navigate = useNavigate();
     const setActiveSessionId = useSetAtom(activeSessionIdAtom);
@@ -29,23 +27,19 @@ export function SessionView() {
     const setChatError = useSetAtom(chatErrorAtom);
     const setPastSessions = useSetAtom(pastSessionsAtom);
     const activeChatId = useAtomValue(activeChatIdAtom);
-    const currentGlobalSession = useAtomValue(activeSessionAtom); // Maybe used for comparison?
     const currentError = useAtomValue(chatErrorAtom);
     const [sidebarWidth, setSidebarWidth] = useAtom(clampedSidebarWidthAtom);
     const [localSession, setLocalSession] = useState<Session | null>(null);
     const [isLoadingSession, setIsLoadingSession] = useState(true);
     const [isLoadingChat, setIsLoadingChat] = useState(false);
     const [isEditingMetadata, setIsEditingMetadata] = useState(false);
-    // Note: editTranscriptContent state is removed as Transcription component likely handles its own edit state now.
     const sidebarRef = useRef<HTMLDivElement>(null);
     const isResizing = useRef(false);
     const previousSessionIdRef = useRef<number | null>(null);
     const currentChatLoadIdRef = useRef<number | null>(null);
 
-    // --- Computed Values ---
+    // TODO remove?
     const sessionIdNum = sessionIdParam ? parseInt(sessionIdParam, 10) : null;
-
-    // --- CALLBACKS ---
 
     // Resizing Logic
     const handleMouseMove = useCallback((e: MouseEvent) => {
@@ -65,7 +59,7 @@ export function SessionView() {
             document.removeEventListener('mousemove', handleMouseMove);
             document.removeEventListener('mouseup', handleMouseUp);
         }
-    }, [handleMouseMove]); // handleMouseMove is a dependency
+    }, [handleMouseMove]);
 
     const handleMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
         e.preventDefault();
@@ -74,11 +68,9 @@ export function SessionView() {
         document.body.style.userSelect = 'none';
         document.addEventListener('mousemove', handleMouseMove);
         document.addEventListener('mouseup', handleMouseUp);
-    }, [handleMouseMove, handleMouseUp]); // Both handlers are dependencies
+    }, [handleMouseMove, handleMouseUp]);
 
-    // --- EFFECTS ---
-
-    // Effect 1: Load Session Metadata and Transcript
+    // Load Session Metadata and Transcript
     useEffect(() => {
         const currentSessionIdNum = sessionIdParam ? parseInt(sessionIdParam, 10) : null;
         if (!currentSessionIdNum || isNaN(currentSessionIdNum)) {
@@ -111,7 +103,11 @@ export function SessionView() {
 
                 if (chatExistsInSession && urlChatId !== null) { targetChatId = urlChatId; }
                 else if (chats.length > 0) { const sortedChats = [...chats].sort((a, b) => b.timestamp - a.timestamp); targetChatId = sortedChats[0].id; if (String(urlChatId) !== String(targetChatId)) { shouldNavigate = true; navigateTo = `/sessions/${currentSessionIdNum}/chats/${targetChatId}`; } }
-                else { if (chatIdParam) { shouldNavigate = true; navigateTo = `/sessions/${currentSessionIdNum}`; } }
+                else { if (chatIdParam) {
+                    shouldNavigate = true;
+                    // TODO route
+                    navigateTo = `/sessions/${currentSessionIdNum}`;
+                } }
 
                 setActiveChatId(targetChatId); // Set active chat ID *after* loading session
                 if (shouldNavigate && navigateTo) { navigate(navigateTo, { replace: true }); }
@@ -122,7 +118,7 @@ export function SessionView() {
         loadSessionCoreData();
     }, [sessionIdParam, chatIdParam, navigate, setActiveSessionId, setActiveChatId, setChatError, setPastSessions]);
 
-    // Effect 2: Load Chat Messages when activeChatId changes or session loads
+    // Load Chat Messages when activeChatId changes or session loads
     useEffect(() => {
         const currentSessionIdNum = sessionIdParam ? parseInt(sessionIdParam, 10) : null;
         if (!localSession || !currentSessionIdNum || activeChatId === null) {
@@ -130,6 +126,7 @@ export function SessionView() {
             return;
         }
         // Avoid re-fetching if already loading this chat or if messages are already present
+        // TODO why not just use Jotai here?
         if (currentChatLoadIdRef.current === activeChatId) { return; }
         const currentChat = localSession.chats?.find(c => c.id === activeChatId);
         if (currentChat?.messages !== undefined) { // Messages already loaded (could be empty array if fetch failed before)
@@ -147,6 +144,7 @@ export function SessionView() {
                     const detailedChatData = await fetchChatDetails(currentSessionIdNum, activeChatId);
                     const chatWithMessages: ChatSession = { ...detailedChatData, messages: detailedChatData.messages || [], }; // Ensure messages is array
 
+                    // TODO why is there local AND global state?
                     // Update local state
                     setLocalSession(prevSession => {
                         if (!prevSession) return null;
@@ -191,10 +189,8 @@ export function SessionView() {
              setActiveChatId(null);
              currentChatLoadIdRef.current = null;
         }
-    // Depend on activeChatId to trigger fetch, localSession for data, and session ID param
     }, [activeChatId, localSession, setChatError, setPastSessions, setActiveChatId, sessionIdParam]);
 
-    // Effect 3: Cleanup for Resize Listeners
     useEffect(() => {
         return () => {
             if (isResizing.current) {
@@ -205,14 +201,14 @@ export function SessionView() {
                 isResizing.current = false;
             }
         };
-    }, [handleMouseMove, handleMouseUp]); // Dependencies are the memoized handlers
+    }, [handleMouseMove, handleMouseUp]);
 
 
-    // --- EVENT HANDLERS ---
      const handleStartFirstChat = async () => {
          const currentSessionIdNum = sessionIdParam ? parseInt(sessionIdParam, 10) : null;
          if (!localSession || !currentSessionIdNum) return; setIsLoadingChat(true);
          try {
+            // TODO does this make sense? Can we have 1 API route?
              const newChatMetaData = await startNewChat(currentSessionIdNum);
              const newChatFull = await fetchChatDetails(currentSessionIdNum, newChatMetaData.id);
              const chatReadyForState: ChatSession = { ...newChatFull, messages: newChatFull.messages || [], };
@@ -220,12 +216,12 @@ export function SessionView() {
              setLocalSession(updatedSession);
              setPastSessions(prevSessions => prevSessions.map(s => s.id === currentSessionIdNum ? updatedSession : s));
              setActiveChatId(chatReadyForState.id);
+             // TODO route
              navigate(`/sessions/${currentSessionIdNum}/chats/${chatReadyForState.id}`);
          } catch (err) { console.error("Failed start new chat:", err); setChatError('Failed start new chat.'); }
          finally { setIsLoadingChat(false); }
      };
      const handleOpenEditMetadataModal = () => setIsEditingMetadata(true);
-     // handleTranscriptContentChange is removed as state is likely local to Transcription now
 
      const handleSaveTranscriptParagraph = async (index: number, text: string) => {
          const currentSessionIdNum = sessionIdParam ? parseInt(sessionIdParam, 10) : null;
@@ -245,6 +241,7 @@ export function SessionView() {
     const handleMetadataSaveSuccess = (updatedMetadata: Partial<SessionMetadata>) => {
         const currentSessionIdNum = sessionIdParam ? parseInt(sessionIdParam, 10) : null;
         if (!currentSessionIdNum) return;
+        // TODO why are these 2 states???
         // Optimistically update local state
         setLocalSession(prevSession => {
             if (!prevSession) return null;
@@ -260,7 +257,6 @@ export function SessionView() {
     };
 
 
-    // --- RENDER LOGIC ---
     if (isLoadingSession) {
          return (<Flex justify="center" align="center" style={{ height: '100vh', backgroundColor: 'var(--color-panel-solid)' }}><Spinner size="3" /><Text ml="2" color="gray">Loading session data...</Text></Flex>);
      }
@@ -299,12 +295,11 @@ export function SessionView() {
                     <SessionContent
                         session={localSession}
                         onEditDetailsClick={handleOpenEditMetadataModal}
-                        // editTranscriptContent and onTranscriptContentChange removed
                         onSaveTranscriptParagraph={handleSaveTranscriptParagraph}
                         activeChatId={activeChatId}
                         hasChats={hasChats}
                         onStartFirstChat={handleStartFirstChat}
-                        isLoadingChat={isLoadingChat} // Pass down chat loading state
+                        isLoadingChat={isLoadingChat}
                     />
                 </Box>
             </Flex>

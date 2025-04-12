@@ -3,9 +3,9 @@ import {
     pastSessionsAtom,
     activeChatIdAtom,
     chatErrorAtom
-} from '..'; // Import from the main store index
-import { startNewChat as startNewChatApi } from '../../api/api'; // Assuming api is ../../
-import type { ChatSession } from '../../types'; // Assuming types is ../../
+} from '..';
+import { startNewChat as startNewChatApi } from '../../api/api';
+import type { ChatSession } from '../../types';
 
 // Type for Action Result
 export type StartNewChatResult = { success: true; newChatId: number } | { success: false; error: string };

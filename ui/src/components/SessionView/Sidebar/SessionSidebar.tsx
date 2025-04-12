@@ -8,8 +8,8 @@ import {
     activeChatIdAtom,
     startNewChatAtom,
     chatErrorAtom,
-} from '../../../store'; // Adjusted path
-import { deleteChat as deleteChatApi } from '../../../api/api'; // Adjusted path
+} from '../../../store';
+import { deleteChat as deleteChatApi } from '../../../api/api';
 import { DotsHorizontalIcon, Pencil1Icon, TrashIcon, PlusCircledIcon } from '@radix-ui/react-icons';
 import {
     Box,
@@ -24,9 +24,9 @@ import {
     ScrollArea,
     Spinner
 } from '@radix-ui/themes';
-import { formatTimestamp } from '../../../helpers'; // Adjusted path
-import type { ChatSession } from '../../../types'; // Adjusted path
-import { cn } from '../../../utils'; // Adjusted path
+import { formatTimestamp } from '../../../helpers';
+import type { ChatSession } from '../../../types';
+import { cn } from '../../../utils';
 
 export function SessionSidebar() {
     const { sessionId: sessionIdParam } = useParams<{ sessionId: string; chatId?: string }>();

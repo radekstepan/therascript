@@ -4,7 +4,7 @@ import {
   isTranscribingAtom,
   transcriptionErrorAtom,
   toastMessageAtom
-} from '..'; // Import from the main store index
+} from '..';
 
 export const closeUploadModalAtom = atom(null, (get, set) => {
     if (!get(isTranscribingAtom)) {

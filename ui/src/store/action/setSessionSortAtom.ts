@@ -2,8 +2,8 @@ import { atom } from 'jotai';
 import {
     sessionSortCriteriaAtom,
     sessionSortDirectionAtom,
-    type SessionSortCriteria // Import the type
-} from '..'; // Import from the main store index
+    type SessionSortCriteria
+} from '..';
 
 export const setSessionSortAtom = atom(null, (get, set, newCriteria: SessionSortCriteria) => {
     const currentCriteria = get(sessionSortCriteriaAtom);

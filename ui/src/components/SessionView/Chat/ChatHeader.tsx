@@ -2,15 +2,11 @@ import React from 'react';
 import { useAtomValue } from 'jotai';
 import { ChatBubbleIcon } from '@radix-ui/react-icons';
 import { Flex, Text } from '@radix-ui/themes';
-import { activeChatAtom } from '../../../store'; // Adjusted path
-import { formatTimestamp } from '../../../helpers'; // Adjusted path
-import type { ChatSession } from '../../../types'; // Adjusted path
+import { activeChatAtom } from '../../../store';
+import { formatTimestamp } from '../../../helpers';
+import type { ChatSession } from '../../../types';
 
-interface ChatHeaderProps {
-  activeChatId: number | null;
-}
-
-export function ChatHeader({ activeChatId }: ChatHeaderProps) {
+export function ChatHeader() {
   const activeChat = useAtomValue(activeChatAtom);
 
   const getChatDisplayTitle = (chat: ChatSession | undefined | null): string => {

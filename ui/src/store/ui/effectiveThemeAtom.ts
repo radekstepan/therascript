@@ -1,7 +1,8 @@
 import { atom } from 'jotai';
-import { themeAtom, type Theme } from '..'; // Import from the main store index
+import { themeAtom, type Theme } from '..';
 
 // Derived atom to get the *effective* theme (resolving 'system')
+// TODO use enums
 export const effectiveThemeAtom = atom<Exclude<Theme, 'system'>>((get) => {
     const theme = get(themeAtom);
     if (theme === 'system') {
