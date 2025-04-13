@@ -1,19 +1,24 @@
 {
-  "name": "ollama-ts-client",
+  "name": "ollama-host-client",
   "version": "1.0.0",
-  "description": "TypeScript client for Ollama API",
+  "description": "TypeScript host client for managing and interacting with Ollama Docker container",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
     "start:dev": "ts-node src/index.ts",
     "start": "node dist/index.js",
-    "lint": "eslint . --ext .ts"
+    "lint": "eslint . --ext .ts",
+    "docker:up": "docker compose up -d ollama",
+    "docker:down": "docker compose down",
+    "docker:pull": "docker compose exec ollama ollama pull",
+    "docker:logs": "docker compose logs ollama"
   },
   "keywords": [
     "ollama",
     "typescript",
     "nodejs",
-    "llm"
+    "llm",
+    "docker"
   ],
   "author": "",
   "license": "ISC",

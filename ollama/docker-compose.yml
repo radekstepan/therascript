@@ -1,11 +1,11 @@
-version: '3.8'
+# Removed version: '3.8' as it's obsolete for V2 and caused warnings
 
 services:
   ollama:
-    image: ollama/ollama:latest # Use the official Ollama image
-    container_name: ollama_server
+    image: ollama/ollama:latest
+    container_name: ollama_server_managed # Changed name slightly to avoid conflicts if old one exists
     ports:
-      - "11434:11434" # Expose Ollama port to host (optional, for direct API testing)
+      - "11434:11434" # Expose Ollama port to host
     volumes:
       - ollama_data:/root/.ollama # Persist downloaded models
     # --- Uncomment the following lines if you have an NVIDIA GPU ---
@@ -17,30 +17,7 @@ services:
     #           count: 1 # Or 'all'
     #           capabilities: [gpu]
     # --- ---
-    # healthcheck:
-    #   test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
-    #   interval: 10s     # Increased interval slightly (optional)
-    #   timeout: 5s      # Increased timeout slightly (optional)
-    #   retries: 6       # Increased retries slightly (optional)
-    #   start_period: 40s  # <<<--- ADD THIS LINE (Wait 20s before failures count)
-    restart: unless-stopped
-
-  app:
-    build: ./app # Build the Node.js app from the 'app' directory
-    container_name: ollama_client_app
-    # depends_on:
-    #   ollama:
-    #     condition: service_healthy # Wait for Ollama to be ready
-    volumes:
-      - ./app/src:/usr/src/app/src # Mount source code for development (optional)
-      - ./chat_data:/usr/src/app/data # Mount volume for chat history
-    environment:
-      # Define where the app can find the Ollama service
-      - OLLAMA_BASE_URL=http://ollama:11434
-      - NODE_ENV=development # Or production
-    # Keep the container running and allow interactive input
-    stdin_open: true
-    tty: true
+    # Healthcheck removed as it was problematic; we'll rely on API calls succeeding
     restart: unless-stopped
 
 volumes:
