@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  ollama:
+    image: ollama/ollama:latest # Use the official Ollama image
+    container_name: ollama_server
+    ports:
+      - "11434:11434" # Expose Ollama port to host (optional, for direct API testing)
+    volumes:
+      - ollama_data:/root/.ollama # Persist downloaded models
+    # --- Uncomment the following lines if you have an NVIDIA GPU ---
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1 # Or 'all'
+    #           capabilities: [gpu]
+    # --- ---
+    # healthcheck:
+    #   test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+    #   interval: 10s     # Increased interval slightly (optional)
+    #   timeout: 5s      # Increased timeout slightly (optional)
+    #   retries: 6       # Increased retries slightly (optional)
+    #   start_period: 40s  # <<<--- ADD THIS LINE (Wait 20s before failures count)
+    restart: unless-stopped
+
+  app:
+    build: ./app # Build the Node.js app from the 'app' directory
+    container_name: ollama_client_app
+    # depends_on:
+    #   ollama:
+    #     condition: service_healthy # Wait for Ollama to be ready
+    volumes:
+      - ./app/src:/usr/src/app/src # Mount source code for development (optional)
+      - ./chat_data:/usr/src/app/data # Mount volume for chat history
+    environment:
+      # Define where the app can find the Ollama service
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - NODE_ENV=development # Or production
+    # Keep the container running and allow interactive input
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+
+volumes:
+  ollama_data: # Define the named volume for Ollama models

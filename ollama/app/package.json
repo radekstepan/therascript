@@ -1,0 +1,28 @@
+{
+  "name": "ollama-ts-client",
+  "version": "1.0.0",
+  "description": "TypeScript client for Ollama API",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start:dev": "ts-node src/index.ts",
+    "start": "node dist/index.js",
+    "lint": "eslint . --ext .ts"
+  },
+  "keywords": [
+    "ollama",
+    "typescript",
+    "nodejs",
+    "llm"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.6.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.3"
+  }
+}

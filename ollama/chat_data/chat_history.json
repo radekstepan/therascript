@@ -1,0 +1,23 @@
+{
+  "chat_1744562996841_kphyo": {
+    "id": "chat_1744562996841_kphyo",
+    "model": "llama3.2:1b",
+    "systemPrompt": "Hello",
+    "contextSize": 2048,
+    "createdAt": "2025-04-13T16:49:56.842Z",
+    "messages": [
+      {
+        "role": "system",
+        "content": "Hello"
+      },
+      {
+        "role": "user",
+        "content": "Hello"
+      },
+      {
+        "role": "assistant",
+        "content": "How can I assist you today?"
+      }
+    ]
+  }
+}
