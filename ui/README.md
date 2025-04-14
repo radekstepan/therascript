@@ -6,11 +6,12 @@
 - [ ] fix vertical align of transcript header, items too close to the top; `align-items: flex-end`
 - [ ] edit session details date is not editable
 - [ ] reduce the left and right padding on the chat/transcript section and be consistent with the chats section
-- [ ] starred messages popover shows below the chats sidebar; should show to the right too
+- [x] starred messages popover shows below the chats sidebar; should show to the right too
 - [ ] when you create a new chat, redirect the UI to that chat page
 - [ ] in the sessions sidebar the session link active onclick outline is being cutoff (top and left)
 - [ ] add icons on all modals/dialogs, right now only the edit transcript paragraph has them
 - [ ] on smaller screens make sure you can still choose a different chat/create a new one; maybe move the chats sidebar into a separate tab much like Chat and Transcript
+- [ ] even if you fail to send the message, you should still "try" to save it; as long as it reaches the API we should save it
 
 ## Nice to have
 

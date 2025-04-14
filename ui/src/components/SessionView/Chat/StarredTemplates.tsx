@@ -14,7 +14,7 @@ export function StarredTemplatesList({ onSelectTemplate, onClose }: StarredTempl
     const starredMessages = useAtomValue(starredMessagesAtom);
 
     const popoverClasses = cn(
-        "absolute bottom-full mb-2 right-0 z-50",
+        "absolute bottom-full mb-2 left-0 z-50",
         "w-72 max-h-60 overflow-hidden flex flex-col",
         "rounded-md border shadow-lg",
         "bg-white dark:bg-gray-900",
