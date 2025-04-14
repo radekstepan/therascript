@@ -90,7 +90,7 @@ export function SessionContent({
                     <Box px={{ initial: '4', md: '6' }} pt="2">
                         <Tabs.List>
                             <Tabs.Trigger value="chat">Chat</Tabs.Trigger>
-                            <Tabs.Trigger value="transcription">Transcription</Tabs.Trigger>
+                            <Tabs.Trigger value="transcription">Transcript</Tabs.Trigger>
                         </Tabs.List>
                     </Box>
                     <Box px={{ initial: '4', md: '6' }} pb={{ initial: '4', md: '6' }} pt="2" className="flex-grow" style={{ minHeight: 0 }}>
