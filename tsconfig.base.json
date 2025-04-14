@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    // Common strict settings
+    "strict": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+
+    // Module settings (adjust per-package if needed)
+    "moduleResolution": "NodeNext", // Good default for modern Node/TS
+
+    // Target
+    "target": "ES2022",
+
+    // Output
+    "sourceMap": true,
+    "declaration": true,
+    "declarationMap": true,
+    "composite": true, // Important for project references if used
+
+    // Decorators (if needed by Elysia/Typebox)
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
+  },
+  "exclude": ["node_modules", "**/dist", "**/build"]
+}

@@ -1,16 +1,40 @@
 {
   "name": "therascript",
   "version": "1.0.0",
-  "main": "index.ts",
-  "repository": "git@github.com:radekstepan/therascript.git",
-  "author": "Radek Stepan <dev@radekstepan.com>",
-  "license": "MIT",
+  "private": true,
+  "description": "Monorepo for Therascript project",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
-    "demo": "npx ts-node whisper.ts"
+    "build": "lerna run build",
+    "build:api": "lerna run build --scope=api",
+    "build:ui": "lerna run build --scope=ui",
+    "build:ollama": "lerna run build --scope=ollama",
+
+    "dev": "lerna run dev --parallel --scope=api --scope=ui",
+    "dev:api": "lerna run dev --scope=api",
+    "dev:ui": "lerna run dev --scope=ui",
+
+    "start:api": "lerna run start --scope=api",
+    "start:ollama": "lerna run start --scope=ollama",
+
+    "lint": "lerna run lint --parallel",
+    "format": "yarn prettier --write .",
+
+    "preload:db": "lerna run preload --scope=api",
+    "whisper:run": "yarn ts-node tools/run-whisper.ts",
+
+    "clean": "lerna run clean --parallel && rm -rf node_modules",
+    "clean:dist": "lerna run clean --parallel"
   },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
   "devDependencies": {
-    "@types/node": "^22.13.14",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.8.2"
+    "concurrently": "^8.2.2",
+    "lerna": "^8.1.7",
+    "prettier": "^3.3.3",
+    "ts-node": "^10.9.2"
   }
 }

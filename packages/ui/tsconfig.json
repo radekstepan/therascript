@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES6", // Target browsers
+    "module": "ESNext", // For Webpack/modern browsers
+    "jsx": "react-jsx", // React specific
+    "outDir": "./dist/", // Output managed by Webpack
+    "rootDir": "./src",
+    "moduleResolution": "node", // Standard for frontend builds
+    "isolatedModules": true,
+    "noEmit": false,
+    "lib": ["DOM", "DOM.Iterable", "ESNext"],
+    "allowJs": false,
+    "baseUrl": "./src", // For '@/' alias
+    "paths": { // Keep path alias if used
+      "@/*": ["*"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

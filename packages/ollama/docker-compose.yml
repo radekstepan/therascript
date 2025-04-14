@@ -1,0 +1,21 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama_server_managed # Changed name slightly to avoid conflicts if old one exists
+    ports:
+      - "11434:11434" # Expose Ollama port to host
+    volumes:
+      - ollama_data:/root/.ollama # Persist downloaded models
+    # TODO confirm how this is done with Whisper and fallback on CPU
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1 # Or 'all'
+              capabilities: [gpu]
+    # Healthcheck removed as it was problematic; we'll rely on API calls succeeding
+    restart: unless-stopped
+
+volumes:
+  ollama_data: # Define the named volume for Ollama models

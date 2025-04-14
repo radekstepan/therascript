@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json", // Path to root base config
+  "compilerOptions": {
+    "module": "NodeNext", // Keep NodeNext for Elysia/Node.js backend
+    "outDir": "./dist",
+    "rootDir": "./src",
+    // Add specific types if needed, e.g., "node" (often implicit)
+    // "types": ["node"]
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "scripts"] // Exclude scripts if not TS
+}

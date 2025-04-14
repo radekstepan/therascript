@@ -1,0 +1,44 @@
+{
+  "name": "api",
+  "version": "1.0.0",
+  "description": "Backend for Therapy Analyzer using Ollama, SQLite, and ElysiaJS",
+  "main": "dist/server.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "concurrently \"tsc --watch --preserveWatchOutput\" \"nodemon dist/server.js\"",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "preload": "node dist/scripts/preloadDb.js",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "keywords": [
+    "ollama",
+    "typescript",
+    "elysiajs",
+    "nlp",
+    "therapy",
+    "sqlite"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@elysiajs/cors": "^1.1.0",
+    "@elysiajs/swagger": "^1.1.0",
+    "@sinclair/typebox": "^0.34.0",
+    "better-sqlite3": "^11.9.1",
+    "dotenv": "^16.4.5",
+    "elysia": "^1.2.25",
+    "multer": "^1.4.5-lts.1",
+    "ollama": "^0.5.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/multer": "^1.4.11",
+    "@types/node": "^20.16.2",
+    "concurrently": "^8.2.2",
+    "nodemon": "^3.1.4",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.4"
+  }
+}
