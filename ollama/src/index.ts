@@ -1,8 +1,9 @@
 import * as chatManager from './chatManager';
 import * as dockerManager from './dockerManager';
-import { OllamaMessage } from './ollamaClient'; // Import the interface
+import { OllamaMessage } from './ollamaClient';
 
 // Configuration
+// TODO move into a const or allow to set programmatically
 const TARGET_MODEL = 'llama3.2:1b'; // The model we want to ensure is available
 const DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant.";
 const CONTEXT_SIZE = 2048;
@@ -67,6 +68,7 @@ async function runExample() {
     }
 
     // Clean up the in-memory chat session (optional)
+    // TODO do this when navigating away in the UI
     // chatManager.endChat(newChatId);
 
     // --- Scenario 2: Simulate Resuming a Chat ---
@@ -116,6 +118,7 @@ async function runExample() {
 
     // Optional: Stop the Docker container when the script finishes
     // console.log("Stopping Ollama container...");
+    // TODO do this on signout?
     // await dockerManager.stopOllamaService();
 }
 

@@ -16,6 +16,7 @@ interface ChatHistory {
 }
 
 // History is now just an in-memory object
+// TODO store in the DB instead
 let history: ChatHistory = {};
 
 /**

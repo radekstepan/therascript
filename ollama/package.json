@@ -1,5 +1,5 @@
 {
-  "name": "ollama-host-client",
+  "name": "ollama",
   "version": "1.0.0",
   "description": "TypeScript host client for managing and interacting with Ollama Docker container",
   "main": "dist/index.js",

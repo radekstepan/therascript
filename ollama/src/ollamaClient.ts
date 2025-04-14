@@ -1,5 +1,5 @@
 import axios, { AxiosError } from 'axios';
-import { OLLAMA_SERVICE_NAME } from './dockerManager'; // <<<--- ADD THIS IMPORT
+import { OLLAMA_SERVICE_NAME } from './dockerManager';
 
 // Default to localhost as the script runs on the host now
 const OLLAMA_URL = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
@@ -46,6 +46,7 @@ export async function sendChatRequest(payload: OllamaChatRequest): Promise<Ollam
 
     try {
         console.log(`\n🤖 Sending request to Ollama (${payload.model}) at ${OLLAMA_URL}...`);
+        // TODO can we get a streaming response that can be cancelled?
         const response = await axios.post<OllamaChatResponse>(
             `${OLLAMA_URL}/api/chat`,
             payload,

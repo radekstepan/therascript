@@ -1,5 +1,3 @@
-# Removed version: '3.8' as it's obsolete for V2 and caused warnings
-
 services:
   ollama:
     image: ollama/ollama:latest
@@ -8,6 +6,7 @@ services:
       - "11434:11434" # Expose Ollama port to host
     volumes:
       - ollama_data:/root/.ollama # Persist downloaded models
+    # TODO confirm how this is done with Whisper and fallback on CPU
     # --- Uncomment the following lines if you have an NVIDIA GPU ---
     # deploy:
     #   resources:

@@ -5,15 +5,11 @@ import * as path from 'path';
 const exec = util.promisify(callbackExec);
 
 const COMPOSE_FILE = path.resolve(__dirname, '..', 'docker-compose.yml');
-export const OLLAMA_SERVICE_NAME = 'ollama'; // <<<--- ADD export HERE
-const OLLAMA_CONTAINER_NAME = 'ollama_server_managed';
-
-// ... (rest of the file remains the same) ...
+export const OLLAMA_SERVICE_NAME = 'ollama';
 
 /** Helper to run docker compose commands */
 async function runDockerComposeCommand(command: string): Promise<string> {
     try {
-        // console.log(`Running: docker compose -f "${COMPOSE_FILE}" ${command}`); // Debug
         const { stdout, stderr } = await exec(`docker compose -f "${COMPOSE_FILE}" ${command}`);
         if (stderr && !stderr.toLowerCase().includes("warn")) { // Ignore docker compose warnings
              console.warn(`Docker Compose stderr: ${stderr}`);
