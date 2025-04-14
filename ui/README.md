@@ -1,6 +1,8 @@
 # TODO
 
-- [ ] double flash of "chats" section on initial load
+- [ ] why do we fetch sessions 2x on initial page load? Is it because React@18 and `useEffect` firing 2x? Do we need to switch to Tanstack Query and cache the data there? Would it make Jotai smaller too?
+- [ ] double flash of "chats" section on initial load (might be fixed by the above)
+- [ ] when you upload a new session, create an initial chat behind the scenes for it and redirect the page to this chat details page
 - [ ] chats rename/delete hamburger icon should be inside the chat name wrapper (leave enough padding on the right of the name for the icon to show)
 - [ ] make the chat paragraph icons larger, add a gap between them AND/OR move the play icon to the left of the paragraph
 - [ ] fix vertical align of transcript header, items too close to the top; `align-items: flex-end`
@@ -15,7 +17,16 @@
 - [ ] the star message icon is too small and not vertically aligned with the message itself
 - [ ] think about the starred messages popover, the list/UI looks odd
 - [ ] the formatting of date fields is not consistent when rendered as an `input type="date"` and text field
+- [ ] show progress bar when transcribing a chat session and be able to abort the process
+- [ ] starred messages show once you save them but when you reload the UI they don't show in the popover
+- [ ] if you can't find chat data, show the same message when we fail to load the session
+- [ ] the `sessionSortCriteriaAtom` says it's sorting by "date", but in the UI it shows sorted by "Client"
 
 ## Nice to have
 
 - [ ] autocomplete client name when typing in both the create new session and editing an existing one (select dropdown with a free form input too?)
+
+## Future
+
+- [ ] the homepage should have a chats section that has "free text" chats, displayed much like Session History. It lets you chat with the model without having a transcript to refer to
+- [ ] the topbar/header should have a search field. Clicking into it expands a panel that lets you search for chats or transcripts and has extra optional filters to drill down by different tags, client names, dates. Does this mean all paragraphs and chats are stored in a vector database in addition or instead of sqlite? Is that the best way to find a document through "free text"?
