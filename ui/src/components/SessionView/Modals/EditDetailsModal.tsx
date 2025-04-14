@@ -117,7 +117,20 @@ export function EditDetailsModal({
                         <Text as="label" size="2" weight="medium" htmlFor="clientNameEditModal" className="text-right">Client Name</Text>
                         <TextField.Root id="clientNameEditModal" size="2" value={editClientName} onChange={(e) => setEditClientName(e.target.value)} placeholder="Client's Full Name" required aria-required="true" disabled={isSaving}/>
                         <Text as="label" size="2" weight="medium" htmlFor="sessionDateEditModal" className="text-right">Date</Text>
-                        <input id="sessionDateEditModal" type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} required aria-required="true" disabled={isSaving} className={cn( "rt-TextFieldInput rt-r-size-2 rt-variant-surface", "h-8 text-sm px-2 py-1" )} style={{ lineHeight: 'normal' }}/>
+                        <input
+                            id="sessionDateEditModal"
+                            type="date"
+                            value={editDate}
+                            onChange={(e) => setEditDate(e.target.value)}
+                            required
+                            aria-required="true"
+                            disabled={isSaving}
+                            className={cn(
+                            "flex w-full rounded-md border border-[--gray-a7] bg-[--gray-1] focus:border-[--accent-8] focus:shadow-[0_0_0_1px_var(--accent-8)]",
+                            "h-8 px-2 py-1 text-sm text-[--gray-12] placeholder:text-[--gray-a9] focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                            )}
+                            style={{ lineHeight: 'normal' }}
+                        />
                         <Text as="label" size="2" weight="medium" htmlFor="sessionTypeEditModal" className="text-right">Session Type</Text>
                         <Select.Root value={editType} onValueChange={setEditType} required size="2" name="sessionType" disabled={isSaving}>
                             <Select.Trigger id="sessionTypeEditModal" placeholder="Select type..." />
