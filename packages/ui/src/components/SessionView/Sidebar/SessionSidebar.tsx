@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { NavLink, useParams, useNavigate } from 'react-router-dom';
 import { useAtomValue } from 'jotai';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query'; // Removed useQuery
 import {
     activeChatIdAtom, // Keep for knowing current selection
     activeSessionIdAtom, // Keep for knowing current selection
 } from '../../../store';
-import { fetchSession, deleteChat as deleteChatApi, renameChat as renameChatApi, startNewChat as startNewChatApi } from '../../../api/api';
+// Removed fetchSession import
+import { deleteChat as deleteChatApi, renameChat as renameChatApi, startNewChat as startNewChatApi } from '../../../api/api';
 import { DotsHorizontalIcon, Pencil1Icon, TrashIcon, PlusCircledIcon } from '@radix-ui/react-icons';
 import {
     Box,
@@ -26,7 +27,14 @@ import { formatTimestamp } from '../../../helpers';
 import type { ChatSession, Session } from '../../../types';
 import { cn } from '../../../utils';
 
-export function SessionSidebar() {
+interface SessionSidebarProps {
+    session: Session | null; // Receive session data
+    isLoading: boolean;      // Receive loading state
+    error: Error | null;     // Receive error state
+}
+
+// Accept props
+export function SessionSidebar({ session, isLoading: isLoadingSession, error: sessionError }: SessionSidebarProps) {
     const { sessionId: sessionIdParam } = useParams<{ sessionId: string; chatId?: string }>();
     const navigate = useNavigate();
     const currentActiveChatId = useAtomValue(activeChatIdAtom);
@@ -44,14 +52,7 @@ export function SessionSidebar() {
 
     const sessionId = sessionIdParam ? parseInt(sessionIdParam, 10) : null;
 
-    // Fetch session metadata (including chat list)
-    // Use currentActiveSessionId from Jotai as part of the key if needed,
-    // or rely purely on the URL param sessionId. Using sessionId is generally safer.
-    const { data: session, isLoading: isLoadingSession, error: sessionError } = useQuery<Session, Error>({
-        queryKey: ['sessionMeta', sessionId],
-        queryFn: () => sessionId ? fetchSession(sessionId) : Promise.reject(new Error("Invalid Session ID")),
-        enabled: !!sessionId, // Only fetch if sessionId from URL is valid
-    });
+    // REMOVED the useQuery hook for sessionMeta here
 
     // Mutation: Start New Chat
     const startNewChatMutation = useMutation({
@@ -141,14 +142,14 @@ export function SessionSidebar() {
     });
 
 
-    if (isLoadingSession) {
+    if (isLoadingSession) { // Use the isLoading prop
         return (
             <Box p="4" className="flex flex-col h-full w-full overflow-hidden items-center justify-center" style={{ backgroundColor: 'var(--color-panel-solid)' }}>
                <Spinner size="2" /> <Text size="1" color="gray" mt="2">Loading session...</Text>
             </Box>
         );
     }
-
+    // Use the error and session props
     if (sessionError || !session) {
         return (
              <Box p="4" className="flex flex-col h-full w-full overflow-hidden items-center justify-center" style={{ backgroundColor: 'var(--color-panel-solid)' }}>
@@ -207,7 +208,7 @@ export function SessionSidebar() {
                     </Button>
                 </Flex>
 
-                {isLoadingSession ? ( // Still show loading if session meta is loading
+                {isLoadingSession ? ( // Still show loading if session meta is loading (using prop)
                     <Flex flexGrow="1" align="center" justify="center">
                         <Spinner size="2"/>
                         <Text color="gray" size="2" style={{ fontStyle: 'italic' }} ml="2">Loading chats...</Text>

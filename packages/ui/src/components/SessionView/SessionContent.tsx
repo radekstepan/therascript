@@ -61,6 +61,9 @@ export function SessionContent({
                 <Flex direction="column" className="w-1/2 h-full" style={{ minHeight: 0 }}>
                     {activeChatId !== null ? (
                         <ChatInterface
+                            // Pass session down
+                            session={session}
+                            activeChatId={activeChatId} // Pass activeChatId
                             isLoadingChat={!!isLoadingChat} // Pass down loading state (ensure boolean)
                         />
                     ) : hasChats ? (
@@ -115,6 +118,9 @@ export function SessionContent({
                         <Tabs.Content value="chat" className="h-full" style={{ outline: 'none' }}>
                             {activeChatId !== null ?
                              <ChatInterface // Use the same ChatInterface component
+                                // Pass session down
+                                session={session}
+                                activeChatId={activeChatId} // Pass activeChatId
                                 isLoadingChat={!!isLoadingChat} // Pass down loading state (ensure boolean)
                                 isTabActive={activeTab === 'chat'}
                                 initialScrollTop={chatScrollPosition}

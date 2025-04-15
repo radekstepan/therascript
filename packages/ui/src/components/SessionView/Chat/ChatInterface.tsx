@@ -1,17 +1,21 @@
 import React, { useRef, useEffect, useCallback } from 'react';
-import { useAtomValue } from 'jotai';
+// Removed useAtomValue if not needed elsewhere
 import { Box, Flex, ScrollArea, Spinner, Text } from '@radix-ui/themes';
 import { useQuery } from '@tanstack/react-query';
 import { ChatInput } from './ChatInput';
 import { ChatMessages } from './ChatMessages';
+import { ChatHeader } from './ChatHeader'; // Import ChatHeader
 import { fetchChatDetails } from '../../../api/api';
-import {
-    activeSessionIdAtom,
-    activeChatIdAtom,
-} from '../../../store';
-import type { ChatSession } from '../../../types';
+// Removed atoms if they are now props
+// import {
+//     activeSessionIdAtom,
+//     activeChatIdAtom,
+// } from '../../../store';
+import type { ChatSession, Session } from '../../../types'; // Add Session type
 
 interface ChatInterfaceProps {
+    session: Session | null; // Accept session prop
+    activeChatId: number | null; // Accept activeChatId prop
     isTabActive?: boolean;
     initialScrollTop?: number;
     onScrollUpdate?: (scrollTop: number) => void;
@@ -29,20 +33,24 @@ const debounce = <F extends (...args: any[]) => any>(func: F, waitFor: number) =
 
 
 export function ChatInterface({
+    session, // Use prop
+    activeChatId, // Use prop
     isTabActive,
     initialScrollTop = 0,
     onScrollUpdate,
     isLoadingChat // Represents loading state BEFORE this component's query runs
 }: ChatInterfaceProps) {
-    const activeSessionId = useAtomValue(activeSessionIdAtom);
-    const activeChatId = useAtomValue(activeChatIdAtom);
+    // REMOVE activeSessionId/activeChatId from useAtomValue if they are now props
+    // const activeChatId = useAtomValue(activeChatIdAtom);
+    const activeSessionId = session?.id ?? null; // Get session ID from prop if needed for query key
+
     const restoreScrollRef = useRef(false);
     const chatContentRef = useRef<HTMLDivElement | null>(null);
     const viewportRef = useRef<HTMLDivElement | null>(null);
 
     // Fetch chat details using Tanstack Query
     const { data: chatData, isLoading: isLoadingMessages, error: chatError, isFetching } = useQuery<ChatSession | null, Error>({
-        queryKey: ['chat', activeSessionId, activeChatId],
+        queryKey: ['chat', activeSessionId, activeChatId], // Use IDs from props/derived prop
         queryFn: () => {
             if (!activeSessionId || activeChatId === null) return Promise.resolve(null); // Return null if IDs aren't valid
             return fetchChatDetails(activeSessionId, activeChatId);
@@ -112,6 +120,10 @@ export function ChatInterface({
 
     return (
         <Flex direction="column" style={{ height: '100%', minHeight: 0 }}>
+            {/* Add ChatHeader and pass props */}
+            <Box style={{ borderBottom: '1px solid var(--gray-a6)', flexShrink: 0, backgroundColor: 'var(--color-panel-solid)' }}>
+                <ChatHeader session={session} activeChatId={activeChatId} />
+            </Box>
             <ScrollArea
                 type="auto"
                 scrollbars="vertical"
