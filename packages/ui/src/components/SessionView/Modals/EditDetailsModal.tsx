@@ -1,7 +1,12 @@
+/* src/components/SessionView/Modals/EditDetailsModal.tsx */
 import React, { useState, useEffect } from 'react';
 import { Button, Dialog, Flex, Text, TextField, Select, Box, Callout, Spinner } from '@radix-ui/themes';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { InfoCircledIcon } from '@radix-ui/react-icons';
+import {
+    InfoCircledIcon,
+    Cross2Icon, // Added for Cancel button
+    CheckIcon, // Added for Save button
+} from '@radix-ui/react-icons';
 import { SESSION_TYPES, THERAPY_TYPES } from '../../../constants';
 import { updateSessionMetadata } from '../../../api/api';
 import type { Session, SessionMetadata } from '../../../types';
@@ -186,13 +191,21 @@ export function EditDetailsModal({
                 </Flex>
                 <Flex gap="3" mt="4" justify="end">
                     <Dialog.Close>
-                        <Button type="button" variant="soft" color="gray" disabled={isSaving}>Cancel</Button>
+                        <Button type="button" variant="soft" color="gray" disabled={isSaving}>
+                            <Cross2Icon /> Cancel
+                        </Button>
                     </Dialog.Close>
                     <Button type="button" onClick={handleSave} disabled={isSaving}>
-                         {isSaving && <Spinner size="2" />}
-                         <Text ml={isSaving ? "2" : "0"}>
-                            {isSaving ? 'Saving...' : 'Save Changes'}
-                         </Text>
+                         {isSaving ? (
+                            <>
+                                <Spinner size="2" />
+                                <Text ml="2">Saving...</Text>
+                            </>
+                         ) : (
+                             <>
+                                <CheckIcon /> Save Changes
+                             </>
+                         )}
                     </Button>
                 </Flex>
             </Dialog.Content>

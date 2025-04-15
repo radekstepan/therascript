@@ -1,9 +1,15 @@
+/* src/components/UploadModal/UploadModal.tsx */
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useSetAtom } from 'jotai';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Dialog, Button, Flex, Text, TextField, Select, Box, Spinner, Strong, Callout } from '@radix-ui/themes';
-import { UploadIcon, InfoCircledIcon, CheckCircledIcon } from '@radix-ui/react-icons';
+import {
+    UploadIcon,
+    InfoCircledIcon,
+    CheckCircledIcon,
+    Cross2Icon, // Added for Cancel button
+} from '@radix-ui/react-icons';
 import {
     SESSION_TYPES,
     THERAPY_TYPES,
@@ -321,12 +327,14 @@ export function UploadModal({ isOpen }: UploadModalProps) {
         </Flex>
         <Flex gap="3" mt="5" justify="end">
           {/* Use a Button instead of Dialog.Close to prevent closing while transcribing */}
-          <Button type="button" variant="soft" color="gray" onClick={closeModal} disabled={isTranscribing}>Cancel</Button>
+          <Button type="button" variant="soft" color="gray" onClick={closeModal} disabled={isTranscribing}>
+            <Cross2Icon /> Cancel
+          </Button>
           <Button type="button" onClick={handleStartClick} disabled={!modalFile || isTranscribing}>
             {isTranscribing ? (
               <><Spinner size="2" /><Text ml="2">Transcribing...</Text></>
             ) : (
-              'Upload & Transcribe'
+               <> <UploadIcon /> Upload & Transcribe </>
             )}
           </Button>
         </Flex>

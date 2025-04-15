@@ -2,17 +2,17 @@
 
 - [x] switch to a monorepo
 - [x] why do we fetch sessions 2x on initial page load? Is it because React@18 and `useEffect` firing 2x? Do we need to switch to Tanstack Query and cache the data there? Would it make Jotai smaller too?
-- [ ] double flash of "chats" section on initial load (might be fixed by the above)
+- [x] double flash of "chats" section on initial load (might be fixed by the above)
 - [ ] when you upload a new session, create an initial chat behind the scenes for it and redirect the page to this chat details page
+- [ ] when you create a new chat, redirect the UI to that chat page
 - [x] chats rename/delete hamburger icon should be inside the chat name wrapper (leave enough padding on the right of the name for the icon to show)
 - [ ] make the chat paragraph icons larger, add a gap between them AND/OR move the play icon to the left of the paragraph
 - [ ] fix vertical align of transcript header, items too close to the top; `align-items: flex-end`
 - [x] edit session details date is not editable
 - [ ] reduce the left and right padding on the chat/transcript section and be consistent with the chats section
 - [x] starred messages popover shows below the chats sidebar; should show to the right too
-- [ ] when you create a new chat, redirect the UI to that chat page
 - [ ] in the sessions sidebar the session link active onclick outline is being cutoff (top and left)
-- [ ] add icons on all modals/dialogs, right now only the edit transcript paragraph has them
+- [x] add icons on all modals/dialogs, right now only the edit transcript paragraph has them
 - [ ] on smaller screens make sure you can still choose a different chat/create a new one; maybe move the chats sidebar into a separate tab much like Chat and Transcript
 - [ ] when you send a message and there's an error from the API, the message could still be saved, so keep showing it in the UI
 - [ ] the star message icon is too small and not vertically aligned with the message itself

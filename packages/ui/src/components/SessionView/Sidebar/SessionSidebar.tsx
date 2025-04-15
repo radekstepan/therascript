@@ -1,3 +1,4 @@
+/* src/components/SessionView/Sidebar/SessionSidebar.tsx */
 import React, { useState } from 'react';
 import { NavLink, useParams, useNavigate } from 'react-router-dom';
 import { useAtomValue } from 'jotai';
@@ -8,7 +9,14 @@ import {
 } from '../../../store';
 // Removed fetchSession import
 import { deleteChat as deleteChatApi, renameChat as renameChatApi, startNewChat as startNewChatApi } from '../../../api/api';
-import { DotsHorizontalIcon, Pencil1Icon, TrashIcon, PlusCircledIcon } from '@radix-ui/react-icons';
+import {
+    DotsHorizontalIcon,
+    Pencil1Icon,
+    TrashIcon,
+    PlusCircledIcon,
+    Cross2Icon, // Added for Cancel buttons
+    CheckIcon, // Added for Save button
+} from '@radix-ui/react-icons';
 import {
     Box,
     Flex,
@@ -75,32 +83,6 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
             if (!sessionId) throw new Error("Session ID missing");
             return renameChatApi(sessionId, variables.chatId, variables.newName);
         },
-        // Optimistic Update Example:
-        // onMutate: async (variables) => {
-        //     await queryClient.cancelQueries({ queryKey: ['sessionMeta', sessionId] });
-        //     const previousSessionData = queryClient.getQueryData<Session>(['sessionMeta', sessionId]);
-        //     queryClient.setQueryData<Session>(['sessionMeta', sessionId], old => {
-        //         if (!old) return old;
-        //         return {
-        //             ...old,
-        //             chats: (old.chats || []).map(c =>
-        //                 c.id === variables.chatId ? { ...c, name: variables.newName || undefined } : c
-        //             ),
-        //         };
-        //     });
-        //     return { previousSessionData };
-        // },
-        // onError: (err, variables, context) => {
-        //     if (context?.previousSessionData) {
-        //         queryClient.setQueryData(['sessionMeta', sessionId], context.previousSessionData);
-        //     }
-        //     console.error("Failed to rename chat:", err); // TODO: User feedback
-        // },
-        // onSuccess: () => { /* Already updated optimistically */ },
-        // onSettled: () => {
-        //     queryClient.invalidateQueries({ queryKey: ['sessionMeta', sessionId] });
-        // },
-        // Non-Optimistic (simpler):
         onSuccess: () => queryClient.invalidateQueries({ queryKey: ['sessionMeta', sessionId] }),
         onError: (error) => console.error("Failed to rename chat:", error), // TODO: User feedback
     });
@@ -112,8 +94,6 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
             return deleteChatApi(sessionId, chatId);
         },
         onSuccess: (data, deletedChatId) => {
-            // Determine the next chat to navigate to *before* invalidating,
-            // as invalidation might trigger a state update that changes currentActiveChatId
             let nextChatId: number | null = null;
             if (currentActiveChatId === deletedChatId) {
                 const sessionData = queryClient.getQueryData<Session>(['sessionMeta', sessionId]);
@@ -123,18 +103,13 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
                     nextChatId = newestChat.id;
                 }
             }
-
-            // Invalidate to refetch the chat list
             queryClient.invalidateQueries({ queryKey: ['sessionMeta', sessionId] });
-             // Also remove the specific chat query data if it exists
             queryClient.removeQueries({ queryKey: ['chat', sessionId, deletedChatId] });
-
-            // Perform navigation if needed
             if (currentActiveChatId === deletedChatId) {
                 if (nextChatId !== null) {
                     navigate(`/sessions/${sessionId}/chats/${nextChatId}`, { replace: true });
                 } else {
-                    navigate(`/sessions/${sessionId}`, { replace: true }); // Navigate to base session if no chats left
+                    navigate(`/sessions/${sessionId}`, { replace: true });
                 }
             }
         },
@@ -142,14 +117,13 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
     });
 
 
-    if (isLoadingSession) { // Use the isLoading prop
+    if (isLoadingSession) {
         return (
             <Box p="4" className="flex flex-col h-full w-full overflow-hidden items-center justify-center" style={{ backgroundColor: 'var(--color-panel-solid)' }}>
                <Spinner size="2" /> <Text size="1" color="gray" mt="2">Loading session...</Text>
             </Box>
         );
     }
-    // Use the error and session props
     if (sessionError || !session) {
         return (
              <Box p="4" className="flex flex-col h-full w-full overflow-hidden items-center justify-center" style={{ backgroundColor: 'var(--color-panel-solid)' }}>
@@ -158,7 +132,6 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
         );
     }
 
-    // Ensure chats is an array, default to empty if not present or not array
     const chatsDefinedAndIsArray = Array.isArray(session?.chats);
     const sortedChats = chatsDefinedAndIsArray
         ? [...session.chats].sort((a, b) => b.timestamp - a.timestamp)
@@ -186,9 +159,8 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
     };
     const cancelDelete = () => { setIsDeleteConfirmOpen(false); setDeletingChat(null); };
 
-    // Updated: Removed truncate, added group
     const getNavLinkClass = ({ isActive }: { isActive: boolean }): string => {
-        const base = "block w-full px-2 py-1.5 rounded-md group"; // Removed truncate, added group
+        const base = "block w-full px-2 py-1.5 rounded-md group";
         const inactive = "text-[--gray-a11] hover:bg-[--gray-a3] focus:outline-none focus:ring-2 focus:ring-[--accent-7]";
         const active = "bg-[--accent-a4] text-[--accent-11] font-medium";
         return cn(base, isActive ? active : inactive);
@@ -209,7 +181,7 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
                     </Button>
                 </Flex>
 
-                {isLoadingSession ? ( // Still show loading if session meta is loading (using prop)
+                {isLoadingSession ? (
                     <Flex flexGrow="1" align="center" justify="center">
                         <Spinner size="2"/>
                         <Text color="gray" size="2" style={{ fontStyle: 'italic' }} ml="2">Loading chats...</Text>
@@ -224,16 +196,15 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
                         <Flex direction="column" gap="1" asChild>
                             <nav>
                                 {sortedChats.map((chat) => (
-                                    // Changed: Use Box container, move Dropdown inside NavLink with inner Flex
                                     <Box key={chat.id} className="relative">
                                         <NavLink
                                             to={`/sessions/${session.id}/chats/${chat.id}`}
-                                            className={getNavLinkClass} // Updated helper applied here
+                                            className={getNavLinkClass}
                                             title={getChatDisplayTitle(chat)}
                                             end
                                         >
                                             <Flex align="center" justify="between" gap="1" width="100%">
-                                                <Text size="2" truncate className="flex-grow pr-1"> {/* Adjust pr-1 padding as needed */}
+                                                <Text size="2" truncate className="flex-grow pr-1">
                                                     {getChatDisplayTitle(chat)}
                                                 </Text>
                                                 <DropdownMenu.Root>
@@ -244,18 +215,18 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
                                                             size="1"
                                                             className="flex-shrink-0 p-1 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 data-[state=open]:bg-[--accent-a4] transition-opacity"
                                                             aria-label="Chat options"
-                                                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); }} // Prevent NavLink activation
-                                                            onMouseDown={(e) => e.stopPropagation()} // Prevent NavLink activation
+                                                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                                                            onMouseDown={(e) => e.stopPropagation()}
                                                         >
                                                             <DotsHorizontalIcon />
                                                         </IconButton>
                                                     </DropdownMenu.Trigger>
                                                     <DropdownMenu.Content
                                                         size="1"
-                                                        align="end" // Align to right edge of trigger
-                                                        sideOffset={2} // Small offset
-                                                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); }} // Prevent NavLink activation
-                                                        onMouseDown={(e) => e.stopPropagation()} // Prevent NavLink activation
+                                                        align="end"
+                                                        sideOffset={2}
+                                                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                                                        onMouseDown={(e) => e.stopPropagation()}
                                                     >
                                                         <DropdownMenu.Item onSelect={() => handleRenameClick(chat)} disabled={renameChatMutation.isPending}><Pencil1Icon className="mr-2 h-4 w-4" />Rename</DropdownMenu.Item>
                                                         <DropdownMenu.Item color="red" onSelect={() => handleDeleteClick(chat)} disabled={deleteChatMutation.isPending}><TrashIcon className="mr-2 h-4 w-4" />Delete</DropdownMenu.Item>
@@ -286,10 +257,15 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
                         {renameChatMutation.isError && <Text color="red" size="1">Error: {renameChatMutation.error.message}</Text>}
                     </Flex>
                     <Flex gap="3" mt="4" justify="end">
-                        <AlertDialog.Cancel><Button variant="soft" color="gray" onClick={cancelRename} disabled={renameChatMutation.isPending}>Cancel</Button></AlertDialog.Cancel>
+                        <AlertDialog.Cancel><Button variant="soft" color="gray" onClick={cancelRename} disabled={renameChatMutation.isPending}>
+                           <Cross2Icon /> Cancel
+                        </Button></AlertDialog.Cancel>
                         <AlertDialog.Action><Button onClick={handleSaveRename} disabled={renameChatMutation.isPending}>
-                            {renameChatMutation.isPending && <Spinner size="2"/>}
-                            Save
+                            {renameChatMutation.isPending ? (
+                                <> <Spinner size="2"/> <Text ml="1">Saving...</Text> </>
+                            ) : (
+                                <> <CheckIcon /> Save </>
+                            )}
                         </Button></AlertDialog.Action>
                     </Flex>
                  </AlertDialog.Content>
@@ -302,10 +278,15 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
                     {deletingChat && <AlertDialog.Description size="2" color="gray" mt="1" mb="4">Are you sure you want to delete "{getChatDisplayTitle(deletingChat)}"? This action cannot be undone.</AlertDialog.Description>}
                     <Flex gap="3" mt="4" justify="end">
                         {deleteChatMutation.isError && <Text color="red" size="1" mr="auto">Error: {deleteChatMutation.error.message}</Text>}
-                        <AlertDialog.Cancel><Button variant="soft" color="gray" onClick={cancelDelete} disabled={deleteChatMutation.isPending}>Cancel</Button></AlertDialog.Cancel>
+                        <AlertDialog.Cancel><Button variant="soft" color="gray" onClick={cancelDelete} disabled={deleteChatMutation.isPending}>
+                            <Cross2Icon /> Cancel
+                        </Button></AlertDialog.Cancel>
                         <AlertDialog.Action><Button color="red" onClick={confirmDelete} disabled={deleteChatMutation.isPending}>
-                             {deleteChatMutation.isPending && <Spinner size="2"/>}
-                             Delete
+                            {deleteChatMutation.isPending ? (
+                                <> <Spinner size="2"/> <Text ml="1">Deleting...</Text> </>
+                            ) : (
+                                <> <TrashIcon /> Delete </>
+                            )}
                         </Button></AlertDialog.Action>
                     </Flex>
                  </AlertDialog.Content>

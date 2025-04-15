@@ -1,7 +1,14 @@
+/* src/components/SessionView/Chat/ChatMessages.tsx */
 import React, { useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { useQueryClient } from '@tanstack/react-query';
-import { StarIcon, StarFilledIcon, InfoCircledIcon } from '@radix-ui/react-icons';
+import {
+    StarIcon,
+    StarFilledIcon,
+    InfoCircledIcon,
+    Cross2Icon, // Added for Cancel button
+    CheckIcon, // Added for Save button
+} from '@radix-ui/react-icons';
 import { Button, TextField, Flex, Box, Text, IconButton, Dialog, Spinner, Callout } from '@radix-ui/themes';
 import { activeSessionIdAtom } from '../../../store';
 import type { ChatMessage, ChatSession } from '../../../types';
@@ -193,9 +200,13 @@ export function ChatMessages({ activeChatId, messages: chatMessages }: ChatMessa
           </Flex>
           <Flex gap="3" mt="4" justify="end">
             <Dialog.Close>
-              <Button variant="soft" color="gray" onClick={handleCancelName}>Cancel</Button>
+              <Button variant="soft" color="gray" onClick={handleCancelName}>
+                <Cross2Icon /> Cancel
+              </Button>
             </Dialog.Close>
-            <Button onClick={handleConfirmName}>Save Template</Button>
+            <Button onClick={handleConfirmName}>
+                <CheckIcon /> Save Template
+            </Button>
           </Flex>
         </Dialog.Content>
       </Dialog.Root>
