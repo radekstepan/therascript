@@ -7,11 +7,6 @@ import { ChatMessages } from './ChatMessages';
 import { ChatHeader } from './ChatHeader'; // Import ChatHeader
 import { fetchChatDetails } from '../../../api/api';
 import { debounce } from '../../../helpers'; // Import debounce
-// Removed atoms if they are now props
-// import {
-//     activeSessionIdAtom,
-//     activeChatIdAtom,
-// } from '../../../store';
 import type { ChatSession, Session } from '../../../types'; // Add Session type
 
 interface ChatInterfaceProps {
@@ -47,12 +42,14 @@ export function ChatInterface({
             return fetchChatDetails(activeSessionId, activeChatId);
         },
         enabled: !!activeSessionId && activeChatId !== null, // Only run query if IDs are valid
-        // staleTime: 60 * 1000, // Example: Consider messages stale after 1 minute
+        staleTime: 5 * 60 * 1000, // Example: Consider messages stale after 5 minutes
+        refetchOnWindowFocus: true, // Refetch if chat might have updated elsewhere
     });
 
     const chatMessages = chatData?.messages || [];
     // Combined loading state: consider initial prop, this query's loading, and background fetching
-    const combinedIsLoading = isLoadingSessionMeta || isLoadingMessages || (isFetching && !chatData);
+    const combinedIsLoading = isLoadingSessionMeta || isLoadingMessages; // Simpler: initial load or explicit chat load
+    const isBackgroundFetching = isFetching && !combinedIsLoading; // Is fetching but not the initial load
 
      const debouncedScrollSave = useCallback(
          debounce((scrollTop: number) => {
@@ -126,7 +123,7 @@ export function ChatInterface({
                 onScroll={handleScroll}
                 style={{ flexGrow: 1, minHeight: 0, position: 'relative' }}
             >
-                {combinedIsLoading && chatMessages.length === 0 && ( // Show spinner only if loading and no messages yet
+                {combinedIsLoading && ( // Show spinner overlay only during initial load
                     <Flex
                        align="center"
                        justify="center"
@@ -142,14 +139,17 @@ export function ChatInterface({
                         <Text ml="2" color="gray">Loading messages...</Text>
                     </Flex>
                 )}
-                 {chatError && (
+                 {chatError && !combinedIsLoading && ( // Show error only if loading finished with error
                      <Flex justify="center" p="4">
                         <Text color="red">Error loading chat: {chatError.message}</Text>
                      </Flex>
                  )}
+                {/* Render messages even if background fetching is happening */}
                 <Box p="4" ref={chatContentRef} style={{ opacity: combinedIsLoading ? 0.5 : 1, transition: 'opacity 0.2s ease-in-out' }}>
                     {/* Pass fetched messages down */}
                     <ChatMessages messages={chatMessages} activeChatId={activeChatId} />
+                     {/* Optionally indicate background refresh */}
+                     {/* {isBackgroundFetching && <Text size="1" color="gray" align="center">Checking for new messages...</Text>} */}
                 </Box>
             </ScrollArea>
             <Box
@@ -160,12 +160,14 @@ export function ChatInterface({
                     flexShrink: 0,
                     borderTop: '1px solid var(--gray-a6)',
                     backgroundColor: 'var(--color-panel-solid)', // Match header/sidebar?
-                    opacity: combinedIsLoading ? 0.6 : 1,
-                    pointerEvents: combinedIsLoading ? 'none' : 'auto',
+                    opacity: combinedIsLoading ? 0.6 : 1, // Fade slightly during initial load
+                    // Don't disable pointer events entirely, let ChatInput handle its disabled state
+                    // pointerEvents: combinedIsLoading ? 'none' : 'auto',
                     transition: 'opacity 0.2s ease-in-out',
                 }}
             >
-                <ChatInput disabled={combinedIsLoading || !activeChatId} /> {/* Also disable if no chat selected */}
+                 {/* ChatInput disabled state is managed internally based on mutation status and activeChatId */}
+                <ChatInput disabled={combinedIsLoading || !activeChatId} />
             </Box>
         </Flex>
     );

@@ -10,7 +10,7 @@ import { SessionContent } from './SessionContent';
 import { EditDetailsModal } from './Modals/EditDetailsModal';
 // Import API functions used in this file
 import { fetchSession, fetchTranscript, startNewChat, fetchChatDetails } from '../../api/api';
-import type { Session, SessionMetadata } from '../../types';
+import type { Session, SessionMetadata, ChatSession } from '../../types'; // Added ChatSession
 import {
     activeSessionIdAtom,
     activeChatIdAtom,
@@ -38,7 +38,7 @@ export function SessionView() {
     // --- Tanstack Query Hooks ---
 
     // Fetch Session Metadata (including chat list without messages)
-    const { data: sessionMetadata, isLoading: isLoadingSessionMeta, error: sessionMetaError } = useQuery<Session, Error>({
+    const { data: sessionMetadata, isLoading: isLoadingSessionMeta, error: sessionMetaError, isFetching: isFetchingSessionMeta } = useQuery<Session, Error>({
         queryKey: ['sessionMeta', sessionIdNum],
         queryFn: () => {
             if (!sessionIdNum) return Promise.reject(new Error("Invalid Session ID"));
@@ -62,6 +62,49 @@ export function SessionView() {
     });
 
     // Note: Chat details query (`useQuery(['chat', sessionId, chatId])`) is now inside ChatInterface component
+
+     // --- Mutations ---
+     // Moved startChatMutation here to be triggered by StartChatPrompt
+     const startChatMutation = useMutation({
+        mutationFn: () => {
+            if (!sessionIdNum) throw new Error("Session ID is missing");
+            return startNewChat(sessionIdNum);
+        },
+        onSuccess: (newChat) => {
+            // Update session meta cache optimistically or invalidate
+            queryClient.setQueryData<Session>(['sessionMeta', sessionIdNum], (oldData) => {
+                 if (!oldData) return oldData;
+                 const existingChats = Array.isArray(oldData.chats) ? oldData.chats : [];
+                 // Add only metadata of new chat
+                 // Ensure the object added conforms to ChatSession metadata part
+                 const newChatMetadata: ChatSession = {
+                    id: newChat.id,
+                    sessionId: newChat.sessionId, // Use sessionId from newChat response
+                    timestamp: newChat.timestamp,
+                    name: newChat.name,
+                    messages: [] // Start with empty messages
+                 };
+                 return { ...oldData, chats: [...existingChats, newChatMetadata] };
+            });
+            // OR invalidate: queryClient.invalidateQueries({ queryKey: ['sessionMeta', sessionIdNum] });
+
+            // Pre-fetch the new chat's details
+            queryClient.prefetchQuery({
+                queryKey: ['chat', sessionIdNum, newChat.id],
+                // Use fetchChatDetails with correct IDs from newChat response
+                // Explicitly type 'chat' parameter
+                queryFn: () => startNewChat(sessionIdNum!).then((chat: ChatSession) => fetchChatDetails(chat.sessionId, chat.id)),
+            });
+
+            // Navigate to the new chat immediately
+            navigate(`/sessions/${sessionIdNum}/chats/${newChat.id}`);
+            // Let useEffect handle setting activeChatId based on navigation
+        },
+        onError: (error) => {
+            console.error("Failed to start new chat:", error);
+            // TODO: Show toast or error message
+        }
+    });
 
     // --- Resizing Logic ---
     const handleMouseMove = useCallback((e: MouseEvent) => {
@@ -185,34 +228,11 @@ export function SessionView() {
     }, [handleMouseMove, handleMouseUp]);
 
 
-     // --- Mutations ---
-    const startChatMutation = useMutation({
-        mutationFn: () => {
-            if (!sessionIdNum) throw new Error("Session ID is missing");
-            return startNewChat(sessionIdNum);
-        },
-        onSuccess: (newChat) => {
-            // Invalidate session meta to get updated chat list
-            queryClient.invalidateQueries({ queryKey: ['sessionMeta', sessionIdNum] });
-            // Pre-fetch new chat details? Optional.
-            queryClient.prefetchQuery({
-                queryKey: ['chat', sessionIdNum, newChat.id],
-                queryFn: () => fetchChatDetails(sessionIdNum!, newChat.id), // Add null check for TS
-            });
-            // Navigate to the new chat
-            navigate(`/sessions/${sessionIdNum}/chats/${newChat.id}`);
-            // setActiveChatId(newChat.id); // Let the useEffect handle this via navigation
-        },
-        onError: (error) => {
-            console.error("Failed to start new chat:", error);
-            // TODO: Show toast or error message
-        }
-    });
-
-     const handleStartFirstChat = async () => {
+     const handleStartFirstChat = useCallback(async () => {
          if (startChatMutation.isPending) return;
          startChatMutation.mutate();
-     };
+     }, [startChatMutation]);
+
      const handleOpenEditMetadataModal = () => setIsEditingMetadata(true);
 
      // Removed: handleSaveTranscriptParagraph - handled by mutation within Transcription component
@@ -240,6 +260,7 @@ export function SessionView() {
     // Data ready for rendering
     const displayTitle = sessionMetadata.sessionName || sessionMetadata.fileName;
     const hasChats = sessionMetadata.chats && sessionMetadata.chats.length > 0;
+    const currentActiveChatIdFromParam = chatIdParam ? parseInt(chatIdParam, 10) : null; // Get chat ID from URL for content
 
     return (
         <Flex flexGrow="1" style={{ height: '100vh', overflow: 'hidden' }}>
@@ -253,7 +274,7 @@ export function SessionView() {
                 {/* Pass props to SessionSidebar, DO NOT hide header */}
                 <SessionSidebar
                     session={sessionMetadata ?? null} // Pass data
-                    isLoading={isLoadingSessionMeta}   // Pass loading state
+                    isLoading={isLoadingSessionMeta || isFetchingSessionMeta}   // Pass combined loading state
                     error={sessionMetaError ?? null}   // Pass error state
                     // hideHeader={false} // Default is false, no need to pass explicitly
                 />
@@ -289,12 +310,12 @@ export function SessionView() {
                         transcriptContent={transcriptContent} // Pass transcript content
                         onEditDetailsClick={handleOpenEditMetadataModal}
                         // onSaveTranscriptParagraph removed, handled in Transcription
-                        activeChatId={activeChatId}
+                        activeChatId={currentActiveChatIdFromParam ?? activeChatId} // Use URL param first, then Jotai state
                         hasChats={hasChats}
                         onStartFirstChat={handleStartFirstChat}
                         // Pass loading/error for session meta down to SessionContent
                         // so it can pass them to SessionSidebar in the tab view
-                        isLoadingSessionMeta={isLoadingSessionMeta}
+                        isLoadingSessionMeta={isLoadingSessionMeta || isFetchingSessionMeta}
                         sessionMetaError={sessionMetaError}
                         isLoadingTranscript={isLoadingTranscript}
                         transcriptError={transcriptError}

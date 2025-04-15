@@ -9,6 +9,7 @@ export interface ChatMessage {
 
 export interface ChatSession {
     id: number;
+    sessionId: number; // Added sessionId
     timestamp: number; // Keep timestamp for sorting/display
     name?: string; // Optional name for the chat
     // Messages are optional, as they might be loaded on demand when a chat is selected
@@ -28,5 +29,6 @@ export interface Session extends SessionMetadata {
     fileName: string;
     transcription: string;
     // Chats array might initially contain only metadata (ChatSession without messages)
+    // Ensure chats array elements conform to the updated ChatSession type
     chats: ChatSession[];
 }

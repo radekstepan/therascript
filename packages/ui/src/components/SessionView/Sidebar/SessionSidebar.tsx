@@ -4,10 +4,11 @@ import { useAtomValue } from 'jotai';
 import { useMutation, useQueryClient } from '@tanstack/react-query'; // Removed useQuery
 import {
     activeChatIdAtom, // Keep for knowing current selection
-    activeSessionIdAtom, // Keep for knowing current selection
+    // activeSessionIdAtom, // Keep for knowing current selection - NO, rely on sessionId from props
 } from '../../../store';
 // Removed fetchSession import
-import { deleteChat as deleteChatApi, renameChat as renameChatApi, startNewChat as startNewChatApi } from '../../../api/api';
+// Added fetchChatDetails import
+import { deleteChat as deleteChatApi, renameChat as renameChatApi, startNewChat as startNewChatApi, fetchChatDetails } from '../../../api/api';
 import {
     DotsHorizontalIcon,
     Pencil1Icon,
@@ -43,10 +44,11 @@ interface SessionSidebarProps {
 
 // Accept props
 export function SessionSidebar({ session, isLoading: isLoadingSession, error: sessionError, hideHeader = false }: SessionSidebarProps) {
-    const { sessionId: sessionIdParam } = useParams<{ sessionId: string; chatId?: string }>();
+    const { chatId: chatIdParam } = useParams<{ sessionId: string; chatId?: string }>(); // Only need chatIdParam here
     const navigate = useNavigate();
-    const currentActiveChatId = useAtomValue(activeChatIdAtom);
-    const currentActiveSessionId = useAtomValue(activeSessionIdAtom); // Get session ID from Jotai too
+    // Determine current active chat ID from URL param, falling back to Jotai if needed (though URL should be canonical)
+    const currentActiveChatId = chatIdParam ? parseInt(chatIdParam, 10) : useAtomValue(activeChatIdAtom);
+    // const currentActiveSessionId = useAtomValue(activeSessionIdAtom); // Session ID comes from props now
     const queryClient = useQueryClient();
 
     const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
@@ -58,7 +60,8 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
     const [deletingChat, setDeletingChat] = useState<ChatSession | null>(null);
     // const [deleteError, setDeleteError] = useState<string | null>(null); // Handled by mutation state
 
-    const sessionId = sessionIdParam ? parseInt(sessionIdParam, 10) : null;
+    // Get session ID from the session prop
+    const sessionId = session?.id ?? null;
 
     // REMOVED the useQuery hook for sessionMeta here
 
@@ -69,12 +72,34 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
             return startNewChatApi(sessionId);
         },
         onSuccess: (newChat) => {
-            // Update cache or invalidate
-            queryClient.invalidateQueries({ queryKey: ['sessionMeta', sessionId] });
+            // Update session meta cache optimistically or invalidate
+            queryClient.setQueryData<Session>(['sessionMeta', sessionId], (oldData) => {
+                 if (!oldData) return oldData;
+                 const existingChats = Array.isArray(oldData.chats) ? oldData.chats : [];
+                 // Add only metadata of new chat
+                 // Ensure the object added conforms to ChatSession metadata part
+                 const newChatMetadata: ChatSession = {
+                    id: newChat.id,
+                    sessionId: newChat.sessionId, // Use sessionId from newChat response
+                    timestamp: newChat.timestamp,
+                    name: newChat.name,
+                    messages: [] // Start with empty messages
+                 };
+                 return { ...oldData, chats: [...existingChats, newChatMetadata] };
+            });
+            // OR invalidate: queryClient.invalidateQueries({ queryKey: ['sessionMeta', sessionId] });
+
+             // Pre-fetch the new chat's details
+            queryClient.prefetchQuery({
+                queryKey: ['chat', sessionId, newChat.id],
+                // Use fetchChatDetails with correct IDs from newChat response
+                queryFn: () => fetchChatDetails(newChat.sessionId, newChat.id),
+            });
+
             // Navigate to the new chat immediately
             navigate(`/sessions/${sessionId}/chats/${newChat.id}`);
         },
-        onError: (error) => console.error("Failed to start new chat:", error), // TODO: User feedback
+        onError: (error) => console.error("Failed to start new chat:", error), // TODO: User feedback (Toast?)
     });
 
     // Mutation: Rename Chat
@@ -83,8 +108,27 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
             if (!sessionId) throw new Error("Session ID missing");
             return renameChatApi(sessionId, variables.chatId, variables.newName);
         },
-        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['sessionMeta', sessionId] }),
-        onError: (error) => console.error("Failed to rename chat:", error), // TODO: User feedback
+        onSuccess: (updatedChatMetadata) => {
+             // Update session meta cache optimistically
+             queryClient.setQueryData<Session>(['sessionMeta', sessionId], (oldData) => {
+                 if (!oldData) return oldData;
+                 return {
+                     ...oldData,
+                     chats: (oldData.chats || []).map(chat =>
+                         chat.id === updatedChatMetadata.id ? { ...chat, name: updatedChatMetadata.name } : chat
+                     ),
+                 };
+             });
+             // OR invalidate: queryClient.invalidateQueries({ queryKey: ['sessionMeta', sessionId] });
+
+              // Also update the specific chat query cache if it exists
+              queryClient.setQueryData<ChatSession>(['chat', sessionId, updatedChatMetadata.id], (oldChatData) => {
+                   if (!oldChatData) return oldChatData;
+                   return { ...oldChatData, name: updatedChatMetadata.name };
+              });
+            cancelRename(); // Close modal on success
+        },
+        onError: (error) => console.error("Failed to rename chat:", error), // Error message shown in modal via mutation state
     });
 
     // Mutation: Delete Chat
@@ -95,16 +139,31 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
         },
         onSuccess: (data, deletedChatId) => {
             let nextChatId: number | null = null;
-            if (currentActiveChatId === deletedChatId) {
-                const sessionData = queryClient.getQueryData<Session>(['sessionMeta', sessionId]);
-                const remainingChats = sessionData?.chats?.filter(c => c.id !== deletedChatId) || [];
+            // Determine next navigation target *before* modifying cache
+            const sessionDataBeforeDelete = queryClient.getQueryData<Session>(['sessionMeta', sessionId]);
+            const remainingChats = sessionDataBeforeDelete?.chats?.filter(c => c.id !== deletedChatId) || [];
+
+            if (currentActiveChatId === deletedChatId) { // Only navigate if the *deleted* chat was active
                 if (remainingChats.length > 0) {
                     const newestChat = [...remainingChats].sort((a, b) => b.timestamp - a.timestamp)[0];
                     nextChatId = newestChat.id;
                 }
             }
-            queryClient.invalidateQueries({ queryKey: ['sessionMeta', sessionId] });
+
+            // Update session meta cache optimistically
+            queryClient.setQueryData<Session>(['sessionMeta', sessionId], (oldData) => {
+                 if (!oldData) return oldData;
+                 return {
+                     ...oldData,
+                     chats: oldData.chats?.filter(c => c.id !== deletedChatId) || [],
+                 };
+            });
+            // OR invalidate: queryClient.invalidateQueries({ queryKey: ['sessionMeta', sessionId] });
+
+            // Remove the specific chat query from cache
             queryClient.removeQueries({ queryKey: ['chat', sessionId, deletedChatId] });
+
+            // Perform navigation if needed
             if (currentActiveChatId === deletedChatId) {
                 if (nextChatId !== null) {
                     navigate(`/sessions/${sessionId}/chats/${nextChatId}`, { replace: true });
@@ -112,8 +171,9 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
                     navigate(`/sessions/${sessionId}`, { replace: true });
                 }
             }
+             cancelDelete(); // Close modal on success
         },
-        onError: (error) => console.error("Failed to delete chat:", error), // TODO: User feedback
+        onError: (error) => console.error("Failed to delete chat:", error), // Error message shown in modal via mutation state
     });
 
 
@@ -145,19 +205,19 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
     const handleNewChatClick = () => startNewChatMutation.mutate();
     const handleRenameClick = (chat: ChatSession) => { setRenamingChat(chat); setCurrentRenameValue(chat.name || ''); setIsRenameModalOpen(true); };
     const handleSaveRename = () => {
-        if (!renamingChat) return;
+        if (!renamingChat || renameChatMutation.isPending) return;
         renameChatMutation.mutate({ chatId: renamingChat.id, newName: currentRenameValue.trim() || null });
-        cancelRename();
+        // Don't close modal here, onSuccess will handle it
     };
-    const cancelRename = () => { setIsRenameModalOpen(false); setRenamingChat(null); setCurrentRenameValue(''); };
+    const cancelRename = () => { setIsRenameModalOpen(false); setRenamingChat(null); setCurrentRenameValue(''); renameChatMutation.reset(); };
 
     const handleDeleteClick = (chat: ChatSession) => { setDeletingChat(chat); setIsDeleteConfirmOpen(true); };
     const confirmDelete = () => {
-        if (!deletingChat) return;
+        if (!deletingChat || deleteChatMutation.isPending) return;
         deleteChatMutation.mutate(deletingChat.id);
-        cancelDelete();
+         // Don't close modal here, onSuccess will handle it
     };
-    const cancelDelete = () => { setIsDeleteConfirmOpen(false); setDeletingChat(null); };
+    const cancelDelete = () => { setIsDeleteConfirmOpen(false); setDeletingChat(null); deleteChatMutation.reset(); };
 
     const getNavLinkClass = ({ isActive }: { isActive: boolean }): string => {
         const base = "block w-full px-2 py-1.5 rounded-md group";
@@ -276,16 +336,18 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
                         {renameChatMutation.isError && <Text color="red" size="1">Error: {renameChatMutation.error.message}</Text>}
                     </Flex>
                     <Flex gap="3" mt="4" justify="end">
-                        <AlertDialog.Cancel><Button variant="soft" color="gray" onClick={cancelRename} disabled={renameChatMutation.isPending}>
-                           <Cross2Icon /> Cancel
-                        </Button></AlertDialog.Cancel>
-                        <AlertDialog.Action><Button onClick={handleSaveRename} disabled={renameChatMutation.isPending}>
+                        {/* Use Button with onClick for Cancel, not AlertDialog.Cancel to prevent closing while pending */}
+                         <Button variant="soft" color="gray" onClick={cancelRename} disabled={renameChatMutation.isPending}>
+                            <Cross2Icon /> Cancel
+                         </Button>
+                         {/* Use Button with onClick for Action */}
+                         <Button onClick={handleSaveRename} disabled={renameChatMutation.isPending}>
                             {renameChatMutation.isPending ? (
                                 <> <Spinner size="2"/> <Text ml="1">Saving...</Text> </>
                             ) : (
                                 <> <CheckIcon /> Save </>
                             )}
-                        </Button></AlertDialog.Action>
+                         </Button>
                     </Flex>
                  </AlertDialog.Content>
             </AlertDialog.Root>
@@ -295,18 +357,20 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
                 <AlertDialog.Content style={{ maxWidth: 450 }}>
                     <AlertDialog.Title>Delete Chat</AlertDialog.Title>
                     {deletingChat && <AlertDialog.Description size="2" color="gray" mt="1" mb="4">Are you sure you want to delete "{getChatDisplayTitle(deletingChat)}"? This action cannot be undone.</AlertDialog.Description>}
+                    {deleteChatMutation.isError && <Text color="red" size="1" mb="3">Error: {deleteChatMutation.error.message}</Text>}
                     <Flex gap="3" mt="4" justify="end">
-                        {deleteChatMutation.isError && <Text color="red" size="1" mr="auto">Error: {deleteChatMutation.error.message}</Text>}
-                        <AlertDialog.Cancel><Button variant="soft" color="gray" onClick={cancelDelete} disabled={deleteChatMutation.isPending}>
+                        {/* Use Button with onClick for Cancel */}
+                         <Button variant="soft" color="gray" onClick={cancelDelete} disabled={deleteChatMutation.isPending}>
                             <Cross2Icon /> Cancel
-                        </Button></AlertDialog.Cancel>
-                        <AlertDialog.Action><Button color="red" onClick={confirmDelete} disabled={deleteChatMutation.isPending}>
+                         </Button>
+                         {/* Use Button with onClick for Action */}
+                         <Button color="red" onClick={confirmDelete} disabled={deleteChatMutation.isPending}>
                             {deleteChatMutation.isPending ? (
                                 <> <Spinner size="2"/> <Text ml="1">Deleting...</Text> </>
                             ) : (
                                 <> <TrashIcon /> Delete </>
                             )}
-                        </Button></AlertDialog.Action>
+                         </Button>
                     </Flex>
                  </AlertDialog.Content>
             </AlertDialog.Root>

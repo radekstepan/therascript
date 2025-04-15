@@ -3,14 +3,13 @@ import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { StarIcon, PaperPlaneIcon, StopIcon, Cross2Icon } from '@radix-ui/react-icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import * as Toast from '@radix-ui/react-toast';
-import { TextField, Flex, Box, Text, IconButton } from '@radix-ui/themes';
+import { TextField, Flex, Box, Text, IconButton, Spinner } from '@radix-ui/themes'; // Added Spinner
 import { StarredTemplatesList } from './StarredTemplates';
 import { addChatMessage } from '../../../api/api';
 import {
     currentQueryAtom,
     activeSessionIdAtom,
     activeChatIdAtom,
-    chatErrorAtom, // Keep for input validation errors?
     toastMessageAtom,
 } from '../../../store';
 import type { ChatSession } from '../../../types';
@@ -23,7 +22,7 @@ export function ChatInput({ disabled = false }: ChatInputProps) {
     const [currentQuery, setCurrentQuery] = useAtom(currentQueryAtom);
     const activeSessionId = useAtomValue(activeSessionIdAtom);
     const activeChatId = useAtomValue(activeChatIdAtom);
-    // Use local state for input-specific errors, keep Jotai atom if needed elsewhere
+    // Use local state for input-specific errors
     const [inputError, setInputError] = useState('');
     const toastMessageContent = useAtomValue(toastMessageAtom);
     const setToastMessageAtom = useSetAtom(toastMessageAtom);
@@ -46,11 +45,9 @@ export function ChatInput({ disabled = false }: ChatInputProps) {
             const queryKey = ['chat', activeSessionId, activeChatId];
             queryClient.setQueryData<ChatSession>(queryKey, (oldData) => {
                 if (!oldData) {
-                    // If cache is empty (e.g., first message), create it
-                    // This requires knowing the chat metadata (id, timestamp, name)
-                    // which isn't available here easily.
-                    // Invalidation is safer if cache might not exist.
-                    console.warn("Chat cache was empty, invalidating instead of setting.");
+                    // If cache is empty (e.g., first message after starting chat),
+                    // it's better to invalidate and let the query refetch the full chat.
+                    console.warn("Chat cache was empty or incomplete, invalidating instead of setting.");
                     queryClient.invalidateQueries({ queryKey });
                     return undefined; // Let invalidation handle refetch
                 }
@@ -67,7 +64,9 @@ export function ChatInput({ disabled = false }: ChatInputProps) {
         },
         onError: (error) => {
             console.error("Failed to send message:", error);
-            setInputError('Failed to send message. Please try again.');
+            setInputError(`Failed to get response: ${error.message}`);
+             // Optionally, re-add the user's message to the input field if desired on error?
+             // setCurrentQuery(variables); // `variables` is the `text` sent
         },
     });
 
@@ -84,6 +83,10 @@ export function ChatInput({ disabled = false }: ChatInputProps) {
         // Clear input-specific errors when user types
         if ((inputError === "Cannot send an empty message." || inputError === "Please select a chat first.") && currentQuery !== '') {
             setInputError('');
+        }
+        // Clear API errors when user types again
+        if (inputError.startsWith("Failed to get response:") && currentQuery !== '') {
+             setInputError('');
         }
     }, [currentQuery, inputError]);
 
@@ -103,11 +106,6 @@ export function ChatInput({ disabled = false }: ChatInputProps) {
         if (isDisabled) {
              console.log("Submit prevented: ChatInput is disabled or AI is responding.");
              return false;
-        }
-        if (isAiResponding) {
-            // Toast might be annoying, maybe just rely on button disabled state
-            // setToastMessageAtom("Please wait for the AI to finish responding.");
-            return false;
         }
         if (!currentQuery.trim()) {
             setInputError("Cannot send an empty message.");
@@ -146,10 +144,14 @@ export function ChatInput({ disabled = false }: ChatInputProps) {
 
     const handleCancelClick = (e: React.MouseEvent<HTMLButtonElement>) => {
         e.preventDefault();
+        // TODO: Implement cancellation if the API supports it (e.g., via AbortController)
+        // For now, just show a toast or log.
         setToastMessageAtom("Cancellation not supported by backend yet.");
+        console.warn("Cancellation attempt - not implemented.");
         if (!isDisabled && inputRef.current) { // Check combined disabled state
            inputRef.current.focus();
         }
+        // addMessageMutation.reset(); // Or potentially try to cancel the underlying fetch
     };
 
     const handleToastOpenChange = (open: boolean) => {
@@ -184,7 +186,7 @@ export function ChatInput({ disabled = false }: ChatInputProps) {
                         ref={inputRef}
                         size="2"
                         style={{ flexGrow: 1 }}
-                        placeholder="Ask about the session..."
+                        placeholder={isAiResponding ? "AI is responding..." : "Ask about the session..."}
                         value={currentQuery}
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCurrentQuery(e.target.value)}
                         disabled={inputFieldDisabled}
@@ -211,10 +213,10 @@ export function ChatInput({ disabled = false }: ChatInputProps) {
                             size="2"
                             onClick={handleSubmitClick}
                             disabled={sendButtonDisabled}
-                            title="Send message"
-                            aria-label="Send message"
+                            title={isAiResponding ? "AI is responding..." : "Send message"}
+                            aria-label={isAiResponding ? "AI is responding" : "Send message"}
                         >
-                            <PaperPlaneIcon />
+                            {isAiResponding ? <Spinner size="1" /> : <PaperPlaneIcon />}
                         </IconButton>
                     )}
                 </Flex>

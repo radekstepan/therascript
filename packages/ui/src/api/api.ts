@@ -68,7 +68,13 @@ export const updateTranscriptParagraph = async (
 export const startNewChat = async (sessionId: number): Promise<ChatSession> => {
     // This likely returns the new chat metadata, potentially without messages initially
     const response = await axios.post(`/api/sessions/${sessionId}/chats/`);
-    return response.data; // Returns ChatSession metadata (likely no messages)
+    // The response type from the backend should match ChatSession metadata (no messages)
+    // Map it to ChatSession type for consistency, knowing messages might be missing
+    const chatMetadata = response.data;
+    return {
+        ...chatMetadata,
+        messages: [] // Initialize with empty messages array
+    };
 };
 
 // POST /api/sessions/{sessionId}/chats/{chatId}/messages
@@ -78,6 +84,7 @@ export const addChatMessage = async (
     text: string
 ): Promise<{ userMessage: ChatMessage; aiMessage: ChatMessage }> => {
     const response = await axios.post(`/api/sessions/${sessionId}/chats/${chatId}/messages`, { text });
+    // The response type from the backend should match { userMessage: ChatMessage; aiMessage: ChatMessage }
     return response.data;
 };
 
@@ -85,7 +92,13 @@ export const addChatMessage = async (
 export const renameChat = async (sessionId: number, chatId: number, name: string | null): Promise<ChatSession> => {
     // Returns updated chat metadata
     const response = await axios.patch(`/api/sessions/${sessionId}/chats/${chatId}/name`, { name });
-    return response.data;
+    // Map response to ChatSession type, messages will be missing
+    const chatMetadata = response.data;
+    return {
+        ...chatMetadata,
+        // Messages are not returned by this endpoint, so keep them undefined or empty
+        messages: undefined
+    };
 };
 
 // DELETE /api/sessions/{sessionId}/chats/{chatId}
