@@ -1,3 +1,4 @@
+// packages/ui/src/App.tsx
 import React from 'react';
 import { useAtomValue } from 'jotai';
 import { Routes, Route, Navigate } from 'react-router-dom';
@@ -15,8 +16,13 @@ import {
   effectiveThemeAtom, // Keep UI atoms
 } from './store';
 
-// TODO should be coming from config
-axios.defaults.baseURL = 'http://localhost:3001';
+// TODO: This should come from config/environment variables, not hardcoded.
+// Setting up proper environment variable handling in Webpack requires
+// additional configuration (e.g., DefinePlugin or dotenv-webpack).
+// Using hardcoded default for now as `process.env` is not available in browser.
+const API_BASE_URL = 'http://localhost:3001';
+axios.defaults.baseURL = API_BASE_URL;
+console.log(`[App] Axios base URL set to: ${axios.defaults.baseURL}`);
 
 // TODO include an Error Boundary
 function App() {
@@ -25,7 +31,7 @@ function App() {
   // Access queryClient if needed for global actions (though mutations handle most)
   // const queryClient = useQueryClient();
 
-  // TODO wtf is 2147483647
+  // TODO wtf is 2147483647 (It's Radix's default high z-index for toasts)
   return (
     <Toast.Provider swipeDirection="right">
       <Theme appearance={effectiveTheme} accentColor="teal" panelBackground="solid" radius="small" scaling="100%">

@@ -3,6 +3,16 @@ import { Button, TextArea, Flex, Box, IconButton } from '@radix-ui/themes';
 import { Pencil1Icon, CheckIcon, Cross1Icon, PlayIcon, UpdateIcon } from '@radix-ui/react-icons';
 import { cn } from '../../utils';
 
+// Moved outside component as it doesn't depend on props/state
+const textStyles = {
+    whiteSpace: 'pre-wrap' as const,
+    fontFamily: 'var(--font-mono)',
+    fontSize: 'var(--font-size-2)', // Use theme font size
+    lineHeight: 'var(--line-height-3)', // Use theme line height
+    wordBreak: 'break-word' as const,
+    color: 'var(--gray-a12)', // Use theme text color
+};
+
 interface TranscriptParagraphProps {
     paragraph: string;
     index: number;
@@ -96,17 +106,6 @@ export function TranscriptParagraph({
     const handlePlayClick = () => {
         console.log(`▶️ Simulate PLAY event for paragraph index ${index}: "${paragraph.substring(0, 70)}..."`);
         // TODO Add actual audio playback logic here if needed
-    };
-
-    // Common text styles for display and edit modes
-    // TODO these should be outside of this component
-    const textStyles = {
-        whiteSpace: 'pre-wrap' as const,
-        fontFamily: 'var(--font-mono)',
-        fontSize: 'var(--font-size-2)', // Use theme font size
-        lineHeight: 'var(--line-height-3)', // Use theme line height
-        wordBreak: 'break-word' as const,
-        color: 'var(--gray-a12)', // Use theme text color
     };
 
     // Function to render the paragraph content (visible or hidden for layout)

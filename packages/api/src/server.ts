@@ -1,13 +1,41 @@
+// packages/api/src/server.ts
 import http from 'node:http';
 import { WritableStream } from 'node:stream/web';
 import { Elysia, ValidationError } from 'elysia';
 import { cors } from '@elysiajs/cors';
 import { swagger } from '@elysiajs/swagger';
-import config from './config/index.js';
-import { checkDatabaseHealth } from './db/dbAccess.js';
+import config from './config/index.js'; // Import config
+// Removed dbAccess import, db interaction is checked on startup in sqliteService
+// import { checkDatabaseHealth } from './db/dbAccess.js';
 import { sessionRoutes } from './routes/sessionRoutes.js';
 import { chatRoutes } from './routes/chatRoutes.js';
 import { ApiError, InternalServerError, ConflictError } from './errors.js';
+
+// Helper function to read package.json version (added at the top level)
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+let appVersion = '0.0.0'; // Default version
+try {
+    // Navigate up from dist/ to find package.json
+    const packageJsonPath = path.resolve(__dirname, '../package.json');
+    if (fs.existsSync(packageJsonPath)) {
+        const packageJsonContent = fs.readFileSync(packageJsonPath, 'utf-8');
+        const packageJson = JSON.parse(packageJsonContent);
+        appVersion = packageJson.version || appVersion;
+        console.log(`[Server Init] Read app version from package.json: ${appVersion}`);
+    } else {
+         console.warn(`[Server Init] Could not find package.json at ${packageJsonPath} to read version.`);
+    }
+} catch (error) {
+    console.error('[Server Init] Error reading package.json version:', error);
+}
+// --- End Package Version Read ---
+
 
 console.log(`[Server] Starting Elysia application in ${config.server.nodeEnv} mode...`);
 
@@ -21,12 +49,18 @@ const getErrorStack = (error: unknown): string | undefined => {
     return undefined;
 };
 
+console.log(`[CORS Config] Allowing origin: ${config.server.corsOrigin}`); // Log the origin being used
+
 const app = new Elysia()
     .use(cors({
-        origin: '*', // Allow any origin for now (insecure for production!)
+        // Use the specific origin from the config file
+        origin: config.server.corsOrigin,
         methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-        allowedHeaders: ['Content-Type', 'Authorization', '*'], // Allow common headers + wildcard for testing
-        // credentials: true, // must be false when origin is '*'
+        // Allowed headers - '*' might be too broad, but okay for dev.
+        // For production, list specific headers like 'Content-Type', 'Authorization'.
+        allowedHeaders: ['Content-Type', 'Authorization', '*'],
+        // Credentials might be needed if you add authentication later
+        // credentials: true, // MUST NOT be true if origin is '*'
     }))
     // Logging middleware
     .onRequest(({ request }) => {
@@ -42,8 +76,8 @@ const app = new Elysia()
         path: '/api/docs',
         exclude: ['/api/docs', '/api/docs/json', '/api/health', '/api/schema'],
         documentation: {
-            // TODO: sync with version from package.json
-            info: { title: 'Therascript API (Elysia)', version: '1.0.0' },
+            // Use version read from package.json
+            info: { title: 'Therascript API (Elysia)', version: appVersion },
             tags: []
         }
     }))
@@ -65,6 +99,21 @@ const app = new Elysia()
             if (!(error instanceof Error)) console.error("Full Error Object:", error);
         }
 
+        // Specific check for CORS preflight failure symptoms
+        if (code === 'UNKNOWN' && method === 'OPTIONS') {
+             console.warn("[Error Handler] Possible CORS preflight failure for OPTIONS request. Check allowedMethods/Headers in CORS config.");
+             // Return 204 No Content for successful OPTIONS requests handled by cors plugin
+             // If it reaches here with UNKNOWN, something else might be wrong
+             set.status = 204;
+             return;
+        }
+         if (code === 'NOT_FOUND' && method === 'OPTIONS') {
+             console.warn("[Error Handler] OPTIONS request resulted in 404. Check route definitions and CORS middleware.");
+             set.status = 204; // Still respond with 204 for OPTIONS 404
+             return;
+         }
+
+
         if (error instanceof ApiError) {
             set.status = error.status;
             return { error: error.name, message: error.message, details: error.details };
@@ -73,13 +122,8 @@ const app = new Elysia()
         switch (code) {
             case 'NOT_FOUND':
                 set.status = 404;
-                 if (method === 'OPTIONS') {
-                     console.warn("[Error] OPTIONS request resulted in 404. Check CORS middleware order and config.");
-                     // Avoid sending a typical JSON 404 body for OPTIONS, let browser handle it
-                     set.status = 204;
-                     return;
-                 }
-                 return { error: 'NotFound', message: `Route ${method} ${path} not found.` };
+                // Already handled OPTIONS above
+                return { error: 'NotFound', message: `Route ${method} ${path} not found.` };
             case 'INTERNAL_SERVER_ERROR':
                 const internalError = new InternalServerError('An unexpected internal error occurred.', error instanceof Error ? error : undefined);
                 set.status = internalError.status;
@@ -91,18 +135,21 @@ const app = new Elysia()
                 const validationDetails = error instanceof ValidationError ? error.all : undefined;
                 set.status = 400; // Use 400 for validation errors
                 return { error: 'ValidationError', message: 'Request validation failed.', details: errorMessage, validationErrors: validationDetails };
-            case 'UNKNOWN':
-                console.error("[Error] Unknown Elysia Error Code:", error);
+            case 'UNKNOWN': // Already handled OPTIONS above
+                console.error("[Error Handler] Unknown Elysia Error Code (Non-OPTIONS):", error);
                 const unknownInternalError = new InternalServerError('An unknown internal error occurred.', error instanceof Error ? error : undefined);
                 set.status = unknownInternalError.status;
                 return { error: unknownInternalError.name, message: unknownInternalError.message, details: unknownInternalError.details };
             default:
+                 // If it's an OPTIONS request that somehow didn't match above, return 204.
                  if (method === 'OPTIONS') {
                      set.status = 204;
                      return;
                  }
-                 break;
+                 break; // Let other errors fall through
         }
+
+        // --- Database Error Handling ---
         const sqliteCode = (error as any)?.code;
         if (typeof sqliteCode === 'string' && sqliteCode.startsWith('SQLITE_')) {
             if (sqliteCode === 'SQLITE_CONSTRAINT_UNIQUE' || sqliteCode.includes('CONSTRAINT')) {
@@ -115,7 +162,9 @@ const app = new Elysia()
                 return { error: dbError.name, message: dbError.message, details: dbError.details };
             }
         }
-        console.error("[Error] Unhandled Error Type:", error);
+
+        // --- Fallback Error Handling ---
+        console.error("[Error Handler] Unhandled Error Type:", error);
         const fallbackError = new InternalServerError('An unexpected server error occurred.', error instanceof Error ? error : undefined);
         set.status = fallbackError.status;
         return { error: fallbackError.name, message: fallbackError.message, details: fallbackError.details };
@@ -123,7 +172,8 @@ const app = new Elysia()
     // API Routes
     .get('/api/health', ({ set }) => {
         try {
-            checkDatabaseHealth();
+            // db is initialized and accessible via sqliteService, check occurs on start
+            // checkDatabaseHealth(); // Removed call
             set.status = 200;
             return { status: 'OK', database: 'connected', timestamp: new Date().toISOString() };
         } catch (dbError) {
@@ -206,7 +256,9 @@ const server = http.createServer((req, res) => {
 server.listen(config.server.port, () => {
     console.log(`-------------------------------------------------------`);
     console.log(`🚀 Therapy Analyzer Backend (Elysia/Node) listening on port ${config.server.port}`);
+    console.log(`   Version: ${appVersion}`); // Log the version
     console.log(`   Mode: ${config.server.nodeEnv}`);
+    console.log(`   CORS Origin Allowed: ${config.server.corsOrigin}`); // Log CORS Origin
     console.log(`   DB Path: ${config.db.sqlitePath}`);
     console.log(`   Ollama URL: ${config.ollama.baseURL}`);
     console.log(`   Ollama Model: ${config.ollama.model}`);

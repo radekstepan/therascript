@@ -1,8 +1,8 @@
-// src/components/SessionView/index.ts
+export { SessionView } from './SessionView'; // Explicitly export SessionView
 
-// Main View Component
-export * from './SessionView';
-export * from './SessionContent'; // Layout component
+// Export SessionContent separately if needed elsewhere,
+// otherwise it's primarily used within SessionView
+export { SessionContent } from './SessionContent'; // Explicitly export SessionContent
 
 // Chat Components
 export * from './Chat/ChatHeader';

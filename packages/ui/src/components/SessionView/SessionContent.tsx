@@ -4,6 +4,7 @@ import type { Session, SessionMetadata } from '../../types';
 import { Transcription } from './Transcription/Transcription';
 import { ChatInterface } from './Chat/ChatInterface';
 import { StartChatPrompt } from './Chat/StartChatPrompt';
+// Removed the circular import: import { SessionContent } from './SessionContent';
 
 interface SessionContentProps {
     session: Session; // Keep full session for metadata display? Or pass specific metadata
@@ -13,12 +14,13 @@ interface SessionContentProps {
     activeChatId: number | null;
     hasChats: boolean;
     onStartFirstChat: () => void;
-    isLoadingChat: boolean | undefined; // Undefined means let ChatInterface handle it
+    // Pass the loading state for the session metadata
+    isLoadingSessionMeta: boolean;
     isLoadingTranscript: boolean;
     transcriptError?: Error | null;
 }
 
-export function SessionContent({
+export function SessionContent({ // Ensure this component is exported
     session,
     onEditDetailsClick,
     // onSaveTranscriptParagraph, // Removed
@@ -26,7 +28,8 @@ export function SessionContent({
     activeChatId,
     hasChats,
     onStartFirstChat,
-    isLoadingChat,
+    // Receive session meta loading state
+    isLoadingSessionMeta,
     isLoadingTranscript,
     transcriptError,
  }: SessionContentProps) {
@@ -64,7 +67,7 @@ export function SessionContent({
                             // Pass session down
                             session={session}
                             activeChatId={activeChatId} // Pass activeChatId
-                            isLoadingChat={!!isLoadingChat} // Pass down loading state (ensure boolean)
+                            isLoadingSessionMeta={isLoadingSessionMeta} // Pass down session meta loading state
                         />
                     ) : hasChats ? (
                         <Box className="flex flex-grow items-center justify-center h-full" style={{ border: '2px dashed var(--gray-a6)', borderRadius: 'var(--radius-3)' }}>
@@ -121,7 +124,7 @@ export function SessionContent({
                                 // Pass session down
                                 session={session}
                                 activeChatId={activeChatId} // Pass activeChatId
-                                isLoadingChat={!!isLoadingChat} // Pass down loading state (ensure boolean)
+                                isLoadingSessionMeta={isLoadingSessionMeta} // Pass down session meta loading state
                                 isTabActive={activeTab === 'chat'}
                                 initialScrollTop={chatScrollPosition}
                                 onScrollUpdate={handleChatScroll}

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback } from 'react'; // Import useCallback
 import { useNavigate } from 'react-router-dom';
 import {
     FileTextIcon,
@@ -8,6 +8,7 @@ import {
 import { Table, Badge, Text, Flex } from '@radix-ui/themes';
 import type { Session } from '../../types';
 import type { SessionSortCriteria, SortDirection } from '../../store';
+import { sessionColorMap, therapyColorMap } from '../../constants'; // Import color maps
 
 interface SessionListTableProps {
     sessions: Session[];
@@ -17,32 +18,13 @@ interface SessionListTableProps {
 }
 
 // Define the specific allowed values for aria-sort
-// TODO import an enum from somewhere
 type AriaSort = 'none' | 'ascending' | 'descending' | 'other' | undefined;
 
-// TODO move these to constants
-const sessionColorMap: Record<string, React.ComponentProps<typeof Badge>['color']> = {
-    'individual': 'blue',
-    'phone': 'sky',
-    'skills group': 'teal',
-    'family session': 'green',
-    'family skills': 'green',
-    'couples': 'indigo',
-    'couples individual': 'plum',
-    'default': 'gray'
-};
-
-const therapyColorMap: Record<string, React.ComponentProps<typeof Badge>['color']> = {
-    'act': 'purple',
-    'dbt': 'amber',
-    'cbt': 'lime',
-    'erp': 'ruby',
-    'mindfulness': 'cyan',
-    'couples act': 'violet',
-    'couples dbt': 'yellow',
-    'dbt skills': 'orange',
-    'default': 'pink'
-};
+// Moved outside component as it doesn't depend on props/state
+const getBadgeColor = (type: string | undefined, category: 'session' | 'therapy'): React.ComponentProps<typeof Badge>['color'] => {
+    const map = category === 'session' ? sessionColorMap : therapyColorMap;
+    return type ? (map[type.toLowerCase()] || map['default']) : map['default'];
+}
 
 export function SessionListTable({ sessions, sortCriteria, sortDirection, onSort }: SessionListTableProps) {
     const navigate = useNavigate();
@@ -52,7 +34,8 @@ export function SessionListTable({ sessions, sortCriteria, sortDirection, onSort
         navigate(`/sessions/${sessionId}`);
     };
 
-    const renderSortIcon = (criteria: SessionSortCriteria) => {
+    // Use useCallback to memoize the function
+    const renderSortIcon = useCallback((criteria: SessionSortCriteria) => {
         if (sortCriteria !== criteria) {
             return <ChevronDownIcon className="h-3 w-3 ml-1 text-[--gray-a9] opacity-0 group-hover:opacity-100 transition-opacity" />;
         }
@@ -60,10 +43,10 @@ export function SessionListTable({ sessions, sortCriteria, sortDirection, onSort
             return <ChevronUpIcon className="h-4 w-4 ml-1 text-[--gray-a11]" />;
         }
         return <ChevronDownIcon className="h-4 w-4 ml-1 text-[--gray-a11]" />;
-    };
+    }, [sortCriteria, sortDirection]); // Dependencies
 
-    // TODO annoying fns defined anew on each render
-    const getHeaderCellProps = (criteria: SessionSortCriteria): React.ThHTMLAttributes<HTMLTableHeaderCellElement> => {
+    // Use useCallback to memoize the function
+    const getHeaderCellProps = useCallback((criteria: SessionSortCriteria): React.ThHTMLAttributes<HTMLTableHeaderCellElement> => {
         const isActiveSortColumn = sortCriteria === criteria;
         const sortValue: AriaSort = isActiveSortColumn
             ? (sortDirection === 'asc' ? 'ascending' : 'descending')
@@ -74,13 +57,7 @@ export function SessionListTable({ sessions, sortCriteria, sortDirection, onSort
             'aria-sort': sortValue,
             style: { cursor: 'pointer', whiteSpace: 'nowrap' },
         };
-    };
-
-    // TODO do this outside
-    const getBadgeColor = (type: string | undefined, category: 'session' | 'therapy'): React.ComponentProps<typeof Badge>['color'] => {
-        const map = category === 'session' ? sessionColorMap : therapyColorMap;
-        return type ? (map[type.toLowerCase()] || map['default']) : map['default'];
-    }
+    }, [sortCriteria, sortDirection, onSort]); // Dependencies
 
     return (
         // Use Themes Table component

@@ -283,8 +283,8 @@ export function SessionView() {
                         activeChatId={activeChatId}
                         hasChats={hasChats}
                         onStartFirstChat={handleStartFirstChat}
-                        // Let ChatInterface handle its own loading state based on its query
-                        isLoadingChat={undefined}
+                        // Pass the correct loading state prop
+                        isLoadingSessionMeta={isLoadingSessionMeta} // Pass session meta loading state
                         isLoadingTranscript={isLoadingTranscript}
                         transcriptError={transcriptError}
                     />

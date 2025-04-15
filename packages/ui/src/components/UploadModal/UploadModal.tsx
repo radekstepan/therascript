@@ -4,7 +4,12 @@ import { useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Dialog, Button, Flex, Text, TextField, Select, Box, Spinner, Strong, Callout } from '@radix-ui/themes';
 import { UploadIcon, InfoCircledIcon, CheckCircledIcon } from '@radix-ui/react-icons';
-import { SESSION_TYPES, THERAPY_TYPES } from '../../constants';
+import {
+    SESSION_TYPES,
+    THERAPY_TYPES,
+    ALLOWED_AUDIO_MIME_TYPES, // Import allowed types
+    ALLOWED_AUDIO_EXTENSIONS, // Import allowed extensions
+} from '../../constants';
 import { getTodayDateString } from '../../helpers';
 // Import API functions used in this file
 import { uploadSession, fetchSession, fetchTranscript } from '../../api/api';
@@ -91,17 +96,16 @@ export function UploadModal({ isOpen }: UploadModalProps) {
     else if (e.type === "dragleave") setDragActive(false);
   };
 
-  // TODO the filetype should come from consts (API?)
   const handleFileSelection = (file: File | null) => {
-    // Basic client-side validation
-    if (file && file.type === 'audio/mpeg') {
+    // Basic client-side validation using constants
+    if (file && ALLOWED_AUDIO_MIME_TYPES.includes(file.type)) {
       setModalFile(file);
       setFormError(null); // Clear previous file errors
       if (!sessionNameInput) setSessionNameInput(file.name.replace(/\.[^/.]+$/, ""));
     } else {
       setModalFile(null);
-      // TODO return the supported types
-      if (file) setFormError('Invalid file type. Please upload an MP3 audio file.');
+      // Improve error message
+      if (file) setFormError(`Invalid file type. Please upload an audio file (${ALLOWED_AUDIO_EXTENSIONS.join(', ')}).`);
       else setFormError(null); // Clear error if file is removed
     }
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -130,7 +134,7 @@ export function UploadModal({ isOpen }: UploadModalProps) {
     uploadMutation.reset(); // Reset mutation error state
 
     let missingFields = [];
-    if (!modalFile) missingFields.push("Audio File (.mp3)");
+    if (!modalFile) missingFields.push(`Audio File (${ALLOWED_AUDIO_EXTENSIONS.join(', ')})`);
     if (!clientNameInput.trim()) missingFields.push("Client Name");
     if (!sessionNameInput.trim()) missingFields.push("Session Name");
     if (!sessionDate) missingFields.push("Date");
@@ -157,7 +161,7 @@ export function UploadModal({ isOpen }: UploadModalProps) {
       }
     } else {
          // This case should be caught by the validation above, but good to have defensively
-         setFormError("Please select an MP3 audio file.");
+         setFormError(`Please select an audio file (${ALLOWED_AUDIO_EXTENSIONS.join(', ')}).`);
     }
   };
 
@@ -192,7 +196,7 @@ export function UploadModal({ isOpen }: UploadModalProps) {
       <Dialog.Content style={{ maxWidth: 550 }}>
         <Dialog.Title>Upload New Session</Dialog.Title>
         <Dialog.Description size="2" mb="4" color="gray">
-          Add session details and upload an MP3 audio file to start analysis.
+          Add session details and upload an audio file ({ALLOWED_AUDIO_EXTENSIONS.join(', ')}) to start analysis.
         </Dialog.Description>
         <Flex direction="column" gap="4">
           <label
@@ -204,12 +208,12 @@ export function UploadModal({ isOpen }: UploadModalProps) {
             onDragOver={handleDrag}
             onDrop={handleDrop}
             aria-disabled={isTranscribing}
-            aria-label={modalFile ? `Selected file: ${modalFile.name}. Click to change.` : "Drag and drop MP3 file or click to upload"}
+            aria-label={modalFile ? `Selected file: ${modalFile.name}. Click to change.` : `Drag and drop audio file (${ALLOWED_AUDIO_EXTENSIONS.join(', ')}) or click to upload`}
           >
             <input
               ref={fileInputRef}
               type="file"
-              accept="audio/mpeg"
+              accept={ALLOWED_AUDIO_MIME_TYPES.join(',')} // Use MIME types for accept attribute
               className="hidden"
               id="audio-upload-input"
               onChange={handleFileChange}
@@ -224,7 +228,7 @@ export function UploadModal({ isOpen }: UploadModalProps) {
                 <UploadIcon width="32" height="32" className={cn(dragActive ? 'text-blue-500' : 'text-gray-400 dark:text-gray-500')} />
               )}
               <Text size="2" color="gray">
-                {isTranscribing ? "Processing audio..." : modalFile ? <>Selected: <Strong>{modalFile.name}</Strong></> : dragActive ? "Drop MP3 file here" : "Drag & drop MP3 file or click"}
+                {isTranscribing ? "Processing audio..." : modalFile ? <>Selected: <Strong>{modalFile.name}</Strong></> : dragActive ? `Drop file (${ALLOWED_AUDIO_EXTENSIONS.join(', ')}) here` : `Drag & drop file (${ALLOWED_AUDIO_EXTENSIONS.join(', ')}) or click`}
               </Text>
               {modalFile && !isTranscribing && (
                 <Button

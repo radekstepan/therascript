@@ -1,9 +1,12 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs/promises';
+import config from '../src/config/index.js'; // Use config
 
-// TODO use config path
-const dbPath = path.resolve(process.cwd(), 'data/therapy-analyzer.sqlite');
+// Use config path
+const dbPath = config.db.sqlitePath;
+// Use config path for transcripts directory
+const transcriptsBaseDir = config.db.transcriptsDir;
 
 // Sample data
 const sampleSessions = [
@@ -14,8 +17,8 @@ const sampleSessions = [
     date: '2025-04-01',
     sessionType: 'Individual',
     therapy: 'CBT',
-    // TODO use config path for transcripts
-    transcriptPath: path.resolve(process.cwd(), 'data/transcripts/1.txt'),
+    // Construct transcript path using config dir and assuming ID 1
+    transcriptPath: path.join(transcriptsBaseDir, '1.txt'),
     transcriptContent: `Therapist: Hi Jane, how are you feeling today?\n\nJane: Not great, honestly. Work's been stressful.\n\nTherapist: Let’s explore that. What happened at work?`,
     chats: [
       {
@@ -34,7 +37,8 @@ const sampleSessions = [
     date: '2025-04-02',
     sessionType: 'Individual',
     therapy: 'Mindfulness',
-    transcriptPath: path.resolve(process.cwd(), 'data/transcripts/2.txt'),
+    // Construct transcript path using config dir and assuming ID 2
+    transcriptPath: path.join(transcriptsBaseDir, '2.txt'),
     transcriptContent: `Therapist: John, how’s the mindfulness practice going?\n\nJohn: It’s helping a bit with anxiety.\n\nTherapist: Good to hear! Any specific moments?`,
     chats: [
       {
@@ -60,9 +64,8 @@ async function preloadDatabase() {
   const db = new Database(dbPath, { verbose: console.log });
 
   try {
-    // Ensure transcripts directory exists
-    const transcriptsDir = path.resolve(process.cwd(), 'data/transcripts');
-    await fs.mkdir(transcriptsDir, { recursive: true });
+    // Ensure transcripts directory exists (using path from config)
+    await fs.mkdir(transcriptsBaseDir, { recursive: true });
 
     // Clear existing data before preloading
     console.log('[Preload] Clearing existing data...');
@@ -97,7 +100,7 @@ async function preloadDatabase() {
           session.date,
           session.sessionType,
           session.therapy,
-          session.transcriptPath
+          session.transcriptPath // Using the path constructed earlier
         );
         const sessionId = sessionResult.lastInsertRowid as number;
         console.log(`[Preload] Added session ${sessionId}: ${session.sessionName}`);

@@ -6,6 +6,7 @@ import { ChatInput } from './ChatInput';
 import { ChatMessages } from './ChatMessages';
 import { ChatHeader } from './ChatHeader'; // Import ChatHeader
 import { fetchChatDetails } from '../../../api/api';
+import { debounce } from '../../../helpers'; // Import debounce
 // Removed atoms if they are now props
 // import {
 //     activeSessionIdAtom,
@@ -16,29 +17,19 @@ import type { ChatSession, Session } from '../../../types'; // Add Session type
 interface ChatInterfaceProps {
     session: Session | null; // Accept session prop
     activeChatId: number | null; // Accept activeChatId prop
+    isLoadingSessionMeta?: boolean; // Pass session meta loading state
     isTabActive?: boolean;
     initialScrollTop?: number;
     onScrollUpdate?: (scrollTop: number) => void;
-    isLoadingChat: boolean; // Prop indicating initial high-level loading (e.g., session meta)
 }
-
-// TODO flipping reuse
-const debounce = <F extends (...args: any[]) => any>(func: F, waitFor: number) => {
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    return (...args: Parameters<F>): void => {
-        if (timeoutId) clearTimeout(timeoutId);
-        timeoutId = setTimeout(() => func(...args), waitFor);
-    };
-};
-
 
 export function ChatInterface({
     session, // Use prop
     activeChatId, // Use prop
+    isLoadingSessionMeta, // Use prop
     isTabActive,
     initialScrollTop = 0,
     onScrollUpdate,
-    isLoadingChat // Represents loading state BEFORE this component's query runs
 }: ChatInterfaceProps) {
     // REMOVE activeSessionId/activeChatId from useAtomValue if they are now props
     // const activeChatId = useAtomValue(activeChatIdAtom);
@@ -61,7 +52,7 @@ export function ChatInterface({
 
     const chatMessages = chatData?.messages || [];
     // Combined loading state: consider initial prop, this query's loading, and background fetching
-    const combinedIsLoading = isLoadingChat || isLoadingMessages || (isFetching && !chatData);
+    const combinedIsLoading = isLoadingSessionMeta || isLoadingMessages || (isFetching && !chatData);
 
      const debouncedScrollSave = useCallback(
          debounce((scrollTop: number) => {
@@ -122,7 +113,11 @@ export function ChatInterface({
         <Flex direction="column" style={{ height: '100%', minHeight: 0 }}>
             {/* Add ChatHeader and pass props */}
             <Box style={{ borderBottom: '1px solid var(--gray-a6)', flexShrink: 0, backgroundColor: 'var(--color-panel-solid)' }}>
-                <ChatHeader session={session} activeChatId={activeChatId} />
+                <ChatHeader
+                    session={session}
+                    activeChatId={activeChatId}
+                    isLoadingSessionMeta={isLoadingSessionMeta} // Pass loading state
+                />
             </Box>
             <ScrollArea
                 type="auto"

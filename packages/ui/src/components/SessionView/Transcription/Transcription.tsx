@@ -12,29 +12,24 @@ import {
 } from '@radix-ui/react-icons';
 import { cn } from '../../../utils';
 import { updateTranscriptParagraph } from '../../../api/api';
+import { sessionColorMap, therapyColorMap } from '../../../constants'; // Import color maps
+import { debounce } from '../../../helpers'; // Import debounce
 
-// TODO reuse these!!!
-const sessionColorMap: Record<string, React.ComponentProps<typeof Badge>['color']> = {
-    'individual': 'blue', 'phone': 'sky', 'skills group': 'teal',
-    'family session': 'green', 'family skills': 'green', 'couples': 'indigo',
-    'couples individual': 'plum', 'default': 'gray'
-};
-const therapyColorMap: Record<string, React.ComponentProps<typeof Badge>['color']> = {
-    'act': 'purple', 'dbt': 'amber', 'cbt': 'lime', 'erp': 'ruby',
-    'mindfulness': 'cyan', 'couples act': 'violet', 'couples dbt': 'yellow',
-    'dbt skills': 'orange', 'default': 'pink'
-};
-// TODO reuse
-const getBadgeColor = (type: string | undefined, category: 'session' | 'therapy'): React.ComponentProps<typeof Badge>['color'] => {
+// Define category type locally or import if defined centrally
+type BadgeCategory = 'session' | 'therapy';
+
+// Moved outside component as it doesn't depend on props/state
+const getBadgeColor = (type: string | undefined, category: BadgeCategory): React.ComponentProps<typeof Badge>['color'] => {
     const map = category === 'session' ? sessionColorMap : therapyColorMap;
     return type ? (map[type.toLowerCase()] || map['default']) : map['default'];
 };
+
+// Moved outside component as it doesn't depend on props/state
 const renderHeaderDetail = (
     IconComponent: React.ElementType,
     value: string | undefined,
     label: string,
-    // TODO enum
-    category?: 'session' | 'therapy'
+    category?: BadgeCategory
 ) => {
     if (!value) return null;
     const isBadge = category === 'session' || category === 'therapy';
@@ -51,20 +46,11 @@ const renderHeaderDetail = (
     );
 };
 
-// TODO move to utils
-const debounce = <F extends (...args: any[]) => any>(func: F, waitFor: number) => {
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    return (...args: Parameters<F>): void => {
-        if (timeoutId) clearTimeout(timeoutId);
-        timeoutId = setTimeout(() => func(...args), waitFor);
-    };
-};
 
 interface TranscriptionProps {
     session: SessionMetadata & { id: number }; // Need ID and metadata fields
     transcriptContent: string | undefined; // Receive transcript content directly
     onEditDetailsClick: () => void;
-    // onSaveParagraph: (index: number, newText: string) => Promise<void>; // Replaced by mutation
     isTabActive?: boolean;
     initialScrollTop?: number;
     onScrollUpdate?: (scrollTop: number) => void;
@@ -76,7 +62,6 @@ export function Transcription({
     session,
     transcriptContent,
     onEditDetailsClick,
-    // onSaveParagraph, // Removed
     isTabActive,
     initialScrollTop = 0,
     onScrollUpdate,

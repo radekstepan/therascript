@@ -1,4 +1,4 @@
-// TODO merge in utils here
+// TODO merge in utils here (cn function) - Keeping separate for now
 
 /**
  * Gets today's date as a string in "YYYY-MM-DD" format.
@@ -32,4 +32,17 @@ export const formatTimestamp = (timestamp?: number): string => {
       console.error("Error formatting timestamp:", timestamp, e);
       return 'Invalid Date';
   }
+};
+
+/**
+ * Creates a debounced version of a function that delays invoking func
+ * until after wait milliseconds have elapsed since the last time the
+ * debounced function was invoked.
+ */
+export const debounce = <F extends (...args: any[]) => any>(func: F, waitFor: number) => {
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    return (...args: Parameters<F>): void => {
+        if (timeoutId) clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => func(...args), waitFor);
+    };
 };
