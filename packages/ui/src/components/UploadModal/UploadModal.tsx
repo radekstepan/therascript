@@ -83,13 +83,6 @@ export function UploadModal({ isOpen }: UploadModalProps) {
     uploadMutation.reset();
   }, [uploadMutation]); // Add mutation to dependency array if reset is used within
 
-  useEffect(() => {
-    if (isOpen) {
-        resetModal();
-        // uploadMutation.reset(); // Moved to resetModal
-    }
-  }, [isOpen, resetModal]);
-
   const handleDrag = (e: React.DragEvent<HTMLDivElement | HTMLLabelElement>) => {
     e.preventDefault();
     e.stopPropagation();
@@ -179,6 +172,8 @@ export function UploadModal({ isOpen }: UploadModalProps) {
     if (!open) {
       closeModal(); // Use the Jotai action atom to set the state
       resetModal(); // Reset form state when closing
+    } else {
+      resetModal(); // Reset form state when opening
     }
     // If opening, isOpen prop handles it via Dialog.Root binding
   };
