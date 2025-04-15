@@ -15,12 +15,22 @@ if (!rootElement) {
 const root = ReactDOM.createRoot(rootElement);
 
 // Create a client
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: false,
+      retry: false,
+    },
+    mutations: {
+      retry: false,
+    },
+  },
+});
 
 root.render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <Provider> {/* Jotai Provider still needed for UI state */}
+      <Provider>
         <BrowserRouter>
           <App />
         </BrowserRouter>
