@@ -16,8 +16,6 @@ import {
     activeChatIdAtom,
     clampedSidebarWidthAtom,
     sidebarWidthAtom, // Keep sidebarWidthAtom for the setter
-    MIN_SIDEBAR_WIDTH,
-    MAX_SIDEBAR_WIDTH,
 } from '../../store'; // Removed chatErrorAtom, pastSessionsAtom
 
 export function SessionView() {
@@ -231,7 +229,7 @@ export function SessionView() {
 
 
     // --- Render Logic ---
-    if (isLoadingSessionMeta) { // Check loading state of metadata query
+    if (isLoadingSessionMeta && !sessionMetadata) { // Check loading state AND if data is still undefined
          return (<Flex justify="center" align="center" style={{ height: '100vh', backgroundColor: 'var(--color-panel-solid)' }}><Spinner size="3" /><Text ml="2" color="gray">Loading session data...</Text></Flex>);
      }
     if (sessionMetaError || !sessionMetadata) {
@@ -245,21 +243,32 @@ export function SessionView() {
 
     return (
         <Flex flexGrow="1" style={{ height: '100vh', overflow: 'hidden' }}>
-            {/* Sidebar */}
+            {/* Sidebar - Rendered ONLY for large screens (lg and up) */}
             {/* Use clampedSidebarWidth for reading the width */}
-            <Box ref={sidebarRef} className="relative flex-shrink-0 hidden lg:flex flex-col" style={{ width: `${clampedSidebarWidth}px`, backgroundColor: 'var(--color-panel-solid)' }}>
-                {/* Pass props to SessionSidebar */}
+            <Box
+                ref={sidebarRef}
+                className="relative flex-shrink-0 hidden lg:flex flex-col" // Keep hidden, lg:flex
+                style={{ width: `${clampedSidebarWidth}px`, backgroundColor: 'var(--color-panel-solid)', borderRight: '1px solid var(--gray-a6)' }}
+            >
+                {/* Pass props to SessionSidebar, DO NOT hide header */}
                 <SessionSidebar
-                    session={sessionMetadata ?? null} // Pass data (or null if undefined)
-                    isLoading={isLoadingSessionMeta}
-                    error={sessionMetaError ?? null}
+                    session={sessionMetadata ?? null} // Pass data
+                    isLoading={isLoadingSessionMeta}   // Pass loading state
+                    error={sessionMetaError ?? null}   // Pass error state
+                    // hideHeader={false} // Default is false, no need to pass explicitly
                 />
             </Box>
-            {/* Resizer */}
-            <Box className="hidden lg:block flex-shrink-0 w-1.5 cursor-col-resize group hover:bg-[--gray-a4]" onMouseDown={handleMouseDown} title="Resize sidebar">
+
+            {/* Resizer - Rendered ONLY for large screens */}
+            <Box
+                className="hidden lg:block flex-shrink-0 w-1.5 cursor-col-resize group hover:bg-[--gray-a4]"
+                onMouseDown={handleMouseDown}
+                title="Resize sidebar"
+            >
                 <Box className="h-full w-[1px] bg-[--gray-a5] group-hover:bg-[--accent-9] mx-auto" />
             </Box>
-            {/* Main Content */}
+
+            {/* Main Content Area */}
             <Flex direction="column" flexGrow="1" style={{ minWidth: 0, height: '100vh', overflow: 'hidden' }}>
                 {/* Header */}
                 <Box px={{ initial: '5', md: '7', lg: '8' }} py="3" flexShrink="0" style={{ backgroundColor: 'var(--color-panel-solid)', borderBottom: '1px solid var(--gray-a6)' }}>
@@ -272,9 +281,9 @@ export function SessionView() {
                         <UserThemeDropdown />
                     </Flex>
                 </Box>
-                {/* Content Body */}
+                {/* Content Body (contains tabs/side-by-side layout) */}
                 <Box flexGrow="1" style={{ minHeight: 0, overflow: 'hidden' }}>
-                    {/* SessionContent already receives sessionMetadata */}
+                    {/* SessionSidebar is now rendered inside SessionContent for small screens */}
                     <SessionContent
                         session={sessionMetadata} // Pass metadata
                         transcriptContent={transcriptContent} // Pass transcript content
@@ -283,8 +292,10 @@ export function SessionView() {
                         activeChatId={activeChatId}
                         hasChats={hasChats}
                         onStartFirstChat={handleStartFirstChat}
-                        // Pass the correct loading state prop
-                        isLoadingSessionMeta={isLoadingSessionMeta} // Pass session meta loading state
+                        // Pass loading/error for session meta down to SessionContent
+                        // so it can pass them to SessionSidebar in the tab view
+                        isLoadingSessionMeta={isLoadingSessionMeta}
+                        sessionMetaError={sessionMetaError}
                         isLoadingTranscript={isLoadingTranscript}
                         transcriptError={transcriptError}
                     />

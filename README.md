@@ -13,7 +13,7 @@
 - [x] starred messages popover shows below the chats sidebar; should show to the right too
 - [ ] in the sessions sidebar the session link active onclick outline is being cutoff (top and left)
 - [x] add icons on all modals/dialogs, right now only the edit transcript paragraph has them
-- [ ] on smaller screens make sure you can still choose a different chat/create a new one; maybe move the chats sidebar into a separate tab much like Chat and Transcript
+- [x] on smaller screens make sure you can still choose a different chat/create a new one; maybe move the chats sidebar into a separate tab much like Chat and Transcript
 - [ ] when you send a message and there's an error from the API, the message could still be saved, so keep showing it in the UI
 - [ ] the star message icon is too small and not vertically aligned with the message itself
 - [ ] think about the starred messages popover, the list/UI looks odd

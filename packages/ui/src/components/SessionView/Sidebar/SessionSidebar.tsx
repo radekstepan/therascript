@@ -1,4 +1,3 @@
-/* src/components/SessionView/Sidebar/SessionSidebar.tsx */
 import React, { useState } from 'react';
 import { NavLink, useParams, useNavigate } from 'react-router-dom';
 import { useAtomValue } from 'jotai';
@@ -39,10 +38,11 @@ interface SessionSidebarProps {
     session: Session | null; // Receive session data
     isLoading: boolean;      // Receive loading state
     error: Error | null;     // Receive error state
+    hideHeader?: boolean;    // New prop to hide the header
 }
 
 // Accept props
-export function SessionSidebar({ session, isLoading: isLoadingSession, error: sessionError }: SessionSidebarProps) {
+export function SessionSidebar({ session, isLoading: isLoadingSession, error: sessionError, hideHeader = false }: SessionSidebarProps) {
     const { sessionId: sessionIdParam } = useParams<{ sessionId: string; chatId?: string }>();
     const navigate = useNavigate();
     const currentActiveChatId = useAtomValue(activeChatIdAtom);
@@ -168,18 +168,37 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
 
     return (
         <>
-            <Box p="4" className="flex flex-col h-full w-full overflow-hidden" style={{ backgroundColor: 'var(--color-panel-solid)' }}>
-                <Flex justify="between" align="center" flexShrink="0" mb="2">
-                    <Heading as="h3" size="2" color="gray" trim="start" weight="medium">Chats</Heading>
-                    <Button
-                        onClick={handleNewChatClick}
-                        variant="soft" size="1" highContrast
-                        title="Start New Chat"
-                        disabled={startNewChatMutation.isPending}
-                    >
-                        {startNewChatMutation.isPending ? <Spinner size="1"/> : <PlusCircledIcon width="16" height="16" />}
-                    </Button>
-                </Flex>
+            {/* Apply padding based on whether header is shown */}
+            <Box p={hideHeader ? "1" : "4"} className="flex flex-col h-full w-full overflow-hidden" style={{ backgroundColor: 'var(--color-panel-solid)' }}>
+                {/* Conditionally render the header */}
+                {!hideHeader && (
+                    <Flex justify="between" align="center" flexShrink="0" mb="2">
+                        <Heading as="h3" size="2" color="gray" trim="start" weight="medium">Chats</Heading>
+                        <Button
+                            onClick={handleNewChatClick}
+                            variant="soft" size="1" highContrast
+                            title="Start New Chat"
+                            disabled={startNewChatMutation.isPending}
+                        >
+                            {startNewChatMutation.isPending ? <Spinner size="1"/> : <PlusCircledIcon width="16" height="16" />}
+                        </Button>
+                    </Flex>
+                 )}
+
+                 {/* Always render the new chat button if header is hidden (for tab view) */}
+                 {hideHeader && (
+                     <Flex justify="end" align="center" flexShrink="0" mb="2">
+                        <Button
+                            onClick={handleNewChatClick}
+                            variant="soft" size="1" highContrast
+                            title="Start New Chat"
+                            disabled={startNewChatMutation.isPending}
+                        >
+                            {startNewChatMutation.isPending ? <Spinner size="1"/> : <PlusCircledIcon width="16" height="16" />}
+                        </Button>
+                    </Flex>
+                 )}
+
 
                 {isLoadingSession ? (
                     <Flex flexGrow="1" align="center" justify="center">
