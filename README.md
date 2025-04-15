@@ -4,7 +4,7 @@
 - [x] why do we fetch sessions 2x on initial page load? Is it because React@18 and `useEffect` firing 2x? Do we need to switch to Tanstack Query and cache the data there? Would it make Jotai smaller too?
 - [ ] double flash of "chats" section on initial load (might be fixed by the above)
 - [ ] when you upload a new session, create an initial chat behind the scenes for it and redirect the page to this chat details page
-- [ ] chats rename/delete hamburger icon should be inside the chat name wrapper (leave enough padding on the right of the name for the icon to show)
+- [x] chats rename/delete hamburger icon should be inside the chat name wrapper (leave enough padding on the right of the name for the icon to show)
 - [ ] make the chat paragraph icons larger, add a gap between them AND/OR move the play icon to the left of the paragraph
 - [ ] fix vertical align of transcript header, items too close to the top; `align-items: flex-end`
 - [x] edit session details date is not editable

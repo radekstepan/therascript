@@ -186,8 +186,9 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
     };
     const cancelDelete = () => { setIsDeleteConfirmOpen(false); setDeletingChat(null); };
 
+    // Updated: Removed truncate, added group
     const getNavLinkClass = ({ isActive }: { isActive: boolean }): string => {
-        const base = "block w-full px-2 py-1.5 rounded-md truncate";
+        const base = "block w-full px-2 py-1.5 rounded-md group"; // Removed truncate, added group
         const inactive = "text-[--gray-a11] hover:bg-[--gray-a3] focus:outline-none focus:ring-2 focus:ring-[--accent-7]";
         const active = "bg-[--accent-a4] text-[--accent-11] font-medium";
         return cn(base, isActive ? active : inactive);
@@ -223,22 +224,46 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
                         <Flex direction="column" gap="1" asChild>
                             <nav>
                                 {sortedChats.map((chat) => (
-                                    <Flex key={chat.id} align="center" justify="between" className="group relative">
-                                        <NavLink to={`/sessions/${session.id}/chats/${chat.id}`} className={getNavLinkClass} title={getChatDisplayTitle(chat)} end>
-                                            <Text size="2" truncate className="flex-grow">{getChatDisplayTitle(chat)}</Text>
+                                    // Changed: Use Box container, move Dropdown inside NavLink with inner Flex
+                                    <Box key={chat.id} className="relative">
+                                        <NavLink
+                                            to={`/sessions/${session.id}/chats/${chat.id}`}
+                                            className={getNavLinkClass} // Updated helper applied here
+                                            title={getChatDisplayTitle(chat)}
+                                            end
+                                        >
+                                            <Flex align="center" justify="between" gap="1" width="100%">
+                                                <Text size="2" truncate className="flex-grow pr-1"> {/* Adjust pr-1 padding as needed */}
+                                                    {getChatDisplayTitle(chat)}
+                                                </Text>
+                                                <DropdownMenu.Root>
+                                                    <DropdownMenu.Trigger>
+                                                        <IconButton
+                                                            variant="ghost"
+                                                            color="gray"
+                                                            size="1"
+                                                            className="flex-shrink-0 p-1 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 data-[state=open]:bg-[--accent-a4] transition-opacity"
+                                                            aria-label="Chat options"
+                                                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); }} // Prevent NavLink activation
+                                                            onMouseDown={(e) => e.stopPropagation()} // Prevent NavLink activation
+                                                        >
+                                                            <DotsHorizontalIcon />
+                                                        </IconButton>
+                                                    </DropdownMenu.Trigger>
+                                                    <DropdownMenu.Content
+                                                        size="1"
+                                                        align="end" // Align to right edge of trigger
+                                                        sideOffset={2} // Small offset
+                                                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); }} // Prevent NavLink activation
+                                                        onMouseDown={(e) => e.stopPropagation()} // Prevent NavLink activation
+                                                    >
+                                                        <DropdownMenu.Item onSelect={() => handleRenameClick(chat)} disabled={renameChatMutation.isPending}><Pencil1Icon className="mr-2 h-4 w-4" />Rename</DropdownMenu.Item>
+                                                        <DropdownMenu.Item color="red" onSelect={() => handleDeleteClick(chat)} disabled={deleteChatMutation.isPending}><TrashIcon className="mr-2 h-4 w-4" />Delete</DropdownMenu.Item>
+                                                    </DropdownMenu.Content>
+                                                </DropdownMenu.Root>
+                                            </Flex>
                                         </NavLink>
-                                        <DropdownMenu.Root>
-                                            <DropdownMenu.Trigger>
-                                                <IconButton variant="ghost" color="gray" size="1" className="flex-shrink-0 ml-1 mr-1 p-1 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 data-[state=open]:bg-[--accent-a4] transition-opacity" aria-label="Chat options" onClick={(e) => e.preventDefault()} onMouseDown={(e) => e.stopPropagation()}>
-                                                    <DotsHorizontalIcon />
-                                                </IconButton>
-                                            </DropdownMenu.Trigger>
-                                            <DropdownMenu.Content size="1" align="start" sideOffset={5} onClick={(e) => e.preventDefault()} onMouseDown={(e) => e.stopPropagation()}>
-                                                <DropdownMenu.Item onSelect={() => handleRenameClick(chat)} disabled={renameChatMutation.isPending}><Pencil1Icon className="mr-2 h-4 w-4" />Rename</DropdownMenu.Item>
-                                                <DropdownMenu.Item color="red" onSelect={() => handleDeleteClick(chat)} disabled={deleteChatMutation.isPending}><TrashIcon className="mr-2 h-4 w-4" />Delete</DropdownMenu.Item>
-                                            </DropdownMenu.Content>
-                                        </DropdownMenu.Root>
-                                    </Flex>
+                                    </Box>
                                 ))}
                             </nav>
                         </Flex>
