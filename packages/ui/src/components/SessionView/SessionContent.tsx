@@ -1,28 +1,34 @@
 import React, { useState, useCallback } from 'react';
 import { Box, Flex, Text, Tabs } from '@radix-ui/themes';
-import type { Session } from '../../types';
+import type { Session, SessionMetadata } from '../../types';
 import { Transcription } from './Transcription/Transcription';
 import { ChatInterface } from './Chat/ChatInterface';
 import { StartChatPrompt } from './Chat/StartChatPrompt';
 
 interface SessionContentProps {
-    session: Session;
+    session: Session; // Keep full session for metadata display? Or pass specific metadata
     onEditDetailsClick: () => void;
-    onSaveTranscriptParagraph: (index: number, text: string) => Promise<void>;
+    // onSaveTranscriptParagraph: (index: number, text: string) => Promise<void>; // Handled internally now
+    transcriptContent: string | undefined;
     activeChatId: number | null;
     hasChats: boolean;
     onStartFirstChat: () => void;
-    isLoadingChat: boolean;
+    isLoadingChat: boolean | undefined; // Undefined means let ChatInterface handle it
+    isLoadingTranscript: boolean;
+    transcriptError?: Error | null;
 }
 
 export function SessionContent({
     session,
     onEditDetailsClick,
-    onSaveTranscriptParagraph,
+    // onSaveTranscriptParagraph, // Removed
+    transcriptContent,
     activeChatId,
     hasChats,
     onStartFirstChat,
-    isLoadingChat
+    isLoadingChat,
+    isLoadingTranscript,
+    transcriptError,
  }: SessionContentProps) {
     const [activeTab, setActiveTab] = useState<'chat' | 'transcription'>('chat');
     const [chatScrollPosition, setChatScrollPosition] = useState(0);
@@ -31,10 +37,11 @@ export function SessionContent({
     const handleChatScroll = useCallback((scrollTop: number) => setChatScrollPosition(scrollTop), []);
     const handleTranscriptScroll = useCallback((scrollTop: number) => setTranscriptScrollPosition(scrollTop), []);
 
-    const activeChatData = activeChatId !== null
-        ? session.chats.find(c => c.id === activeChatId)
-        : null;
-    const messagesAvailable = activeChatData?.messages !== undefined;
+    // Messages are now handled by the ChatInterface's useQuery
+    // const activeChatData = activeChatId !== null
+    //     ? (session?.chats || []).find(c => c.id === activeChatId)
+    //     : null;
+    // const messagesAvailable = activeChatData?.messages !== undefined; // isLoadingChat now covers this
 
     return (
         <Flex
@@ -54,7 +61,7 @@ export function SessionContent({
                 <Flex direction="column" className="w-1/2 h-full" style={{ minHeight: 0 }}>
                     {activeChatId !== null ? (
                         <ChatInterface
-                            isLoadingChat={isLoadingChat || !messagesAvailable}
+                            isLoadingChat={!!isLoadingChat} // Pass down loading state (ensure boolean)
                         />
                     ) : hasChats ? (
                         <Box className="flex flex-grow items-center justify-center h-full" style={{ border: '2px dashed var(--gray-a6)', borderRadius: 'var(--radius-3)' }}>
@@ -69,10 +76,21 @@ export function SessionContent({
 
                 {/* Transcription Panel */}
                 <Flex direction="column" className="w-1/2 h-full" style={{ minHeight: 0 }}>
+                    {/* Pass only needed metadata + transcript content */}
                     <Transcription
-                        session={session}
+                        // Provide the necessary metadata fields + ID
+                        session={{
+                            id: session.id,
+                            clientName: session.clientName,
+                            sessionName: session.sessionName,
+                            date: session.date,
+                            sessionType: session.sessionType,
+                            therapy: session.therapy
+                        }}
+                        transcriptContent={transcriptContent}
                         onEditDetailsClick={onEditDetailsClick}
-                        onSaveParagraph={onSaveTranscriptParagraph}
+                        isLoadingTranscript={isLoadingTranscript}
+                        transcriptError={transcriptError}
                     />
                 </Flex>
             </Flex>
@@ -96,8 +114,8 @@ export function SessionContent({
                     <Box px={{ initial: '4', md: '6' }} pb={{ initial: '4', md: '6' }} pt="2" className="flex-grow" style={{ minHeight: 0 }}>
                         <Tabs.Content value="chat" className="h-full" style={{ outline: 'none' }}>
                             {activeChatId !== null ?
-                             <ChatInterface
-                                isLoadingChat={isLoadingChat || !messagesAvailable}
+                             <ChatInterface // Use the same ChatInterface component
+                                isLoadingChat={!!isLoadingChat} // Pass down loading state (ensure boolean)
                                 isTabActive={activeTab === 'chat'}
                                 initialScrollTop={chatScrollPosition}
                                 onScrollUpdate={handleChatScroll}
@@ -109,9 +127,19 @@ export function SessionContent({
 
                         <Tabs.Content value="transcription" className="h-full" style={{ outline: 'none' }}>
                              <Transcription
-                                session={session}
+                                // Provide the necessary metadata fields + ID
+                                session={{
+                                    id: session.id,
+                                    clientName: session.clientName,
+                                    sessionName: session.sessionName,
+                                    date: session.date,
+                                    sessionType: session.sessionType,
+                                    therapy: session.therapy
+                                }}
+                                transcriptContent={transcriptContent}
                                 onEditDetailsClick={onEditDetailsClick}
-                                onSaveParagraph={onSaveTranscriptParagraph}
+                                isLoadingTranscript={isLoadingTranscript}
+                                transcriptError={transcriptError}
                                 isTabActive={activeTab === 'transcription'}
                                 initialScrollTop={transcriptScrollPosition}
                                 onScrollUpdate={handleTranscriptScroll}

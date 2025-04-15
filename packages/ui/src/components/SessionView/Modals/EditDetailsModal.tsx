@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Button, Dialog, Flex, Text, TextField, Select, Box, Callout, Spinner } from '@radix-ui/themes';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { InfoCircledIcon } from '@radix-ui/react-icons';
 import { SESSION_TYPES, THERAPY_TYPES } from '../../../constants';
 import { updateSessionMetadata } from '../../../api/api';
@@ -9,7 +10,7 @@ import { cn } from '../../../utils';
 interface EditDetailsModalProps {
     isOpen: boolean;
     onOpenChange: (open: boolean) => void;
-    session: Session | null;
+    session: Session | null; // Receive full session for initial values
     onSaveSuccess: (updatedMetadata: Partial<SessionMetadata>) => void;
 }
 
@@ -25,7 +26,7 @@ export function EditDetailsModal({
     const [editType, setEditType] = useState('');
     const [editTherapy, setEditTherapy] = useState('');
     const [validationError, setValidationError] = useState<string | null>(null);
-    const [isSaving, setIsSaving] = useState(false);
+    const queryClient = useQueryClient();
 
     useEffect(() => {
         if (isOpen && session) {
@@ -44,11 +45,39 @@ export function EditDetailsModal({
             setEditTherapy(initialEditTherapy);
 
             setValidationError(null);
-            setIsSaving(false);
+            // Reset mutation state if needed, though usually handled by component unmount/remount
+            updateMetadataMutation.reset();
         } else if (!isOpen) {
-             setIsSaving(false);
+             // Optional: Reset mutation state when modal closes without saving
+             updateMetadataMutation.reset();
         }
     }, [isOpen, session]);
+
+    // Mutation for updating metadata
+    const updateMetadataMutation = useMutation({
+        mutationFn: (metadata: Partial<SessionMetadata>) => {
+            if (!session) throw new Error("Session data missing");
+            return updateSessionMetadata(session.id, metadata);
+        },
+        onSuccess: (updatedData, variables) => {
+            console.log('[EditModal] Save successful (API Response):', updatedData);
+            // Invalidate relevant queries to refetch updated data
+            queryClient.invalidateQueries({ queryKey: ['sessionMeta', session?.id] });
+            queryClient.invalidateQueries({ queryKey: ['sessions'] }); // Invalidate list if name/date/type changed
+
+            // Call prop provided by parent (SessionView) if needed
+            onSaveSuccess(variables); // Pass the data that was sent
+
+            onOpenChange(false); // Close modal
+        },
+        onError: (error) => {
+            console.error('[EditModal] Save failed:', error);
+            // Set validation error to display in the modal
+            setValidationError(`Failed to update session metadata: ${error.message}. Please try again.`);
+        }
+    });
+
+    const isSaving = updateMetadataMutation.isPending;
 
     const handleSave = async () => {
         if (!session || isSaving) return;
@@ -60,6 +89,7 @@ export function EditDetailsModal({
         if (!trimmedName) errors.push("Session Name");
         if (!trimmedClient) errors.push("Client Name");
         if (!editDate) errors.push("Date");
+        // Basic validation, ensure types are within known constants
         if (!SESSION_TYPES.includes(editType)) errors.push("Session Type");
         if (!THERAPY_TYPES.includes(editTherapy)) errors.push("Therapy Type");
 
@@ -68,8 +98,8 @@ export function EditDetailsModal({
              return;
         }
 
+        // Clear previous validation errors before attempting save
         setValidationError(null);
-        setIsSaving(true);
 
         const metadataToSave: Partial<SessionMetadata> = {
             clientName: trimmedClient,
@@ -79,28 +109,34 @@ export function EditDetailsModal({
             therapy: editTherapy,
         };
 
+        // Check if anything actually changed
+        const hasChanged = Object.keys(metadataToSave).some(key =>
+            metadataToSave[key as keyof SessionMetadata] !== session[key as keyof SessionMetadata]
+        );
+
+        if (!hasChanged) {
+             setValidationError("No changes detected.");
+             return; // Don't call mutation if nothing changed
+        }
+
         try {
-            const backendResponse = await updateSessionMetadata(session.id, metadataToSave);
-            console.log('[EditModal] Save successful (API Response):', backendResponse);
-
-            onSaveSuccess(metadataToSave);
-
-            onOpenChange(false);
-
+            updateMetadataMutation.mutate(metadataToSave);
         } catch (err) {
-            console.error('[EditModal] Save failed:', err);
-            setValidationError('Failed to update session metadata. Please try again.');
-        } finally {
-            setIsSaving(false);
+             // This catch block might not be necessary if mutation handles errors
+             console.error("Error initiating mutation:", err);
+             setValidationError("An unexpected error occurred while trying to save.");
         }
     };
 
     const handleManualClose = (open: boolean) => {
+        // Prevent closing while saving is in progress
         if (!open && isSaving) {
              console.log("[EditModal] Attempted to close while saving.");
-             return;
+             // Optionally show a message or disable close action?
+             return; // Prevent closing
         }
         if (!open) {
+            // Clear validation errors when closing manually
             setValidationError(null);
         }
         onOpenChange(open);

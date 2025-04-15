@@ -3,6 +3,7 @@ import { useAtomValue } from 'jotai';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Theme } from '@radix-ui/themes';
 import * as Toast from '@radix-ui/react-toast';
+import { useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
 
 import { LandingPage } from './components/LandingPage/LandingPage';
@@ -11,9 +12,7 @@ import { UploadModal } from './components/UploadModal/UploadModal';
 
 import {
   isUploadModalOpenAtom,
-  isTranscribingAtom,
-  transcriptionErrorAtom,
-  effectiveThemeAtom,
+  effectiveThemeAtom, // Keep UI atoms
 } from './store';
 
 // TODO should be coming from config
@@ -22,9 +21,9 @@ axios.defaults.baseURL = 'http://localhost:3001';
 // TODO include an Error Boundary
 function App() {
   const isModalOpen = useAtomValue(isUploadModalOpenAtom);
-  const isTranscribing = useAtomValue(isTranscribingAtom);
-  const transcriptionError = useAtomValue(transcriptionErrorAtom);
   const effectiveTheme = useAtomValue(effectiveThemeAtom);
+  // Access queryClient if needed for global actions (though mutations handle most)
+  // const queryClient = useQueryClient();
 
   // TODO wtf is 2147483647
   return (
@@ -40,11 +39,7 @@ function App() {
             </Routes>
           </main>
 
-          <UploadModal
-            isOpen={isModalOpen}
-            isTranscribing={isTranscribing}
-            transcriptionError={transcriptionError}
-          />
+          <UploadModal isOpen={isModalOpen} /> {/* Remove props handled by useMutation */}
 
           <Toast.Viewport className="fixed bottom-0 right-0 flex flex-col p-6 gap-3 w-[390px] max-w-[100vw] m-0 list-none z-[2147483647] outline-none" />
         </div>

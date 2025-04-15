@@ -1,7 +1,7 @@
 # TODO
 
 - [x] switch to a monorepo
-- [ ] why do we fetch sessions 2x on initial page load? Is it because React@18 and `useEffect` firing 2x? Do we need to switch to Tanstack Query and cache the data there? Would it make Jotai smaller too?
+- [>] why do we fetch sessions 2x on initial page load? Is it because React@18 and `useEffect` firing 2x? Do we need to switch to Tanstack Query and cache the data there? Would it make Jotai smaller too?
 - [ ] double flash of "chats" section on initial load (might be fixed by the above)
 - [ ] when you upload a new session, create an initial chat behind the scenes for it and redirect the page to this chat details page
 - [ ] chats rename/delete hamburger icon should be inside the chat name wrapper (leave enough padding on the right of the name for the icon to show)

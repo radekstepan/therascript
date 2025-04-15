@@ -1,26 +1,25 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useSetAtom } from 'jotai';
 import { useNavigate } from 'react-router-dom';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Dialog, Button, Flex, Text, TextField, Select, Box, Spinner, Strong, Callout } from '@radix-ui/themes';
 import { UploadIcon, InfoCircledIcon, CheckCircledIcon } from '@radix-ui/react-icons';
 import { SESSION_TYPES, THERAPY_TYPES } from '../../constants';
 import { getTodayDateString } from '../../helpers';
-import { uploadSession } from '../../api/api';
+// Import API functions used in this file
+import { uploadSession, fetchSession, fetchTranscript } from '../../api/api';
 import type { SessionMetadata } from '../../types';
-import { closeUploadModalAtom, isTranscribingAtom, transcriptionErrorAtom } from '../../store';
+import { closeUploadModalAtom } from '../../store'; // Keep close action
 import { cn } from '../../utils';
 
 interface UploadModalProps {
-  isOpen: boolean;
-  isTranscribing: boolean;
-  transcriptionError: string;
+  isOpen: boolean; // Controlled from outside
 }
 
-export function UploadModal({ isOpen, isTranscribing, transcriptionError }: UploadModalProps) {
-  const closeModalAction = useSetAtom(closeUploadModalAtom);
-  const setIsTranscribing = useSetAtom(isTranscribingAtom);
-  const setTranscriptionError = useSetAtom(transcriptionErrorAtom);
+export function UploadModal({ isOpen }: UploadModalProps) {
+  const closeModal = useSetAtom(closeUploadModalAtom);
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -31,6 +30,44 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
   const [sessionTypeInput, setSessionTypeInput] = useState(SESSION_TYPES[0]);
   const [therapyInput, setTherapyInput] = useState(THERAPY_TYPES[0]);
   const [formError, setFormError] = useState<string | null>(null);
+  // const [transcriptionError, setTranscriptionError] = useState(''); // Replaced by mutation.error
+
+  // Mutation for uploading and transcribing
+  const uploadMutation = useMutation({
+    mutationFn: ({ file, metadata }: { file: File; metadata: SessionMetadata }) => {
+      return uploadSession(file, metadata);
+    },
+    onSuccess: (newSession) => {
+      queryClient.invalidateQueries({ queryKey: ['sessions'] }); // Update session list
+       // Pre-fetch the new session's data?
+      queryClient.prefetchQuery({
+          queryKey: ['sessionMeta', newSession.id],
+          queryFn: () => fetchSession(newSession.id), // Added import
+      });
+      queryClient.prefetchQuery({
+           queryKey: ['transcript', newSession.id],
+           queryFn: () => fetchTranscript(newSession.id), // Added import
+      });
+
+      // Navigate to the new session's first chat
+      const firstChatId = newSession.chats?.[0]?.id;
+      if (firstChatId) {
+          navigate(`/sessions/${newSession.id}/chats/${firstChatId}`);
+      } else {
+          navigate(`/sessions/${newSession.id}`); // Fallback if no chat exists
+      }
+      closeModal(); // Close modal on success
+    },
+    onError: (error) => {
+      console.error("Upload/Transcription failed:", error);
+      // Error state is available via uploadMutation.error
+      // No need to set local state unless you want custom messages
+      setFormError(`Upload failed: ${error.message}`); // Show error in the modal
+    }
+  });
+
+  const isTranscribing = uploadMutation.isPending;
+  const transcriptionError = uploadMutation.error?.message; // Get error message from mutation state
 
   const resetModal = useCallback(() => {
     setModalFile(null);
@@ -42,10 +79,15 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
     setDragActive(false);
     setFormError(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
-  }, []);
+    // Reset mutation state if needed when modal reopens/resets
+    uploadMutation.reset();
+  }, [uploadMutation]); // Add mutation to dependency array if reset is used within
 
   useEffect(() => {
-    if (isOpen) resetModal();
+    if (isOpen) {
+        resetModal();
+        // uploadMutation.reset(); // Moved to resetModal
+    }
   }, [isOpen, resetModal]);
 
   const handleDrag = (e: React.DragEvent<HTMLDivElement | HTMLLabelElement>) => {
@@ -58,14 +100,16 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
 
   // TODO the filetype should come from consts (API?)
   const handleFileSelection = (file: File | null) => {
+    // Basic client-side validation
     if (file && file.type === 'audio/mpeg') {
       setModalFile(file);
-      setFormError(null);
+      setFormError(null); // Clear previous file errors
       if (!sessionNameInput) setSessionNameInput(file.name.replace(/\.[^/.]+$/, ""));
     } else {
       setModalFile(null);
       // TODO return the supported types
       if (file) setFormError('Invalid file type. Please upload an MP3 audio file.');
+      else setFormError(null); // Clear error if file is removed
     }
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
@@ -88,7 +132,10 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
   };
 
   const handleStartClick = async () => {
+    // Clear previous errors before validation
     setFormError(null);
+    uploadMutation.reset(); // Reset mutation error state
+
     let missingFields = [];
     if (!modalFile) missingFields.push("Audio File (.mp3)");
     if (!clientNameInput.trim()) missingFields.push("Client Name");
@@ -101,33 +148,39 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
     }
 
     if (modalFile) {
-      const metadata: SessionMetadata = {
-        clientName: clientNameInput.trim(),
-        sessionName: sessionNameInput.trim(),
-        date: sessionDate,
-        sessionType: sessionTypeInput,
-        therapy: therapyInput,
-      };
       try {
-        setIsTranscribing(true);
-        setTranscriptionError('');
-        const newSession = await uploadSession(modalFile, metadata);
-        // TODO use a route
-        navigate(`/sessions/${newSession.id}/chats/${newSession.chats[0].id}`);
-        closeModalAction();
+        const metadata: SessionMetadata = {
+          clientName: clientNameInput.trim(),
+          sessionName: sessionNameInput.trim(),
+          date: sessionDate,
+          sessionType: sessionTypeInput,
+          therapy: therapyInput,
+        };
+        uploadMutation.mutate({ file: modalFile, metadata });
       } catch (err) {
-        setTranscriptionError('Failed to upload and transcribe session.');
-      } finally {
-        setIsTranscribing(false);
+        // Should be caught by mutation's onError
+        console.error("Error initiating upload mutation", err);
+        setFormError('An unexpected error occurred while starting the upload.');
       }
+    } else {
+         // This case should be caught by the validation above, but good to have defensively
+         setFormError("Please select an MP3 audio file.");
     }
   };
 
   const handleOpenChange = (open: boolean) => {
-    if (!open && !isTranscribing) {
-      closeModalAction();
-      resetModal();
+    // Prevent closing while transcribing ONLY if triggered by user interaction
+    // (e.g., clicking outside, pressing Esc). Programmatic close should still work.
+    if (!open && isTranscribing) {
+       // Optionally show a toast message here
+       console.log("Cannot close modal while transcription is in progress.");
+       return; // Prevent Dialog Primitive from closing
     }
+    if (!open) {
+      closeModal(); // Use the Jotai action atom to set the state
+      resetModal(); // Reset form state when closing
+    }
+    // If opening, isOpen prop handles it via Dialog.Root binding
   };
 
   const dropAreaClasses = cn(
@@ -139,6 +192,7 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
   );
 
   return (
+    // Bind Dialog open state to the isOpen prop
     <Dialog.Root open={isOpen} onOpenChange={handleOpenChange}>
       <Dialog.Content style={{ maxWidth: 550 }}>
         <Dialog.Title>Upload New Session</Dialog.Title>
@@ -186,7 +240,7 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
                   highContrast
                   onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
                     e.preventDefault();
-                    e.stopPropagation();
+                    e.stopPropagation(); // Prevent label click handler
                     handleFileSelection(null);
                   }}
                   aria-label="Remove selected file"
@@ -258,6 +312,7 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
               </label>
             </Box>
           </Flex>
+          {/* Display form validation error OR mutation error */}
           {(formError || transcriptionError) && (
             <Callout.Root color="red" role="alert" size="1" mt="2">
               <Callout.Icon><InfoCircledIcon /></Callout.Icon>
@@ -266,9 +321,8 @@ export function UploadModal({ isOpen, isTranscribing, transcriptionError }: Uplo
           )}
         </Flex>
         <Flex gap="3" mt="5" justify="end">
-          <Dialog.Close>
-            <Button type="button" variant="soft" color="gray" disabled={isTranscribing}>Cancel</Button>
-          </Dialog.Close>
+          {/* Use a Button instead of Dialog.Close to prevent closing while transcribing */}
+          <Button type="button" variant="soft" color="gray" onClick={closeModal} disabled={isTranscribing}>Cancel</Button>
           <Button type="button" onClick={handleStartClick} disabled={!modalFile || isTranscribing}>
             {isTranscribing ? (
               <><Spinner size="2" /><Text ml="2">Transcribing...</Text></>

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { StarIcon, PaperPlaneIcon, StopIcon, Cross2Icon } from '@radix-ui/react-icons';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import * as Toast from '@radix-ui/react-toast';
 import { TextField, Flex, Box, Text, IconButton } from '@radix-ui/themes';
 import { StarredTemplatesList } from './StarredTemplates';
@@ -9,11 +10,10 @@ import {
     currentQueryAtom,
     activeSessionIdAtom,
     activeChatIdAtom,
-    chatErrorAtom,
+    chatErrorAtom, // Keep for input validation errors?
     toastMessageAtom,
-    isChattingAtom,
-    pastSessionsAtom,
 } from '../../../store';
+import type { ChatSession } from '../../../types';
 
 interface ChatInputProps {
     disabled?: boolean;
@@ -23,27 +23,69 @@ export function ChatInput({ disabled = false }: ChatInputProps) {
     const [currentQuery, setCurrentQuery] = useAtom(currentQueryAtom);
     const activeSessionId = useAtomValue(activeSessionIdAtom);
     const activeChatId = useAtomValue(activeChatIdAtom);
-    const [chatError, setChatError] = useAtom(chatErrorAtom);
+    // Use local state for input-specific errors, keep Jotai atom if needed elsewhere
+    const [inputError, setInputError] = useState('');
     const toastMessageContent = useAtomValue(toastMessageAtom);
     const setToastMessageAtom = useSetAtom(toastMessageAtom);
     const [isToastVisible, setIsToastVisible] = useState(false);
-    const [isAiResponding, setIsAiResponding] = useAtom(isChattingAtom);
-    const setPastSessions = useSetAtom(pastSessionsAtom);
 
     const inputRef = useRef<HTMLInputElement>(null);
     const [showTemplates, setShowTemplates] = useState(false);
+    const queryClient = useQueryClient();
+
+    // Mutation for sending a message
+    const addMessageMutation = useMutation({
+        mutationFn: (text: string) => {
+            if (!activeSessionId || !activeChatId) {
+                throw new Error("Session ID or Chat ID missing");
+            }
+            return addChatMessage(activeSessionId, activeChatId, text);
+        },
+        onSuccess: (data, variables) => {
+            // Update the cache directly for instant feedback
+            const queryKey = ['chat', activeSessionId, activeChatId];
+            queryClient.setQueryData<ChatSession>(queryKey, (oldData) => {
+                if (!oldData) {
+                    // If cache is empty (e.g., first message), create it
+                    // This requires knowing the chat metadata (id, timestamp, name)
+                    // which isn't available here easily.
+                    // Invalidation is safer if cache might not exist.
+                    console.warn("Chat cache was empty, invalidating instead of setting.");
+                    queryClient.invalidateQueries({ queryKey });
+                    return undefined; // Let invalidation handle refetch
+                }
+                const currentMessages = Array.isArray(oldData.messages) ? oldData.messages : [];
+                return { ...oldData, messages: [...currentMessages, data.userMessage, data.aiMessage] };
+            });
+            setInputError(''); // Clear any previous submission error
+
+             // Focus input after successful send, unless disabled prop is true
+            const isDisabled = disabled || !activeChatId;
+            if (!isDisabled && inputRef.current) {
+                inputRef.current.focus();
+            }
+        },
+        onError: (error) => {
+            console.error("Failed to send message:", error);
+            setInputError('Failed to send message. Please try again.');
+        },
+    });
+
+    const isAiResponding = addMessageMutation.isPending;
+    const isDisabled = disabled || isAiResponding || !activeChatId; // Combined disabled check
 
     useEffect(() => {
-        if (activeChatId !== null && !disabled) {
+        if (activeChatId !== null && !isDisabled) { // Check combined disabled state
             inputRef.current?.focus();
         }
-    }, [activeChatId, disabled]);
+    }, [activeChatId, isDisabled]); // Depend on combined state
 
     useEffect(() => {
-        if ((chatError === "Cannot send an empty message." || chatError === "Please select a chat first.") && currentQuery !== '') {
-            setChatError('');
+        // Clear input-specific errors when user types
+        if ((inputError === "Cannot send an empty message." || inputError === "Please select a chat first.") && currentQuery !== '') {
+            setInputError('');
         }
-    }, [currentQuery, chatError, setChatError]);
+    }, [currentQuery, inputError]);
 
     useEffect(() => {
         setIsToastVisible(!!toastMessageContent);
@@ -52,68 +94,42 @@ export function ChatInput({ disabled = false }: ChatInputProps) {
     const handleSelectTemplate = (text: string) => {
         setCurrentQuery((prev) => (prev ? `${prev} ${text}` : text));
         setShowTemplates(false);
-        if (!disabled) {
-            inputRef.current?.focus();
+        if (!isDisabled && inputRef.current) { // Check combined disabled state
+            inputRef.current.focus();
         }
     };
 
     const trySubmit = async () => {
-        if (disabled) {
-             console.log("Submit prevented: ChatInput is disabled.");
+        if (isDisabled) {
+             console.log("Submit prevented: ChatInput is disabled or AI is responding.");
              return false;
         }
         if (isAiResponding) {
-            setToastMessageAtom("Please wait for the AI to finish responding.");
+            // Toast might be annoying, maybe just rely on button disabled state
+            // setToastMessageAtom("Please wait for the AI to finish responding.");
             return false;
         }
         if (!currentQuery.trim()) {
-            setChatError("Cannot send an empty message.");
+            setInputError("Cannot send an empty message.");
             return false;
         }
         if (activeSessionId === null || activeChatId === null) {
-            setChatError("Please select a chat first.");
+            setInputError("Please select a chat first.");
              console.error("Submit failed: No active session or chat ID.");
             return false;
         }
 
         try {
-            setIsAiResponding(true);
-            setChatError('');
+            setInputError(''); // Clear previous errors
             const queryToSend = currentQuery;
-            setCurrentQuery('');
-
-            const { userMessage, aiMessage } = await addChatMessage(activeSessionId, activeChatId, queryToSend);
-
-            setPastSessions(prevSessions =>
-                prevSessions.map(session => {
-                    if (session.id === activeSessionId) {
-                        return {
-                            ...session,
-                            chats: (session.chats || []).map(chat => {
-                                if (chat.id === activeChatId) {
-                                    return {
-                                        ...chat,
-                                        messages: [...(chat.messages || []), userMessage, aiMessage]
-                                    };
-                                }
-                                return chat;
-                            })
-                        };
-                    }
-                    return session;
-                })
-            );
-
-            if (!disabled) {
-               inputRef.current?.focus();
-            }
+            setCurrentQuery(''); // Clear input immediately
+            addMessageMutation.mutate(queryToSend); // Trigger the mutation
         } catch (err) {
-            console.error("Failed to send message:", err);
-            setChatError('Failed to send message. Please try again.');
-        } finally {
-            setIsAiResponding(false);
+            // Should be caught by mutation's onError
+            console.error("Error during mutation initiation:", err);
+            setInputError('An unexpected error occurred.');
         }
-        return true;
+        return true; // Indicate submission attempt was made
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -131,8 +147,8 @@ export function ChatInput({ disabled = false }: ChatInputProps) {
     const handleCancelClick = (e: React.MouseEvent<HTMLButtonElement>) => {
         e.preventDefault();
         setToastMessageAtom("Cancellation not supported by backend yet.");
-        if (!disabled) {
-           inputRef.current?.focus();
+        if (!isDisabled && inputRef.current) { // Check combined disabled state
+           inputRef.current.focus();
         }
     };
 
@@ -141,10 +157,10 @@ export function ChatInput({ disabled = false }: ChatInputProps) {
         if (!open) setToastMessageAtom(null);
     };
 
-    const showCancelButton = isAiResponding && !disabled;
-    const sendButtonDisabled = disabled || !currentQuery.trim() || activeChatId === null || isAiResponding;
-    const starredButtonDisabled = disabled || activeChatId === null;
-    const inputFieldDisabled = disabled || activeChatId === null || isAiResponding;
+    const showCancelButton = isAiResponding && !disabled; // Show cancel only if base disabled prop is false
+    const sendButtonDisabled = isDisabled || !currentQuery.trim(); // Simplified disabled logic
+    const starredButtonDisabled = isDisabled;
+    const inputFieldDisabled = isDisabled;
 
     return (
         <>
@@ -184,7 +200,7 @@ export function ChatInput({ disabled = false }: ChatInputProps) {
                            onClick={handleCancelClick}
                            title="Cancel response (Not Implemented)"
                            aria-label="Cancel AI response"
-                           disabled={!isAiResponding}
+                           disabled={!isAiResponding} // Disable if not actually responding
                            >
                             <StopIcon />
                         </IconButton>
@@ -202,7 +218,7 @@ export function ChatInput({ disabled = false }: ChatInputProps) {
                         </IconButton>
                     )}
                 </Flex>
-                {chatError && <Text size="1" color="red" align="center" mt="1">{chatError}</Text>}
+                {inputError && <Text size="1" color="red" align="center" mt="1">{inputError}</Text>}
             </Flex>
             <Toast.Root
                 open={isToastVisible}

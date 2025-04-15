@@ -1,14 +1,16 @@
 import React, { useState, useRef, useEffect, Dispatch, SetStateAction } from 'react';
 import { Button, TextArea, Flex, Box, IconButton } from '@radix-ui/themes';
-import { Pencil1Icon, CheckIcon, Cross1Icon, PlayIcon } from '@radix-ui/react-icons';
+import { Pencil1Icon, CheckIcon, Cross1Icon, PlayIcon, UpdateIcon } from '@radix-ui/react-icons';
 import { cn } from '../../utils';
 
 interface TranscriptParagraphProps {
     paragraph: string;
     index: number;
-    onSave: (index: number, newText: string) => Promise<void>;
+    // onSave accepts index and text, returns Promise (for mutation)
+    onSave: (index: number, newText: string) => Promise<void> | void;
     activeEditIndex: number | null;
     setActiveEditIndex: Dispatch<SetStateAction<number | null>>;
+    isSaving: boolean; // Add prop to indicate saving state for this paragraph
 }
 
 export function TranscriptParagraph({
@@ -16,7 +18,8 @@ export function TranscriptParagraph({
     index,
     onSave,
     activeEditIndex,
-    setActiveEditIndex
+    setActiveEditIndex,
+    isSaving, // Use the prop
 }: TranscriptParagraphProps) {
     const [editValue, setEditValue] = useState(paragraph);
     const containerRef = useRef<HTMLDivElement>(null);
@@ -53,20 +56,24 @@ export function TranscriptParagraph({
     };
 
     const handleCancel = () => {
+        if (isSaving) return; // Don't cancel if currently saving
         setActiveEditIndex(null); // Exit edit mode for this paragraph
         setEditValue(paragraph); // Reset textarea value to original on cancel
     };
 
-    // Make handleSave async to await the onSave prop
+    // Make handleSave async to potentially await the onSave prop
     const handleSave = async () => {
         const trimmedValue = editValue.trim();
+        if (isSaving) return; // Prevent double save
+
         // Only call save if the trimmed text actually changed
         if (trimmedValue !== paragraph.trim()) {
             try {
-                // Call the async onSave function passed from parent (waits for API call)
+                // Call the async onSave function passed from parent (likely triggers mutation)
                 await onSave(index, trimmedValue);
-                // Parent's onSave handler (handleSaveParagraphInternal) will call setActiveEditIndex(null) on success
+                // Parent's mutation's onSuccess handler should call setActiveEditIndex(null)
             } catch (error) {
+                // Error handling might be done within the mutation's onError
                 console.error(`Error saving paragraph ${index} from TranscriptParagraph:`, error);
             }
         } else {
@@ -199,13 +206,18 @@ export function TranscriptParagraph({
                                 }}
                                 onKeyDown={handleKeyDown}
                                 aria-label={`Edit paragraph ${index + 1}`}
+                                disabled={isSaving} // Disable textarea while saving
                             />
                             <Flex justify="end" gap="2" mt="1">
-                                <Button onClick={handleCancel} size="1" variant="soft" color="gray" title="Cancel (Esc)">
+                                <Button onClick={handleCancel} size="1" variant="soft" color="gray" title="Cancel (Esc)" disabled={isSaving}>
                                     <Cross1Icon /> Cancel
                                 </Button>
-                                <Button onClick={handleSave} size="1" variant="solid" title="Save (Ctrl+Enter)">
-                                    <CheckIcon /> Save
+                                <Button onClick={handleSave} size="1" variant="solid" title="Save (Ctrl+Enter)" disabled={isSaving}>
+                                    {isSaving ? (
+                                        <UpdateIcon className="animate-spin" /> // Show spinner icon
+                                    ) : (
+                                        <CheckIcon />
+                                    )} Save
                                 </Button>
                             </Flex>
                         </Flex>

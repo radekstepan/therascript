@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { Provider } from 'jotai';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import './styles/global.css';
@@ -13,12 +14,17 @@ if (!rootElement) {
 
 const root = ReactDOM.createRoot(rootElement);
 
+// Create a client
+const queryClient = new QueryClient();
+
 root.render(
   <React.StrictMode>
-    <Provider>
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
-    </Provider>
+    <QueryClientProvider client={queryClient}>
+      <Provider> {/* Jotai Provider still needed for UI state */}
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </Provider>
+    </QueryClientProvider>
   </React.StrictMode>
 );

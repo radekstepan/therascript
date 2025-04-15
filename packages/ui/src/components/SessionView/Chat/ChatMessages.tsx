@@ -1,30 +1,48 @@
 import React, { useState } from 'react';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue } from 'jotai';
+import { useQueryClient } from '@tanstack/react-query';
 import { StarIcon, StarFilledIcon, InfoCircledIcon } from '@radix-ui/react-icons';
 import { Button, TextField, Flex, Box, Text, IconButton, Dialog, Spinner, Callout } from '@radix-ui/themes';
-import { currentChatMessagesAtom, isChattingAtom, starMessageAtom } from '../../../store';
-import type { ChatMessage } from '../../../types';
+import { activeSessionIdAtom } from '../../../store';
+import type { ChatMessage, ChatSession } from '../../../types';
 import { cn } from '../../../utils';
+// Assume no dedicated star API for now, handled via setQueryData
+// import { starMessage as starMessageApi } from '../../../api/api'; // If an API existed
 
 interface ChatMessagesProps {
   activeChatId: number | null;
+  messages: ChatMessage[]; // Receive messages as props
 }
 
-export function ChatMessages({ activeChatId }: ChatMessagesProps) {
-  const chatMessages = useAtomValue(currentChatMessagesAtom);
-  const isChatting = useAtomValue(isChattingAtom);
-  const starMessageAction = useSetAtom(starMessageAtom);
+export function ChatMessages({ activeChatId, messages: chatMessages }: ChatMessagesProps) {
+  const activeSessionId = useAtomValue(activeSessionIdAtom);
 
   const [isNamingDialogOpen, setIsNamingDialogOpen] = useState(false);
   const [messageToName, setMessageToName] = useState<ChatMessage | null>(null);
   const [templateNameInput, setTemplateNameInput] = useState('');
   const [namingError, setNamingError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
   const handleStarClick = (message: ChatMessage) => {
-    if (activeChatId === null) return;
+    if (activeChatId === null || !activeSessionId) return;
+
+    const queryKey = ['chat', activeSessionId, activeChatId];
+
     if (message.starred) {
-      starMessageAction({ chatId: activeChatId, messageId: message.id, shouldStar: false });
+      // Unstar directly using setQueryData (optimistic)
+      queryClient.setQueryData<ChatSession>(queryKey, (oldData) => {
+        if (!oldData) return oldData;
+        return {
+          ...oldData,
+          messages: (oldData.messages || []).map(msg =>
+            msg.id === message.id ? { ...msg, starred: false, starredName: undefined } : msg
+          ),
+        };
+      });
+      // If there were a backend API:
+      // starMutation.mutate({ messageId: message.id, shouldStar: false });
     } else {
+      // Open naming dialog
       setMessageToName(message);
       setTemplateNameInput(message.starredName || message.text.substring(0, 50) + (message.text.length > 50 ? '...' : ''));
       setNamingError(null);
@@ -40,13 +58,27 @@ export function ChatMessages({ activeChatId }: ChatMessagesProps) {
   };
 
   const handleConfirmName = () => {
-    if (!messageToName || activeChatId === null) return;
+    if (!messageToName || activeChatId === null || !activeSessionId) return;
+
     const finalName = templateNameInput.trim();
     if (!finalName) {
       setNamingError("Please enter a name for the starred template.");
       return;
     }
-    starMessageAction({ chatId: activeChatId, messageId: messageToName.id, shouldStar: true, name: finalName });
+
+    const queryKey = ['chat', activeSessionId, activeChatId];
+    // Star directly using setQueryData (optimistic)
+    queryClient.setQueryData<ChatSession>(queryKey, (oldData) => {
+      if (!oldData) return oldData;
+      return {
+        ...oldData,
+        messages: (oldData.messages || []).map(msg =>
+          msg.id === messageToName.id ? { ...msg, starred: true, starredName: finalName } : msg
+        ),
+      };
+    });
+    // If there were a backend API:
+    // starMutation.mutate({ messageId: messageToName.id, shouldStar: true, name: finalName });
     handleCancelName();
   };
 
@@ -118,7 +150,8 @@ export function ChatMessages({ activeChatId }: ChatMessagesProps) {
             )}
           </Flex>
         ))}
-        {isChatting && (
+        {/* "Thinking..." indicator is now handled by the mutation state in ChatInput/ChatInterface */}
+        {/* {isChatting && (
           <Flex align="start" gap="2" justify="start">
             <Box className="rounded-lg p-2 px-3 text-sm bg-[--gray-a3] text-[--gray-a11] shadow-sm">
               <Flex align="center" gap="1" style={{ fontStyle: 'italic' }}>
@@ -126,7 +159,7 @@ export function ChatMessages({ activeChatId }: ChatMessagesProps) {
               </Flex>
             </Box>
           </Flex>
-        )}
+        )} */}
       </Box>
       <Dialog.Root open={isNamingDialogOpen} onOpenChange={(open) => !open && handleCancelName()}>
         <Dialog.Content style={{ maxWidth: 450 }}>

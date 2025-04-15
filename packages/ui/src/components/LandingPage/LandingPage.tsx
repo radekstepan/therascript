@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useMemo } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { CounterClockwiseClockIcon, PlusCircledIcon } from '@radix-ui/react-icons';
+import { useQuery } from '@tanstack/react-query';
 import { SessionListTable } from './SessionListTable';
 import { Button, Card, Flex, Heading, Text, Box, Container, Spinner } from '@radix-ui/themes';
 import { UserThemeDropdown } from '../User/UserThemeDropdown';
@@ -10,42 +11,97 @@ import {
     sessionSortCriteriaAtom,
     sessionSortDirectionAtom,
     setSessionSortAtom,
-    SessionSortCriteria,
-    pastSessionsAtom,
-    sortedSessionsAtom
+    SessionSortCriteria, // Keep type
+    // Remove pastSessionsAtom, sortedSessionsAtom - handled by useQuery and local sort
 } from '../../store';
+import type { Session } from '../../types'; // Keep type
 
 export function LandingPage() {
-    const [isLoading, setIsLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
-
     const openUploadModal = useSetAtom(openUploadModalAtom);
     const currentSortCriteria = useAtomValue(sessionSortCriteriaAtom);
     const currentSortDirection = useAtomValue(sessionSortDirectionAtom);
     const setSort = useSetAtom(setSessionSortAtom);
-    const setPastSessions = useSetAtom(pastSessionsAtom);
-    const sortedSessions = useAtomValue(sortedSessionsAtom);
 
-    useEffect(() => {
-        const loadSessions = async () => {
-            try {
-                setIsLoading(true);
-                setError(null); // Clear previous errors
-                const data = await fetchSessions();
-                console.log('[LandingPage] Fetched sessions:', data);
-                // ** Update the global pastSessionsAtom **
-                setPastSessions(data);
-            } catch (err) {
-                console.error("Failed to load sessions:", err);
-                setError('Failed to load sessions.');
-                 setPastSessions([]); // Clear sessions on error
-            } finally {
-                setIsLoading(false);
+    // Fetch sessions using Tanstack Query
+    const { data: sessions, isLoading, error, refetch } = useQuery<Session[], Error>({
+        queryKey: ['sessions'],
+        queryFn: fetchSessions,
+        // staleTime: 5 * 60 * 1000, // Example: Cache data for 5 minutes
+    });
+
+    // Memoized sorting logic, operates on the data from useQuery
+    const sortedSessions = useMemo(() => {
+        if (!sessions) return [];
+
+        const criteria = currentSortCriteria;
+        const direction = currentSortDirection;
+        console.log(`[LandingPage] Sorting ${sessions.length} sessions by ${criteria} (${direction})`);
+
+        const sorted = [...sessions].sort((a, b) => {
+            let valA: any;
+            let valB: any;
+
+            // Determine values based on criteria
+            switch (criteria) {
+                case 'sessionName':
+                    valA = a.sessionName || a.fileName || ''; // Fallback to fileName
+                    valB = b.sessionName || b.fileName || '';
+                    break;
+                case 'clientName':
+                    valA = a.clientName || ''; // Default empty string for null/undefined
+                    valB = b.clientName || '';
+                    break;
+                case 'sessionType':
+                    valA = a.sessionType || '';
+                    valB = b.sessionType || '';
+                    break;
+                case 'therapy':
+                    valA = a.therapy || '';
+                    valB = b.therapy || '';
+                    break;
+                case 'date':
+                    // Date comparison needs special handling
+                    const dateA = a.date ? new Date(a.date) : null;
+                    const dateB = b.date ? new Date(b.date) : null;
+                    const timeA = dateA ? dateA.getTime() : NaN;
+                    const timeB = dateB ? dateB.getTime() : NaN;
+
+                    // Handle invalid or missing dates consistently (e.g., push to end)
+                    if (isNaN(timeA)) return isNaN(timeB) ? 0 : 1; // Place NaN dates after valid dates
+                    if (isNaN(timeB)) return -1;
+                    return timeA - timeB; // Sort valid dates chronologically
+                case 'id': // Sorting by ID might be useful for debugging or default
+                    valA = a.id;
+                    valB = b.id;
+                    break;
+                default:
+                    // Should not happen if criteria is typed correctly
+                    // Use assertion to help TypeScript, though it won't prevent runtime issues if type isn't exhaustive
+                    const _exhaustiveCheck: never = criteria;
+                    console.warn(`[sortedSessionsAtom] Unknown sort criteria: ${criteria}`);
+                    return 0;
             }
-        };
-        loadSessions();
-    // Run only once on mount, or add dependencies if needed (e.g., user login)
-    }, [setPastSessions]);
+
+            // Generic comparison for non-date fields
+            // Handle nulls consistently (e.g., place at the end)
+            if (valA === null || valA === undefined) return (valB === null || valB === undefined) ? 0 : 1;
+            if (valB === null || valB === undefined) return -1;
+
+            // Compare based on type
+            if (typeof valA === 'string' && typeof valB === 'string') {
+                return valA.localeCompare(valB, undefined, { sensitivity: 'base' });
+            } else if (typeof valA === 'number' && typeof valB === 'number') {
+                return valA - valB;
+            } else {
+                // Fallback: convert to string and compare
+                return String(valA).localeCompare(String(valB), undefined, { sensitivity: 'base' });
+            }
+        });
+
+        if (direction === 'desc') sorted.reverse();
+        return sorted;
+
+    }, [sessions, currentSortCriteria, currentSortDirection]);
 
     // Handler for sorting (passed to table)
     const handleSort = (criteria: SessionSortCriteria) => {
@@ -63,11 +119,11 @@ export function LandingPage() {
     }
 
     // Display error state
-    if (error) {
+    if (error || (!sessions && !isLoading)) { // Also handle case where sessions is undefined after loading attempt
          return (
             <Flex direction="column" justify="center" align="center" style={{ height: '100vh', padding: '2rem' }}>
-                <Text color="red" mb="4">{error}</Text>
-                 <Button onClick={() => window.location.reload()} variant="soft">
+                <Text color="red" mb="4">{error?.message || 'Failed to load sessions.'}</Text>
+                 <Button onClick={() => refetch()} variant="soft">
                     Try Again
                 </Button>
             </Flex>
@@ -108,8 +164,7 @@ export function LandingPage() {
                         </Flex>
                         {/* Card Body - Table or Empty State */}
                         <Box className="flex-grow flex flex-col overflow-hidden">
-                            {/* ** Use the sortedSessions from the atom ** */}
-                            {sortedSessions.length === 0 ? (
+                            {sortedSessions.length === 0 && !isLoading ? ( // Check isLoading too
                                 <Flex flexGrow="1" align="center" justify="center" p="6">
                                     <Text color="gray">No sessions found. Upload one to get started!</Text>
                                 </Flex>

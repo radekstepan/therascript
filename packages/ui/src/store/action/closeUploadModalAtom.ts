@@ -1,16 +1,12 @@
 import { atom } from 'jotai';
 import {
   isUploadModalOpenAtom,
-  isTranscribingAtom,
-  transcriptionErrorAtom,
-  toastMessageAtom
+  // toastMessageAtom // Toast logic might change with mutations
 } from '..';
 
 export const closeUploadModalAtom = atom(null, (get, set) => {
-    if (!get(isTranscribingAtom)) {
-        set(isUploadModalOpenAtom, false);
-        set(transcriptionErrorAtom, '');
-    } else {
-        set(toastMessageAtom, "Please wait for the transcription to finish before closing.");
-    }
+    // Logic preventing close during transcription is now handled within the modal's useMutation state
+    // and the onOpenChange handler binding in UploadModal.tsx.
+    set(isUploadModalOpenAtom, false);
+    // set(transcriptionErrorAtom, ''); // Error state managed by mutation
 });

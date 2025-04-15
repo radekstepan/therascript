@@ -1,19 +1,21 @@
 import React, { useRef, useEffect, useCallback } from 'react';
 import { useAtomValue } from 'jotai';
 import { Box, Flex, ScrollArea, Spinner, Text } from '@radix-ui/themes';
+import { useQuery } from '@tanstack/react-query';
 import { ChatInput } from './ChatInput';
 import { ChatMessages } from './ChatMessages';
+import { fetchChatDetails } from '../../../api/api';
 import {
+    activeSessionIdAtom,
     activeChatIdAtom,
-    currentChatMessagesAtom,
-    isChattingAtom
 } from '../../../store';
+import type { ChatSession } from '../../../types';
 
 interface ChatInterfaceProps {
     isTabActive?: boolean;
     initialScrollTop?: number;
     onScrollUpdate?: (scrollTop: number) => void;
-    isLoadingChat: boolean;
+    isLoadingChat: boolean; // Prop indicating initial high-level loading (e.g., session meta)
 }
 
 // TODO flipping reuse
@@ -30,14 +32,28 @@ export function ChatInterface({
     isTabActive,
     initialScrollTop = 0,
     onScrollUpdate,
-    isLoadingChat
+    isLoadingChat // Represents loading state BEFORE this component's query runs
 }: ChatInterfaceProps) {
+    const activeSessionId = useAtomValue(activeSessionIdAtom);
     const activeChatId = useAtomValue(activeChatIdAtom);
+    const restoreScrollRef = useRef(false);
     const chatContentRef = useRef<HTMLDivElement | null>(null);
     const viewportRef = useRef<HTMLDivElement | null>(null);
-    const chatMessages = useAtomValue(currentChatMessagesAtom);
-    const isAiResponding = useAtomValue(isChattingAtom);
-    const restoreScrollRef = useRef(false);
+
+    // Fetch chat details using Tanstack Query
+    const { data: chatData, isLoading: isLoadingMessages, error: chatError, isFetching } = useQuery<ChatSession | null, Error>({
+        queryKey: ['chat', activeSessionId, activeChatId],
+        queryFn: () => {
+            if (!activeSessionId || activeChatId === null) return Promise.resolve(null); // Return null if IDs aren't valid
+            return fetchChatDetails(activeSessionId, activeChatId);
+        },
+        enabled: !!activeSessionId && activeChatId !== null, // Only run query if IDs are valid
+        // staleTime: 60 * 1000, // Example: Consider messages stale after 1 minute
+    });
+
+    const chatMessages = chatData?.messages || [];
+    // Combined loading state: consider initial prop, this query's loading, and background fetching
+    const combinedIsLoading = isLoadingChat || isLoadingMessages || (isFetching && !chatData);
 
      const debouncedScrollSave = useCallback(
          debounce((scrollTop: number) => {
@@ -78,8 +94,10 @@ export function ChatInterface({
          }
      }, [isTabActive, initialScrollTop]);
 
+    // Scroll to bottom effect
     useEffect(() => {
-        if ((isTabActive === undefined || isTabActive) && !restoreScrollRef.current && !isLoadingChat) {
+        // Scroll only if the tab is active (or tabs aren't used), not restoring scroll, not loading, and there are messages
+        if ((isTabActive === undefined || isTabActive) && !restoreScrollRef.current && !combinedIsLoading && chatMessages.length > 0) {
             if (chatContentRef.current) {
                 const lastElement = chatContentRef.current.lastElementChild;
                 if (lastElement) {
@@ -89,7 +107,7 @@ export function ChatInterface({
                 }
             }
         }
-    }, [chatMessages, isAiResponding, isTabActive, isLoadingChat]);
+    }, [chatMessages.length, combinedIsLoading, isTabActive]); // Depend on length for new messages
 
 
     return (
@@ -101,7 +119,7 @@ export function ChatInterface({
                 onScroll={handleScroll}
                 style={{ flexGrow: 1, minHeight: 0, position: 'relative' }}
             >
-                {isLoadingChat && (
+                {combinedIsLoading && chatMessages.length === 0 && ( // Show spinner only if loading and no messages yet
                     <Flex
                        align="center"
                        justify="center"
@@ -117,8 +135,14 @@ export function ChatInterface({
                         <Text ml="2" color="gray">Loading messages...</Text>
                     </Flex>
                 )}
-                <Box p="4" ref={chatContentRef} style={{ opacity: isLoadingChat ? 0.5 : 1, transition: 'opacity 0.2s ease-in-out' }}>
-                    <ChatMessages activeChatId={activeChatId} />
+                 {chatError && (
+                     <Flex justify="center" p="4">
+                        <Text color="red">Error loading chat: {chatError.message}</Text>
+                     </Flex>
+                 )}
+                <Box p="4" ref={chatContentRef} style={{ opacity: combinedIsLoading ? 0.5 : 1, transition: 'opacity 0.2s ease-in-out' }}>
+                    {/* Pass fetched messages down */}
+                    <ChatMessages messages={chatMessages} activeChatId={activeChatId} />
                 </Box>
             </ScrollArea>
             <Box
@@ -128,13 +152,13 @@ export function ChatInterface({
                 style={{
                     flexShrink: 0,
                     borderTop: '1px solid var(--gray-a6)',
-                    backgroundColor: 'var(--card-background)',
-                    opacity: isLoadingChat ? 0.6 : 1,
-                    pointerEvents: isLoadingChat ? 'none' : 'auto',
+                    backgroundColor: 'var(--color-panel-solid)', // Match header/sidebar?
+                    opacity: combinedIsLoading ? 0.6 : 1,
+                    pointerEvents: combinedIsLoading ? 'none' : 'auto',
                     transition: 'opacity 0.2s ease-in-out',
                 }}
             >
-                <ChatInput disabled={isLoadingChat} />
+                <ChatInput disabled={combinedIsLoading || !activeChatId} /> {/* Also disable if no chat selected */}
             </Box>
         </Flex>
     );

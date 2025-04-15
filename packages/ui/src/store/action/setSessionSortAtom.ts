@@ -1,5 +1,5 @@
 import { atom } from 'jotai';
-import {
+import { // Keep types, but remove pastSessionsAtom dependency
     sessionSortCriteriaAtom,
     sessionSortDirectionAtom,
     type SessionSortCriteria
@@ -10,9 +10,12 @@ export const setSessionSortAtom = atom(null, (get, set, newCriteria: SessionSort
     const currentDirection = get(sessionSortDirectionAtom);
 
     if (newCriteria === currentCriteria) {
+        // If clicking the same column header, toggle direction
         set(sessionSortDirectionAtom, currentDirection === 'asc' ? 'desc' : 'asc');
     } else {
+        // If clicking a new column header, set criteria and default direction
         set(sessionSortCriteriaAtom, newCriteria);
-        set(sessionSortDirectionAtom, newCriteria === 'date' ? 'desc' : 'asc'); // Default sort directions
+        // Default sort directions: 'date' descending, others ascending
+        set(sessionSortDirectionAtom, newCriteria === 'date' ? 'desc' : 'asc');
     }
 });
