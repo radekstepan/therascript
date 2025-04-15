@@ -46,8 +46,13 @@ interface SessionSidebarProps {
 export function SessionSidebar({ session, isLoading: isLoadingSession, error: sessionError, hideHeader = false }: SessionSidebarProps) {
     const { chatId: chatIdParam } = useParams<{ sessionId: string; chatId?: string }>(); // Only need chatIdParam here
     const navigate = useNavigate();
+
+    // Always call useAtomValue unconditionally to follow rules of hooks
+    const activeChatIdFromAtom = useAtomValue(activeChatIdAtom);
+
     // Determine current active chat ID from URL param, falling back to Jotai if needed (though URL should be canonical)
-    const currentActiveChatId = chatIdParam ? parseInt(chatIdParam, 10) : useAtomValue(activeChatIdAtom);
+    const currentActiveChatId = chatIdParam ? parseInt(chatIdParam, 10) : activeChatIdFromAtom;
+
     // const currentActiveSessionId = useAtomValue(activeSessionIdAtom); // Session ID comes from props now
     const queryClient = useQueryClient();
 
