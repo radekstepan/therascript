@@ -1,4 +1,3 @@
-/* packages/api/src/services/transcriptionService.ts */
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import axios, { AxiosError } from 'axios';
@@ -15,38 +14,69 @@ import type {
 const WHISPER_API_URL = config.whisper.apiUrl;
 const WHISPER_MODEL_TO_USE = config.whisper.model; // Get model from config
 
-// --- Helper Function: Group segments into paragraphs (Keep as is) ---
+// --- Helper Function: Group segments into paragraphs (Corrected) ---
 function groupSegmentsIntoParagraphs(segments: WhisperSegment[]): StructuredTranscript {
-    // ... (implementation remains the same)
     if (!segments || segments.length === 0) {
         return [];
     }
     const paragraphs: { id: number; timestamp: number; text: string }[] = [];
     let currentParagraphText = '';
+    // Initialize with the start time of the very first segment
     let currentParagraphStartTimeMs = segments[0].start * 1000;
     let paragraphIndex = 0;
-    segments.forEach((segment, index) => { /* ... grouping logic ... */
-        const segmentText = segment.text.trim();
-        if (segmentText) {
+
+    segments.forEach((segment, index) => {
+        // Trim individual segment text AFTER checking if it exists
+        const originalSegmentText = segment.text; // Keep original for checks if needed, though trim is usually fine
+        const segmentText = originalSegmentText.trim();
+
+        if (segmentText) { // Only process non-empty segments after trimming
             if (!currentParagraphText) {
-                currentParagraphStartTimeMs = segment.start * 1000;
+                // This is the first non-empty segment for this paragraph
+                currentParagraphStartTimeMs = segment.start * 1000; // Set start time
                 currentParagraphText = segmentText;
             } else {
-                 if (!/[.!?]$/.test(currentParagraphText)) { currentParagraphText += ' '; }
+                // *** CORRECTED LOGIC ***
+                // Always add a space before appending subsequent segments within the same paragraph
+                currentParagraphText += ' ';
                 currentParagraphText += segmentText;
             }
         }
+
+        // Paragraph splitting logic
         const nextSegment = segments[index + 1];
         const timeGapMs = nextSegment ? (nextSegment.start - segment.end) * 1000 : Infinity;
-        const endsWithPunctuation = /[.!?]$/.test(segmentText);
-        const shouldSplit = index === segments.length - 1 || timeGapMs > 1000 || (endsWithPunctuation && timeGapMs > 500);
+        // Use original text to check punctuation before trimming might remove it
+        const endsWithPunctuation = /[.!?]$/.test(originalSegmentText.trim());
+        // Determine if we should end the current paragraph
+        const shouldSplit = index === segments.length - 1 // Last segment overall
+                          || timeGapMs > 1000             // Long pause after this segment
+                          || (endsWithPunctuation && timeGapMs > 500); // Ends with punctuation AND a moderate pause
+
+        // If we should split AND we have accumulated text, finalize the paragraph
         if (shouldSplit && currentParagraphText) {
-            paragraphs.push({ id: paragraphIndex++, timestamp: Math.round(currentParagraphStartTimeMs), text: currentParagraphText });
+            paragraphs.push({
+                id: paragraphIndex++,
+                timestamp: Math.round(currentParagraphStartTimeMs),
+                text: currentParagraphText // Use the accumulated text
+            });
+            // Reset for the next paragraph
             currentParagraphText = '';
+             // Initialize next paragraph's start time (if there is a next segment)
             currentParagraphStartTimeMs = nextSegment ? nextSegment.start * 1000 : 0;
         }
-     });
-    if (currentParagraphText) { paragraphs.push({ id: paragraphIndex, timestamp: Math.round(currentParagraphStartTimeMs), text: currentParagraphText }); }
+    });
+
+     // In case the loop finishes while building a paragraph (e.g., last segment didn't trigger split)
+     if (currentParagraphText) {
+        paragraphs.push({
+            id: paragraphIndex,
+            timestamp: Math.round(currentParagraphStartTimeMs),
+            text: currentParagraphText
+        });
+     }
+
+    // Final filter just in case empty paragraphs were somehow created
     return paragraphs.filter(p => p.text.trim().length > 0);
 }
 // --- End Helper ---
@@ -126,10 +156,6 @@ export const getTranscriptionStatus = async (jobId: string): Promise<WhisperJobS
         if (axios.isAxiosError(error)) {
             const axiosError = error as AxiosError;
             if (axiosError.response?.status === 404) {
-                 // It's possible the job ID isn't found *yet* if polled too quickly after submission
-                 console.warn(`[TranscriptionService] Job ID ${jobId} not found on Whisper service (maybe polling too fast?).`);
-                 // Return a synthetic 'queued' status to allow UI polling to continue briefly
-                 // Or, re-throw but maybe a different error type? For now, let's re-throw standard error.
                 throw new InternalServerError(`Job ID ${jobId} not found on Whisper service.`);
             }
              if (axiosError.code === 'ECONNREFUSED' || axiosError.code === 'ENOTFOUND') {

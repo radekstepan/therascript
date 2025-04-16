@@ -31,7 +31,7 @@
 - [ ] show the user message in the UI immediately after sending it
 - [ ] when sorting by date in session history, make sure we use a full datetime
 - [x] md5 on the DB init script file and check on api start that we use the latest version of the db or throw an error
-- [ ] the transcript has no spaces between sentences
+- [x] the transcript has no spaces between sentences
 - [x] the status API should be called every time the dropdown menu to check if a model is loaded is opened, the response should not be cached
 - [ ] show how large the context is in tokens and warn if context is too large
 - [ ] when you upload/transcribe a file, you should reset the New Session modal
