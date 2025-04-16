@@ -7,9 +7,9 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
-    "dev": "concurrently \"tsc --watch --preserveWatchOutput\" \"nodemon dist/server.js\"",
+    "dev": "yarn workspace whisper build && node ../whisper/dist/index.js & concurrently --kill-others-on-fail \"tsc --watch --preserveWatchOutput\" \"nodemon --signal SIGTERM --delay 2.5 dist/server.js\"",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "preload": "node dist/scripts/preloadDb.js",
+    "preload": "yarn build && node dist/scripts/preloadDb.js",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "keywords": [
@@ -26,9 +26,11 @@
     "@elysiajs/cors": "^1.1.0",
     "@elysiajs/swagger": "^1.1.0",
     "@sinclair/typebox": "^0.34.0",
+    "axios": "^1.8.4",
     "better-sqlite3": "^11.9.1",
     "dotenv": "^16.4.5",
     "elysia": "^1.2.25",
+    "form-data": "^4.0.0",
     "multer": "^1.4.5-lts.1",
     "ollama": "^0.5.3"
   },

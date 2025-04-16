@@ -1,4 +1,3 @@
-// packages/api/src/routes/sessionRoutes.ts
 import { Elysia, t, type Static } from 'elysia';
 import path from 'node:path';
 import fs from 'node:fs/promises';
@@ -13,7 +12,7 @@ import {
     deleteTranscriptFile,
     deleteUploadedFile
 } from '../services/fileService.js';
-import { transcribeAudio } from '../services/transcriptionService.js';
+import { transcribeAudio } from '../services/transcriptionService.js'; // Uses the updated service
 import type { BackendSession, BackendSessionMetadata } from '../types/index.js';
 import { NotFoundError, InternalServerError, ApiError, BadRequestError } from '../errors.js';
 import config from '../config/index.js'; // Keep config import
@@ -119,20 +118,21 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
 
             try {
                 // 1. Save uploaded file temporarily (Validation happened in beforeHandle)
-                const tempFileName = `upload-${Date.now()}-${audioFile.name}`;
+                const tempFileName = `upload-${Date.now()}-${path.parse(audioFile.name).name}${path.extname(audioFile.name)}`; // Sanitize name slightly?
                 tempAudioPath = path.join(config.db.uploadsDir, tempFileName);
                 const audioBuffer = await audioFile.arrayBuffer();
                 await fs.writeFile(tempAudioPath, Buffer.from(audioBuffer));
                 console.log(`[API Upload] Temporary audio saved to ${tempAudioPath}`);
 
-                // 2. Transcribe Audio
-                // TODO expose being able to cancel the task (preserved)
+                // 2. Transcribe Audio using the updated service
+                // The service now handles calling the Whisper API endpoint
                 console.log(`[API Upload] Starting transcription for ${audioFile.name}...`);
-                const transcriptContent = await transcribeAudio(tempAudioPath);
+                const transcriptContent = await transcribeAudio(tempAudioPath); // Pass the path
                 console.log(`[API Upload] Transcription finished.`);
 
-                // 3. Create Session in DB
+                // 3. Create Session in DB (using temp transcript path initially)
                 const tempDbTranscriptPath = path.join(config.db.transcriptsDir, `temp-${Date.now()}.txt`);
+                // Pass filename from the original upload
                 newSession = await sessionRepository.create(metadata as BackendSessionMetadata, audioFile.name, tempDbTranscriptPath);
                 if (!newSession) throw new InternalServerError('Failed to create session record.');
                 console.log(`[API Upload] DB session record created (ID: ${newSession.id}) with temp path.`);
@@ -140,7 +140,7 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
                 const sessionId = newSession.id;
                 const finalTranscriptPath = path.join(config.db.transcriptsDir, `${sessionId}.txt`);
 
-                // 4. Save transcript content
+                // 4. Save transcript content to the final path
                 savedTranscriptPath = await saveTranscriptContent(sessionId, transcriptContent);
                 console.log(`[API Upload] Transcript content saved to ${savedTranscriptPath}`);
 
@@ -152,10 +152,11 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
 
                 // 6. Create initial chat
                 const initialChat = await chatRepository.createChat(sessionId);
-                await chatRepository.addMessage(initialChat.id, 'ai', `Session "${metadata.sessionName}" (${metadata.date}) transcribed.`);
+                // Add a more informative initial AI message
+                await chatRepository.addMessage(initialChat.id, 'ai', `Session "${metadata.sessionName}" uploaded on ${metadata.date} has been transcribed and is ready for analysis.`);
                 console.log(`[API Upload] Initial chat created (ID: ${initialChat.id})`);
 
-                // 7. Fetch final state for response
+                // 7. Fetch final state for response (including chat metadata)
                 const finalSessionState = await sessionRepository.findById(sessionId);
                 if (!finalSessionState) throw new InternalServerError(`Failed to fetch final state for session ${sessionId}`);
                 const chatsRaw = await chatRepository.findChatsBySessionId(sessionId);
@@ -169,11 +170,11 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
                     sessionType: finalSessionState.sessionType,
                     therapy: finalSessionState.therapy,
                     transcriptPath: finalSessionState.transcriptPath,
-                    chats: chatsMetadata
+                    chats: chatsMetadata // Include chat metadata in the response
                 };
 
                 set.status = 201;
-                return responseSession;
+                return responseSession; // Return the full session details with chats
 
             } catch (error) {
                  console.error('[API Error] Error during session upload processing:', error);
@@ -181,18 +182,23 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
                  if (newSession?.id) {
                      console.log(`[API Upload Cleanup] Attempting cleanup for session ${newSession.id}...`);
                      try {
-                        await deleteTranscriptFile(newSession.id);
+                        // Attempt to delete transcript file even if saving failed
+                        if (savedTranscriptPath) await fs.unlink(savedTranscriptPath).catch(e => console.warn(`Cleanup: Error deleting final transcript ${savedTranscriptPath}`, e));
+                        else await deleteTranscriptFile(newSession.id); // Try deleting using ID if final save didn't happen
+
                         await sessionRepository.deleteById(newSession.id);
-                        console.log(`[API Upload Cleanup] DB record and transcript file deleted.`);
+                        console.log(`[API Upload Cleanup] DB record and associated transcript file (attempted) deleted.`);
                      }
                      catch (cleanupError) { console.error(`[API Upload Cleanup] Error during cleanup:`, cleanupError); }
                  }
                   if (error instanceof ApiError) throw error;
-                  throw new InternalServerError('Session upload failed.', error instanceof Error ? error : undefined);
+                  // Provide more context in the error message if possible
+                  const errorMessage = error instanceof Error ? error.message : 'Unknown error during upload';
+                  throw new InternalServerError(`Session upload failed: ${errorMessage}`, error instanceof Error ? error : undefined);
             } finally {
                  if (tempAudioPath) {
                     console.log(`[API Upload Cleanup] Deleting temporary audio file: ${tempAudioPath}`);
-                    await deleteUploadedFile(tempAudioPath);
+                    await deleteUploadedFile(tempAudioPath); // Uses fs.unlink with error handling
                  }
             }
         }, {
@@ -210,11 +216,16 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
                 if (file.size > maxSizeInBytes) {
                      throw new BadRequestError(`File size (${(file.size / 1024 / 1024).toFixed(1)}MB) exceeds the limit of ${config.upload.maxFileSize}.`);
                 }
+                // Check if file is empty
+                if (file.size === 0) {
+                    throw new BadRequestError('Uploaded audio file cannot be empty.');
+                }
             },
             // Reference the model name defined above
             body: 'uploadBody',
-            response: { 201: 'sessionWithChatsMetadataResponse', 400: t.Any(), 500: t.Any() },
-            detail: { summary: 'Upload session audio & metadata' }
+            // Update response schema to match the actual return type
+            response: { 201: 'sessionWithChatsMetadataResponse', 400: t.Any(), 499: t.Any(), 500: t.Any() },
+            detail: { summary: 'Upload session audio & metadata, trigger transcription' }
         })
 
         // --- Routes requiring :sessionId ---
@@ -222,6 +233,7 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
              .derive(async ({ params }) => {
                  const sessionId = parseInt(params.sessionId as unknown as string, 10);
                  if (isNaN(sessionId)) throw new BadRequestError('Invalid session ID');
+                 // Fetch session using the repository method
                  const session = await sessionRepository.findById(sessionId);
                  if (!session) throw new NotFoundError(`Session with ID ${sessionId}`);
                  return { sessionData: session };

@@ -1,23 +1,11 @@
 {
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2022", // Modern target
-    "module": "ESNext", // Use ES modules
-    "moduleResolution": "NodeNext", // Modern module resolution
     "outDir": "./dist",
     "rootDir": "./src",
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true,
-    "sourceMap": true,
-    "declaration": true, // Optional: generate declaration files
-    "declarationMap": true, // Optional: generate declaration maps
-    // Required by Elysia for decorators / advanced features if used
-    "experimentalDecorators": true,
-    "emitDecoratorMetadata": true,
-     // Add Bun types if using Bun
-     "types": ["bun-types"]
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node"]
   },
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "dist"]

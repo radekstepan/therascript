@@ -1,0 +1,34 @@
+services:
+  whisper:
+    build:
+      context: ./packages/whisper # Path relative to this compose file
+      dockerfile: Dockerfile
+    image: therascript/whisper # Optional: name the image built by compose
+    container_name: therascript_whisper_service
+    ports:
+      - "127.0.0.1:8000:8000" # Map localhost only port 8000 to container port 8000
+    volumes:
+      # Mount a volume to cache downloaded Whisper models on the host
+      # This prevents re-downloading on every container start
+      - whisper_models:/root/.cache
+      # Keep internal temp dirs, mounting from host usually not needed
+      # - ./whisper_temp_inputs:/app/temp_inputs
+      # - ./whisper_temp_outputs:/app/temp_outputs
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all # Or 1 if you want to limit it
+              capabilities: [gpu] # Ensure GPU access
+    restart: unless-stopped # Restart policy
+    healthcheck: # Added basic healthcheck
+      test: ["CMD", "curl", "--fail", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s # Give time for GPU model loading
+
+volumes:
+  whisper_models: # Define the named volume for caching models
+    driver: local

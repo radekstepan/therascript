@@ -25,10 +25,25 @@ const ollamaBaseURL = getEnvVar('OLLAMA_BASE_URL', 'http://localhost:11434');
 const ollamaModel = getEnvVar('OLLAMA_MODEL', 'llama3');
 const ollamaKeepAlive = getEnvVar('OLLAMA_CHAT_KEEP_ALIVE', '5m');
 
+// Whisper Configuration
+const whisperApiURL = getEnvVar('WHISPER_API_URL', 'http://localhost:8000'); // Default Whisper service URL
+
 // Database and File Storage Configuration
 const dbPath = getEnvVar('DB_PATH', './data/therapy-analyzer.sqlite');
 const transcriptsDir = getEnvVar('DB_TRANSCRIPTS_DIR', './data/transcripts');
 const uploadsDir = getEnvVar('DB_UPLOADS_DIR', './data/uploads');
+
+// Upload Configuration
+const allowedAudioMimeTypes = [
+    'audio/mpeg', // .mp3
+    'audio/mp3',  // Common alternative
+    'audio/wav',  // .wav
+    'audio/x-m4a',// .m4a
+    'audio/ogg',  // .ogg
+    'audio/aac',  // .aac
+    // Add more as needed and tested with Whisper
+];
+const maxUploadFileSize = '1000m'; // Default 100MB
 
 // Resolve paths relative to the project root
 const resolvedDbPath = path.resolve(process.cwd(), dbPath);
@@ -48,10 +63,17 @@ const config = {
     model: ollamaModel,
     keepAlive: ollamaKeepAlive,
   },
+  whisper: { // Added Whisper config
+      apiUrl: whisperApiURL,
+  },
   db: {
     sqlitePath: resolvedDbPath,
     transcriptsDir: resolvedTranscriptsDir,
     uploadsDir: resolvedUploadsDir,
+  },
+  upload: {
+    allowedMimeTypes: allowedAudioMimeTypes,
+    maxFileSize: maxUploadFileSize,
   },
 };
 
