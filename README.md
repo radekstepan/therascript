@@ -27,10 +27,12 @@
 - [ ] make sure to unload whisper when we are done transcribing
 - [ ] add hamburger icon in the session history table for each row to be able to edit the details there as well much like on the session page
 - [ ] the edit transcript modal should let you delete the whole transcript. That will delete the transcript and all chat messages. Well, it'll "archive" it so that it's hidden from the UI but it's still in the DB just in case.
-- [ ] if I run yarn dev then use llama3 and a tiny whisper model; have a configuration for "prod" as well that I can easily change by modifying the config. Should live in the root dir as an env file I think
+- [>] if I run yarn dev then use llama3 and a tiny whisper model; have a configuration for "prod" as well that I can easily change by modifying the config. Should live in the root dir as an env file I think
 - [ ] show the user message in the UI immediately after sending it
 - [ ] when sorting by date in session history, make sure we use a full datetime
 - [ ] md5 on the DB init script file and check on api start that we use the latest version of the db or throw an error
+- [ ] the transcript has no spaces between sentences
+- [ ] the status API should be called every time the dropdown menu to check if a model is loaded is opened, the response should not be cached
 
 ## Nice to have
 

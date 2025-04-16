@@ -1,78 +1,61 @@
+/* packages/api/src/services/transcriptionService.ts */
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import axios, { AxiosError } from 'axios';
 import FormData from 'form-data';
-import config from '../config/index.js';
+import config from '../config/index.js'; // Import config
 import { isNodeError } from '../utils/helpers.js';
 import { InternalServerError, ApiError, BadRequestError } from '../errors.js';
 import type {
     StructuredTranscript,
-    TranscriptParagraphData,
     WhisperJobStatus,
-    WhisperTranscriptionResult,
-    // --- FIX: Import from types ---
     WhisperSegment
 } from '../types/index.js';
 
 const WHISPER_API_URL = config.whisper.apiUrl;
+const WHISPER_MODEL_TO_USE = config.whisper.model; // Get model from config
 
 // --- Helper Function: Group segments into paragraphs (Keep as is) ---
 function groupSegmentsIntoParagraphs(segments: WhisperSegment[]): StructuredTranscript {
+    // ... (implementation remains the same)
     if (!segments || segments.length === 0) {
         return [];
     }
-
-    const paragraphs: TranscriptParagraphData[] = [];
+    const paragraphs: { id: number; timestamp: number; text: string }[] = [];
     let currentParagraphText = '';
     let currentParagraphStartTimeMs = segments[0].start * 1000;
     let paragraphIndex = 0;
-
-    segments.forEach((segment, index) => {
+    segments.forEach((segment, index) => { /* ... grouping logic ... */
         const segmentText = segment.text.trim();
         if (segmentText) {
             if (!currentParagraphText) {
                 currentParagraphStartTimeMs = segment.start * 1000;
                 currentParagraphText = segmentText;
             } else {
-                 if (!/[.!?]$/.test(currentParagraphText)) {
-                    currentParagraphText += ' ';
-                 }
+                 if (!/[.!?]$/.test(currentParagraphText)) { currentParagraphText += ' '; }
                 currentParagraphText += segmentText;
             }
         }
-
         const nextSegment = segments[index + 1];
         const timeGapMs = nextSegment ? (nextSegment.start - segment.end) * 1000 : Infinity;
         const endsWithPunctuation = /[.!?]$/.test(segmentText);
         const shouldSplit = index === segments.length - 1 || timeGapMs > 1000 || (endsWithPunctuation && timeGapMs > 500);
-
         if (shouldSplit && currentParagraphText) {
-            paragraphs.push({
-                id: paragraphIndex++,
-                timestamp: Math.round(currentParagraphStartTimeMs),
-                text: currentParagraphText,
-            });
+            paragraphs.push({ id: paragraphIndex++, timestamp: Math.round(currentParagraphStartTimeMs), text: currentParagraphText });
             currentParagraphText = '';
             currentParagraphStartTimeMs = nextSegment ? nextSegment.start * 1000 : 0;
         }
-    });
-
-    if (currentParagraphText) {
-         paragraphs.push({
-             id: paragraphIndex,
-             timestamp: Math.round(currentParagraphStartTimeMs),
-             text: currentParagraphText,
-         });
-    }
+     });
+    if (currentParagraphText) { paragraphs.push({ id: paragraphIndex, timestamp: Math.round(currentParagraphStartTimeMs), text: currentParagraphText }); }
     return paragraphs.filter(p => p.text.trim().length > 0);
 }
 // --- End Helper ---
 
-// --- NEW: Start Transcription Job ---
+// --- Start Transcription Job ---
 export const startTranscriptionJob = async (filePath: string): Promise<string> => {
     const absoluteFilePath = path.resolve(filePath);
     const fileName = path.basename(absoluteFilePath);
-    console.log(`[TranscriptionService] Requesting transcription job for: ${fileName} via ${WHISPER_API_URL}`);
+    console.log(`[TranscriptionService] Requesting transcription job for: ${fileName} via ${WHISPER_API_URL} using model '${WHISPER_MODEL_TO_USE}'`); // Log model
 
     let fileHandle;
     try {
@@ -85,8 +68,10 @@ export const startTranscriptionJob = async (filePath: string): Promise<string> =
 
         const form = new FormData();
         form.append('file', fileHandle.createReadStream(), { filename: fileName });
+        // *** ADD model_name to the form data ***
+        form.append('model_name', WHISPER_MODEL_TO_USE);
 
-        console.log(`[TranscriptionService] Sending audio file to ${WHISPER_API_URL}/transcribe ...`);
+        console.log(`[TranscriptionService] Sending audio file and model name to ${WHISPER_API_URL}/transcribe ...`);
         const submitResponse = await axios.post<{ job_id: string; message: string }>(
             `${WHISPER_API_URL}/transcribe`,
             form,
@@ -124,7 +109,7 @@ export const startTranscriptionJob = async (filePath: string): Promise<string> =
     }
 };
 
-// --- NEW: Get Transcription Status ---
+// --- Get Transcription Status (No change needed) ---
 export const getTranscriptionStatus = async (jobId: string): Promise<WhisperJobStatus> => {
     if (!jobId) throw new BadRequestError("Job ID is required to check status.");
     console.log(`[TranscriptionService] Checking status for job ${jobId}...`);
@@ -141,6 +126,10 @@ export const getTranscriptionStatus = async (jobId: string): Promise<WhisperJobS
         if (axios.isAxiosError(error)) {
             const axiosError = error as AxiosError;
             if (axiosError.response?.status === 404) {
+                 // It's possible the job ID isn't found *yet* if polled too quickly after submission
+                 console.warn(`[TranscriptionService] Job ID ${jobId} not found on Whisper service (maybe polling too fast?).`);
+                 // Return a synthetic 'queued' status to allow UI polling to continue briefly
+                 // Or, re-throw but maybe a different error type? For now, let's re-throw standard error.
                 throw new InternalServerError(`Job ID ${jobId} not found on Whisper service.`);
             }
              if (axiosError.code === 'ECONNREFUSED' || axiosError.code === 'ENOTFOUND') {
@@ -152,7 +141,7 @@ export const getTranscriptionStatus = async (jobId: string): Promise<WhisperJobS
     }
 };
 
-// --- NEW: Get Transcription Result and Structure It ---
+// --- Get Structured Transcription Result (No change needed) ---
 export const getStructuredTranscriptionResult = async (jobId: string): Promise<StructuredTranscript> => {
     console.log(`[TranscriptionService] Fetching and structuring result for completed job ${jobId}...`);
     const jobStatus = await getTranscriptionStatus(jobId);

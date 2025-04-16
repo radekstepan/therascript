@@ -11,20 +11,21 @@
     "build:api": "lerna run build --scope=api",
     "build:ui": "lerna run build --scope=ui",
     "build:ollama": "lerna run build --scope=ollama",
+    "build:whisper": "lerna run build --scope=whisper",
 
-    "dev": "lerna run dev --parallel --scope=api --scope=ui",
-    "dev:api": "lerna run dev --scope=api",
+    "dev": "NODE_ENV=development lerna run dev --parallel --scope=api --scope=ui",
+    "dev:api": "NODE_ENV=development lerna run dev --scope=api",
     "dev:ui": "lerna run dev --scope=ui",
 
-    "start:api": "lerna run start --scope=api",
+    "start": "yarn build && NODE_ENV=production node packages/api/dist/server.js",
+    "start:api": "yarn build:api && NODE_ENV=production node packages/api/dist/server.js",
     "start:ollama": "lerna run start --scope=ollama",
+    "start:whisper": "yarn build:whisper && node packages/whisper/dist/index.js",
 
     "lint": "lerna run lint --parallel",
     "format": "yarn prettier --write .",
 
-    "preload:db": "lerna run preload --scope=api",
-    "whisper:run": "yarn ts-node tools/run-whisper.ts",
-
+    "preload:db": "yarn build:api && node packages/api/dist/preloadDb.js",
     "clean": "lerna run clean --parallel && rm -rf node_modules",
     "clean:dist": "lerna run clean --parallel"
   },
@@ -35,6 +36,7 @@
     "concurrently": "^8.2.2",
     "lerna": "^8.1.7",
     "prettier": "^3.3.3",
-    "ts-node": "^10.9.2"
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.4"
   }
 }
