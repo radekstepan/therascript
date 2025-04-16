@@ -1,10 +1,12 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react'; // <-- Import useState
 import { useAtomValue, useSetAtom } from 'jotai';
 import { CounterClockwiseClockIcon, PlusCircledIcon } from '@radix-ui/react-icons';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query'; // <-- Import useQueryClient
 import { SessionListTable } from './SessionListTable';
 import { Button, Card, Flex, Heading, Text, Box, Container, Spinner } from '@radix-ui/themes';
 import { UserThemeDropdown } from '../User/UserThemeDropdown';
+// <-- Import EditDetailsModal
+import { EditDetailsModal } from '../SessionView/Modals/EditDetailsModal';
 import { fetchSessions } from '../../api/api';
 import {
     openUploadModalAtom,
@@ -13,30 +15,36 @@ import {
     setSessionSortAtom,
     SessionSortCriteria,
 } from '../../store';
-import type { Session } from '../../types';
+// <-- Import SessionMetadata type
+import type { Session, SessionMetadata } from '../../types';
 
 export function LandingPage() {
     const openUploadModal = useSetAtom(openUploadModalAtom);
     const currentSortCriteria = useAtomValue(sessionSortCriteriaAtom);
     const currentSortDirection = useAtomValue(sessionSortDirectionAtom);
     const setSort = useSetAtom(setSessionSortAtom);
+    const queryClient = useQueryClient(); // <-- Get query client instance
 
+    // *** State for Edit Modal ***
+    const [isEditingModalOpen, setIsEditingModalOpen] = useState(false);
+    const [sessionToEdit, setSessionToEdit] = useState<Session | null>(null);
+
+    // Fetch sessions using Tanstack Query
     const { data: sessions, isLoading, error, refetch } = useQuery<Session[], Error>({
         queryKey: ['sessions'],
         queryFn: fetchSessions,
     });
 
-    const sortedSessions = useMemo(() => {
+    // Memoized sorting logic (no changes needed here)
+    const sortedSessions = useMemo(() => { /* ... sorting logic ... */
         if (!sessions) return [];
-
         const criteria = currentSortCriteria;
         const direction = currentSortDirection;
         console.log(`[LandingPage] Sorting ${sessions.length} sessions by ${criteria} (${direction})`);
-
         const sorted = [...sessions].sort((a, b) => {
             let compareResult = 0;
-
             switch (criteria) {
+                // ... cases for sessionName, clientName, sessionType, therapy ...
                 case 'sessionName':
                     const nameA = a.sessionName || a.fileName || '';
                     const nameB = b.sessionName || b.fileName || '';
@@ -58,14 +66,10 @@ export function LandingPage() {
                     compareResult = therapyA.localeCompare(therapyB, undefined, { sensitivity: 'base' });
                     break;
                 case 'date':
-                    // Directly compare ISO 8601 strings (lexicographical sort works)
-                    const dateStrA = a.date || ''; // ISO string or empty
-                    const dateStrB = b.date || ''; // ISO string or empty
-                    // Sort descending by default (newer dates first)
+                    const dateStrA = a.date || '';
+                    const dateStrB = b.date || '';
                     compareResult = dateStrB.localeCompare(dateStrA);
-                    // No need for ID tie-breaker if full timestamps are unique enough
-                    // If timestamps could be identical, add ID tie-breaker here:
-                    // if (compareResult === 0) { compareResult = b.id - a.id; }
+                    // if (compareResult === 0) { compareResult = b.id - a.id; } // Optional tie-breaker
                     break;
                 case 'id':
                     compareResult = a.id - b.id;
@@ -75,32 +79,40 @@ export function LandingPage() {
                     console.warn(`[sortedSessions] Unknown sort criteria: ${criteria}`);
                     return 0;
             }
-
             // Apply direction reversal if needed
             if (direction === 'desc') {
-                 // If default sort wasn't descending (like for names), reverse it
-                 if (!(criteria === 'date')) { // Date defaults descending
-                     compareResult *= -1;
-                 }
+                 if (!(criteria === 'date')) { compareResult *= -1; }
             } else { // direction === 'asc'
-                 // If default sort was descending (like for date), reverse it
-                 if (criteria === 'date') {
-                     compareResult *= -1;
-                 }
+                 if (criteria === 'date') { compareResult *= -1; }
             }
-
             return compareResult;
         });
-
         return sorted;
+     }, [sessions, currentSortCriteria, currentSortDirection]);
 
-    }, [sessions, currentSortCriteria, currentSortDirection]);
 
-
+    // Handler for sorting (passed to table)
     const handleSort = (criteria: SessionSortCriteria) => {
         console.log("[LandingPage] handleSort called with criteria:", criteria);
         setSort(criteria);
     };
+
+    // *** Handler to open the edit modal ***
+    const handleEditSession = (session: Session) => {
+        setSessionToEdit(session);
+        setIsEditingModalOpen(true);
+    };
+
+    // *** Handler for successful save from modal ***
+    const handleEditSaveSuccess = (updatedMetadata: Partial<SessionMetadata>) => {
+        console.log("[LandingPage] Edit modal saved:", updatedMetadata);
+        // The modal's mutation already invalidates queries, so UI should update.
+        // Optionally, manually update cache here if needed, but invalidation is usually sufficient.
+        // queryClient.invalidateQueries({ queryKey: ['sessions'] }); // Already done by modal mutation
+        setIsEditingModalOpen(false); // Close modal
+        setSessionToEdit(null);
+    };
+
 
     if (isLoading) { /* ... loading state ... */
         return (
@@ -109,7 +121,7 @@ export function LandingPage() {
                 <Text ml="2">Loading sessions...</Text>
             </Flex>
         );
-     }
+    }
     if (error || (!sessions && !isLoading)) { /* ... error state ... */
          return (
             <Flex direction="column" justify="center" align="center" style={{ height: '100vh', padding: '2rem' }}>
@@ -125,7 +137,7 @@ export function LandingPage() {
     return (
         <Box className="w-full flex-grow flex flex-col">
             {/* Header Bar */}
-            <Box py="2" px={{ initial: '4', md: '6', lg: '8' }} flexShrink="0" style={{ backgroundColor: 'var(--color-panel-solid)', borderBottom: '1px solid var(--gray-a6)' }}>
+            <Box py="2" px={{ initial: '4', md: '6', lg: '8' }} flexShrink="0" style={{ backgroundColor: 'var(--color-panel-solid)', borderBottom: '1px solid var(--gray-a6)' }} >
                 <Flex justify="end">
                     <UserThemeDropdown />
                 </Flex>
@@ -154,12 +166,25 @@ export function LandingPage() {
                                     sortCriteria={currentSortCriteria}
                                     sortDirection={currentSortDirection}
                                     onSort={handleSort}
+                                    // *** Pass edit handler down ***
+                                    onEditSession={handleEditSession}
                                 />
                             )}
                         </Box>
                     </Card>
                 </Container>
             </Box>
+
+            {/* *** Render Edit Modal *** */}
+            <EditDetailsModal
+                isOpen={isEditingModalOpen}
+                onOpenChange={(open) => {
+                    setIsEditingModalOpen(open);
+                    if (!open) setSessionToEdit(null); // Clear session when closing
+                }}
+                session={sessionToEdit}
+                onSaveSuccess={handleEditSaveSuccess}
+            />
         </Box>
     );
 }

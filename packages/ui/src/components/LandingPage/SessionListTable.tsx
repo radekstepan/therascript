@@ -1,22 +1,26 @@
-import React, { useCallback } from 'react'; // Import useCallback
+import React, { useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
     FileTextIcon,
     ChevronUpIcon,
-    ChevronDownIcon
+    ChevronDownIcon,
+    // DotsHorizontalIcon, // <-- Remove Dots icon
+    Pencil1Icon,         // <-- Keep Edit icon
 } from '@radix-ui/react-icons';
-import { Table, Badge, Text, Flex } from '@radix-ui/themes';
+// <-- Remove DropdownMenu import
+import { Table, Badge, Text, Flex, IconButton } from '@radix-ui/themes';
 import type { Session } from '../../types';
 import type { SessionSortCriteria, SortDirection } from '../../store';
 import { sessionColorMap, therapyColorMap } from '../../constants';
-// Import the new formatter
 import { formatIsoDateToYMD } from '../../helpers';
+// import { cn } from '../../utils'; // <-- Remove cn import if no longer needed
 
 interface SessionListTableProps {
     sessions: Session[];
     sortCriteria: SessionSortCriteria;
     sortDirection: SortDirection;
     onSort: (criteria: SessionSortCriteria) => void;
+    onEditSession: (session: Session) => void;
 }
 
 type AriaSort = 'none' | 'ascending' | 'descending' | 'other' | undefined;
@@ -26,12 +30,24 @@ const getBadgeColor = (type: string | undefined, category: 'session' | 'therapy'
     return type ? (map[type.toLowerCase()] || map['default']) : map['default'];
 }
 
-export function SessionListTable({ sessions, sortCriteria, sortDirection, onSort }: SessionListTableProps) {
+export function SessionListTable({ sessions, sortCriteria, sortDirection, onSort, onEditSession }: SessionListTableProps) {
     const navigate = useNavigate();
 
-    // TODO these urls should be defined in a router somewhere
-    const handleSessionClick = (sessionId: number) => {
+    const handleSessionClick = (e: React.MouseEvent<HTMLTableRowElement>, sessionId: number) => {
+        // Prevent triggering row click when clicking on the edit button
+        const target = e.target as HTMLElement;
+        // Check if the click target is the button itself or an icon inside it
+        if (target.closest('button[aria-label="Edit session details"]')) {
+            return;
+        }
         navigate(`/sessions/${sessionId}`);
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLTableRowElement>, sessionId: number) => {
+        // Prevent triggering row navigation if Enter is pressed on the button
+        if (e.key === 'Enter' && !(e.target as HTMLElement).closest('button[aria-label="Edit session details"]')) {
+            navigate(`/sessions/${sessionId}`);
+        }
     };
 
     const renderSortIcon = useCallback((criteria: SessionSortCriteria) => {
@@ -77,17 +93,20 @@ export function SessionListTable({ sessions, sortCriteria, sortDirection, onSort
                         <Table.ColumnHeaderCell {...getHeaderCellProps('date')}>
                              <Flex align="center" className="group">Date {renderSortIcon('date')}</Flex>
                         </Table.ColumnHeaderCell>
+                        <Table.ColumnHeaderCell style={{ width: '1%', whiteSpace: 'nowrap' }} align="right">
+                            {/* Empty header or label it "Edit" */}
+                        </Table.ColumnHeaderCell>
                     </Table.Row>
                 </Table.Header>
                 <Table.Body>
                     {sessions.map((session: Session) => (
                         <Table.Row
                             key={session.id}
-                            onClick={() => handleSessionClick(session.id)}
-                            className="cursor-pointer hover:bg-[--gray-a3] transition-colors duration-150"
+                            onClick={(e) => handleSessionClick(e, session.id)}
+                            className="cursor-pointer hover:bg-[--gray-a3] transition-colors duration-150 group"
                             aria-label={`Load session: ${session.sessionName || session.fileName}`}
                             tabIndex={0}
-                            onKeyDown={(e: React.KeyboardEvent<HTMLTableRowElement>) => e.key === 'Enter' && handleSessionClick(session.id)}
+                            onKeyDown={(e) => handleKeyDown(e, session.id)}
                         >
                             <Table.RowHeaderCell justify="start">
                                 <Flex align="center" gap="2">
@@ -113,8 +132,25 @@ export function SessionListTable({ sessions, sortCriteria, sortDirection, onSort
                                 ) : (<Text color="gray">N/A</Text>)}
                             </Table.Cell>
                             <Table.Cell>
-                                {/* Format the ISO date string for display */}
                                 <Text color="gray">{formatIsoDateToYMD(session.date) || <span style={{ fontStyle: 'italic' }}>No Date</span>}</Text>
+                            </Table.Cell>
+                            {/* *** Actions Cell with direct Edit Button *** */}
+                            <Table.Cell align="right" onClick={(e) => e.stopPropagation()}>
+                                <IconButton
+                                    variant="ghost"
+                                    color="gray"
+                                    size="1"
+                                    className="p-1" // Keep padding for click area
+                                    aria-label="Edit session details"
+                                    title="Edit session details"
+                                    onClick={(e) => {
+                                        e.stopPropagation(); // Prevent row click
+                                        onEditSession(session);
+                                    }}
+                                    onKeyDown={(e) => e.stopPropagation()} // Prevent row navigation
+                                >
+                                    <Pencil1Icon />
+                                </IconButton>
                             </Table.Cell>
                         </Table.Row>
                     ))}
