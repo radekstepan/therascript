@@ -1,11 +1,10 @@
-// packages/ui/src/components/User/UserThemeDropdown.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAtom, useSetAtom } from 'jotai';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, DropdownMenu, Text, Spinner } from '@radix-ui/themes';
 import {
     SunIcon, MoonIcon, DesktopIcon, ExitIcon, PersonIcon,
-    ReloadIcon // Example icon for unload/reload
+    ReloadIcon
 } from '@radix-ui/react-icons';
 import { themeAtom, Theme as ThemeType, toastMessageAtom } from '../../store';
 import { unloadOllamaModel, fetchOllamaStatus } from '../../api/api';
@@ -14,15 +13,34 @@ export function UserThemeDropdown() {
     const [theme, setTheme] = useAtom(themeAtom);
     const setToast = useSetAtom(toastMessageAtom);
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+    const queryClient = useQueryClient();
 
-    // Fetch Ollama status only when dropdown is open
+    // *** New state: Track if we are waiting for unload confirmation ***
+    const [isWaitingForUnload, setIsWaitingForUnload] = useState(false);
+
+    // Fetch Ollama status
     const { data: ollamaStatus, isLoading: isStatusLoading } = useQuery({
         queryKey: ['ollamaStatus'],
         queryFn: fetchOllamaStatus,
-        enabled: isDropdownOpen, // Only fetch when dropdown is open
-        staleTime: 30 * 1000, // Cache for 30 seconds
+        enabled: isDropdownOpen, // Fetch when dropdown opens OR when waiting for unload
+        staleTime: 0,
+        gcTime: 0,
+        // *** Refetch configuration for polling ***
+        refetchInterval: isWaitingForUnload ? 1500 : false, // Poll every 1.5s only when waiting
+        refetchOnMount: true,
+        refetchOnWindowFocus: false,
         retry: false,
     });
+
+    // *** Effect to stop polling when unload is confirmed ***
+    useEffect(() => {
+        // If we are waiting and the status comes back as NOT loaded, stop waiting/polling.
+        if (isWaitingForUnload && ollamaStatus && !ollamaStatus.loaded) {
+            console.log("[UserThemeDropdown] Unload confirmed by status query.");
+            setIsWaitingForUnload(false);
+        }
+    }, [isWaitingForUnload, ollamaStatus]);
+
 
     const handleSignOut = () => {
         console.log("Sign Out clicked (Placeholder)");
@@ -35,18 +53,28 @@ export function UserThemeDropdown() {
         onSuccess: (data) => {
             console.log("Unload request successful:", data.message);
             setToast(`✅ ${data.message}`);
+            // *** Start waiting/polling ***
+            console.log("[UserThemeDropdown] Starting polling for unload confirmation...");
+            setIsWaitingForUnload(true);
+            // Optionally trigger an immediate refetch after starting to wait
+            queryClient.refetchQueries({ queryKey: ['ollamaStatus'] });
+            // Invalidation might not be needed now, as polling handles updates
+            // queryClient.invalidateQueries({ queryKey: ['ollamaStatus'] });
         },
         onError: (error: Error) => {
             console.error("Unload request failed:", error);
             setToast(`❌ Error: ${error.message || 'Failed to send unload request.'}`);
+            setIsWaitingForUnload(false); // Stop waiting on error
         }
     });
 
     const handleUnloadClick = (event: Event) => {
         event.preventDefault();
-        if (unloadMutation.isPending) return;
+        if (unloadMutation.isPending || isWaitingForUnload) return; // Prevent triggering while already unloading/waiting
         unloadMutation.mutate();
     };
+
+    const isUnloadingProcessActive = unloadMutation.isPending || isWaitingForUnload;
 
     return (
         <DropdownMenu.Root
@@ -77,19 +105,19 @@ export function UserThemeDropdown() {
                 <DropdownMenu.Separator />
 
                 {/* Ollama Action */}
-                {isStatusLoading ? (
+                {isStatusLoading && !isWaitingForUnload ? ( // Show initial loading only
                     <DropdownMenu.Item disabled>
                         <Spinner size="1" style={{ marginRight: 'var(--space-2)' }}/>
-                        Checking model status...
+                        Checking status...
                     </DropdownMenu.Item>
                 ) : ollamaStatus?.loaded ? (
                     <DropdownMenu.Item
                         onSelect={handleUnloadClick}
-                        disabled={unloadMutation.isPending}
+                        disabled={isUnloadingProcessActive} // Disable if mutation pending OR waiting for confirmation
                         color="orange"
-                        style={{ cursor: unloadMutation.isPending ? 'not-allowed' : 'pointer' }}
+                        style={{ cursor: isUnloadingProcessActive ? 'not-allowed' : 'pointer' }}
                     >
-                        {unloadMutation.isPending ? (
+                        {isUnloadingProcessActive ? (
                             <>
                                 <Spinner size="1" style={{ marginRight: 'var(--space-2)' }}/>
                                 Unloading...
@@ -102,6 +130,7 @@ export function UserThemeDropdown() {
                         )}
                     </DropdownMenu.Item>
                 ) : (
+                    // If not loading and not loaded
                     <DropdownMenu.Item disabled>
                         <Text size="2" color="gray">No AI model loaded</Text>
                     </DropdownMenu.Item>

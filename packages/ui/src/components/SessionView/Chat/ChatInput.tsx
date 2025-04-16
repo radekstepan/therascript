@@ -2,7 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { StarIcon, PaperPlaneIcon, StopIcon, Cross2Icon } from '@radix-ui/react-icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import * as Toast from '@radix-ui/react-toast';
+// Remove Toast import if no longer needed here
+// import * as Toast from '@radix-ui/react-toast';
 import { TextField, Flex, Box, Text, IconButton, Spinner } from '@radix-ui/themes'; // Added Spinner
 import { StarredTemplatesList } from './StarredTemplates';
 import { addChatMessage } from '../../../api/api';
@@ -10,7 +11,7 @@ import {
     currentQueryAtom,
     activeSessionIdAtom,
     activeChatIdAtom,
-    toastMessageAtom,
+    toastMessageAtom, // Keep toastMessageAtom for SETTING
 } from '../../../store';
 import type { ChatSession } from '../../../types';
 
@@ -22,11 +23,11 @@ export function ChatInput({ disabled = false }: ChatInputProps) {
     const [currentQuery, setCurrentQuery] = useAtom(currentQueryAtom);
     const activeSessionId = useAtomValue(activeSessionIdAtom);
     const activeChatId = useAtomValue(activeChatIdAtom);
-    // Use local state for input-specific errors
     const [inputError, setInputError] = useState('');
-    const toastMessageContent = useAtomValue(toastMessageAtom);
+    // Remove toast visibility state, App.tsx will handle rendering
+    // const toastMessageContent = useAtomValue(toastMessageAtom);
     const setToastMessageAtom = useSetAtom(toastMessageAtom);
-    const [isToastVisible, setIsToastVisible] = useState(false);
+    // const [isToastVisible, setIsToastVisible] = useState(false);
 
     const inputRef = useRef<HTMLInputElement>(null);
     const [showTemplates, setShowTemplates] = useState(false);
@@ -41,22 +42,18 @@ export function ChatInput({ disabled = false }: ChatInputProps) {
             return addChatMessage(activeSessionId, activeChatId, text);
         },
         onSuccess: (data, variables) => {
-            // Update the cache directly for instant feedback
             const queryKey = ['chat', activeSessionId, activeChatId];
             queryClient.setQueryData<ChatSession>(queryKey, (oldData) => {
                 if (!oldData) {
-                    // If cache is empty (e.g., first message after starting chat),
-                    // it's better to invalidate and let the query refetch the full chat.
                     console.warn("Chat cache was empty or incomplete, invalidating instead of setting.");
                     queryClient.invalidateQueries({ queryKey });
-                    return undefined; // Let invalidation handle refetch
+                    return undefined;
                 }
                 const currentMessages = Array.isArray(oldData.messages) ? oldData.messages : [];
                 return { ...oldData, messages: [...currentMessages, data.userMessage, data.aiMessage] };
             });
-            setInputError(''); // Clear any previous submission error
+            setInputError('');
 
-             // Focus input after successful send, unless disabled prop is true
             const isDisabled = disabled || !activeChatId;
             if (!isDisabled && inputRef.current) {
                 inputRef.current.focus();
@@ -65,39 +62,38 @@ export function ChatInput({ disabled = false }: ChatInputProps) {
         onError: (error) => {
             console.error("Failed to send message:", error);
             setInputError(`Failed to get response: ${error.message}`);
-             // Optionally, re-add the user's message to the input field if desired on error?
-             // setCurrentQuery(variables); // `variables` is the `text` sent
+             // Optionally set a toast message here too if needed for send errors
+             // setToastMessageAtom(`❌ Failed to send: ${error.message}`);
         },
     });
 
     const isAiResponding = addMessageMutation.isPending;
-    const isDisabled = disabled || isAiResponding || !activeChatId; // Combined disabled check
+    const isDisabled = disabled || isAiResponding || !activeChatId;
 
     useEffect(() => {
-        if (activeChatId !== null && !isDisabled) { // Check combined disabled state
+        if (activeChatId !== null && !isDisabled) {
             inputRef.current?.focus();
         }
-    }, [activeChatId, isDisabled]); // Depend on combined state
+    }, [activeChatId, isDisabled]);
 
     useEffect(() => {
-        // Clear input-specific errors when user types
         if ((inputError === "Cannot send an empty message." || inputError === "Please select a chat first.") && currentQuery !== '') {
             setInputError('');
         }
-        // Clear API errors when user types again
         if (inputError.startsWith("Failed to get response:") && currentQuery !== '') {
              setInputError('');
         }
     }, [currentQuery, inputError]);
 
-    useEffect(() => {
-        setIsToastVisible(!!toastMessageContent);
-    }, [toastMessageContent]);
+    // Remove toast visibility effect
+    // useEffect(() => {
+    //     setIsToastVisible(!!toastMessageContent);
+    // }, [toastMessageContent]);
 
     const handleSelectTemplate = (text: string) => {
         setCurrentQuery((prev) => (prev ? `${prev} ${text}` : text));
         setShowTemplates(false);
-        if (!isDisabled && inputRef.current) { // Check combined disabled state
+        if (!isDisabled && inputRef.current) {
             inputRef.current.focus();
         }
     };
@@ -118,16 +114,15 @@ export function ChatInput({ disabled = false }: ChatInputProps) {
         }
 
         try {
-            setInputError(''); // Clear previous errors
+            setInputError('');
             const queryToSend = currentQuery;
-            setCurrentQuery(''); // Clear input immediately
-            addMessageMutation.mutate(queryToSend); // Trigger the mutation
+            setCurrentQuery('');
+            addMessageMutation.mutate(queryToSend);
         } catch (err) {
-            // Should be caught by mutation's onError
             console.error("Error during mutation initiation:", err);
             setInputError('An unexpected error occurred.');
         }
-        return true; // Indicate submission attempt was made
+        return true;
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -144,28 +139,29 @@ export function ChatInput({ disabled = false }: ChatInputProps) {
 
     const handleCancelClick = (e: React.MouseEvent<HTMLButtonElement>) => {
         e.preventDefault();
-        // TODO: Implement cancellation if the API supports it (e.g., via AbortController)
-        // For now, just show a toast or log.
-        setToastMessageAtom("Cancellation not supported by backend yet.");
+        // TODO: Implement cancellation if the API supports it
+        // For now, use the global toast atom if needed
+        setToastMessageAtom("❗ Cancellation not supported by backend yet.");
         console.warn("Cancellation attempt - not implemented.");
-        if (!isDisabled && inputRef.current) { // Check combined disabled state
+        if (!isDisabled && inputRef.current) {
            inputRef.current.focus();
         }
-        // addMessageMutation.reset(); // Or potentially try to cancel the underlying fetch
     };
 
-    const handleToastOpenChange = (open: boolean) => {
-        setIsToastVisible(open);
-        if (!open) setToastMessageAtom(null);
-    };
+    // Remove toast open change handler
+    // const handleToastOpenChange = (open: boolean) => {
+    //     setIsToastVisible(open);
+    //     if (!open) setToastMessageAtom(null);
+    // };
 
-    const showCancelButton = isAiResponding && !disabled; // Show cancel only if base disabled prop is false
-    const sendButtonDisabled = isDisabled || !currentQuery.trim(); // Simplified disabled logic
+    const showCancelButton = isAiResponding && !disabled;
+    const sendButtonDisabled = isDisabled || !currentQuery.trim();
     const starredButtonDisabled = isDisabled;
     const inputFieldDisabled = isDisabled;
 
     return (
-        <>
+        // Remove the Toast.Root from here
+        // <>
             <Flex direction="column" gap="1">
                 <Flex align="start" gap="2" width="100%">
                     <Box position="relative" flexShrink="0">
@@ -202,7 +198,7 @@ export function ChatInput({ disabled = false }: ChatInputProps) {
                            onClick={handleCancelClick}
                            title="Cancel response (Not Implemented)"
                            aria-label="Cancel AI response"
-                           disabled={!isAiResponding} // Disable if not actually responding
+                           disabled={!isAiResponding}
                            >
                             <StopIcon />
                         </IconButton>
@@ -222,19 +218,6 @@ export function ChatInput({ disabled = false }: ChatInputProps) {
                 </Flex>
                 {inputError && <Text size="1" color="red" align="center" mt="1">{inputError}</Text>}
             </Flex>
-            <Toast.Root
-                open={isToastVisible}
-                onOpenChange={handleToastOpenChange}
-                duration={5000}
-                className="bg-[--color-panel-solid] rounded-md shadow-[hsl(206_22%_7%_/_35%)_0px_10px_38px_-10px,_hsl(206_22%_7%_/_20%)_0px_10px_20px_-15px] p-[15px] grid [grid-template-areas:_'title_action'_'description_action'] grid-cols-[auto_max-content] gap-x-[15px] items-center data-[state=open]:animate-slideIn data-[state=closed]:animate-hide data-[swipe=move]:translate-x-[var(--radix-toast-swipe-move-x)] data-[swipe=cancel]:translate-x-0 data-[swipe=cancel]:transition-[transform_200ms_ease-out] data-[swipe=end]:animate-swipeOut"
-            >
-                <Toast.Description className="[grid-area:_description] m-0 text-[--gray-a11] text-[13px] leading-[1.3]">{toastMessageContent}</Toast.Description>
-                <Toast.Close className="[grid-area:_action]" asChild>
-                    <IconButton variant="ghost" color="gray" size="1" aria-label="Close">
-                        <Cross2Icon />
-                    </IconButton>
-                </Toast.Close>
-            </Toast.Root>
-        </>
+        // </>
     );
 }

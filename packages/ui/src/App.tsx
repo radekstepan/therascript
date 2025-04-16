@@ -1,10 +1,9 @@
-// packages/ui/src/App.tsx
-import React from 'react';
-import { useAtomValue } from 'jotai';
+import React, { useEffect, useState } from 'react'; // Import useEffect, useState
+import { useAtomValue, useSetAtom } from 'jotai'; // Import useSetAtom
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { Theme } from '@radix-ui/themes';
+import { Theme, IconButton } from '@radix-ui/themes'; // Import IconButton
 import * as Toast from '@radix-ui/react-toast';
-import { useQueryClient } from '@tanstack/react-query';
+import { Cross2Icon } from '@radix-ui/react-icons'; // Import Cross2Icon
 import axios from 'axios';
 
 import { LandingPage } from './components/LandingPage/LandingPage';
@@ -13,25 +12,39 @@ import { UploadModal } from './components/UploadModal/UploadModal';
 
 import {
   isUploadModalOpenAtom,
-  effectiveThemeAtom, // Keep UI atoms
+  effectiveThemeAtom,
+  toastMessageAtom, // Import toastMessageAtom
 } from './store';
 
-// TODO: This should come from config/environment variables, not hardcoded.
-// Setting up proper environment variable handling in Webpack requires
-// additional configuration (e.g., DefinePlugin or dotenv-webpack).
-// Using hardcoded default for now as `process.env` is not available in browser.
 const API_BASE_URL = 'http://localhost:3001';
 axios.defaults.baseURL = API_BASE_URL;
 console.log(`[App] Axios base URL set to: ${axios.defaults.baseURL}`);
 
-// TODO include an Error Boundary
 function App() {
   const isModalOpen = useAtomValue(isUploadModalOpenAtom);
   const effectiveTheme = useAtomValue(effectiveThemeAtom);
-  // Access queryClient if needed for global actions (though mutations handle most)
-  // const queryClient = useQueryClient();
+  // Read the toast message content from the atom
+  const toastMessageContent = useAtomValue(toastMessageAtom);
+  // Get the setter to clear the message when the toast closes
+  const setToastMessageAtom = useSetAtom(toastMessageAtom);
+  // State to control the visibility of the Toast.Root
+  const [isToastVisible, setIsToastVisible] = useState(false);
 
-  // TODO wtf is 2147483647 (It's Radix's default high z-index for toasts)
+  // Effect to synchronize toast visibility with the atom content
+  useEffect(() => {
+    // Show the toast whenever there is content in the atom
+    setIsToastVisible(!!toastMessageContent);
+  }, [toastMessageContent]);
+
+  // Handler for when the toast's open state changes (e.g., dismissed by user or timeout)
+  const handleToastOpenChange = (open: boolean) => {
+    setIsToastVisible(open);
+    // If the toast is closing, clear the message from the atom
+    if (!open) {
+      setToastMessageAtom(null);
+    }
+  };
+
   return (
     <Toast.Provider swipeDirection="right">
       <Theme appearance={effectiveTheme} accentColor="teal" panelBackground="solid" radius="small" scaling="100%">
@@ -45,7 +58,25 @@ function App() {
             </Routes>
           </main>
 
-          <UploadModal isOpen={isModalOpen} /> {/* Remove props handled by useMutation */}
+          <UploadModal isOpen={isModalOpen} />
+
+          {/* Render the Toast Root here, controlled by local state synced with the atom */}
+          <Toast.Root
+                open={isToastVisible}
+                onOpenChange={handleToastOpenChange}
+                duration={5000} // Or adjust as needed
+                // Use the same styling as before
+                className="bg-[--color-panel-solid] rounded-md shadow-[hsl(206_22%_7%_/_35%)_0px_10px_38px_-10px,_hsl(206_22%_7%_/_20%)_0px_10px_20px_-15px] p-[15px] grid [grid-template-areas:_'title_action'_'description_action'] grid-cols-[auto_max-content] gap-x-[15px] items-center data-[state=open]:animate-slideIn data-[state=closed]:animate-hide data-[swipe=move]:translate-x-[var(--radix-toast-swipe-move-x)] data-[swipe=cancel]:translate-x-0 data-[swipe=cancel]:transition-[transform_200ms_ease-out] data-[swipe=end]:animate-swipeOut"
+            >
+                <Toast.Description className="[grid-area:_description] m-0 text-[--gray-a11] text-[13px] leading-[1.3]">
+                    {toastMessageContent} {/* Display the message from the atom */}
+                </Toast.Description>
+                <Toast.Close className="[grid-area:_action]" asChild>
+                    <IconButton variant="ghost" color="gray" size="1" aria-label="Close">
+                        <Cross2Icon />
+                    </IconButton>
+                </Toast.Close>
+            </Toast.Root>
 
           <Toast.Viewport className="fixed bottom-0 right-0 flex flex-col p-6 gap-3 w-[390px] max-w-[100vw] m-0 list-none z-[2147483647] outline-none" />
         </div>
