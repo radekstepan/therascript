@@ -106,3 +106,17 @@ export const deleteChat = async (sessionId: number, chatId: number): Promise<{ m
     const response = await axios.delete(`/api/sessions/${sessionId}/chats/${chatId}`);
     return response.data;
 };
+
+// POST /api/ollama/unload
+export const unloadOllamaModel = async (): Promise<{ message: string }> => {
+    console.log("Sending request to /api/ollama/unload");
+    const response = await axios.post('/api/ollama/unload');
+    return response.data;
+};
+
+// GET /api/ollama/status
+export const fetchOllamaStatus = async (): Promise<{ loaded: boolean; model?: string }> => {
+    console.log("Fetching Ollama status from /api/ollama/status");
+    const response = await axios.get('/api/ollama/status');
+    return response.data;
+};

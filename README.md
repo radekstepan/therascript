@@ -22,6 +22,8 @@
 - [ ] starred messages show once you save them but when you reload the UI they don't show in the popover
 - [ ] if you can't find chat data, show the same message when we fail to load the session
 - [ ] the `sessionSortCriteriaAtom` says it's sorting by "date", but in the UI it shows sorted by "Client"
+- [ ] unload LM toast shows 2x
+- [ ] change the theme dropodown such that we highlight rather than show a checkmark next to the selected theme
 
 ## Nice to have
 

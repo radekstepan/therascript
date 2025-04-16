@@ -1,5 +1,5 @@
 import ollama, { ChatResponse, Message } from 'ollama';
-import axios from 'axios'; // Import axios for the pull request
+import axios from 'axios'; // Import axios for the pull and status requests
 import config from '../config/index.js';
 import { BackendChatMessage } from '../types/index.js';
 import { InternalServerError } from '../errors.js'; // Import InternalServerError
@@ -13,7 +13,7 @@ async function pullOllamaModel(modelName: string): Promise<boolean> {
     const pullUrl = `${config.ollama.baseURL}/api/pull`;
     console.log(`[OllamaService] Attempting to pull model '${modelName}' from ${pullUrl}...`);
     try {
-        // Use axios or fetch to make the POST request
+        // Use axios to make the POST request
         const response = await axios.post(pullUrl, {
             name: modelName,
             stream: false, // Wait for the pull to complete
@@ -41,7 +41,48 @@ async function pullOllamaModel(modelName: string): Promise<boolean> {
     }
 }
 
-// TODO use an API to talk to Ollama in a Docker
+// Check if a model is loaded
+export const checkModelStatus = async (modelName: string = config.ollama.model): Promise<boolean> => {
+    const psUrl = `${config.ollama.baseURL}/api/ps`;
+    console.log(`[OllamaService] Checking if model '${modelName}' is loaded using ${psUrl}...`);
+    try {
+        const response = await axios.get(psUrl, {
+            timeout: 10000, // 10 seconds timeout for status check
+        });
+
+        if (response.status === 200) {
+            // /api/ps returns { models: [{ name, ... }, ...] }
+            const loadedModels = response.data.models || [];
+            // Normalize model names by removing tags (e.g., ':latest')
+            const normalizedModelName = modelName.split(':')[0]; // Get base name (e.g., 'llama3' from 'llama3:latest')
+            const isLoaded = loadedModels.some((model: any) => {
+                const normalizedLoadedModelName = model.name.split(':')[0];
+                return normalizedLoadedModelName === normalizedModelName;
+            });
+            console.log(`[OllamaService] Model '${modelName}' ${isLoaded ? 'is' : 'is not'} loaded in memory. Found models:`, loadedModels.map((m: any) => m.name));
+            return isLoaded;
+        } else {
+            console.warn(`[OllamaService] Unexpected response status for /api/ps: ${response.status}`);
+            return false;
+        }
+    } catch (error: any) {
+        console.error(`[OllamaService] Error checking model '${modelName}' status:`, error.message);
+        if (axios.isAxiosError(error)) {
+            if (error.response?.status === 404) {
+                // /api/ps should return 200 with empty models if none are loaded
+                console.log(`[OllamaService] No models loaded (404 from /api/ps).`);
+                return false;
+            }
+            if (error.code === 'ECONNREFUSED') {
+                throw new InternalServerError(`Connection refused: Could not connect to Ollama at ${config.ollama.baseURL}.`);
+            }
+        }
+        // Treat other errors (e.g., timeouts, network issues) as not loaded
+        console.log(`[OllamaService] Assuming model '${modelName}' is not loaded due to error.`);
+        return false;
+    }
+};
+
 export const generateChatResponse = async (
     contextTranscript: string,
     chatHistory: BackendChatMessage[],

@@ -1,20 +1,22 @@
 // packages/api/src/server.ts
 import http from 'node:http';
 import { WritableStream } from 'node:stream/web';
-import { Elysia, ValidationError } from 'elysia';
+import { Elysia, t, ValidationError } from 'elysia'; // Added 't' for schema
 import { cors } from '@elysiajs/cors';
 import { swagger } from '@elysiajs/swagger';
-import config from './config/index.js'; // Import config
+import ollama from 'ollama'; // <--- Import ollama library
+import config from './config/index.js';
 // Removed dbAccess import, db interaction is checked on startup in sqliteService
-// import { checkDatabaseHealth } from './db/dbAccess.js';
 import { sessionRoutes } from './routes/sessionRoutes.js';
 import { chatRoutes } from './routes/chatRoutes.js';
 import { ApiError, InternalServerError, ConflictError } from './errors.js';
+import { checkModelStatus } from './services/ollamaService.js'; // Import the new service function
 
 // Helper function to read package.json version (added at the top level)
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import axios from 'axios'; // Needed for checking connection errors
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -35,7 +37,6 @@ try {
     console.error('[Server Init] Error reading package.json version:', error);
 }
 // --- End Package Version Read ---
-
 
 console.log(`[Server] Starting Elysia application in ${config.server.nodeEnv} mode...`);
 
@@ -78,7 +79,9 @@ const app = new Elysia()
         documentation: {
             // Use version read from package.json
             info: { title: 'Therascript API (Elysia)', version: appVersion },
-            tags: []
+            tags: [
+                { name: 'Ollama', description: 'Ollama Management Endpoints' }
+            ]
         }
     }))
     // Error Handling
@@ -112,7 +115,6 @@ const app = new Elysia()
              set.status = 204; // Still respond with 204 for OPTIONS 404
              return;
          }
-
 
         if (error instanceof ApiError) {
             set.status = error.status;
@@ -169,11 +171,96 @@ const app = new Elysia()
         set.status = fallbackError.status;
         return { error: fallbackError.name, message: fallbackError.message, details: fallbackError.details };
     })
-    // API Routes
+
+    // --- Ollama Management Routes ---
+    .group('/api/ollama', { detail: { tags: ['Ollama'] } }, (app) => app
+        .post('/unload', async ({ set }) => {
+            // TODO move to ollamaService
+            const modelToUnload = config.ollama.model;
+            console.log(`[API Unload] Received request to unload model: ${modelToUnload}`);
+            try {
+                // Send a minimal request with keep_alive: 0 to trigger unload
+                // The response itself isn't critical, just the act of sending the request
+                await ollama.chat({
+                    model: modelToUnload,
+                    messages: [{ role: 'user', content: 'unload request' }], // Arbitrary content
+                    keep_alive: 0, // <-- Key parameter for immediate unload
+                    stream: false,
+                    // host: config.ollama.baseURL, // Uncomment if ollama lib needs explicit host
+                });
+                console.log(`[API Unload] Sent unload request (keep_alive: 0) for model ${modelToUnload}`);
+                set.status = 200;
+                return { message: `Unload request sent for model ${modelToUnload}. It will be unloaded shortly.` };
+            } catch (error: any) {
+                console.error(`[API Unload] Error sending unload request for ${modelToUnload}:`, error);
+                // Check for specific errors if needed (e.g., model not found might mean it's already unloaded)
+                if (error.message?.includes('model') && error.message?.includes('not found')) {
+                     console.warn(`[API Unload] Model ${modelToUnload} might already be unloaded.`);
+                     set.status = 200; // Treat as success if model wasn't loaded anyway
+                     return { message: `Model ${modelToUnload} was not found (likely already unloaded).` };
+                }
+                 const isConnectionError = (error as NodeJS.ErrnoException)?.code === 'ECONNREFUSED' || error.message?.includes('ECONNREFUSED');
+                 if (isConnectionError) {
+                     throw new InternalServerError(`Connection refused: Could not connect to Ollama at ${config.ollama.baseURL}.`);
+                 }
+                // Throw a generic internal server error for other issues
+                throw new InternalServerError('Failed to send unload request to Ollama service.');
+            }
+        }, {
+             response: { // Define response schema
+                 200: t.Object({ message: t.String() }),
+                 // Include error responses handled by the global onError handler
+                 400: t.Object({ // Example error structure (may vary)
+                    error: t.String(),
+                    message: t.String(),
+                    details: t.Optional(t.Any()),
+                    validationErrors: t.Optional(t.Any())
+                 }),
+                 500: t.Object({
+                    error: t.String(),
+                    message: t.String(),
+                    details: t.Optional(t.Any())
+                 })
+             },
+             detail: { summary: 'Request Ollama to unload the configured model' }
+        })
+        // New endpoint to check model status
+        .get('/status', async ({ set }) => {
+            const modelName = config.ollama.model;
+            console.log(`[API Status] Checking status of model: ${modelName}`);
+            try {
+                const isLoaded = await checkModelStatus(modelName);
+                set.status = 200;
+                return {
+                    model: modelName,
+                    loaded: isLoaded,
+                    message: isLoaded ? `Model ${modelName} is available.` : `Model ${modelName} is not loaded or not found.`
+                };
+            } catch (error: any) {
+                console.error(`[API Status] Error checking status for ${modelName}:`, error);
+                throw new InternalServerError(`Failed to check status of model ${modelName}.`, error);
+            }
+        }, {
+            response: {
+                200: t.Object({
+                    model: t.String(),
+                    loaded: t.Boolean(),
+                    message: t.String()
+                }),
+                500: t.Object({
+                    error: t.String(),
+                    message: t.String(),
+                    details: t.Optional(t.Any())
+                })
+            },
+            detail: { summary: 'Check if the configured Ollama model is loaded' }
+        })
+    ) // End /api/ollama group
+
+    // --- Existing API Routes ---
     .get('/api/health', ({ set }) => {
         try {
             // db is initialized and accessible via sqliteService, check occurs on start
-            // checkDatabaseHealth(); // Removed call
             set.status = 200;
             return { status: 'OK', database: 'connected', timestamp: new Date().toISOString() };
         } catch (dbError) {
@@ -187,7 +274,6 @@ const app = new Elysia()
     }, { detail: { tags: ['Meta'] } })
     .use(sessionRoutes) // Mount routes AFTER CORS and logging
     .use(chatRoutes);
-
 
 console.log(`[Server] Creating Node.js HTTP server wrapper on port ${config.server.port}...`);
 const server = http.createServer((req, res) => {
@@ -216,14 +302,21 @@ const server = http.createServer((req, res) => {
             res.writeHead(response.status, Object.fromEntries(response.headers));
             if (response.body) {
                 try {
-                    await response.body.pipeTo(new WritableStream({
-                        write(chunk) { res.write(chunk); },
-                        close() { res.end(); },
-                        abort(err) {
-                            console.error('Response stream aborted:', err);
-                            res.destroy(err instanceof Error ? err : new Error(String(err)));
-                        }
-                    }));
+                    // Ensure response.body is ReadableStream
+                    if (response.body instanceof ReadableStream) {
+                        await response.body.pipeTo(new WritableStream({
+                            write(chunk) { res.write(chunk); },
+                            close() { res.end(); },
+                            abort(err) {
+                                console.error('Response stream aborted:', err);
+                                res.destroy(err instanceof Error ? err : new Error(String(err)));
+                            }
+                        }));
+                    } else {
+                         // Handle non-stream bodies if Elysia ever returns them
+                         console.warn('Response body is not a ReadableStream:', typeof response.body);
+                         res.end(response.body); // Attempt to end with the body directly
+                    }
                 } catch (pipeError) {
                      console.error('Error piping response body:', pipeError);
                      if (!res.writableEnded) {
