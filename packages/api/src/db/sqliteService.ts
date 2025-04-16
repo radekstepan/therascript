@@ -1,5 +1,4 @@
-/* packages/api/src/db/sqliteService.ts */
-// (Content is the same as the previous correct version - transcriptPath TEXT NULL - with added logging)
+import crypto from 'node:crypto';
 import Database, { type Database as DB, type Statement, type RunResult } from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -8,6 +7,7 @@ import config from '../config/index.js';
 const isDev = !config.server.isProduction;
 const dbFilePath = config.db.sqlitePath;
 const dbDir = path.dirname(dbFilePath);
+const SCHEMA_HASH_KEY = 'schema_md5'; // <-- Key for storing the hash
 
 // --- Ensure Directory Exists ---
 if (!fs.existsSync(dbDir)) {
@@ -15,7 +15,7 @@ if (!fs.existsSync(dbDir)) {
     fs.mkdirSync(dbDir, { recursive: true });
 }
 
-// --- Schema Definition (Moved UP) ---
+// --- Schema Definition (Updated) ---
 const schema = `
     -- Sessions Table
     CREATE TABLE IF NOT EXISTS sessions (
@@ -26,9 +26,8 @@ const schema = `
         date TEXT NOT NULL,
         sessionType TEXT NOT NULL,
         therapy TEXT NOT NULL,
-        -- *** FIX: Make transcriptPath nullable ***
-        transcriptPath TEXT NULL, -- Allow NULL initially
-        status TEXT NOT NULL DEFAULT 'pending', -- e.g., pending, transcribing, completed, failed
+        transcriptPath TEXT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
         whisperJobId TEXT NULL
     );
     -- Chats Table
@@ -51,14 +50,19 @@ const schema = `
     );
     CREATE INDEX IF NOT EXISTS idx_message_chat ON messages (chatId);
     CREATE INDEX IF NOT EXISTS idx_message_timestamp ON messages (timestamp);
+
+    -- Schema Metadata Table (New)
+    CREATE TABLE IF NOT EXISTS schema_metadata (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );
 `;
 
-// --- Database Instance (Declare Here, Define in try block) ---
+// --- Database Instance ---
 let db: DB;
 
-// --- Close Function Definition (Moved UP) ---
+// --- Close Function ---
 const closeDb = (): void => {
-    // Check if db has been initialized and is open
     if (db && db.open) {
         console.log('[db]: Closing database connection...');
         try {
@@ -67,67 +71,101 @@ const closeDb = (): void => {
         } catch (error) {
             console.error('[db]: Error closing the database connection:', error);
         }
-    } else {
-        // Optional: Log if closeDb is called before db is initialized
-        // console.log('[db]: closeDb called, but DB not initialized or already closed.');
     }
 };
 
+// --- Helper Function: Calculate MD5 Hash ---
+function calculateSchemaHash(schemaString: string): string {
+    return crypto.createHash('md5').update(schemaString).digest('hex');
+}
 
-// --- Initialize Function Definition (Uses `schema` and `closeDb`) ---
-function initializeDatabase(dbInstance: DB) {
-    console.log('[db]: Attempting to initialize schema...'); // *** ADDED LOG ***
+// --- Helper Function: Verify Schema Version ---
+function verifySchemaVersion(dbInstance: DB, currentSchemaDefinition: string) {
+    console.log('[db Schema Check]: Verifying schema version...');
+    const currentSchemaHash = calculateSchemaHash(currentSchemaDefinition);
+    console.log(`[db Schema Check]: Current schema definition hash: ${currentSchemaHash}`);
+
+    let storedSchemaHash: string | undefined;
     try {
-        // Execute PRAGMAs sequentially using the synchronous pragma method
+        const row = dbInstance.prepare('SELECT value FROM schema_metadata WHERE key = ?').get(SCHEMA_HASH_KEY) as { value: string } | undefined;
+        storedSchemaHash = row?.value;
+    } catch (error) {
+        // This might happen if the table doesn't exist yet (very first run)
+        console.warn(`[db Schema Check]: Could not read stored schema hash (Table might not exist yet?):`, error);
+        storedSchemaHash = undefined; // Treat as if no hash is stored
+    }
+
+    if (storedSchemaHash) {
+        console.log(`[db Schema Check]: Stored schema hash found: ${storedSchemaHash}`);
+        if (currentSchemaHash === storedSchemaHash) {
+            console.log('[db Schema Check]: Schema version matches stored hash. OK.');
+        } else {
+            console.error('---------------------------------------------------------------------');
+            console.error('[db Schema Check]: FATAL ERROR: Schema definition mismatch!');
+            console.error(`  > Current schema hash in code : ${currentSchemaHash}`);
+            console.error(`  > Stored schema hash in DB    : ${storedSchemaHash}`);
+            console.error('  > The schema defined in sqliteService.ts has changed since the');
+            console.error('  > database file was last initialized or verified.');
+            console.error('  > To resolve:');
+            console.error('  >   1. Ensure all intended schema changes are in sqliteService.ts.');
+            console.error('  >   2. Backup your database file (${dbFilePath}).');
+            console.error('  >   3. Delete the database file to allow re-initialization with the new schema,');
+            console.error('  >      OR implement a proper migration strategy.');
+            console.error('---------------------------------------------------------------------');
+            closeDb();
+            process.exit(1); // Exit the application
+        }
+    } else {
+        console.log('[db Schema Check]: No stored schema hash found. Assuming first run or new database.');
+        try {
+            // Insert or replace the current hash
+            dbInstance.prepare('INSERT OR REPLACE INTO schema_metadata (key, value) VALUES (?, ?)')
+                      .run(SCHEMA_HASH_KEY, currentSchemaHash);
+            console.log(`[db Schema Check]: Stored current schema hash (${currentSchemaHash}) in database.`);
+        } catch (insertError) {
+            console.error(`[db Schema Check]: FATAL: Failed to store initial schema hash:`, insertError);
+            closeDb();
+            process.exit(1);
+        }
+    }
+}
+
+
+// --- Initialize Function Definition ---
+function initializeDatabase(dbInstance: DB) {
+    console.log('[db]: Attempting to initialize schema...');
+    try {
+        // Enable PRAGMAs
         dbInstance.pragma('journal_mode = WAL');
         dbInstance.pragma('busy_timeout = 5000');
-        dbInstance.pragma('foreign_keys = ON'); // Ensure foreign keys are enforced
+        dbInstance.pragma('foreign_keys = ON');
         console.log('[db]: WAL mode and foreign keys enabled.');
 
-        // Execute schema creation statements using synchronous exec (schema is defined above)
+        // Execute schema creation statements (includes schema_metadata table now)
         dbInstance.exec(schema);
-        console.log('[db]: Database schema exec command executed.'); // *** MODIFIED LOG ***
+        console.log('[db]: Database schema exec command executed.');
 
-        // --- Verify schema IMMEDIATELY after execution --- // *** ADDED LOG BLOCK ***
-        console.log('[db]: Verifying schema after exec...');
+        // Check and add columns (simple migrations)
         const columns = dbInstance.pragma("table_info(sessions)") as { name: string; notnull: number; pk: number; type: string; dflt_value: any }[];
-        const transcriptPathColumn = columns.find(col => col.name === 'transcriptPath');
-        if (transcriptPathColumn) {
-            console.log(`[db Verification]: Found transcriptPath column. NOT NULL constraint: ${transcriptPathColumn.notnull === 1 ? 'YES (Problem!)' : 'NO (Correct)'}`);
-        } else {
-             console.log('[db Verification]: transcriptPath column NOT FOUND after schema exec!');
-        }
-         // *** END ADDED LOG BLOCK ***
-
-        // Check and add new columns if they don't exist (simple migration)
         const hasStatus = columns.some((col) => col.name === 'status');
         const hasWhisperJobId = columns.some((col) => col.name === 'whisperJobId');
 
         if (!hasStatus) {
-            console.log('[db]: Adding "status" column to sessions table...');
+            console.log('[db Migration]: Adding "status" column to sessions table...');
             dbInstance.exec("ALTER TABLE sessions ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'");
-            console.log('[db]: "status" column added.');
+            console.log('[db Migration]: "status" column added.');
         }
         if (!hasWhisperJobId) {
-            console.log('[db]: Adding "whisperJobId" column to sessions table...');
+            console.log('[db Migration]: Adding "whisperJobId" column to sessions table...');
             dbInstance.exec("ALTER TABLE sessions ADD COLUMN whisperJobId TEXT NULL");
-            console.log('[db]: "whisperJobId" column added.');
+            console.log('[db Migration]: "whisperJobId" column added.');
         }
 
-        // --- Verify transcriptPath is nullable (redundant check, but keep for logging) ---
-        if (transcriptPathColumn && transcriptPathColumn.notnull !== 0) {
-            console.warn('[db]: Existing "transcriptPath" column is NOT NULL. This migration script does not automatically alter it to be NULLABLE due to data loss risk. Please manually update the schema if needed (backup first!). Or delete the DB file to recreate with the correct schema.');
-        } else if (transcriptPathColumn && transcriptPathColumn.notnull === 0) {
-             console.log('[db]: Confirmed "transcriptPath" column is nullable (second check).');
-        } else if (!transcriptPathColumn) {
-             console.warn('[db]: "transcriptPath" column not found (second check). Schema creation should handle this.');
-        }
-        // --- END Verify ---
-
+        // --- Verify Schema Version (AFTER schema exec and migrations) ---
+        verifySchemaVersion(dbInstance, schema); // Pass the schema string used
 
     } catch (error) {
-        console.error('[db]: Error initializing database pragmas or schema:', error);
-        // Close the faulty connection attempt and exit (closeDb is defined above)
+        console.error('[db]: Error initializing database pragmas, schema, or migrations:', error);
         closeDb();
         process.exit(1);
     }
@@ -136,18 +174,13 @@ function initializeDatabase(dbInstance: DB) {
 // --- Database Connection and Initialization ---
 console.log(`[db]: Initializing SQLite database connection for: ${dbFilePath}`);
 try {
-    // Define the db instance
     db = new Database(dbFilePath, {
-        verbose: isDev ? console.log : undefined, // Log statements in dev
-        // *** ADDED LOG: File must exist? Set to true to potentially reveal issues if file is missing when expected ***
-        // fileMustExist: true, // Uncomment cautiously for debugging specific file existence issues
+        verbose: isDev ? console.log : undefined,
     });
     console.log(`[db]: Successfully connected to database: ${dbFilePath}`);
-    initializeDatabase(db); // Initialize synchronously (schema and closeDb are defined above)
+    initializeDatabase(db); // Initialize synchronously
 } catch (err) {
     console.error(`[db]: FATAL: Could not connect to database at ${dbFilePath}:`, (err as Error).message);
-    // closeDb is defined above, so safe to call here if needed (though connection failed)
-    // closeDb(); // Optional: attempt close even on connection failure, though likely unnecessary
     process.exit(1);
 }
 
@@ -158,13 +191,12 @@ function prepare(sql: string): Statement {
     let stmt = statementCache.get(sql);
     if (!stmt) {
         try {
-            // *** ADDED LOG ***
-            console.log(`[db]: Preparing statement: ${sql}`);
-            stmt = db.prepare(sql); // db is now guaranteed to be initialized here
+            console.log(`[db]: Preparing statement: ${sql.split('\n')[0]}...`); // Log only first line
+            stmt = db.prepare(sql);
             statementCache.set(sql, stmt);
         } catch (error) {
             console.error(`[db] Error preparing statement: ${sql}`, error);
-            throw error; // Re-throw after logging
+            throw error;
         }
     }
     return stmt;
@@ -181,14 +213,14 @@ function all<T = any>(sql: string, ...params: any[]): T[] {
     return prepare(sql).all(params) as T[];
 }
 function exec(sql: string): void {
-    db.exec(sql); // db is initialized
+    db.exec(sql);
 }
 function transaction<T>(fn: (...args: any[]) => T): (...args: any[]) => T {
-    return db.transaction(fn); // db is initialized
+    return db.transaction(fn);
 }
 
 
-// --- Process Event Listeners (closeDb is defined above) ---
+// --- Process Event Listeners ---
 process.on('exit', closeDb);
 process.on('SIGHUP', () => process.exit(128 + 1));
 process.on('SIGINT', () => process.exit(128 + 2));
