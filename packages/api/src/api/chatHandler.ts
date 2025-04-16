@@ -1,7 +1,10 @@
+/* packages/api/src/api/chatHandler.ts */
 import { chatRepository } from '../repositories/chatRepository.js';
-import { loadTranscriptContent } from '../services/fileService.js';
+import { loadTranscriptContent } from '../services/fileService.js'; // Loads structured transcript now
 import { generateChatResponse } from '../services/ollamaService.js';
 import { NotFoundError, InternalServerError, ApiError } from '../errors.js';
+import type { StructuredTranscript, TranscriptParagraphData } from '../types/index.js'; // Import types
+
 // No need for explicit context types here, rely on Elysia's inference
 
 // GET /:sessionId/chats/:chatId - Get details of a specific chat
@@ -43,25 +46,37 @@ export const addChatMessage = async ({ sessionData, chatData, body, set }: any) 
     }
 
     try {
+        // 1. Add user message to DB
         const userMessage = chatRepository.addMessage(chatData.id, 'user', trimmedText); // Sync
 
-        const transcriptContent = await loadTranscriptContent(sessionData.id); // Async
-        if (transcriptContent === null || transcriptContent === undefined) {
-             throw new InternalServerError(`Transcript for session ${sessionData.id} could not be loaded.`);
+        // 2. Load Structured Transcript Content
+        const structuredTranscript: StructuredTranscript = await loadTranscriptContent(sessionData.id); // Async, returns StructuredTranscript
+
+        // 3. Convert structured transcript to a single string for the LLM context
+        // Simple join with double newlines between paragraphs
+        const transcriptString = structuredTranscript.map(p => p.text).join('\n\n');
+
+        if (!transcriptString) {
+             // Log a warning but proceed, the LLM prompt handles empty transcript case
+             console.warn(`[API addChatMessage] Transcript for session ${sessionData.id} is empty or could not be loaded/formatted.`);
         }
 
+        // 4. Get current chat messages from DB (including the one just added)
         const currentMessages = chatRepository.findMessagesByChatId(chatData.id); // Sync
         if (currentMessages.length === 0) {
-             throw new InternalServerError(`CRITICAL: Chat ${chatData.id} has no messages.`);
+             // This should theoretically not happen as we just added a message
+             throw new InternalServerError(`CRITICAL: Chat ${chatData.id} has no messages immediately after adding one.`);
         }
 
+        // 5. Generate AI response using the stringified transcript and chat history
         console.log(`[API] Sending context (transcript + ${currentMessages.length} messages) to Ollama...`);
-        const aiResponseText = await generateChatResponse(transcriptContent, currentMessages); // Async
+        const aiResponseText = await generateChatResponse(transcriptString, currentMessages); // Async, pass stringified transcript
         console.log(`[API] Received Ollama response.`);
 
+        // 6. Add AI response message to DB
         const aiMessage = chatRepository.addMessage(chatData.id, 'ai', aiResponseText); // Sync
 
-        console.log(`[API] Added user (${userMessage.id}) and AI (${aiMessage.id}) messages.`);
+        console.log(`[API] Added user (${userMessage.id}) and AI (${aiMessage.id}) messages to chat ${chatData.id}.`);
         set.status = 201;
         return { userMessage, aiMessage }; // Matches AddMessageResponseSchema
 
@@ -87,7 +102,8 @@ export const renameChat = ({ chatData, body, set }: any) => { // Using 'any', be
         // Pass string | null to the repository function
         const updatedChat = chatRepository.updateChatName(chatData.id, nameToSave); // Sync call
         if (!updatedChat) {
-            throw new NotFoundError(`Chat with ID ${chatData.id} not found during update.`);
+            // Should not happen if chatData was found, but good practice
+            throw new NotFoundError(`Chat with ID ${chatData.id} not found during update attempt.`);
         }
         console.log(`[API] Renamed chat ${chatData.id} to "${updatedChat.name || '(no name)'}"`);
 
@@ -111,7 +127,8 @@ export const deleteChat = ({ chatData, set }: any) => { // Using 'any', becomes 
     try {
         const deleted = chatRepository.deleteChatById(chatData.id); // Sync call
         if (!deleted) {
-            throw new NotFoundError(`Chat with ID ${chatData.id} not found during deletion.`);
+             // Should not happen if chatData was found, but good practice
+            throw new NotFoundError(`Chat with ID ${chatData.id} not found during deletion attempt.`);
         }
         console.log(`[API] Deleted chat ${chatData.id}`);
         set.status = 200;

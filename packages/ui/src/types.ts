@@ -1,4 +1,14 @@
 // TODO can we infer these from the API?
+
+// Add the new structured transcript types
+export interface TranscriptParagraphData {
+    id: number; // or index used as ID
+    timestamp: number; // start time in milliseconds
+    text: string;
+}
+export type StructuredTranscript = TranscriptParagraphData[];
+
+
 export interface ChatMessage {
     id: number;
     sender: 'user' | 'ai';
@@ -27,8 +37,10 @@ export interface SessionMetadata {
 export interface Session extends SessionMetadata {
     id: number;
     fileName: string;
-    transcription: string;
+    // transcription field is removed - it's fetched separately now as structured data
+    // transcription: string; // REMOVED
     // Chats array might initially contain only metadata (ChatSession without messages)
     // Ensure chats array elements conform to the updated ChatSession type
     chats: ChatSession[];
+    transcriptPath: string; // Keep path if needed, points to JSON now
 }

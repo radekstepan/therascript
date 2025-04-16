@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import type { Session, SessionMetadata } from '../../../types';
+// Import the new structured transcript types
+import type { SessionMetadata, StructuredTranscript, TranscriptParagraphData } from '../../../types';
 import { TranscriptParagraph } from '../../Transcription/TranscriptParagraph';
 import { Box, ScrollArea, Text, Flex, Button, Badge, Spinner } from '@radix-ui/themes'; // Import Spinner
 import {
@@ -48,8 +49,10 @@ const renderHeaderDetail = (
 
 
 interface TranscriptionProps {
-    session: SessionMetadata & { id: number }; // Need ID and metadata fields
-    transcriptContent: string | undefined; // Receive transcript content directly
+    // Update session prop type if needed, ensure ID is present
+    session: SessionMetadata & { id: number; fileName: string; transcriptPath: string };
+    // transcriptContent is now StructuredTranscript
+    transcriptContent: StructuredTranscript | undefined;
     onEditDetailsClick: () => void;
     isTabActive?: boolean;
     initialScrollTop?: number;
@@ -60,7 +63,7 @@ interface TranscriptionProps {
 
 export function Transcription({
     session,
-    transcriptContent,
+    transcriptContent, // Now StructuredTranscript | undefined
     onEditDetailsClick,
     isTabActive,
     initialScrollTop = 0,
@@ -76,18 +79,19 @@ export function Transcription({
     // Mutation for saving a paragraph
     const saveParagraphMutation = useMutation({
         mutationFn: ({ index, newText }: { index: number; newText: string }) => {
-            // Backend expects paragraphIndex, not array index if different
-            // Assuming API uses 0-based index corresponding to split paragraphs
+            // Backend expects paragraphIndex (0-based index of the paragraph in the array)
             return updateTranscriptParagraph(session.id, index, newText);
         },
-        onSuccess: (updatedFullTranscript, variables) => {
-            // Update the transcript query cache directly
-            queryClient.setQueryData(['transcript', session.id], updatedFullTranscript);
+        onSuccess: (updatedStructuredTranscript, variables) => {
+            // Update the transcript query cache directly with the full updated array
+            queryClient.setQueryData(['transcript', session.id], updatedStructuredTranscript);
             setActiveEditIndex(null); // Close editor on success
         },
         onError: (error, variables) => {
             console.error(`Error saving paragraph ${variables.index}:`, error);
             // TODO: Optionally show an error message near the paragraph or via toast
+            // Maybe reset the activeEditIndex or revert the text? For now, just log.
+            setActiveEditIndex(null); // Close editor even on error for simplicity
         }
     });
 
@@ -135,19 +139,12 @@ export function Transcription({
         return <Box p="4"><Text color="gray" style={{ fontStyle: 'italic' }}>Session data not available.</Text></Box>;
     }
 
-    const sourceContent = transcriptContent ?? ''; // Use empty string if undefined
-
-    // TODO: Backend should ideally return pre-split paragraphs or structured text.
-    // This split might not match backend expectations for paragraphIndex in PATCH.
-    const paragraphs = sourceContent
-        .replace(/\r\n/g, '\n') // Normalize line breaks
-        .split(/\n\s*\n/) // Split on blank lines
-        .filter(p => p.trim() !== ''); // Remove empty paragraphs resulting from split
+    // Use transcriptContent directly (it's already an array or undefined)
+    const paragraphs = transcriptContent || []; // Use empty array if undefined
 
     // Handler passed to TranscriptParagraph component
     const handleSaveParagraphInternal = async (index: number, newText: string) => {
-        // Index here corresponds to the index in the `paragraphs` array derived above.
-        // Ensure this matches the `paragraphIndex` expected by the API.
+        // Index here corresponds to the index in the `paragraphs` array
         saveParagraphMutation.mutate({ index, newText });
     };
 
@@ -196,11 +193,14 @@ export function Transcription({
                      </Flex>
                 )}
                 <Box p="3" className="space-y-3">
+                     {/* Map over the paragraphs array */}
                      {!isLoadingTranscript && !transcriptError && paragraphs.length > 0 && paragraphs.map((paragraph, index) => (
                         <TranscriptParagraph
-                            key={`${session.id}-p-${index}`}
+                            // Use paragraph.id or index as key. Ensure uniqueness.
+                            key={paragraph.id ?? `p-${index}`}
+                            // Pass the whole paragraph object
                             paragraph={paragraph}
-                            index={index}
+                            index={index} // Pass index for saving
                             onSave={handleSaveParagraphInternal} // Pass the internal handler
                             activeEditIndex={activeEditIndex}
                             setActiveEditIndex={setActiveEditIndex}
@@ -208,13 +208,22 @@ export function Transcription({
                         />
                     ))}
                      {/* Show message only if not loading, no error, and paragraphs array is empty */}
-                     {!isLoadingTranscript && !transcriptError && paragraphs.length === 0 && transcriptContent !== undefined && (
+                     {/* Check if transcriptContent exists but is empty array */}
+                     {!isLoadingTranscript && !transcriptError && transcriptContent && paragraphs.length === 0 && (
                         <Flex align="center" justify="center" style={{minHeight: '100px'}}>
                             <Text color="gray" style={{ fontStyle: 'italic' }}>
-                                {transcriptContent === '' ? 'Transcription is empty.' : 'No transcription content found.'}
+                                Transcription is empty.
                             </Text>
                         </Flex>
                     )}
+                     {/* Handle case where transcript is explicitly undefined (still loading or failed) */}
+                     {!isLoadingTranscript && !transcriptError && transcriptContent === undefined && (
+                          <Flex align="center" justify="center" style={{minHeight: '100px'}}>
+                             <Text color="gray" style={{ fontStyle: 'italic' }}>
+                                 No transcription content available.
+                             </Text>
+                          </Flex>
+                     )}
                 </Box>
             </ScrollArea>
         </Flex>

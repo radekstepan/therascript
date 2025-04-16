@@ -1,7 +1,7 @@
-/* src/components/SessionView/SessionContent.tsx */
 import React, { useState, useCallback } from 'react';
 import { Box, Flex, Text, Tabs, ScrollArea } from '@radix-ui/themes'; // Added ScrollArea here
-import type { Session } from '../../types'; // Keep Session type
+// Import new transcript types
+import type { Session, StructuredTranscript } from '../../types';
 import { Transcription } from './Transcription/Transcription';
 import { ChatInterface } from './Chat/ChatInterface';
 import { StartChatPrompt } from './Chat/StartChatPrompt';
@@ -10,14 +10,15 @@ import { SessionSidebar } from './Sidebar/SessionSidebar'; // Import SessionSide
 interface SessionContentProps {
     session: Session; // Keep full session for metadata display? Or pass specific metadata
     onEditDetailsClick: () => void;
-    // onSaveTranscriptParagraph: (index: number, text: string) => Promise<void>; // Handled internally now
-    transcriptContent: string | undefined;
+    // transcriptContent is now StructuredTranscript
+    transcriptContent: StructuredTranscript | undefined;
     activeChatId: number | null;
     hasChats: boolean;
     onStartFirstChat: () => void;
     // Pass the loading/error states for session metadata needed by SessionSidebar in tabs
     isLoadingSessionMeta: boolean;
     sessionMetaError: Error | null;
+    // Pass transcript loading/error states
     isLoadingTranscript: boolean;
     transcriptError?: Error | null;
 }
@@ -25,14 +26,14 @@ interface SessionContentProps {
 export function SessionContent({ // Ensure this component is exported
     session,
     onEditDetailsClick,
-    // onSaveTranscriptParagraph, // Removed
-    transcriptContent,
+    transcriptContent, // Now StructuredTranscript | undefined
     activeChatId,
     hasChats,
     onStartFirstChat,
     // Receive session meta loading/error states
     isLoadingSessionMeta,
     sessionMetaError,
+    // Receive transcript loading/error states
     isLoadingTranscript,
     transcriptError,
  }: SessionContentProps) {
@@ -110,8 +111,12 @@ export function SessionContent({ // Ensure this component is exported
                             sessionName: session.sessionName,
                             date: session.date,
                             sessionType: session.sessionType,
-                            therapy: session.therapy
+                            therapy: session.therapy,
+                            // Pass fileName and transcriptPath if needed by Transcription header (optional)
+                             fileName: session.fileName,
+                             transcriptPath: session.transcriptPath,
                         }}
+                        // Pass the structured transcript
                         transcriptContent={transcriptContent}
                         onEditDetailsClick={onEditDetailsClick}
                         isLoadingTranscript={isLoadingTranscript}
@@ -185,8 +190,12 @@ export function SessionContent({ // Ensure this component is exported
                                         sessionName: session.sessionName,
                                         date: session.date,
                                         sessionType: session.sessionType,
-                                        therapy: session.therapy
+                                        therapy: session.therapy,
+                                        // Pass fileName and transcriptPath if needed by Transcription header (optional)
+                                        fileName: session.fileName,
+                                        transcriptPath: session.transcriptPath,
                                     }}
+                                    // Pass the structured transcript
                                     transcriptContent={transcriptContent}
                                     onEditDetailsClick={onEditDetailsClick}
                                     isLoadingTranscript={isLoadingTranscript}

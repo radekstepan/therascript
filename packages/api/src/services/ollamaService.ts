@@ -1,3 +1,4 @@
+/* packages/api/src/services/ollamaService.ts */
 import ollama, { ChatResponse, Message } from 'ollama';
 import axios from 'axios'; // Import axios for the pull and status requests
 import config from '../config/index.js';
@@ -84,13 +85,15 @@ export const checkModelStatus = async (modelName: string = config.ollama.model):
 };
 
 export const generateChatResponse = async (
+    // Accepts the stringified transcript
     contextTranscript: string,
     chatHistory: BackendChatMessage[],
     retryAttempt: boolean = false // Flag to prevent infinite retry loops
 ): Promise<string> => {
-    if (!contextTranscript && chatHistory.length <= 1) {
-        console.warn("[OllamaService] Called with empty transcript and minimal history.");
-        return "I need more context or a transcript to analyze.";
+    // Check if contextTranscript is empty/null/undefined, but proceed anyway
+    if (!contextTranscript) {
+        console.warn("[OllamaService] Generating response with empty or missing transcript context.");
+        // No longer return early, let the prompt handle it
     }
     if (!chatHistory || chatHistory.length === 0) {
         console.error("[OllamaService] generateChatResponse called with empty chat history.");
@@ -100,13 +103,16 @@ export const generateChatResponse = async (
 
     console.log(`[OllamaService] Generating response (model: ${config.ollama.model})...`);
 
+    // Construct messages array, ensuring transcript context is included
     const messages: Message[] = [
         { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: `CONTEXT TRANSCRIPT:\n"""\n${contextTranscript || 'No transcript.'}\n"""\n\nCHAT HISTORY:` },
+        // Include the transcript string. Handle the case where it might be empty.
+        { role: 'user', content: `CONTEXT TRANSCRIPT:\n"""\n${contextTranscript || 'No transcript available.'}\n"""\n\nCHAT HISTORY:` },
+        // Append the actual chat history
         ...chatHistory.map((msg): Message => ({ role: msg.sender === 'ai' ? 'assistant' : 'user', content: msg.text })),
     ];
 
-    console.log(`[OllamaService] Sending ${messages.length} messages to Ollama.`);
+    console.log(`[OllamaService] Sending ${messages.length} messages to Ollama (including system prompt and transcript context).`);
 
     try {
         const response: ChatResponse = await ollama.chat({

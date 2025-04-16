@@ -14,6 +14,18 @@ export interface BackendChatSession {
   messages?: BackendChatMessage[]; // Optional, loaded on demand
 }
 
+// Represents a single paragraph with its text and starting timestamp
+export interface TranscriptParagraphData {
+  // Using index as a temporary ID, a stable ID might be better long-term
+  id: number; // Or paragraphIndex? Let's use index for now.
+  timestamp: number; // Start time of the paragraph in milliseconds from audio start
+  text: string;
+}
+
+// Represents the full transcript as an array of paragraphs
+export type StructuredTranscript = TranscriptParagraphData[];
+
+
 export interface BackendSession {
   id: number;
   fileName: string;
@@ -22,8 +34,11 @@ export interface BackendSession {
   date: string;
   sessionType: string;
   therapy: string;
+  // transcriptPath now points to a JSON file
   transcriptPath: string;
   chats?: Pick<BackendChatSession, 'id' | 'sessionId' | 'timestamp' | 'name'>[]; // Optional, only metadata usually loaded
+  // The structured transcript data might be loaded separately or included here if needed frequently
+  // transcript?: StructuredTranscript; // Optional: Could be included here
 }
 
 // Metadata used for creation/update, excluding generated fields

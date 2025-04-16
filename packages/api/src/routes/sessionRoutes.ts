@@ -13,7 +13,8 @@ import {
     deleteUploadedFile
 } from '../services/fileService.js';
 import { transcribeAudio } from '../services/transcriptionService.js'; // Uses the updated service
-import type { BackendSession, BackendSessionMetadata } from '../types/index.js';
+// Import the new types
+import type { BackendSession, BackendSessionMetadata, StructuredTranscript, TranscriptParagraphData } from '../types/index.js';
 import { NotFoundError, InternalServerError, ApiError, BadRequestError } from '../errors.js';
 import config from '../config/index.js'; // Keep config import
 
@@ -23,7 +24,7 @@ const SessionIdParamSchema = t.Object({
 });
 const ParagraphUpdateBodySchema = t.Object({
     paragraphIndex: t.Numeric({ minimum: 0, error: "Paragraph index must be 0 or greater" }),
-    newText: t.String()
+    newText: t.String() // Can be empty string
 });
 const SessionMetadataUpdateBodySchema = t.Partial(t.Object({
     clientName: t.Optional(t.String({ minLength: 1 })),
@@ -32,7 +33,7 @@ const SessionMetadataUpdateBodySchema = t.Partial(t.Object({
     sessionType: t.Optional(t.String({ minLength: 1 })),
     therapy: t.Optional(t.String({ minLength: 1 })),
     fileName: t.Optional(t.String()),
-    transcriptPath: t.Optional(t.String()),
+    transcriptPath: t.Optional(t.String()), // Should point to .json file now
 }));
 const SessionMetadataResponseSchema = t.Object({
     id: t.Number(),
@@ -42,7 +43,7 @@ const SessionMetadataResponseSchema = t.Object({
     date: t.String(),
     sessionType: t.String(),
     therapy: t.String(),
-    transcriptPath: t.String(),
+    transcriptPath: t.String(), // Path to the .json file
 });
 const SessionListResponseItemSchema = SessionMetadataResponseSchema;
 
@@ -58,7 +59,17 @@ const SessionWithChatsMetadataResponseSchema = t.Intersect([
         chats: t.Array(ChatMetadataResponseSchema)
     })
 ]);
-const TranscriptResponseSchema = t.Object({ transcriptContent: t.String() });
+
+// Define the structure for a single paragraph in the response
+const TranscriptParagraphSchema = t.Object({
+    id: t.Number(), // Or index used as ID
+    timestamp: t.Number(), // Milliseconds
+    text: t.String()
+});
+
+// Define the Transcript response schema as an array of paragraphs
+const TranscriptResponseSchema = t.Array(TranscriptParagraphSchema);
+
 
 // Define UploadBodySchema with a generic File type for now
 const UploadBodySchema = t.Object({
@@ -98,6 +109,7 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
         uploadBody: UploadBodySchema,
         sessionMetadataResponse: SessionMetadataResponseSchema,
         sessionWithChatsMetadataResponse: SessionWithChatsMetadataResponseSchema,
+        // Register the new transcript response schema
         transcriptResponse: TranscriptResponseSchema,
     })
     .group('', { detail: { tags: ['Session'] } }, (app) => app
@@ -125,26 +137,28 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
                 console.log(`[API Upload] Temporary audio saved to ${tempAudioPath}`);
 
                 // 2. Transcribe Audio using the updated service
-                // The service now handles calling the Whisper API endpoint
+                // The service now handles calling the Whisper API endpoint and returns StructuredTranscript
                 console.log(`[API Upload] Starting transcription for ${audioFile.name}...`);
-                const transcriptContent = await transcribeAudio(tempAudioPath); // Pass the path
-                console.log(`[API Upload] Transcription finished.`);
+                const structuredTranscript: StructuredTranscript = await transcribeAudio(tempAudioPath); // Returns StructuredTranscript
+                console.log(`[API Upload] Transcription finished, got ${structuredTranscript.length} paragraphs.`);
 
-                // 3. Create Session in DB (using temp transcript path initially)
-                const tempDbTranscriptPath = path.join(config.db.transcriptsDir, `temp-${Date.now()}.txt`);
+                // 3. Create Session in DB (using temp transcript path initially - now .json)
+                // Use .json extension for the temporary path as well
+                const tempDbTranscriptPath = path.join(config.db.transcriptsDir, `temp-${Date.now()}.json`);
                 // Pass filename from the original upload
                 newSession = await sessionRepository.create(metadata as BackendSessionMetadata, audioFile.name, tempDbTranscriptPath);
                 if (!newSession) throw new InternalServerError('Failed to create session record.');
-                console.log(`[API Upload] DB session record created (ID: ${newSession.id}) with temp path.`);
+                console.log(`[API Upload] DB session record created (ID: ${newSession.id}) with temp JSON path.`);
 
                 const sessionId = newSession.id;
-                const finalTranscriptPath = path.join(config.db.transcriptsDir, `${sessionId}.txt`);
+                // Final path is now .json
+                const finalTranscriptPath = path.join(config.db.transcriptsDir, `${sessionId}.json`);
 
-                // 4. Save transcript content to the final path
-                savedTranscriptPath = await saveTranscriptContent(sessionId, transcriptContent);
-                console.log(`[API Upload] Transcript content saved to ${savedTranscriptPath}`);
+                // 4. Save structured transcript content to the final path (.json)
+                savedTranscriptPath = await saveTranscriptContent(sessionId, structuredTranscript); // Pass the structured data
+                console.log(`[API Upload] Structured transcript content saved to ${savedTranscriptPath}`);
 
-                // 5. Update session record with final path
+                // 5. Update session record with final path (.json)
                 const sessionAfterUpdate = await sessionRepository.updateMetadata(sessionId, { transcriptPath: finalTranscriptPath });
                 if (!sessionAfterUpdate) throw new InternalServerError(`Failed to update transcript path for session ${sessionId}.`);
                 newSession = sessionAfterUpdate;
@@ -182,9 +196,8 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
                  if (newSession?.id) {
                      console.log(`[API Upload Cleanup] Attempting cleanup for session ${newSession.id}...`);
                      try {
-                        // Attempt to delete transcript file even if saving failed
-                        if (savedTranscriptPath) await fs.unlink(savedTranscriptPath).catch(e => console.warn(`Cleanup: Error deleting final transcript ${savedTranscriptPath}`, e));
-                        else await deleteTranscriptFile(newSession.id); // Try deleting using ID if final save didn't happen
+                        // Attempt to delete transcript file (now .json)
+                        await deleteTranscriptFile(newSession.id); // Handles .json path
 
                         await sessionRepository.deleteById(newSession.id);
                         console.log(`[API Upload Cleanup] DB record and associated transcript file (attempted) deleted.`);
@@ -249,14 +262,16 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
                  response: { 200: 'sessionMetadataResponse' },
                  detail: { summary: 'Update session metadata' }
              })
-             // GET /:sessionId/transcript - Get transcript content only
+             // GET /:sessionId/transcript - Get structured transcript content
              .get('/:sessionId/transcript', getTranscript, {
+                 // Use the updated transcriptResponse schema (array of paragraphs)
                  response: { 200: 'transcriptResponse' },
-                 detail: { summary: 'Get transcript content' }
+                 detail: { summary: 'Get structured transcript content' }
              })
              // PATCH /:sessionId/transcript - Update transcript paragraph
              .patch('/:sessionId/transcript', updateTranscriptParagraph, {
                  body: 'paragraphUpdateBody',
+                 // Use the updated transcriptResponse schema (array of paragraphs)
                  response: { 200: 'transcriptResponse' },
                  detail: { summary: 'Update transcript paragraph' }
              })

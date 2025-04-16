@@ -24,6 +24,7 @@
 - [ ] the `sessionSortCriteriaAtom` says it's sorting by "date", but in the UI it shows sorted by "Client"
 - [ ] unload LM toast shows 2x
 - [ ] change the theme dropodown such that we highlight rather than show a checkmark next to the selected theme
+- [ ] make sure to unload whisper when we are done transcribing
 
 ## Nice to have
 

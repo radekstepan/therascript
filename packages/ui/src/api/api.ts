@@ -1,13 +1,19 @@
 import axios from 'axios';
-import type { Session, SessionMetadata, ChatSession, ChatMessage } from '../types';
+// Import the new structured transcript types
+import type { Session, SessionMetadata, ChatSession, ChatMessage, StructuredTranscript, TranscriptParagraphData } from '../types';
 
 // TODO can we get types on all of the responses?
 // GET /api/sessions/
 export const fetchSessions = async (): Promise<Session[]> => {
-    // This endpoint likely returns an array of objects that match SessionMetadata
-    // plus 'id' and 'fileName'. It might NOT include 'transcription' or 'chats'.
+    // Endpoint returns an array of objects matching SessionMetadata + id/fileName/transcriptPath
     const response = await axios.get('/api/sessions/');
-    return response.data;
+    // Map response to Session type, transcript itself isn't included here
+    return response.data.map((item: any) => ({
+        ...item,
+        // Ensure chats is an array, even if empty (backend might omit it)
+        chats: item.chats || [],
+        // Transcription field is removed from the Session type
+    }));
 };
 
 // POST /api/sessions/upload
@@ -18,28 +24,39 @@ export const uploadSession = async (file: File, metadata: SessionMetadata): Prom
     const response = await axios.post('/api/sessions/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
     });
-    // Assume the upload response includes the full session details including transcription
-    return response.data;
+    // Assume the upload response includes the session details including the chat list
+    // Map response to Session type
+    return {
+        ...response.data,
+        // Ensure chats is an array
+        chats: response.data.chats || [],
+        // Transcription field is removed
+    };
 };
 
 // GET /api/sessions/{sessionId} - Fetches metadata and chat list (messages likely missing in chats)
 export const fetchSession = async (sessionId: number): Promise<Session> => {
-    // Backend might return chats without messages here. Type is Session for simplicity,
-    // but be aware 'messages' might be undefined/missing in the response's chat objects.
+    // Backend returns metadata + chat list (metadata only).
     const response = await axios.get(`/api/sessions/${sessionId}`);
-    return response.data;
+    // Map response to Session type
+    return {
+        ...response.data,
+        // Ensure chats is an array
+        chats: response.data.chats || [],
+        // Transcription field is removed
+    };
 };
 
-// GET /api/sessions/{sessionId}/transcript - Fetches only the transcript content
-export const fetchTranscript = async (sessionId: number): Promise<string> => {
-    const response = await axios.get(`/api/sessions/${sessionId}/transcript`);
-    // Assuming API returns { transcriptContent: "..." } based on spec or actual behavior
-    return response.data.transcriptContent;
+// GET /api/sessions/{sessionId}/transcript - Fetches the structured transcript content
+export const fetchTranscript = async (sessionId: number): Promise<StructuredTranscript> => {
+    const response = await axios.get<StructuredTranscript>(`/api/sessions/${sessionId}/transcript`);
+    // API directly returns the array of TranscriptParagraphData
+    return response.data;
 };
 
 // GET /api/sessions/{sessionId}/chats/{chatId} - Fetches full chat details including messages
 export const fetchChatDetails = async (sessionId: number, chatId: number): Promise<ChatSession> => {
-    // This endpoint is expected to return the ChatSession with the 'messages' array populated.
+    // This endpoint returns the ChatSession with the 'messages' array populated.
     const response = await axios.get(`/api/sessions/${sessionId}/chats/${chatId}`);
     return response.data; // Should match the ChatSession type (with messages)
 };
@@ -48,7 +65,7 @@ export const fetchChatDetails = async (sessionId: number, chatId: number): Promi
 export const updateSessionMetadata = async (
     sessionId: number,
     metadata: Partial<SessionMetadata>
-): Promise<SessionMetadata> => {
+): Promise<SessionMetadata> => { // Returns updated metadata
     const response = await axios.put(`/api/sessions/${sessionId}/metadata`, metadata);
     return response.data;
 };
@@ -56,20 +73,19 @@ export const updateSessionMetadata = async (
 // PATCH /api/sessions/{sessionId}/transcript - Update a specific paragraph
 export const updateTranscriptParagraph = async (
     sessionId: number,
-    paragraphIndex: number,
+    paragraphIndex: number, // Backend uses index
     newText: string
-): Promise<string> => {
-    const response = await axios.patch(`/api/sessions/${sessionId}/transcript`, { paragraphIndex, newText });
-    // Assuming API returns the updated full transcript content
-    return response.data.transcriptContent;
+): Promise<StructuredTranscript> => { // Returns the full updated structured transcript
+    const response = await axios.patch<StructuredTranscript>(`/api/sessions/${sessionId}/transcript`, { paragraphIndex, newText });
+    // API returns the updated full transcript array
+    return response.data;
 };
 
 // POST /api/sessions/{sessionId}/chats/
 export const startNewChat = async (sessionId: number): Promise<ChatSession> => {
-    // This likely returns the new chat metadata, potentially without messages initially
+    // Returns the new chat metadata
     const response = await axios.post(`/api/sessions/${sessionId}/chats/`);
-    // The response type from the backend should match ChatSession metadata (no messages)
-    // Map it to ChatSession type for consistency, knowing messages might be missing
+    // Map response to ChatSession type
     const chatMetadata = response.data;
     return {
         ...chatMetadata,
@@ -92,11 +108,11 @@ export const addChatMessage = async (
 export const renameChat = async (sessionId: number, chatId: number, name: string | null): Promise<ChatSession> => {
     // Returns updated chat metadata
     const response = await axios.patch(`/api/sessions/${sessionId}/chats/${chatId}/name`, { name });
-    // Map response to ChatSession type, messages will be missing
+    // Map response to ChatSession type
     const chatMetadata = response.data;
     return {
         ...chatMetadata,
-        // Messages are not returned by this endpoint, so keep them undefined or empty
+        // Messages are not returned by this endpoint
         messages: undefined
     };
 };

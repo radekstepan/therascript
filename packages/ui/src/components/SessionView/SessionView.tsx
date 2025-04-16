@@ -10,7 +10,8 @@ import { SessionContent } from './SessionContent';
 import { EditDetailsModal } from './Modals/EditDetailsModal';
 // Import API functions used in this file
 import { fetchSession, fetchTranscript, startNewChat, fetchChatDetails } from '../../api/api';
-import type { Session, SessionMetadata, ChatSession } from '../../types'; // Added ChatSession
+// Import new types
+import type { Session, SessionMetadata, ChatSession, StructuredTranscript } from '../../types';
 import {
     activeSessionIdAtom,
     activeChatIdAtom,
@@ -49,16 +50,16 @@ export function SessionView() {
         staleTime: 5 * 60 * 1000, // Cache metadata for 5 mins
     });
 
-    // Fetch Transcript Content
-    const { data: transcriptContent, isLoading: isLoadingTranscript, error: transcriptError } = useQuery<string, Error>({
+    // Fetch Transcript Content (now expects StructuredTranscript)
+    const { data: transcriptContent, isLoading: isLoadingTranscript, error: transcriptError } = useQuery<StructuredTranscript, Error>({
         queryKey: ['transcript', sessionIdNum],
         queryFn: () => {
             if (!sessionIdNum) return Promise.reject(new Error("Invalid Session ID"));
             console.log(`[SessionView] Fetching transcript for ID: ${sessionIdNum}`);
-            return fetchTranscript(sessionIdNum);
+            return fetchTranscript(sessionIdNum); // fetchTranscript now returns StructuredTranscript
         },
         enabled: !!sessionIdNum, // Only fetch if sessionIdNum is valid
-        staleTime: Infinity, // Transcript likely doesn't change unless explicitly edited via mutation
+        staleTime: Infinity, // Transcript structure might change via edits, but content less frequent? Revisit if needed.
     });
 
     // Note: Chat details query (`useQuery(['chat', sessionId, chatId])`) is now inside ChatInterface component
@@ -307,7 +308,8 @@ export function SessionView() {
                     {/* SessionSidebar is now rendered inside SessionContent for small screens */}
                     <SessionContent
                         session={sessionMetadata} // Pass metadata
-                        transcriptContent={transcriptContent} // Pass transcript content
+                        // Pass the structured transcript data
+                        transcriptContent={transcriptContent} // Pass transcript content (StructuredTranscript | undefined)
                         onEditDetailsClick={handleOpenEditMetadataModal}
                         // onSaveTranscriptParagraph removed, handled in Transcription
                         activeChatId={currentActiveChatIdFromParam ?? activeChatId} // Use URL param first, then Jotai state
@@ -317,8 +319,8 @@ export function SessionView() {
                         // so it can pass them to SessionSidebar in the tab view
                         isLoadingSessionMeta={isLoadingSessionMeta || isFetchingSessionMeta}
                         sessionMetaError={sessionMetaError}
-                        isLoadingTranscript={isLoadingTranscript}
-                        transcriptError={transcriptError}
+                        isLoadingTranscript={isLoadingTranscript} // Pass transcript loading state
+                        transcriptError={transcriptError} // Pass transcript error state
                     />
                 </Box>
             </Flex>

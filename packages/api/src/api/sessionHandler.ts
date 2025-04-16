@@ -6,10 +6,10 @@ import {
     deleteTranscriptFile,
     deleteUploadedFile
 } from '../services/fileService.js';
-import { updateParagraphInTranscript } from '../utils/helpers.js';
+// Removed import of updateParagraphInTranscript from helpers
 import { NotFoundError, BadRequestError, InternalServerError, ApiError } from '../errors.js';
 import config from '../config/index.js';
-import type { BackendSession, BackendSessionMetadata } from '../types/index.js';
+import type { BackendSession, BackendSessionMetadata, StructuredTranscript, TranscriptParagraphData } from '../types/index.js'; // Import types
 // No need for explicit context types here, rely on Elysia's inference
 
 // GET / - List all sessions (metadata only)
@@ -17,6 +17,7 @@ import type { BackendSession, BackendSessionMetadata } from '../types/index.js';
 export const listSessions = ({ set }: any) => { // Using 'any', becomes sync
     try {
         const sessions = sessionRepository.findAll(); // Sync
+        // Convert to DTO, ensuring transcriptPath is included if schema requires it
         const sessionDTOs = sessions.map(s => ({
             id: s.id,
             fileName: s.fileName,
@@ -102,43 +103,66 @@ export const updateSessionMetadata = ({ sessionData, body, set }: any) => { // U
     }
 };
 
-// GET /:sessionId/transcript - Get transcript content only
+// GET /:sessionId/transcript - Get structured transcript content
 // Let Elysia infer context, including 'sessionData'
 export const getTranscript = async ({ sessionData, set }: any) => { // Using 'any', remains async
     const sessionId = sessionData.id;
     try {
-        const transcriptContent = await loadTranscriptContent(sessionId); // Async
+        // loadTranscriptContent now returns StructuredTranscript
+        const structuredTranscript: StructuredTranscript = await loadTranscriptContent(sessionId); // Async
         set.status = 200;
-        return { transcriptContent }; // Matches TranscriptResponseSchema
+        // Return the structured data directly
+        return structuredTranscript; // Matches the updated TranscriptResponseSchema (Array<TranscriptParagraphData>)
     } catch (error) {
         console.error(`[API Error] getTranscript (ID: ${sessionId}):`, error);
+        if (error instanceof ApiError) throw error; // Re-throw known API errors
         throw new InternalServerError('Failed to load transcript', error instanceof Error ? error : undefined);
     }
 };
 
-// PATCH /:sessionId/transcript - Update a specific paragraph
+// PATCH /:sessionId/transcript - Update a specific paragraph in the structured transcript
 // Let Elysia infer context, including 'sessionData', 'body'
 export const updateTranscriptParagraph = async ({ sessionData, body, set }: any) => { // Using 'any', remains async
     const sessionId = sessionData.id;
     const { paragraphIndex, newText } = body; // Body validated by schema
 
     try {
-        const currentTranscript = await loadTranscriptContent(sessionId); // Async
-        if (currentTranscript === null || currentTranscript === undefined) {
-             throw new InternalServerError(`Transcript for session ${sessionId} could not be loaded.`);
+        // Load the current structured transcript
+        const currentTranscript: StructuredTranscript = await loadTranscriptContent(sessionId); // Async
+
+        // Validate the index
+        if (paragraphIndex < 0 || paragraphIndex >= currentTranscript.length) {
+            throw new BadRequestError(`Invalid paragraph index: ${paragraphIndex}. Must be between 0 and ${currentTranscript.length - 1}.`);
         }
 
-        const updatedTranscript = updateParagraphInTranscript(currentTranscript, paragraphIndex, newText); // Sync
+        // Check if the text actually changed
+        const trimmedNewText = newText.trim();
+        const originalText = currentTranscript[paragraphIndex].text;
+        const originalTrimmedText = originalText.trim();
 
-        if (updatedTranscript !== currentTranscript) {
-            await saveTranscriptContent(sessionId, updatedTranscript); // Async
-            console.log(`[API] Updated paragraph ${paragraphIndex} for session ${sessionId}`);
-        } else {
-             console.log(`[API] No change needed for paragraph ${paragraphIndex}.`);
+        if (trimmedNewText === originalTrimmedText) {
+             console.log(`[API] No change needed for paragraph ${paragraphIndex}. Text is identical.`);
+             set.status = 200;
+             // Return the unmodified transcript
+             return currentTranscript; // Matches updated TranscriptResponseSchema
         }
+
+        // Create a modified copy of the transcript array
+        const updatedTranscript = currentTranscript.map((paragraph, index) => {
+             if (index === paragraphIndex) {
+                 // Return a new object for the updated paragraph
+                 return { ...paragraph, text: trimmedNewText };
+             }
+             return paragraph; // Return the original object for unchanged paragraphs
+        });
+
+        // Save the entire updated transcript structure back to the file
+        await saveTranscriptContent(sessionId, updatedTranscript); // Async
+        console.log(`[API] Updated paragraph ${paragraphIndex} for session ${sessionId}`);
 
         set.status = 200;
-        return { transcriptContent: updatedTranscript }; // Matches TranscriptResponseSchema
+        // Return the newly updated transcript structure
+        return updatedTranscript; // Matches updated TranscriptResponseSchema
     } catch (error) {
         console.error(`[API Error] updateTranscriptParagraph (ID: ${sessionId}, Index: ${paragraphIndex}):`, error);
         if (error instanceof ApiError) throw error;
