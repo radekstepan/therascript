@@ -19,12 +19,17 @@
 - [ ] think about the starred messages popover, the list/UI looks odd
 - [ ] the formatting of date fields is not consistent when rendered as an `input type="date"` and text field
 - [ ] show progress bar when transcribing a chat session and be able to abort the process
-- [ ] starred messages show once you save them but when you reload the UI they don't show in the popover
+- [ ] starred messages don't show in the popover
 - [ ] if you can't find chat data, show the same message when we fail to load the session
 - [ ] the `sessionSortCriteriaAtom` says it's sorting by "date", but in the UI it shows sorted by "Client"
 - [ ] unload LM toast shows 2x
 - [ ] change the theme dropodown such that we highlight rather than show a checkmark next to the selected theme
 - [ ] make sure to unload whisper when we are done transcribing
+- [ ] add hamburger icon in the session history table for each row to be able to edit the details there as well much like on the session page
+- [ ] the edit transcript modal should let you delete the whole transcript. That will delete the transcript and all chat messages. Well, it'll "archive" it so that it's hidden from the UI but it's still in the DB just in case.
+- [ ] if I run yarn dev then use llama3 and a tiny whisper model; have a configuration for "prod" as well that I can easily change by modifying the config. Should live in the root dir as an env file I think
+- [ ] show the user message in the UI immediately after sending it
+- [ ] when sorting by date in session history, make sure we use a full datetime
 
 ## Nice to have
 
