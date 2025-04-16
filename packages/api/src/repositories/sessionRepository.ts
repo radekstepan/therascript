@@ -1,5 +1,3 @@
-/* packages/api/src/repositories/sessionRepository.ts */
-// (Content is the same as the previous correct version - with added logging)
 import { db } from '../db/sqliteService.js';
 import type { BackendSession, BackendSessionMetadata } from '../types/index.js';
 import { Statement, RunResult } from 'better-sqlite3';
@@ -11,54 +9,52 @@ const prepareStmt = (sql: string): Statement => {
 };
 
 // Prepare statements
-// Statement for initial creation (transcriptPath can be null)
-const insertSessionStmt = prepareStmt('INSERT INTO sessions (fileName, clientName, sessionName, date, sessionType, therapy, transcriptPath) VALUES (?, ?, ?, ?, ?, ?, ?)');
+// Date column is TEXT
+const insertSessionStmt = prepareStmt('INSERT INTO sessions (fileName, clientName, sessionName, date, sessionType, therapy, transcriptPath, status, whisperJobId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+// Sort by date string (ISO 8601 sorts correctly lexicographically)
 const selectAllSessionsStmt = prepareStmt('SELECT * FROM sessions ORDER BY date DESC, id DESC');
 const selectSessionByIdStmt = prepareStmt('SELECT * FROM sessions WHERE id = ?');
-// Update statement includes all potentially updatable fields
 const updateSessionMetadataStmt = prepareStmt(
     `UPDATE sessions SET clientName = ?, sessionName = ?, date = ?, sessionType = ?, therapy = ?, fileName = ?, transcriptPath = ?, status = ?, whisperJobId = ? WHERE id = ?`
 );
 const deleteSessionStmt = prepareStmt('DELETE FROM sessions WHERE id = ?');
 const findSessionByTranscriptPathStmt = prepareStmt('SELECT * FROM sessions WHERE transcriptPath = ?');
 
-
 export const sessionRepository = {
     create: (
         metadata: BackendSessionMetadata,
         fileName: string,
-        // transcriptPath is expected to be potentially null on creation
-        transcriptPath: string | null
+        transcriptPath: string | null,
+        // Accept the full timestamp for creation
+        sessionTimestamp: string // ISO 8601 string
     ): BackendSession => {
-        // *** ADDED LOG ***
-        console.log(`[SessionRepo:create] Attempting insert with fileName: ${fileName}, transcriptPath: ${transcriptPath === null ? 'NULL' : transcriptPath}`);
+        console.log(`[SessionRepo:create] Attempting insert with fileName: ${fileName}, date: ${sessionTimestamp}`);
         try {
-             // Allow creation even if path is null initially
              if (transcriptPath) {
                  const existing = findSessionByTranscriptPathStmt.get(transcriptPath);
                  if (existing) throw new Error(`Transcript path ${transcriptPath} already linked.`);
              }
-
-             // Insert with default 'pending' status and null jobId initially from schema
-             // Pass transcriptPath (which is allowed to be null by the schema now)
+             // Insert with provided ISO timestamp
             const info: RunResult = insertSessionStmt.run(
-                fileName, metadata.clientName, metadata.sessionName, metadata.date,
-                metadata.sessionType, metadata.therapy, transcriptPath // Pass null if needed
-                // Status and whisperJobId will use table defaults (pending, NULL)
+                fileName, metadata.clientName, metadata.sessionName, sessionTimestamp, // Use full timestamp
+                metadata.sessionType, metadata.therapy, transcriptPath,
+                'pending', // Default status
+                null       // Default whisperJobId
             );
             const newId = info.lastInsertRowid as number;
-            console.log(`[SessionRepo:create] Insert successful. New ID: ${newId}`); // *** ADDED LOG ***
-            // Fetch the newly created session to return the full object including defaults
+            console.log(`[SessionRepo:create] Insert successful. New ID: ${newId}`);
             const newSession = sessionRepository.findById(newId);
             if (!newSession) throw new Error(`Failed retrieve session ${newId} immediately after creation.`);
             return newSession;
         } catch (error) {
-            // Log the specific error before throwing a general one
             console.error(`[SessionRepo] Error in create: ${error}`);
-            // Check if it's the constraint error specifically (this will trigger if the DB file isn't updated)
-            if (error instanceof Error && error.message.includes('NOT NULL constraint failed: sessions.transcriptPath')) {
-                 console.error("[SessionRepo] CRITICAL: Still encountered NOT NULL constraint for transcriptPath despite schema change attempt.");
+             if (error instanceof Error && error.message.includes('NOT NULL constraint failed: sessions.transcriptPath')) {
+                 console.error("[SessionRepo] CRITICAL: Still encountered NOT NULL constraint for transcriptPath.");
                  throw new Error(`DB error creating session: transcriptPath constraint issue persists. ${error}`);
+            }
+             if (error instanceof Error && error.message.includes('NOT NULL constraint failed: sessions.date')) {
+                 console.error("[SessionRepo] CRITICAL: Encountered NOT NULL constraint for date.");
+                 throw new Error(`DB error creating session: date constraint issue. ${error}`);
             }
             throw new Error(`DB error creating session: ${error}`);
         }
@@ -79,16 +75,17 @@ export const sessionRepository = {
     // Update function now accepts the extended partial type
     updateMetadata: (
         id: number,
-        metadataUpdate: Partial<BackendSessionMetadata & { fileName?: string; transcriptPath?: string | null; status?: 'pending' | 'transcribing' | 'completed' | 'failed'; whisperJobId?: string | null }>
+        // Accept date as string (will be ISO format)
+        metadataUpdate: Partial<BackendSessionMetadata & { fileName?: string; transcriptPath?: string | null; status?: 'pending' | 'transcribing' | 'completed' | 'failed'; whisperJobId?: string | null; date?: string }>
     ): BackendSession | null => {
          try {
             const existingSession = sessionRepository.findById(id);
             if (!existingSession) return null;
 
-            // Merge updates, ensuring defaults from existingSession are kept if not provided in metadataUpdate
+            // Merge updates
             const updatedData = { ...existingSession, ...metadataUpdate };
 
-             // Check for transcript path conflicts only if a non-null path is being set
+             // Validate transcript path conflict
              if (updatedData.transcriptPath && updatedData.transcriptPath !== existingSession.transcriptPath) {
                  const existingPath = findSessionByTranscriptPathStmt.get(updatedData.transcriptPath);
                  if (existingPath && (existingPath as BackendSession).id !== id) {
@@ -96,23 +93,20 @@ export const sessionRepository = {
                  }
              }
 
-            // Execute the update using all fields from the merged object
+            // Execute the update using all fields, including the potentially updated date string
             const info: RunResult = updateSessionMetadataStmt.run(
-                updatedData.clientName, updatedData.sessionName, updatedData.date,
+                updatedData.clientName, updatedData.sessionName, updatedData.date, // Pass date string
                 updatedData.sessionType, updatedData.therapy, updatedData.fileName,
-                updatedData.transcriptPath, // Can be null
-                updatedData.status,         // Pass status
-                updatedData.whisperJobId,   // Pass whisperJobId
+                updatedData.transcriptPath, updatedData.status, updatedData.whisperJobId,
                 id
             );
-            // Re-fetch to return the updated session data
             return sessionRepository.findById(id);
         } catch (error) { throw new Error(`DB error updating metadata for session ${id}: ${error}`); }
     },
 
     deleteById: (id: number): boolean => {
         try {
-            // TODO: Also delete associated transcript file? Maybe in the handler/service layer. (Handled in sessionRoutes delete handler)
+            // TODO: Also delete associated transcript file? (Handled in sessionRoutes)
             const info: RunResult = deleteSessionStmt.run(id);
              return info.changes > 0;
         } catch (error) { throw new Error(`DB error deleting session ${id}: ${error}`); }

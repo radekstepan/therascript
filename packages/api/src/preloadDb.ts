@@ -1,30 +1,35 @@
-// <file path="packages/api/src/preloadDb.ts">
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs/promises';
-import config from './config/index.js'; // Use config
+import config from './config/index.js';
+// *** Import the initializeDatabase function ***
+import { initializeDatabase } from './db/sqliteService.js';
 
-// Use config path
 const dbPath = config.db.sqlitePath;
-// Use config path for transcripts directory
 const transcriptsBaseDir = config.db.transcriptsDir;
 
-// Type for Verification Step
 interface SessionVerificationData {
     id: number;
     status: string;
     transcriptPath: string | null;
+    date: string; // Expect ISO string now
 }
 
-// Sample data - REMOVED transcriptPath pre-calculation
+// Helper to create ISO timestamp slightly offset for sorting demo
+const createIsoTimestamp = (dateStr: string, offsetMinutes: number = 0): string => {
+    const baseDate = new Date(dateStr + 'T12:00:00Z'); // Assume noon UTC for base date
+    baseDate.setMinutes(baseDate.getMinutes() + offsetMinutes);
+    return baseDate.toISOString();
+};
+
+// Sample data - Use helper for dates
 const sampleSessions = [
   {
-    // Local ID is only for reference within this array if needed, NOT for DB ID or file path
     localIdRef: 1,
     fileName: 'session1.mp3',
     clientName: 'Jane Doe',
-    sessionName: 'Initial Consultation', // Use this for verification query
-    date: '2025-04-01',
+    sessionName: 'Initial Consultation',
+    date: createIsoTimestamp('2025-04-01', 0), // Use full timestamp
     sessionType: 'Individual',
     therapy: 'CBT',
     transcriptContent: [ /* ... transcript content ... */
@@ -43,7 +48,7 @@ const sampleSessions = [
         { id: 12, timestamp: 98000, text: "Therapist: Okay. So the thought 'I'm going to fail' led to intense negative feelings and the behavior of overworking, even when exhausted. Does that thought pattern – predicting failure or catastrophe when faced with a challenge – sound familiar?" },
         { id: 13, timestamp: 106200, text: "Jane: (Sighs) Yeah, I suppose it does. I tend to assume the worst-case scenario, especially when I feel pressured." }
     ],
-    status: 'completed', // Set status directly
+    status: 'completed',
     whisperJobId: null,
     chats: [
       { name: 'Work Stress Discussion', messages: [ { sender: 'user', text: 'What did Jane say about work?' }, { sender: 'ai', text: 'Jane mentioned that work has been incredibly stressful due to a major project deadline, feeling like she carries most of the weight, and her manager adding more tasks while colleagues seem unsupportive. She\'s working late frequently.' }, ] },
@@ -54,8 +59,8 @@ const sampleSessions = [
     localIdRef: 2,
     fileName: 'session2.mp3',
     clientName: 'John Smith',
-    sessionName: 'Follow-up Session', // Use this for verification query
-    date: '2025-04-02',
+    sessionName: 'Follow-up Session',
+    date: createIsoTimestamp('2025-04-02', 0), // Use full timestamp
     sessionType: 'Individual',
     therapy: 'Mindfulness',
     transcriptContent: [ /* ... transcript content ... */
@@ -73,7 +78,7 @@ const sampleSessions = [
         { id: 11, timestamp: 99600, text: "John: Just replaying the feedback in my head, thinking about how my boss must think I'm incompetent, worrying about my job. It took me a while to shake it off." },
         { id: 12, timestamp: 106300, text: "Therapist: That internal replay and catastrophic thinking is where anxiety can really take hold. Perhaps next time a similar situation arises, the intention could simply be to notice the initial feeling and the urge to spiral, even if you don't immediately jump to a breathing exercise. Just the noticing is a mindful step." }
     ],
-    status: 'completed', // Set status directly
+    status: 'completed',
     whisperJobId: null,
     chats: [
       { name: 'Mindfulness Check-in', messages: [ { sender: 'user', text: 'How’s John doing with anxiety?' }, { sender: 'ai', text: 'John reported that the breathing exercises helped reduce the intensity of physical anxiety symptoms before meetings. However, he struggled to practice consistently, especially in the evenings, and forgot to use the techniques when triggered by critical feedback at work.' }, ] },
@@ -81,170 +86,168 @@ const sampleSessions = [
       { name: 'Therapist Techniques', messages: [ { sender: 'user', text: 'What techniques did the therapist suggest or reinforce?' }, { sender: 'ai', text: 'The therapist reinforced the use of breathing exercises and the 5-minute body scan. They also reframed mindfulness practice as "checking in" rather than a chore and suggested simply noticing the initial anxious feeling and urge to spiral in triggering situations as a first step.' }, ] },
     ],
   },
+   // Add another session on the same day for sorting check
+  {
+    localIdRef: 3,
+    fileName: 'session3.mp3',
+    clientName: 'Jane Doe',
+    sessionName: 'Follow-up CBT',
+    date: createIsoTimestamp('2025-04-01', 60), // Same day, but later time
+    sessionType: 'Individual',
+    therapy: 'CBT',
+    transcriptContent: [ { id: 0, timestamp: 0, text: "Therapist: Welcome back, Jane. How was your week?" }, { id: 1, timestamp: 3000, text: "Jane: Better, I think. I tried noticing those automatic thoughts we talked about." } ],
+    status: 'completed',
+    whisperJobId: null,
+    chats: [], // No chats initially
+  },
 ];
 
 async function preloadDatabase() {
-  console.log(`[Preload] Connecting to database at ${dbPath}`);
-  const db = new Database(dbPath, { verbose: console.log, fileMustExist: false });
-  let success = false;
-
-  const fileWritePromises: Promise<void>[] = [];
-  const sessionsToVerify: { name: string; expectedPathEnding: string }[] = []; // Store info for verification
-
-  try {
-    console.log(`[Preload] Ensuring transcript directory exists: ${transcriptsBaseDir}`);
-    await fs.mkdir(transcriptsBaseDir, { recursive: true });
-    console.log(`[Preload] Transcript directory confirmed/created.`);
-
-    console.log('[Preload] Clearing existing data...');
-    db.exec('DELETE FROM messages');
-    db.exec('DELETE FROM chats');
-    db.exec('DELETE FROM sessions');
-    console.log('[Preload] Existing data cleared.');
-
-    // Prepare statements
-    const insertSession = db.prepare(`
-      INSERT INTO sessions (fileName, clientName, sessionName, date, sessionType, therapy, transcriptPath, status, whisperJobId)
-      VALUES (@fileName, @clientName, @sessionName, @date, @sessionType, @therapy, NULL, @status, @whisperJobId)
-    `);
-    const updateSessionPath = db.prepare(`
-      UPDATE sessions SET transcriptPath = ? WHERE id = ?
-    `);
-    const insertChat = db.prepare(`
-      INSERT INTO chats (sessionId, timestamp, name)
-      VALUES (?, ?, ?)
-    `);
-    const insertMessage = db.prepare(`
-      INSERT INTO messages (chatId, sender, text, timestamp)
-      VALUES (?, ?, ?, ?)
-    `);
-
-    console.log('[Preload] Starting DB transaction...');
-    db.transaction(() => {
-      for (const session of sampleSessions) {
-        // 1. Insert session data, leaving transcriptPath as NULL for now
-        const sessionResult = insertSession.run({
-          fileName: session.fileName,
-          clientName: session.clientName,
-          sessionName: session.sessionName,
-          date: session.date,
-          sessionType: session.sessionType,
-          therapy: session.therapy,
-          // transcriptPath is NULL here
-          status: session.status,
-          whisperJobId: session.whisperJobId
-        });
-        const sessionId = sessionResult.lastInsertRowid as number; // Get the actual inserted ID
-
-        // 2. Construct the CORRECT transcript path using the actual sessionId
-        const correctTranscriptPath = path.join(transcriptsBaseDir, `${sessionId}.json`);
-        const expectedPathEnding = `${sessionId}.json`; // Store for verification
-
-        // 3. Update the session row with the correct path
-        updateSessionPath.run(correctTranscriptPath, sessionId);
-
-        console.log(`[Preload DB] Added session ${sessionId}: ${session.sessionName} (Status: ${session.status}). Path set to: ${correctTranscriptPath}`);
-        sessionsToVerify.push({ name: session.sessionName, expectedPathEnding }); // Add to verification list
-
-        // 4. Prepare file writing using the CORRECT path
-        const transcriptJson = JSON.stringify(session.transcriptContent, null, 2);
-        fileWritePromises.push(
-          fs.writeFile(correctTranscriptPath, transcriptJson, 'utf-8') // Use correct path
-            .then(() => console.log(`[Preload Files] Successfully wrote transcript to ${correctTranscriptPath}`))
-            .catch(err => {
-                 console.error(`[Preload Files] Error writing transcript ${correctTranscriptPath}:`, err);
-                 throw new Error(`Failed to write transcript for session ${sessionId}`);
-            })
-        );
-
-        // 5. Insert chats and messages (as before)
-        for (const chat of session.chats) {
-          const timestamp = Date.now();
-          const chatResult = insertChat.run(sessionId, timestamp, chat.name || null);
-          const chatId = chatResult.lastInsertRowid;
-          for (const message of chat.messages) {
-            const messageTimestamp = Date.now() + Math.floor(Math.random() * 100);
-            insertMessage.run(chatId, message.sender, message.text, messageTimestamp);
-          }
+    console.log(`[Preload] Connecting to database at ${dbPath}`);
+    // Ensure DB file is deleted before preloading for clean slate
+    try {
+        await fs.unlink(dbPath);
+        console.log(`[Preload] Deleted existing database file: ${dbPath}`);
+    } catch (err: any) {
+        if (err.code !== 'ENOENT') { // Ignore error if file didn't exist
+             console.error(`[Preload] Error deleting existing database file:`, err);
+             process.exit(1);
         }
-      }
-    })(); // End of transaction
+    }
 
-    console.log('[Preload] DB transaction committed.');
-    console.log(`[Preload] Waiting for ${fileWritePromises.length} transcript file(s) to be written...`);
-    await Promise.all(fileWritePromises);
-    console.log('[Preload] All transcript files written successfully.');
+    const db = new Database(dbPath, { verbose: console.log });
+    let success = false;
 
-    success = true;
+    const fileWritePromises: Promise<void>[] = [];
+    const sessionsToVerify: { name: string; expectedPathEnding: string; expectedDate: string }[] = [];
 
-  } catch (error) {
-    console.error('[Preload] Error during preloading process:', error);
-    success = false;
-  } finally {
-    // --- Verification Step (Corrected Loop Variable) ---
-    if (success && db.open) {
-        console.log('[Preload Verification] Checking database entries and file existence...');
-        try {
-            const verifyStmt = db.prepare('SELECT id, status, transcriptPath FROM sessions WHERE sessionName = ?');
-            let verificationPassed = true; // Track overall verification
+    try {
+        console.log(`[Preload] Ensuring transcript directory exists: ${transcriptsBaseDir}`);
+        await fs.mkdir(transcriptsBaseDir, { recursive: true });
+        console.log(`[Preload] Transcript directory confirmed/created.`);
 
-            // *** CORRECTED: Use the array name `sessionsToVerify` here ***
-            for (const sessionToVerify of sessionsToVerify) {
-                const dbSession: SessionVerificationData | undefined = verifyStmt.get(sessionToVerify.name) as SessionVerificationData | undefined;
-                console.log(`[Preload Verification] Data for name '${sessionToVerify.name}':`, dbSession);
+        // *** Initialize the schema using the imported function ***
+        console.log('[Preload] Initializing database schema...');
+        initializeDatabase(db); // <--- CALL INITIALIZE FUNCTION
+        console.log('[Preload] Database schema initialized.');
 
-                if (!dbSession) {
-                    console.error(`[Preload Verification] FAILED: Session '${sessionToVerify.name}' not found in DB!`);
-                    verificationPassed = false;
-                    continue; // Skip further checks for this session
-                }
-                if (dbSession.status !== 'completed') {
-                    console.error(`[Preload Verification] FAILED: Session '${sessionToVerify.name}' (ID: ${dbSession.id}) has status '${dbSession.status}', expected 'completed'.`);
-                    verificationPassed = false;
-                }
-                if (!dbSession.transcriptPath) {
-                     console.error(`[Preload Verification] FAILED: Session '${sessionToVerify.name}' (ID: ${dbSession.id}) has NULL transcriptPath in DB.`);
-                    verificationPassed = false;
-                } else if (!dbSession.transcriptPath.endsWith(sessionToVerify.expectedPathEnding)) {
-                    console.error(`[Preload Verification] FAILED: Session '${sessionToVerify.name}' (ID: ${dbSession.id}) path '${dbSession.transcriptPath}' doesn't end with expected '${sessionToVerify.expectedPathEnding}'.`);
-                    verificationPassed = false;
-                } else {
-                    // Check if the file actually exists at the path stored in DB
-                    try {
-                        await fs.access(dbSession.transcriptPath);
-                        console.log(`[Preload Verification] File check PASSED for path: ${dbSession.transcriptPath}`);
-                    } catch (fileError) {
-                        console.error(`[Preload Verification] FAILED: File check failed for path '${dbSession.transcriptPath}'. Error: ${fileError}`);
-                        verificationPassed = false;
+        // Prepare statements (now safe, tables exist)
+        const insertSession = db.prepare(/* SQL */ `
+          INSERT INTO sessions (fileName, clientName, sessionName, date, sessionType, therapy, transcriptPath, status, whisperJobId)
+          VALUES (@fileName, @clientName, @sessionName, @date, @sessionType, @therapy, NULL, @status, @whisperJobId)
+        `);
+        const updateSessionPath = db.prepare(/* SQL */ `
+          UPDATE sessions SET transcriptPath = ? WHERE id = ?
+        `);
+        const insertChat = db.prepare(/* SQL */ `
+          INSERT INTO chats (sessionId, timestamp, name)
+          VALUES (?, ?, ?)
+        `);
+        const insertMessage = db.prepare(/* SQL */ `
+          INSERT INTO messages (chatId, sender, text, timestamp)
+          VALUES (?, ?, ?, ?)
+        `);
+
+        console.log('[Preload] Starting DB transaction for data insertion...');
+        db.transaction(() => {
+            for (const session of sampleSessions) {
+                // Insert session with ISO timestamp
+                const sessionResult = insertSession.run({
+                    fileName: session.fileName,
+                    clientName: session.clientName,
+                    sessionName: session.sessionName,
+                    date: session.date, // Insert the ISO string
+                    sessionType: session.sessionType,
+                    therapy: session.therapy,
+                    status: session.status,
+                    whisperJobId: session.whisperJobId
+                });
+                const sessionId = sessionResult.lastInsertRowid as number;
+
+                const correctTranscriptPath = path.join(transcriptsBaseDir, `${sessionId}.json`);
+                const expectedPathEnding = `${sessionId}.json`;
+                updateSessionPath.run(correctTranscriptPath, sessionId);
+
+                console.log(`[Preload DB] Added session ${sessionId}: ${session.sessionName} (Date: ${session.date}). Path set to: ${correctTranscriptPath}`);
+                sessionsToVerify.push({ name: session.sessionName, expectedPathEnding, expectedDate: session.date });
+
+                const transcriptJson = JSON.stringify(session.transcriptContent, null, 2);
+                fileWritePromises.push(
+                    fs.writeFile(correctTranscriptPath, transcriptJson, 'utf-8')
+                        .then(() => console.log(`[Preload Files] Successfully wrote transcript to ${correctTranscriptPath}`))
+                        .catch(err => {
+                             console.error(`[Preload Files] Error writing transcript ${correctTranscriptPath}:`, err);
+                             throw new Error(`Failed to write transcript for session ${sessionId}`);
+                        })
+                );
+
+                for (const chat of session.chats) {
+                    const timestamp = Date.now() + Math.floor(Math.random() * 1000); // Add small random offset for demo sorting
+                    const chatResult = insertChat.run(sessionId, timestamp, chat.name === undefined ? null : chat.name);
+                    const chatId = chatResult.lastInsertRowid;
+                    for (const message of chat.messages) {
+                        // Use timestamp slightly offset from chat timestamp for realism
+                        const messageTimestamp = timestamp + Math.floor(Math.random() * 100);
+                        insertMessage.run(chatId, message.sender, message.text, messageTimestamp);
                     }
                 }
-            } // End loop
-
-            if(verificationPassed) {
-                console.log('[Preload Verification] All database entries and file checks look OK.');
-            } else {
-                 console.error('[Preload Verification] One or more verification checks FAILED.');
-                 success = false; // Ensure overall success reflects verification failure
             }
+        })(); // End of transaction
 
-        } catch(verifyError) {
-             console.error('[Preload Verification] Error checking DB entries:', verifyError);
-             success = false;
+        console.log('[Preload] DB transaction committed.');
+        console.log(`[Preload] Waiting for ${fileWritePromises.length} transcript file(s) to be written...`);
+        await Promise.all(fileWritePromises);
+        console.log('[Preload] All transcript files written successfully.');
+
+        success = true;
+
+    } catch (error) {
+        console.error('[Preload] Error during preloading process:', error);
+        success = false;
+    } finally {
+        // --- Verification Step ---
+        if (success && db.open) {
+            console.log('[Preload Verification] Checking database entries...');
+            try {
+                const verifyStmt = db.prepare('SELECT id, status, transcriptPath, date FROM sessions WHERE sessionName = ?');
+                let verificationPassed = true;
+
+                for (const sessionToVerify of sessionsToVerify) {
+                    const dbSession: SessionVerificationData | undefined = verifyStmt.get(sessionToVerify.name) as SessionVerificationData | undefined;
+                    console.log(`[Preload Verification] Data for name '${sessionToVerify.name}':`, dbSession);
+
+                    if (!dbSession) {
+                        console.error(`[Preload Verification] FAILED: Session '${sessionToVerify.name}' not found in DB!`);
+                        verificationPassed = false; continue;
+                    }
+                    if (dbSession.status !== 'completed') {
+                        console.error(`[Preload Verification] FAILED: Session '${sessionToVerify.name}' (ID: ${dbSession.id}) has status '${dbSession.status}', expected 'completed'.`);
+                        verificationPassed = false;
+                    }
+                    if (dbSession.date !== sessionToVerify.expectedDate) {
+                        console.error(`[Preload Verification] FAILED: Session '${sessionToVerify.name}' (ID: ${dbSession.id}) has date '${dbSession.date}', expected '${sessionToVerify.expectedDate}'.`);
+                         verificationPassed = false;
+                    }
+                    if (!dbSession.transcriptPath || !dbSession.transcriptPath.endsWith(sessionToVerify.expectedPathEnding)) {
+                        console.error(`[Preload Verification] FAILED: Session '${sessionToVerify.name}' (ID: ${dbSession.id}) path '${dbSession.transcriptPath}' mismatch or missing.`);
+                        verificationPassed = false;
+                    } else {
+                        try { await fs.access(dbSession.transcriptPath); }
+                        catch (fileError) { console.error(`[Preload Verification] FAILED: File check failed for path '${dbSession.transcriptPath}'. Error: ${fileError}`); verificationPassed = false; }
+                    }
+                }
+
+                if(verificationPassed) console.log('[Preload Verification] All database entries and file checks look OK.');
+                else { console.error('[Preload Verification] One or more verification checks FAILED.'); success = false; }
+
+            } catch(verifyError) { console.error('[Preload Verification] Error checking DB entries:', verifyError); success = false; }
         }
-    }
-    // --- End Verification ---
+        // --- End Verification ---
 
-    if (db.open) {
-        db.close();
-        console.log('[Preload] Database connection closed.');
+        if (db.open) { db.close(); console.log('[Preload] Database connection closed.'); }
+        if (success) console.log('[Preload] Database preloaded successfully!');
+        else { console.error('[Preload] Database preloading FAILED. Please check errors above.'); process.exitCode = 1; }
     }
-    if (success) {
-        console.log('[Preload] Database preloaded successfully!');
-    } else {
-         console.error('[Preload] Database preloading FAILED. Please check errors above.');
-         process.exitCode = 1;
-    }
-  }
 }
 
 // Execute the preload
@@ -252,4 +255,3 @@ preloadDatabase().catch(err => {
   console.error('[Preload] Fatal error during execution:', err);
   process.exit(1);
 });
-// </file>

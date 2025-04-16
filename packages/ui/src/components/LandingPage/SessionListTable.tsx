@@ -8,7 +8,9 @@ import {
 import { Table, Badge, Text, Flex } from '@radix-ui/themes';
 import type { Session } from '../../types';
 import type { SessionSortCriteria, SortDirection } from '../../store';
-import { sessionColorMap, therapyColorMap } from '../../constants'; // Import color maps
+import { sessionColorMap, therapyColorMap } from '../../constants';
+// Import the new formatter
+import { formatIsoDateToYMD } from '../../helpers';
 
 interface SessionListTableProps {
     sessions: Session[];
@@ -17,10 +19,8 @@ interface SessionListTableProps {
     onSort: (criteria: SessionSortCriteria) => void;
 }
 
-// Define the specific allowed values for aria-sort
 type AriaSort = 'none' | 'ascending' | 'descending' | 'other' | undefined;
 
-// Moved outside component as it doesn't depend on props/state
 const getBadgeColor = (type: string | undefined, category: 'session' | 'therapy'): React.ComponentProps<typeof Badge>['color'] => {
     const map = category === 'session' ? sessionColorMap : therapyColorMap;
     return type ? (map[type.toLowerCase()] || map['default']) : map['default'];
@@ -34,7 +34,6 @@ export function SessionListTable({ sessions, sortCriteria, sortDirection, onSort
         navigate(`/sessions/${sessionId}`);
     };
 
-    // Use useCallback to memoize the function
     const renderSortIcon = useCallback((criteria: SessionSortCriteria) => {
         if (sortCriteria !== criteria) {
             return <ChevronDownIcon className="h-3 w-3 ml-1 text-[--gray-a9] opacity-0 group-hover:opacity-100 transition-opacity" />;
@@ -43,9 +42,8 @@ export function SessionListTable({ sessions, sortCriteria, sortDirection, onSort
             return <ChevronUpIcon className="h-4 w-4 ml-1 text-[--gray-a11]" />;
         }
         return <ChevronDownIcon className="h-4 w-4 ml-1 text-[--gray-a11]" />;
-    }, [sortCriteria, sortDirection]); // Dependencies
+    }, [sortCriteria, sortDirection]);
 
-    // Use useCallback to memoize the function
     const getHeaderCellProps = useCallback((criteria: SessionSortCriteria): React.ThHTMLAttributes<HTMLTableHeaderCellElement> => {
         const isActiveSortColumn = sortCriteria === criteria;
         const sortValue: AriaSort = isActiveSortColumn
@@ -57,18 +55,15 @@ export function SessionListTable({ sessions, sortCriteria, sortDirection, onSort
             'aria-sort': sortValue,
             style: { cursor: 'pointer', whiteSpace: 'nowrap' },
         };
-    }, [sortCriteria, sortDirection, onSort]); // Dependencies
+    }, [sortCriteria, sortDirection, onSort]);
 
     return (
-        // Use Themes Table component
         <div className="flex-grow overflow-y-auto">
              <Table.Root variant="surface" size="2">
                 <Table.Header style={{ backgroundColor: 'var(--gray-a2)', position: 'sticky', top: 0, zIndex: 1 }}>
                     <Table.Row>
                         <Table.ColumnHeaderCell {...getHeaderCellProps('sessionName')} justify="start">
-                             <Flex align="center" className="group">
-                                Session / File {renderSortIcon('sessionName')}
-                            </Flex>
+                             <Flex align="center" className="group">Session / File {renderSortIcon('sessionName')}</Flex>
                         </Table.ColumnHeaderCell>
                         <Table.ColumnHeaderCell {...getHeaderCellProps('clientName')}>
                              <Flex align="center" className="group">Client {renderSortIcon('clientName')}</Flex>
@@ -92,7 +87,7 @@ export function SessionListTable({ sessions, sortCriteria, sortDirection, onSort
                             className="cursor-pointer hover:bg-[--gray-a3] transition-colors duration-150"
                             aria-label={`Load session: ${session.sessionName || session.fileName}`}
                             tabIndex={0}
-                            onKeyDown={(e: React.KeyboardEvent<HTMLTableRowElement>) => e.key === 'Enter' && handleSessionClick(session.id)} // Added type and target element
+                            onKeyDown={(e: React.KeyboardEvent<HTMLTableRowElement>) => e.key === 'Enter' && handleSessionClick(session.id)}
                         >
                             <Table.RowHeaderCell justify="start">
                                 <Flex align="center" gap="2">
@@ -108,21 +103,18 @@ export function SessionListTable({ sessions, sortCriteria, sortDirection, onSort
                                      <Badge color={getBadgeColor(session.sessionType, 'session')} variant="soft" radius="full">
                                          {session.sessionType}
                                     </Badge>
-                                ) : (
-                                    <Text color="gray">N/A</Text>
-                                )}
+                                ) : (<Text color="gray">N/A</Text>)}
                             </Table.Cell>
                             <Table.Cell>
                                 {session.therapy ? (
                                     <Badge color={getBadgeColor(session.therapy, 'therapy')} variant="soft" radius="full">
                                          {session.therapy}
                                     </Badge>
-                                ) : (
-                                    <Text color="gray">N/A</Text>
-                                )}
+                                ) : (<Text color="gray">N/A</Text>)}
                             </Table.Cell>
                             <Table.Cell>
-                                <Text color="gray">{session.date || <span style={{ fontStyle: 'italic' }}>No Date</span>}</Text>
+                                {/* Format the ISO date string for display */}
+                                <Text color="gray">{formatIsoDateToYMD(session.date) || <span style={{ fontStyle: 'italic' }}>No Date</span>}</Text>
                             </Table.Cell>
                         </Table.Row>
                     ))}

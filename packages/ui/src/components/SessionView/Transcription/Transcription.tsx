@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-// Import the full Session type
 import type { Session, StructuredTranscript, TranscriptParagraphData } from '../../../types';
 import { TranscriptParagraph } from '../../Transcription/TranscriptParagraph';
 import { Box, ScrollArea, Text, Flex, Button, Badge, Spinner } from '@radix-ui/themes';
@@ -14,7 +13,8 @@ import {
 import { cn } from '../../../utils';
 import { updateTranscriptParagraph } from '../../../api/api';
 import { sessionColorMap, therapyColorMap } from '../../../constants';
-import { debounce } from '../../../helpers';
+// Import the date formatter
+import { debounce, formatIsoDateToYMD } from '../../../helpers';
 
 type BadgeCategory = 'session' | 'therapy';
 
@@ -27,18 +27,29 @@ const renderHeaderDetail = (
     IconComponent: React.ElementType,
     value: string | undefined,
     label: string,
-    category?: BadgeCategory
+    category?: BadgeCategory,
+    // Add optional flag to indicate if value needs date formatting
+    isDateValue?: boolean
 ) => {
-    if (!value) return null;
+    // Format the date if needed, otherwise use original value
+    const displayValue = isDateValue ? formatIsoDateToYMD(value) : value;
+
+    // Don't render if displayValue is empty after formatting
+    if (!displayValue) return null;
+
     const isBadge = category === 'session' || category === 'therapy';
+    // Use original value for badge lookup if it's a badge category
     const badgeColor = isBadge ? getBadgeColor(value, category) : undefined;
+
     return (
         <Flex align="center" gap="1" title={label}>
             <IconComponent className={cn("flex-shrink-0", isBadge ? "opacity-80" : "text-[--gray-a10]")} width="14" height="14" />
             {isBadge && badgeColor ? (
+                // Use original value for badge text
                 <Badge color={badgeColor} variant="soft" radius="full" size="1">{value}</Badge>
             ) : (
-                <Text size="1" color="gray">{value}</Text>
+                // Use the potentially formatted displayValue for Text
+                <Text size="1" color="gray">{displayValue}</Text>
             )}
         </Flex>
     );
@@ -46,7 +57,6 @@ const renderHeaderDetail = (
 
 
 interface TranscriptionProps {
-    // Use the full Session type which includes status
     session: Session;
     transcriptContent: StructuredTranscript | undefined;
     onEditDetailsClick: () => void;
@@ -149,7 +159,8 @@ export function Transcription({
                 {/* Display metadata from session prop */}
                 <Flex align="center" gap="3" wrap="wrap" style={{ minWidth: 0, flexGrow: 1 }}>
                     {renderHeaderDetail(PersonIcon, session.clientName, "Client")}
-                    {renderHeaderDetail(CalendarIcon, session.date, "Date")}
+                    {/* Pass the isDateValue flag */}
+                    {renderHeaderDetail(CalendarIcon, session.date, "Date", undefined, true)}
                     {renderHeaderDetail(SessionTypeIcon, session.sessionType, "Session Type", 'session')}
                     {renderHeaderDetail(BookmarkIcon, session.therapy, "Therapy Type", 'therapy')}
                 </Flex>
@@ -182,6 +193,7 @@ export function Transcription({
                 <Box p="3" className="space-y-3">
                      {!isLoadingTranscript && !transcriptError && paragraphs.length > 0 && paragraphs.map((paragraph, index) => (
                         <TranscriptParagraph
+                            // TODO: Use paragraph.id when it's reliable from backend
                             key={paragraph.id ?? `p-${index}`}
                             paragraph={paragraph}
                             index={index}
@@ -191,16 +203,13 @@ export function Transcription({
                             isSaving={saveParagraphMutation.isPending && saveParagraphMutation.variables?.index === index}
                         />
                     ))}
-                     {/* Show message only if not loading, no error, and paragraphs array is empty */}
                      {!isLoadingTranscript && !transcriptError && transcriptContent && paragraphs.length === 0 && (
                         <Flex align="center" justify="center" style={{minHeight: '100px'}}>
                             <Text color="gray" style={{ fontStyle: 'italic' }}>
-                                {/* Use session.status which is now available */}
                                 {session.status === 'completed' ? 'Transcription is empty.' : 'Transcription not available yet.'}
                             </Text>
                         </Flex>
                     )}
-                     {/* Handle case where transcript is explicitly undefined (still loading or failed) */}
                      {!isLoadingTranscript && !transcriptError && transcriptContent === undefined && (
                           <Flex align="center" justify="center" style={{minHeight: '100px'}}>
                              <Text color="gray" style={{ fontStyle: 'italic' }}>

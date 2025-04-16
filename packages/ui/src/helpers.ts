@@ -1,5 +1,3 @@
-// TODO merge in utils here (cn function) - Keeping separate for now
-
 /**
  * Gets today's date as a string in "YYYY-MM-DD" format.
  */
@@ -33,6 +31,27 @@ export const formatTimestamp = (timestamp?: number): string => {
       return 'Invalid Date';
   }
 };
+
+/**
+ * Formats an ISO 8601 date string into "YYYY-MM-DD" format.
+ * Returns empty string for invalid input.
+ */
+export const formatIsoDateToYMD = (isoString?: string | null): string => {
+    if (!isoString) return '';
+    try {
+        const date = new Date(isoString);
+        if (isNaN(date.getTime())) return ''; // Invalid date parsed
+
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    } catch (e) {
+        console.error("Error formatting ISO date:", isoString, e);
+        return '';
+    }
+};
+
 
 /**
  * Creates a debounced version of a function that delays invoking func
