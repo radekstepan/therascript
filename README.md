@@ -30,6 +30,7 @@
 - [ ] if I run yarn dev then use llama3 and a tiny whisper model; have a configuration for "prod" as well that I can easily change by modifying the config. Should live in the root dir as an env file I think
 - [ ] show the user message in the UI immediately after sending it
 - [ ] when sorting by date in session history, make sure we use a full datetime
+- [ ] md5 on the DB init script file and check on api start that we use the latest version of the db or throw an error
 
 ## Nice to have
 

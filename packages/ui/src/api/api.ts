@@ -1,62 +1,79 @@
 import axios from 'axios';
-// Import the new structured transcript types
-import type { Session, SessionMetadata, ChatSession, ChatMessage, StructuredTranscript, TranscriptParagraphData } from '../types';
+import type {
+    Session,
+    SessionMetadata,
+    ChatSession,
+    ChatMessage,
+    StructuredTranscript,
+    TranscriptParagraphData
+    // Remove WhisperJobStatus from this import
+} from '../types';
 
-// TODO can we get types on all of the responses?
+// Define WhisperJobStatus for UI (matching API response schema)
+export interface UITranscriptionStatus {
+    job_id: string;
+    status: "queued" | "processing" | "completed" | "failed" | "canceled";
+    progress?: number;
+    error?: string;
+    duration?: number;
+}
+
+
 // GET /api/sessions/
 export const fetchSessions = async (): Promise<Session[]> => {
-    // Endpoint returns an array of objects matching SessionMetadata + id/fileName/transcriptPath
     const response = await axios.get('/api/sessions/');
-    // Map response to Session type, transcript itself isn't included here
     return response.data.map((item: any) => ({
         ...item,
-        // Ensure chats is an array, even if empty (backend might omit it)
         chats: item.chats || [],
-        // Transcription field is removed from the Session type
     }));
 };
 
-// POST /api/sessions/upload
-export const uploadSession = async (file: File, metadata: SessionMetadata): Promise<Session> => {
+// POST /api/sessions/upload (Modified Return Type)
+export const uploadSession = async (file: File, metadata: SessionMetadata): Promise<{ sessionId: number; jobId: string; message: string }> => {
     const formData = new FormData();
     formData.append('audioFile', file);
     Object.entries(metadata).forEach(([key, value]) => formData.append(key, value));
+    // Endpoint now returns { sessionId, jobId, message } with status 202
     const response = await axios.post('/api/sessions/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
     });
-    // Assume the upload response includes the session details including the chat list
-    // Map response to Session type
-    return {
-        ...response.data,
-        // Ensure chats is an array
-        chats: response.data.chats || [],
-        // Transcription field is removed
-    };
-};
-
-// GET /api/sessions/{sessionId} - Fetches metadata and chat list (messages likely missing in chats)
-export const fetchSession = async (sessionId: number): Promise<Session> => {
-    // Backend returns metadata + chat list (metadata only).
-    const response = await axios.get(`/api/sessions/${sessionId}`);
-    // Map response to Session type
-    return {
-        ...response.data,
-        // Ensure chats is an array
-        chats: response.data.chats || [],
-        // Transcription field is removed
-    };
-};
-
-// GET /api/sessions/{sessionId}/transcript - Fetches the structured transcript content
-export const fetchTranscript = async (sessionId: number): Promise<StructuredTranscript> => {
-    const response = await axios.get<StructuredTranscript>(`/api/sessions/${sessionId}/transcript`);
-    // API directly returns the array of TranscriptParagraphData
     return response.data;
 };
 
-// GET /api/sessions/{sessionId}/chats/{chatId} - Fetches full chat details including messages
+// NEW: GET /api/transcription/status/{jobId}
+export const fetchTranscriptionStatus = async (jobId: string): Promise<UITranscriptionStatus> => {
+    const response = await axios.get<UITranscriptionStatus>(`/api/transcription/status/${jobId}`);
+    return response.data;
+};
+
+// NEW: POST /api/sessions/{sessionId}/finalize
+export const finalizeSession = async (sessionId: number): Promise<Session> => {
+    const response = await axios.post<Session>(`/api/sessions/${sessionId}/finalize`);
+     // API returns the full session details including chats after finalization
+     return {
+        ...response.data,
+        chats: response.data.chats || [], // Ensure chats array exists
+     };
+};
+
+
+// GET /api/sessions/{sessionId}
+export const fetchSession = async (sessionId: number): Promise<Session> => {
+    const response = await axios.get(`/api/sessions/${sessionId}`);
+    return {
+        ...response.data,
+        chats: response.data.chats || [],
+    };
+};
+
+// GET /api/sessions/{sessionId}/transcript
+export const fetchTranscript = async (sessionId: number): Promise<StructuredTranscript> => {
+    const response = await axios.get<StructuredTranscript>(`/api/sessions/${sessionId}/transcript`);
+    return response.data;
+};
+
+// GET /api/sessions/{sessionId}/chats/{chatId}
 export const fetchChatDetails = async (sessionId: number, chatId: number): Promise<ChatSession> => {
-    // This endpoint returns the ChatSession with the 'messages' array populated.
     const response = await axios.get(`/api/sessions/${sessionId}/chats/${chatId}`);
     return response.data; // Should match the ChatSession type (with messages)
 };

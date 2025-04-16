@@ -37,10 +37,11 @@ export interface SessionMetadata {
 export interface Session extends SessionMetadata {
     id: number;
     fileName: string;
-    // transcription field is removed - it's fetched separately now as structured data
-    // transcription: string; // REMOVED
-    // Chats array might initially contain only metadata (ChatSession without messages)
-    // Ensure chats array elements conform to the updated ChatSession type
+    // transcriptPath can be null if transcription is pending/failed
+    transcriptPath: string | null;
+    // Add status and whisperJobId to match backend
+    status: 'pending' | 'transcribing' | 'completed' | 'failed';
+    whisperJobId: string | null;
+    // Chats array might initially contain only metadata
     chats: ChatSession[];
-    transcriptPath: string; // Keep path if needed, points to JSON now
 }

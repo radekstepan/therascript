@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-// Import the new structured transcript types
-import type { SessionMetadata, StructuredTranscript, TranscriptParagraphData } from '../../../types';
+// Import the full Session type
+import type { Session, StructuredTranscript, TranscriptParagraphData } from '../../../types';
 import { TranscriptParagraph } from '../../Transcription/TranscriptParagraph';
-import { Box, ScrollArea, Text, Flex, Button, Badge, Spinner } from '@radix-ui/themes'; // Import Spinner
+import { Box, ScrollArea, Text, Flex, Button, Badge, Spinner } from '@radix-ui/themes';
 import {
     Pencil1Icon,
     BookmarkIcon,
@@ -13,19 +13,16 @@ import {
 } from '@radix-ui/react-icons';
 import { cn } from '../../../utils';
 import { updateTranscriptParagraph } from '../../../api/api';
-import { sessionColorMap, therapyColorMap } from '../../../constants'; // Import color maps
-import { debounce } from '../../../helpers'; // Import debounce
+import { sessionColorMap, therapyColorMap } from '../../../constants';
+import { debounce } from '../../../helpers';
 
-// Define category type locally or import if defined centrally
 type BadgeCategory = 'session' | 'therapy';
 
-// Moved outside component as it doesn't depend on props/state
 const getBadgeColor = (type: string | undefined, category: BadgeCategory): React.ComponentProps<typeof Badge>['color'] => {
     const map = category === 'session' ? sessionColorMap : therapyColorMap;
     return type ? (map[type.toLowerCase()] || map['default']) : map['default'];
 };
 
-// Moved outside component as it doesn't depend on props/state
 const renderHeaderDetail = (
     IconComponent: React.ElementType,
     value: string | undefined,
@@ -49,9 +46,8 @@ const renderHeaderDetail = (
 
 
 interface TranscriptionProps {
-    // Update session prop type if needed, ensure ID is present
-    session: SessionMetadata & { id: number; fileName: string; transcriptPath: string };
-    // transcriptContent is now StructuredTranscript
+    // Use the full Session type which includes status
+    session: Session;
     transcriptContent: StructuredTranscript | undefined;
     onEditDetailsClick: () => void;
     isTabActive?: boolean;
@@ -63,7 +59,7 @@ interface TranscriptionProps {
 
 export function Transcription({
     session,
-    transcriptContent, // Now StructuredTranscript | undefined
+    transcriptContent,
     onEditDetailsClick,
     isTabActive,
     initialScrollTop = 0,
@@ -76,22 +72,17 @@ export function Transcription({
     const restoreScrollRef = useRef(false);
     const queryClient = useQueryClient();
 
-    // Mutation for saving a paragraph
     const saveParagraphMutation = useMutation({
         mutationFn: ({ index, newText }: { index: number; newText: string }) => {
-            // Backend expects paragraphIndex (0-based index of the paragraph in the array)
             return updateTranscriptParagraph(session.id, index, newText);
         },
         onSuccess: (updatedStructuredTranscript, variables) => {
-            // Update the transcript query cache directly with the full updated array
             queryClient.setQueryData(['transcript', session.id], updatedStructuredTranscript);
-            setActiveEditIndex(null); // Close editor on success
+            setActiveEditIndex(null);
         },
         onError: (error, variables) => {
             console.error(`Error saving paragraph ${variables.index}:`, error);
-            // TODO: Optionally show an error message near the paragraph or via toast
-            // Maybe reset the activeEditIndex or revert the text? For now, just log.
-            setActiveEditIndex(null); // Close editor even on error for simplicity
+            setActiveEditIndex(null);
         }
     });
 
@@ -135,16 +126,12 @@ export function Transcription({
     }, [isTabActive, initialScrollTop]);
 
     if (!session) {
-        // This case might not be reachable if SessionView handles loading/error first
         return <Box p="4"><Text color="gray" style={{ fontStyle: 'italic' }}>Session data not available.</Text></Box>;
     }
 
-    // Use transcriptContent directly (it's already an array or undefined)
-    const paragraphs = transcriptContent || []; // Use empty array if undefined
+    const paragraphs = transcriptContent || [];
 
-    // Handler passed to TranscriptParagraph component
     const handleSaveParagraphInternal = async (index: number, newText: string) => {
-        // Index here corresponds to the index in the `paragraphs` array
         saveParagraphMutation.mutate({ index, newText });
     };
 
@@ -187,32 +174,29 @@ export function Transcription({
                         <Text ml="2" color="gray">Loading transcript...</Text>
                     </Flex>
                 )}
-                {transcriptError && !isLoadingTranscript && ( // Show error only if not loading
+                {transcriptError && !isLoadingTranscript && (
                      <Flex align="center" justify="center" style={{minHeight: '100px'}}>
                          <Text color="red">Error loading transcript: {transcriptError.message}</Text>
                      </Flex>
                 )}
                 <Box p="3" className="space-y-3">
-                     {/* Map over the paragraphs array */}
                      {!isLoadingTranscript && !transcriptError && paragraphs.length > 0 && paragraphs.map((paragraph, index) => (
                         <TranscriptParagraph
-                            // Use paragraph.id or index as key. Ensure uniqueness.
                             key={paragraph.id ?? `p-${index}`}
-                            // Pass the whole paragraph object
                             paragraph={paragraph}
-                            index={index} // Pass index for saving
-                            onSave={handleSaveParagraphInternal} // Pass the internal handler
+                            index={index}
+                            onSave={handleSaveParagraphInternal}
                             activeEditIndex={activeEditIndex}
                             setActiveEditIndex={setActiveEditIndex}
                             isSaving={saveParagraphMutation.isPending && saveParagraphMutation.variables?.index === index}
                         />
                     ))}
                      {/* Show message only if not loading, no error, and paragraphs array is empty */}
-                     {/* Check if transcriptContent exists but is empty array */}
                      {!isLoadingTranscript && !transcriptError && transcriptContent && paragraphs.length === 0 && (
                         <Flex align="center" justify="center" style={{minHeight: '100px'}}>
                             <Text color="gray" style={{ fontStyle: 'italic' }}>
-                                Transcription is empty.
+                                {/* Use session.status which is now available */}
+                                {session.status === 'completed' ? 'Transcription is empty.' : 'Transcription not available yet.'}
                             </Text>
                         </Flex>
                     )}

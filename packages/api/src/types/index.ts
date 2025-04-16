@@ -16,8 +16,7 @@ export interface BackendChatSession {
 
 // Represents a single paragraph with its text and starting timestamp
 export interface TranscriptParagraphData {
-  // Using index as a temporary ID, a stable ID might be better long-term
-  id: number; // Or paragraphIndex? Let's use index for now.
+  id: number;
   timestamp: number; // Start time of the paragraph in milliseconds from audio start
   text: string;
 }
@@ -25,6 +24,39 @@ export interface TranscriptParagraphData {
 // Represents the full transcript as an array of paragraphs
 export type StructuredTranscript = TranscriptParagraphData[];
 
+// --- FIX: Define and export WhisperSegment here ---
+export interface WhisperSegment {
+    id: number;
+    seek: number;
+    start: number; // seconds
+    end: number;   // seconds
+    text: string;
+    tokens: number[];
+    temperature: number;
+    avg_logprob: number;
+    compression_ratio: number;
+    no_speech_prob: number;
+}
+// --- END FIX ---
+
+// Represents the structure within the 'result' field when status is 'completed'
+export interface WhisperTranscriptionResult {
+  text: string;
+  segments: WhisperSegment[]; // Uses the exported interface now
+  language: string;
+}
+
+// Represents the full Whisper job status/result from the python service
+export interface WhisperJobStatus {
+    job_id: string;
+    status: "queued" | "processing" | "completed" | "failed" | "canceled";
+    progress?: number;
+    result?: WhisperTranscriptionResult;
+    error?: string;
+    start_time?: number;
+    end_time?: number;
+    duration?: number;
+}
 
 export interface BackendSession {
   id: number;
@@ -34,15 +66,13 @@ export interface BackendSession {
   date: string;
   sessionType: string;
   therapy: string;
-  // transcriptPath now points to a JSON file
-  transcriptPath: string;
-  chats?: Pick<BackendChatSession, 'id' | 'sessionId' | 'timestamp' | 'name'>[]; // Optional, only metadata usually loaded
-  // The structured transcript data might be loaded separately or included here if needed frequently
-  // transcript?: StructuredTranscript; // Optional: Could be included here
+  transcriptPath: string | null;
+  status: 'pending' | 'transcribing' | 'completed' | 'failed';
+  whisperJobId: string | null;
+  chats?: Pick<BackendChatSession, 'id' | 'sessionId' | 'timestamp' | 'name'>[];
 }
 
-// Metadata used for creation/update, excluding generated fields
-export type BackendSessionMetadata = Omit<BackendSession, 'id' | 'transcriptPath' | 'chats' | 'fileName'>;
+export type BackendSessionMetadata = Omit<BackendSession, 'id' | 'transcriptPath' | 'chats' | 'fileName' | 'status' | 'whisperJobId'>;
 
 export interface ActionSchema {
     endpoint: string;
@@ -56,6 +86,6 @@ export interface ActionSchema {
 
 export interface ApiErrorResponse {
     error: string;
-    details?: string | Record<string, any>; // Allow details object, e.g., for validation
-    validationErrors?: any; // Specifically for validation errors
+    details?: string | Record<string, any>;
+    validationErrors?: any;
 }

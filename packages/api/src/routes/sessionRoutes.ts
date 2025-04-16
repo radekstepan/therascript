@@ -1,3 +1,4 @@
+/* packages/api/src/routes/sessionRoutes.ts */
 import { Elysia, t, type Static } from 'elysia';
 import path from 'node:path';
 import fs from 'node:fs/promises';
@@ -12,19 +13,33 @@ import {
     deleteTranscriptFile,
     deleteUploadedFile
 } from '../services/fileService.js';
-import { transcribeAudio } from '../services/transcriptionService.js'; // Uses the updated service
-// Import the new types
-import type { BackendSession, BackendSessionMetadata, StructuredTranscript, TranscriptParagraphData } from '../types/index.js';
-import { NotFoundError, InternalServerError, ApiError, BadRequestError } from '../errors.js';
-import config from '../config/index.js'; // Keep config import
+// Import new transcription service functions
+import {
+    startTranscriptionJob,
+    getTranscriptionStatus,
+    getStructuredTranscriptionResult
+} from '../services/transcriptionService.js';
+import type {
+    BackendSession,
+    BackendSessionMetadata,
+    StructuredTranscript,
+    TranscriptParagraphData,
+    WhisperJobStatus // Import WhisperJobStatus
+} from '../types/index.js';
+import { NotFoundError, InternalServerError, ApiError, BadRequestError, ConflictError } from '../errors.js';
+import config from '../config/index.js';
+// REMOVED: import { chatRoutes } from './chatRoutes.js'; // No longer needed here
 
-// --- Schemas ---
+// --- Schemas (Update/Add) ---
 const SessionIdParamSchema = t.Object({
     sessionId: t.String({ pattern: '^[0-9]+$', error: "Session ID must be a positive number" })
 });
+const JobIdParamSchema = t.Object({ // New schema for job ID
+    jobId: t.String({ minLength: 1, error: "Job ID must be provided" })
+});
 const ParagraphUpdateBodySchema = t.Object({
     paragraphIndex: t.Numeric({ minimum: 0, error: "Paragraph index must be 0 or greater" }),
-    newText: t.String() // Can be empty string
+    newText: t.String()
 });
 const SessionMetadataUpdateBodySchema = t.Partial(t.Object({
     clientName: t.Optional(t.String({ minLength: 1 })),
@@ -33,7 +48,11 @@ const SessionMetadataUpdateBodySchema = t.Partial(t.Object({
     sessionType: t.Optional(t.String({ minLength: 1 })),
     therapy: t.Optional(t.String({ minLength: 1 })),
     fileName: t.Optional(t.String()),
-    transcriptPath: t.Optional(t.String()), // Should point to .json file now
+    // Removed transcriptPath from update body - managed internally now
+    // transcriptPath: t.Optional(t.String()),
+    // Added status and jobId for internal updates
+    status: t.Optional(t.Union([ t.Literal('pending'), t.Literal('transcribing'), t.Literal('completed'), t.Literal('failed') ])),
+    whisperJobId: t.Optional(t.Union([t.String(), t.Null()]))
 }));
 const SessionMetadataResponseSchema = t.Object({
     id: t.Number(),
@@ -43,9 +62,11 @@ const SessionMetadataResponseSchema = t.Object({
     date: t.String(),
     sessionType: t.String(),
     therapy: t.String(),
-    transcriptPath: t.String(), // Path to the .json file
+    transcriptPath: t.Union([t.String(), t.Null()]), // Path can be null initially
+    status: t.String(), // Add status
+    whisperJobId: t.Union([t.String(), t.Null()]), // Add whisperJobId
 });
-const SessionListResponseItemSchema = SessionMetadataResponseSchema;
+const SessionListResponseItemSchema = SessionMetadataResponseSchema; // List items include status now
 
 const ChatMetadataResponseSchema = t.Object({
     id: t.Number(),
@@ -60,22 +81,15 @@ const SessionWithChatsMetadataResponseSchema = t.Intersect([
     })
 ]);
 
-// Define the structure for a single paragraph in the response
 const TranscriptParagraphSchema = t.Object({
-    id: t.Number(), // Or index used as ID
-    timestamp: t.Number(), // Milliseconds
+    id: t.Number(),
+    timestamp: t.Number(),
     text: t.String()
 });
-
-// Define the Transcript response schema as an array of paragraphs
 const TranscriptResponseSchema = t.Array(TranscriptParagraphSchema);
 
-
-// Define UploadBodySchema with a generic File type for now
 const UploadBodySchema = t.Object({
-    // Use a generic File type, validation will happen in beforeHandle
     audioFile: t.File({ error: "Audio file is required." }),
-    // Keep other metadata fields
     clientName: t.String({ minLength: 1, error: "Client name required." }),
     sessionName: t.String({ minLength: 1, error: "Session name required." }),
     date: t.RegExp(/^\d{4}-\d{2}-\d{2}$/, { error: "Date must be YYYY-MM-DD." }),
@@ -83,197 +97,296 @@ const UploadBodySchema = t.Object({
     therapy: t.String({ minLength: 1, error: "Therapy type required." }),
 });
 
-// Helper to parse human-readable size string (e.g., '100m') into bytes
+// New Schema for Transcription Status Response
+const TranscriptionStatusResponseSchema = t.Object({
+    job_id: t.String(),
+    status: t.Union([
+        t.Literal("queued"),
+        t.Literal("processing"),
+        t.Literal("completed"),
+        t.Literal("failed"),
+        t.Literal("canceled"),
+    ]),
+    progress: t.Optional(t.Number()),
+    // *** FIX: Allow error and duration to be explicitly null ***
+    error: t.Optional(t.Union([t.String(), t.Null()])),
+    duration: t.Optional(t.Union([t.Number(), t.Null()])),
+});
+
+
+// Helper to parse human-readable size string
 const parseSize = (sizeStr: string): number => {
     const lowerStr = sizeStr.toLowerCase();
     const value = parseFloat(lowerStr);
     if (isNaN(value)) return 0;
-
-    if (lowerStr.endsWith('g') || lowerStr.endsWith('gb')) {
-        return value * 1024 * 1024 * 1024;
-    } else if (lowerStr.endsWith('m') || lowerStr.endsWith('mb')) {
-        return value * 1024 * 1024;
-    } else if (lowerStr.endsWith('k') || lowerStr.endsWith('kb')) {
-        return value * 1024;
-    }
-    return value; // Assume bytes if no unit
+    if (lowerStr.endsWith('g') || lowerStr.endsWith('gb')) return value * 1024 * 1024 * 1024;
+    if (lowerStr.endsWith('m') || lowerStr.endsWith('mb')) return value * 1024 * 1024;
+    if (lowerStr.endsWith('k') || lowerStr.endsWith('kb')) return value * 1024;
+    return value;
 };
 
-// --- Elysia Plugin for Session Routes ---
-export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
+// --- Elysia Plugins ---
+export const sessionRoutes = new Elysia({ prefix: '/api' }) // Base prefix /api
     .model({
         sessionIdParam: SessionIdParamSchema,
+        jobIdParam: JobIdParamSchema, // Add job ID param model
         paragraphUpdateBody: ParagraphUpdateBodySchema,
         metadataUpdateBody: SessionMetadataUpdateBodySchema,
-        // Register the schema with the generic File type
         uploadBody: UploadBodySchema,
         sessionMetadataResponse: SessionMetadataResponseSchema,
         sessionWithChatsMetadataResponse: SessionWithChatsMetadataResponseSchema,
-        // Register the new transcript response schema
         transcriptResponse: TranscriptResponseSchema,
+        transcriptionStatusResponse: TranscriptionStatusResponseSchema, // Add status response model
     })
-    .group('', { detail: { tags: ['Session'] } }, (app) => app
-        // GET /api/sessions - List sessions
+    // --- Transcription Status Endpoint ---
+    .group('/transcription', { detail: { tags: ['Transcription'] } }, (app) => app
+        .get('/status/:jobId', async ({ params }) => {
+            const { jobId } = params;
+            try {
+                const status: WhisperJobStatus = await getTranscriptionStatus(jobId);
+                // Map to the response schema (omitting the large 'result' field)
+                // This data structure should now match the updated schema
+                return {
+                    job_id: status.job_id,
+                    status: status.status,
+                    progress: status.progress,
+                    error: status.error, // Can be null
+                    duration: status.duration, // Can be null
+                };
+            } catch (error) {
+                 console.error(`[API Error] Transcription Status (Job ID: ${jobId}):`, error);
+                 if (error instanceof ApiError) throw error;
+                 throw new InternalServerError(`Failed to get transcription status for job ${jobId}`, error instanceof Error ? error : undefined);
+            }
+        }, {
+            params: 'jobIdParam',
+            response: { 200: 'transcriptionStatusResponse' }, // Schema now allows nulls
+            detail: { summary: 'Get transcription job status and progress' }
+        })
+    )
+    // --- Session Endpoints ---
+    .group('/sessions', { detail: { tags: ['Session'] } }, (app) => app
         .get('/', listSessions, {
             response: { 200: t.Array(SessionListResponseItemSchema) },
             detail: { summary: 'List all sessions (metadata only)' }
         })
-
-        // POST /api/sessions/upload - Upload session
+        // POST /api/sessions/upload (Modified)
         .post('/upload', async ({ body, set }) => {
-            // Body is already parsed according to the basic UploadBodySchema
             const { audioFile, ...metadata } = body;
-
-            let newSession: BackendSession | null = null;
             let tempAudioPath: string | null = null;
-            let savedTranscriptPath: string | null = null;
+            let newSession: BackendSession | null = null; // Keep track of session if created
 
             try {
-                // 1. Save uploaded file temporarily (Validation happened in beforeHandle)
-                const tempFileName = `upload-${Date.now()}-${path.parse(audioFile.name).name}${path.extname(audioFile.name)}`; // Sanitize name slightly?
+                // 1. Save uploaded file temporarily
+                const tempFileName = `upload-${Date.now()}-${path.parse(audioFile.name).name}${path.extname(audioFile.name)}`;
                 tempAudioPath = path.join(config.db.uploadsDir, tempFileName);
                 const audioBuffer = await audioFile.arrayBuffer();
                 await fs.writeFile(tempAudioPath, Buffer.from(audioBuffer));
                 console.log(`[API Upload] Temporary audio saved to ${tempAudioPath}`);
 
-                // 2. Transcribe Audio using the updated service
-                // The service now handles calling the Whisper API endpoint and returns StructuredTranscript
-                console.log(`[API Upload] Starting transcription for ${audioFile.name}...`);
-                const structuredTranscript: StructuredTranscript = await transcribeAudio(tempAudioPath); // Returns StructuredTranscript
-                console.log(`[API Upload] Transcription finished, got ${structuredTranscript.length} paragraphs.`);
+                // 2. Start transcription job
+                const jobId = await startTranscriptionJob(tempAudioPath);
+                console.log(`[API Upload] Transcription job started. Job ID: ${jobId}`);
 
-                // 3. Create Session in DB (using temp transcript path initially - now .json)
-                // Use .json extension for the temporary path as well
-                const tempDbTranscriptPath = path.join(config.db.transcriptsDir, `temp-${Date.now()}.json`);
-                // Pass filename from the original upload
-                newSession = await sessionRepository.create(metadata as BackendSessionMetadata, audioFile.name, tempDbTranscriptPath);
-                if (!newSession) throw new InternalServerError('Failed to create session record.');
-                console.log(`[API Upload] DB session record created (ID: ${newSession.id}) with temp JSON path.`);
+                // 3. Create Session in DB with NULL transcript path initially
+                newSession = await sessionRepository.create(metadata as BackendSessionMetadata, audioFile.name, null);
+                if (!newSession) throw new InternalServerError('Failed to create initial session record.');
 
-                const sessionId = newSession.id;
-                // Final path is now .json
-                const finalTranscriptPath = path.join(config.db.transcriptsDir, `${sessionId}.json`);
+                // 4. Update session status and job ID immediately
+                const updatedSession = await sessionRepository.updateMetadata(newSession.id, {
+                    status: 'transcribing',
+                    whisperJobId: jobId,
+                });
+                 if (!updatedSession) throw new InternalServerError(`Failed to update status for session ${newSession.id}.`);
 
-                // 4. Save structured transcript content to the final path (.json)
-                savedTranscriptPath = await saveTranscriptContent(sessionId, structuredTranscript); // Pass the structured data
-                console.log(`[API Upload] Structured transcript content saved to ${savedTranscriptPath}`);
+                console.log(`[API Upload] DB session record created (ID: ${updatedSession.id}) with status 'transcribing'.`);
 
-                // 5. Update session record with final path (.json)
-                const sessionAfterUpdate = await sessionRepository.updateMetadata(sessionId, { transcriptPath: finalTranscriptPath });
-                if (!sessionAfterUpdate) throw new InternalServerError(`Failed to update transcript path for session ${sessionId}.`);
-                newSession = sessionAfterUpdate;
-                console.log(`[API Upload] DB session record updated with final transcript path: ${finalTranscriptPath}`);
-
-                // 6. Create initial chat
-                const initialChat = await chatRepository.createChat(sessionId);
-                // Add a more informative initial AI message
-                await chatRepository.addMessage(initialChat.id, 'ai', `Session "${metadata.sessionName}" uploaded on ${metadata.date} has been transcribed and is ready for analysis.`);
-                console.log(`[API Upload] Initial chat created (ID: ${initialChat.id})`);
-
-                // 7. Fetch final state for response (including chat metadata)
-                const finalSessionState = await sessionRepository.findById(sessionId);
-                if (!finalSessionState) throw new InternalServerError(`Failed to fetch final state for session ${sessionId}`);
-                const chatsRaw = await chatRepository.findChatsBySessionId(sessionId);
-                const chatsMetadata = chatsRaw.map(c => ({id: c.id, sessionId: c.sessionId, timestamp: c.timestamp, name: c.name}));
-                const responseSession = {
-                    id: finalSessionState.id,
-                    fileName: finalSessionState.fileName,
-                    clientName: finalSessionState.clientName,
-                    sessionName: finalSessionState.sessionName,
-                    date: finalSessionState.date,
-                    sessionType: finalSessionState.sessionType,
-                    therapy: finalSessionState.therapy,
-                    transcriptPath: finalSessionState.transcriptPath,
-                    chats: chatsMetadata // Include chat metadata in the response
+                // 5. Return 202 Accepted with session ID and job ID
+                set.status = 202; // Accepted
+                return {
+                    sessionId: updatedSession.id,
+                    jobId: jobId,
+                    message: "Upload successful, transcription started.",
                 };
 
-                set.status = 201;
-                return responseSession; // Return the full session details with chats
-
             } catch (error) {
-                 console.error('[API Error] Error during session upload processing:', error);
-                 // Cleanup logic
-                 if (newSession?.id) {
-                     console.log(`[API Upload Cleanup] Attempting cleanup for session ${newSession.id}...`);
-                     try {
-                        // Attempt to delete transcript file (now .json)
-                        await deleteTranscriptFile(newSession.id); // Handles .json path
+                 console.error('[API Error] Error during session upload initiation:', error);
 
-                        await sessionRepository.deleteById(newSession.id);
-                        console.log(`[API Upload Cleanup] DB record and associated transcript file (attempted) deleted.`);
+                 if (error instanceof Error && error.message.includes('NOT NULL constraint failed: sessions.transcriptPath')) {
+                    console.error("[API Upload Error] Encountered unexpected transcriptPath NOT NULL constraint. Check DB schema again.");
+                     throw new InternalServerError('Database schema constraint error during session creation.');
+                 }
+
+                 // General cleanup logic
+                 if (newSession?.id) {
+                     console.log(`[API Upload Cleanup] Attempting cleanup for incomplete session ${newSession.id}...`);
+                     try {
+                         await sessionRepository.deleteById(newSession.id);
+                         console.log(`[API Upload Cleanup] DB record deleted.`);
+                     } catch (cleanupError) {
+                         console.error(`[API Upload Cleanup] Error deleting DB record:`, cleanupError);
                      }
-                     catch (cleanupError) { console.error(`[API Upload Cleanup] Error during cleanup:`, cleanupError); }
                  }
                   if (error instanceof ApiError) throw error;
-                  // Provide more context in the error message if possible
                   const errorMessage = error instanceof Error ? error.message : 'Unknown error during upload';
                   throw new InternalServerError(`Session upload failed: ${errorMessage}`, error instanceof Error ? error : undefined);
             } finally {
                  if (tempAudioPath) {
-                    console.log(`[API Upload Cleanup] Deleting temporary audio file: ${tempAudioPath}`);
-                    await deleteUploadedFile(tempAudioPath); // Uses fs.unlink with error handling
+                     console.log(`[API Upload] Temporary audio file ${tempAudioPath} kept for Whisper processing.`);
                  }
             }
         }, {
-            // Add the beforeHandle hook for detailed validation
             beforeHandle: ({ body, set }) => {
                 const file = body.audioFile;
                 const maxSizeInBytes = parseSize(config.upload.maxFileSize);
-
-                // Check Type
                 if (!config.upload.allowedMimeTypes.includes(file.type)) {
-                    throw new BadRequestError(`Invalid file type: ${file.type}. Allowed types: ${config.upload.allowedMimeTypes.join(', ')}`);
+                    throw new BadRequestError(`Invalid file type: ${file.type}. Allowed: ${config.upload.allowedMimeTypes.join(', ')}`);
                 }
-
-                // Check Size
                 if (file.size > maxSizeInBytes) {
-                     throw new BadRequestError(`File size (${(file.size / 1024 / 1024).toFixed(1)}MB) exceeds the limit of ${config.upload.maxFileSize}.`);
+                     throw new BadRequestError(`File size (${(file.size / 1024 / 1024).toFixed(1)}MB) exceeds limit of ${config.upload.maxFileSize}.`);
                 }
-                // Check if file is empty
                 if (file.size === 0) {
                     throw new BadRequestError('Uploaded audio file cannot be empty.');
                 }
             },
-            // Reference the model name defined above
             body: 'uploadBody',
-            // Update response schema to match the actual return type
-            response: { 201: 'sessionWithChatsMetadataResponse', 400: t.Any(), 499: t.Any(), 500: t.Any() },
-            detail: { summary: 'Upload session audio & metadata, trigger transcription' }
+            response: {
+                202: t.Object({ sessionId: t.Number(), jobId: t.String(), message: t.String() }),
+                400: t.Any(), 409: t.Any(), 500: t.Any()
+            },
+            detail: { summary: 'Upload session audio & metadata, start transcription' }
         })
 
         // --- Routes requiring :sessionId ---
         .guard({ params: 'sessionIdParam' }, (app) => app
              .derive(async ({ params }) => {
-                 const sessionId = parseInt(params.sessionId as unknown as string, 10);
-                 if (isNaN(sessionId)) throw new BadRequestError('Invalid session ID');
-                 // Fetch session using the repository method
+                 const sessionId = parseInt(params.sessionId, 10);
+                 if (isNaN(sessionId)) throw new BadRequestError('Invalid session ID format');
                  const session = await sessionRepository.findById(sessionId);
                  if (!session) throw new NotFoundError(`Session with ID ${sessionId}`);
                  return { sessionData: session };
              })
-             // GET /:sessionId - Get session metadata & chat list
              .get('/:sessionId', getSessionDetails, {
                  response: { 200: 'sessionWithChatsMetadataResponse' },
                  detail: { summary: 'Get session metadata & chat list' }
              })
-             // PUT /:sessionId/metadata - Update session metadata
              .put('/:sessionId/metadata', updateSessionMetadata, {
                  body: 'metadataUpdateBody',
                  response: { 200: 'sessionMetadataResponse' },
-                 detail: { summary: 'Update session metadata' }
+                 detail: { summary: 'Update session metadata (excluding transcript path)' }
              })
-             // GET /:sessionId/transcript - Get structured transcript content
              .get('/:sessionId/transcript', getTranscript, {
-                 // Use the updated transcriptResponse schema (array of paragraphs)
                  response: { 200: 'transcriptResponse' },
-                 detail: { summary: 'Get structured transcript content' }
+                 detail: { summary: 'Get structured transcript content (if completed)' }
              })
-             // PATCH /:sessionId/transcript - Update transcript paragraph
              .patch('/:sessionId/transcript', updateTranscriptParagraph, {
                  body: 'paragraphUpdateBody',
-                 // Use the updated transcriptResponse schema (array of paragraphs)
                  response: { 200: 'transcriptResponse' },
-                 detail: { summary: 'Update transcript paragraph' }
+                 detail: { summary: 'Update transcript paragraph (if completed)' }
              })
-         )
+             // POST /api/sessions/{sessionId}/finalize (New)
+             .post('/:sessionId/finalize', async ({ params, set, sessionData }) => {
+                  const sessionId = sessionData.id;
+                  console.log(`[API Finalize] Request received for session ${sessionId}`);
+
+                  if (sessionData.status !== 'transcribing') {
+                      console.warn(`[API Finalize] Session ${sessionId} is not in 'transcribing' state (current: ${sessionData.status}).`);
+                      if (sessionData.status === 'completed') {
+                            const chatsRaw = await chatRepository.findChatsBySessionId(sessionId);
+                            const chatsMetadata = chatsRaw.map(c => ({id: c.id, sessionId: c.sessionId, timestamp: c.timestamp, name: c.name}));
+                            set.status = 200;
+                            return { ...sessionData, chats: chatsMetadata };
+                      }
+                      throw new ConflictError(`Session ${sessionId} cannot be finalized. Status: ${sessionData.status}.`);
+                  }
+                  if (!sessionData.whisperJobId) {
+                      throw new InternalServerError(`Session ${sessionId} is transcribing but has no associated Job ID.`);
+                  }
+
+                  const jobId = sessionData.whisperJobId;
+
+                  try {
+                      const structuredTranscript = await getStructuredTranscriptionResult(jobId);
+                      console.log(`[API Finalize] Successfully retrieved structured transcript for job ${jobId}.`);
+
+                      const finalTranscriptPath = path.join(config.db.transcriptsDir, `${sessionId}.json`);
+                      await saveTranscriptContent(sessionId, structuredTranscript);
+                      console.log(`[API Finalize] Structured transcript saved to ${finalTranscriptPath}`);
+
+                      const finalizedSession = await sessionRepository.updateMetadata(sessionId, {
+                          status: 'completed',
+                          transcriptPath: finalTranscriptPath,
+                      });
+                      if (!finalizedSession) throw new InternalServerError(`Failed to update final status/path for session ${sessionId}.`);
+                      console.log(`[API Finalize] DB session ${sessionId} updated to 'completed'.`);
+
+                      const existingChats = await chatRepository.findChatsBySessionId(sessionId);
+                      let initialChat = existingChats.sort((a, b) => a.timestamp - b.timestamp)[0];
+                      if (!initialChat) {
+                            initialChat = await chatRepository.createChat(sessionId);
+                            await chatRepository.addMessage(initialChat.id, 'ai', `Session "${finalizedSession.sessionName}" uploaded on ${finalizedSession.date} has been transcribed and is ready for analysis.`);
+                            console.log(`[API Finalize] Initial chat created (ID: ${initialChat.id}) for session ${sessionId}.`);
+                      } else {
+                           console.log(`[API Finalize] Initial chat already exists (ID: ${initialChat.id}) for session ${sessionId}.`);
+                      }
+
+                      const finalSessionState = await sessionRepository.findById(sessionId);
+                      if (!finalSessionState) throw new InternalServerError(`Failed to fetch final state for session ${sessionId}`);
+                      const chatsRaw = await chatRepository.findChatsBySessionId(sessionId);
+                      const chatsMetadata = chatsRaw.map(c => ({id: c.id, sessionId: c.sessionId, timestamp: c.timestamp, name: c.name}));
+
+                      set.status = 200; // OK
+                      return { ...finalSessionState, chats: chatsMetadata };
+
+                  } catch (error) {
+                      console.error(`[API Error] Finalize Session ${sessionId}:`, error);
+                      try {
+                           await sessionRepository.updateMetadata(sessionId, { status: 'failed' });
+                           console.log(`[API Finalize] Marked session ${sessionId} as 'failed' due to finalization error.`);
+                      } catch (updateError) {
+                           console.error(`[API Finalize] CRITICAL: Failed to mark session ${sessionId} as failed after finalization error:`, updateError);
+                      }
+
+                      if (error instanceof ApiError) throw error;
+                      throw new InternalServerError(`Failed to finalize session ${sessionId}`, error instanceof Error ? error : undefined);
+                  } finally {
+                      console.warn(`[API Finalize] Cannot reliably determine temp audio path for session ${sessionId} for cleanup. Please implement temp path storage or manual cleanup.`);
+                  }
+             }, {
+                  response: { 200: 'sessionWithChatsMetadataResponse', 409: t.Any(), 500: t.Any() },
+                  detail: { summary: 'Finalize session after successful transcription' }
+             })
+             // Add DELETE route for session
+             .delete('/:sessionId', async ({ params, set, sessionData }) => {
+                 const sessionId = sessionData.id;
+                 console.log(`[API Delete] Request received for session ${sessionId}`);
+                 try {
+                     if (sessionData.transcriptPath) {
+                         await deleteTranscriptFile(sessionId);
+                     } else {
+                          console.log(`[API Delete] Session ${sessionId} has no transcript file to delete.`);
+                     }
+
+                     const deleted = sessionRepository.deleteById(sessionId);
+                     if (!deleted) {
+                         throw new NotFoundError(`Session with ID ${sessionId} not found during deletion attempt.`);
+                     }
+                     console.log(`[API Delete] Successfully deleted session ${sessionId} and associated data.`);
+
+                     console.warn(`[API Delete] Cannot reliably determine original uploaded audio path for session ${sessionId} for cleanup. Please implement temp path storage or manual cleanup.`);
+
+
+                     set.status = 200;
+                     return { message: `Session ${sessionId} deleted successfully.` };
+
+                 } catch (error) {
+                     console.error(`[API Error] Delete Session ${sessionId}:`, error);
+                     if (error instanceof ApiError) throw error;
+                     throw new InternalServerError(`Failed to delete session ${sessionId}`, error instanceof Error ? error : undefined);
+                 }
+             }, {
+                 response: { 200: t.Object({ message: t.String() }), 404: t.Any(), 500: t.Any() },
+                 detail: { summary: 'Delete a session, its transcript, and associated chats' }
+             })
+         ) // End session ID guard
     );

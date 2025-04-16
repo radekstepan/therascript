@@ -1,3 +1,5 @@
+/* packages/api/src/db/sqliteService.ts */
+// (Content is the same as the previous correct version - transcriptPath TEXT NULL - with added logging)
 import Database, { type Database as DB, type Statement, type RunResult } from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -24,7 +26,10 @@ const schema = `
         date TEXT NOT NULL,
         sessionType TEXT NOT NULL,
         therapy TEXT NOT NULL,
-        transcriptPath TEXT NOT NULL UNIQUE
+        -- *** FIX: Make transcriptPath nullable ***
+        transcriptPath TEXT NULL, -- Allow NULL initially
+        status TEXT NOT NULL DEFAULT 'pending', -- e.g., pending, transcribing, completed, failed
+        whisperJobId TEXT NULL
     );
     -- Chats Table
     CREATE TABLE IF NOT EXISTS chats (
@@ -71,6 +76,7 @@ const closeDb = (): void => {
 
 // --- Initialize Function Definition (Uses `schema` and `closeDb`) ---
 function initializeDatabase(dbInstance: DB) {
+    console.log('[db]: Attempting to initialize schema...'); // *** ADDED LOG ***
     try {
         // Execute PRAGMAs sequentially using the synchronous pragma method
         dbInstance.pragma('journal_mode = WAL');
@@ -80,7 +86,44 @@ function initializeDatabase(dbInstance: DB) {
 
         // Execute schema creation statements using synchronous exec (schema is defined above)
         dbInstance.exec(schema);
-        console.log('[db]: Database schema initialized successfully.');
+        console.log('[db]: Database schema exec command executed.'); // *** MODIFIED LOG ***
+
+        // --- Verify schema IMMEDIATELY after execution --- // *** ADDED LOG BLOCK ***
+        console.log('[db]: Verifying schema after exec...');
+        const columns = dbInstance.pragma("table_info(sessions)") as { name: string; notnull: number; pk: number; type: string; dflt_value: any }[];
+        const transcriptPathColumn = columns.find(col => col.name === 'transcriptPath');
+        if (transcriptPathColumn) {
+            console.log(`[db Verification]: Found transcriptPath column. NOT NULL constraint: ${transcriptPathColumn.notnull === 1 ? 'YES (Problem!)' : 'NO (Correct)'}`);
+        } else {
+             console.log('[db Verification]: transcriptPath column NOT FOUND after schema exec!');
+        }
+         // *** END ADDED LOG BLOCK ***
+
+        // Check and add new columns if they don't exist (simple migration)
+        const hasStatus = columns.some((col) => col.name === 'status');
+        const hasWhisperJobId = columns.some((col) => col.name === 'whisperJobId');
+
+        if (!hasStatus) {
+            console.log('[db]: Adding "status" column to sessions table...');
+            dbInstance.exec("ALTER TABLE sessions ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'");
+            console.log('[db]: "status" column added.');
+        }
+        if (!hasWhisperJobId) {
+            console.log('[db]: Adding "whisperJobId" column to sessions table...');
+            dbInstance.exec("ALTER TABLE sessions ADD COLUMN whisperJobId TEXT NULL");
+            console.log('[db]: "whisperJobId" column added.');
+        }
+
+        // --- Verify transcriptPath is nullable (redundant check, but keep for logging) ---
+        if (transcriptPathColumn && transcriptPathColumn.notnull !== 0) {
+            console.warn('[db]: Existing "transcriptPath" column is NOT NULL. This migration script does not automatically alter it to be NULLABLE due to data loss risk. Please manually update the schema if needed (backup first!). Or delete the DB file to recreate with the correct schema.');
+        } else if (transcriptPathColumn && transcriptPathColumn.notnull === 0) {
+             console.log('[db]: Confirmed "transcriptPath" column is nullable (second check).');
+        } else if (!transcriptPathColumn) {
+             console.warn('[db]: "transcriptPath" column not found (second check). Schema creation should handle this.');
+        }
+        // --- END Verify ---
+
 
     } catch (error) {
         console.error('[db]: Error initializing database pragmas or schema:', error);
@@ -96,6 +139,8 @@ try {
     // Define the db instance
     db = new Database(dbFilePath, {
         verbose: isDev ? console.log : undefined, // Log statements in dev
+        // *** ADDED LOG: File must exist? Set to true to potentially reveal issues if file is missing when expected ***
+        // fileMustExist: true, // Uncomment cautiously for debugging specific file existence issues
     });
     console.log(`[db]: Successfully connected to database: ${dbFilePath}`);
     initializeDatabase(db); // Initialize synchronously (schema and closeDb are defined above)
@@ -113,6 +158,8 @@ function prepare(sql: string): Statement {
     let stmt = statementCache.get(sql);
     if (!stmt) {
         try {
+            // *** ADDED LOG ***
+            console.log(`[db]: Preparing statement: ${sql}`);
             stmt = db.prepare(sql); // db is now guaranteed to be initialized here
             statementCache.set(sql, stmt);
         } catch (error) {
