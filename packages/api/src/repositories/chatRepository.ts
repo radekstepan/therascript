@@ -1,3 +1,4 @@
+// <file path="packages/api/src/repositories/chatRepository.ts">
 import { get, all, run } from '../db/sqliteService.js'; // Use synchronous helpers
 import type { BackendChatSession, BackendChatMessage } from '../types/index.js';
 
@@ -5,7 +6,8 @@ import type { BackendChatSession, BackendChatMessage } from '../types/index.js';
 const insertChatSql = 'INSERT INTO chats (sessionId, timestamp, name) VALUES (?, ?, ?)';
 const insertMessageSql = 'INSERT INTO messages (chatId, sender, text, timestamp) VALUES (?, ?, ?, ?)';
 const selectChatsBySessionIdSql = 'SELECT * FROM chats WHERE sessionId = ? ORDER BY timestamp DESC';
-const selectMessagesByChatIdSql = 'SELECT * FROM messages WHERE chatId = ? ORDER BY timestamp ASC, id ASC';
+// *** MODIFICATION: Prioritize sorting by insertion order (id) ***
+const selectMessagesByChatIdSql = 'SELECT * FROM messages WHERE chatId = ? ORDER BY id ASC';
 const selectChatByIdSql = 'SELECT * FROM chats WHERE id = ?';
 const selectMessageByIdSql = 'SELECT * FROM messages WHERE id = ?';
 const updateChatNameSql = 'UPDATE chats SET name = ? WHERE id = ?';
@@ -16,7 +18,9 @@ const findChatWithMessages = (chatId: number): BackendChatSession | null => {
     try {
         const chatRow = get<Omit<BackendChatSession, 'messages'>>(selectChatByIdSql, chatId);
         if (!chatRow) return null;
+        // Use the modified SQL query here
         const messages = all<BackendChatMessage>(selectMessagesByChatIdSql, chatId);
+        console.log(`[findChatWithMessages DEBUG] Fetched ${messages.length} messages for Chat ID ${chatId} using ORDER BY id ASC.`); // Add log
         return { ...chatRow, messages };
     } catch (error) {
         console.error(`DB error fetching chat ${chatId}:`, error);
@@ -40,12 +44,14 @@ export const chatRepository = {
     },
 
     addMessage: (chatId: number, sender: 'user' | 'ai', text: string): BackendChatMessage => {
-        const timestamp = Date.now();
+        const timestamp = Date.now(); // Keep timestamp for potential display or other uses
         try {
             const info = run(insertMessageSql, chatId, sender, text, timestamp);
             const newMessageId = info.lastInsertRowid as number;
             const newMessage = get<BackendChatMessage>(selectMessageByIdSql, newMessageId);
             if (!newMessage) throw new Error(`Failed retrieve message ${newMessageId} immediately after creation.`);
+            // Log the inserted message details
+            console.log(`[chatRepository.addMessage DEBUG] Inserted Msg ID: ${newMessage.id}, Sender: ${newMessage.sender}, Timestamp: ${newMessage.timestamp}`);
             return newMessage;
         } catch (error) {
             console.error(`DB error adding message to chat ${chatId}:`, error);
@@ -56,10 +62,10 @@ export const chatRepository = {
     findChatsBySessionId: (sessionId: number): BackendChatSession[] => {
         try {
             const chatRows = all<Omit<BackendChatSession, 'messages'>>(selectChatsBySessionIdSql, sessionId);
+            // This map will now use the helper findChatWithMessages which uses the corrected ORDER BY id
             const chatsWithMessages = chatRows.map((chatRow) => {
-                const messages = all<BackendChatMessage>(selectMessagesByChatIdSql, chatRow.id);
-                return { ...chatRow, messages };
-            });
+                return findChatWithMessages(chatRow.id);
+            }).filter((chat): chat is BackendChatSession => chat !== null); // Filter out nulls just in case find fails
             return chatsWithMessages;
         } catch (error) {
             console.error(`DB error fetching chats for session ${sessionId}:`, error);
@@ -68,12 +74,18 @@ export const chatRepository = {
     },
 
     findChatById: (chatId: number): BackendChatSession | null => {
+        // This already uses findChatWithMessages, which now uses the corrected ORDER BY id
         return findChatWithMessages(chatId);
     },
 
     findMessagesByChatId: (chatId: number): BackendChatMessage[] => {
         try {
-            return all<BackendChatMessage>(selectMessagesByChatIdSql, chatId);
+             // Use the modified SQL query here too
+            const messages = all<BackendChatMessage>(selectMessagesByChatIdSql, chatId);
+            console.log(`[findMessagesByChatId DEBUG] Fetched ${messages.length} messages for Chat ID ${chatId} using ORDER BY id ASC.`); // Add log
+            // Log timestamps for debugging if needed
+            messages.slice(-5).forEach(m => console.log(`[findMessagesByChatId DEBUG] Msg ID=${m.id}, Sender=${m.sender}, TS=${m.timestamp}`));
+            return messages;
         } catch (error) {
             console.error(`DB error fetching messages for chat ${chatId}:`, error);
             throw new Error(`Database error fetching messages.`);
@@ -102,3 +114,4 @@ export const chatRepository = {
         }
     },
 };
+// </file>

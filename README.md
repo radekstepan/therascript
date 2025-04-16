@@ -33,6 +33,8 @@
 - [ ] md5 on the DB init script file and check on api start that we use the latest version of the db or throw an error
 - [ ] the transcript has no spaces between sentences
 - [ ] the status API should be called every time the dropdown menu to check if a model is loaded is opened, the response should not be cached
+- [ ] show how large the context is in tokens and warn if context is too large
+- [ ] when you upload/transcribe a file, you should reset the New Session modal
 
 ## Nice to have
 

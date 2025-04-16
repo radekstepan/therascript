@@ -1,3 +1,4 @@
+// <file path="packages/api/src/services/fileService.ts">
 import fs from 'fs/promises';
 import path from 'path';
 import config from '../config/index.js';
@@ -15,24 +16,37 @@ const getTranscriptPath = (sessionId: number): string => {
 // Loads and parses JSON, returns StructuredTranscript
 export const loadTranscriptContent = async (sessionId: number): Promise<StructuredTranscript> => {
   const filePath = getTranscriptPath(sessionId);
+  console.log(`[FileService DEBUG] Attempting to load transcript from: ${filePath}`); // DEBUG LOG
   try {
-    await fs.access(filePath);
+    await fs.access(filePath); // Check existence first
+    console.log(`[FileService DEBUG] File found: ${filePath}`); // DEBUG LOG
     const fileContent = await fs.readFile(filePath, 'utf-8');
+    console.log(`[FileService DEBUG] Raw file content (first 200 chars): "${fileContent.substring(0, 200).replace(/\n/g, '\\n')}"`); // DEBUG LOG
+    if (!fileContent.trim()) {
+        console.warn(`[FileService] Transcript file for session ${sessionId} is empty.`);
+        return [];
+    }
     // Parse the JSON content
     const transcriptData = JSON.parse(fileContent) as StructuredTranscript;
      // Basic validation (optional, but good practice)
      if (!Array.isArray(transcriptData)) {
+         console.error(`[FileService] Invalid transcript format for session ${sessionId}: Expected an array, got ${typeof transcriptData}.`);
          throw new Error('Invalid transcript format: Expected an array.');
      }
-     // Add more checks if needed (e.g., check object structure)
+     console.log(`[FileService] Loaded and parsed transcript for session ${sessionId}. Found ${transcriptData.length} paragraphs.`);
      return transcriptData;
   } catch (error: any) {
     if (isNodeError(error) && error.code === 'ENOENT') {
-      console.warn(`[FileService] Transcript file for session ${sessionId} not found.`);
+      console.warn(`[FileService] Transcript file for session ${sessionId} not found at ${filePath}.`);
       return []; // Return empty array if file not found
     }
     if (error instanceof SyntaxError) {
          console.error(`[FileService] Error parsing transcript JSON for session ${sessionId}:`, error);
+         // Log snippet of content that failed parsing
+         try {
+            const contentSnippet = await fs.readFile(filePath, 'utf-8').catch(() => 'Could not read file for snippet');
+            console.error(`[FileService DEBUG] Content snippet failing parse (first 200 chars): "${contentSnippet.substring(0,200).replace(/\n/g, '\\n')}"`);
+         } catch {}
          throw new Error(`Could not parse transcript ${sessionId}. Invalid JSON format.`);
     }
     console.error(`[FileService] Error loading transcript ${sessionId}:`, error);
@@ -98,3 +112,4 @@ export const deleteUploadedFile = async (filePath: string): Promise<void> => {
         }
     }
 };
+// </file>

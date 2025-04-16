@@ -1,3 +1,4 @@
+// <file path="packages/api/src/api/chatHandler.ts">
 /* packages/api/src/api/chatHandler.ts */
 import { chatRepository } from '../repositories/chatRepository.js';
 import { loadTranscriptContent } from '../services/fileService.js'; // Loads structured transcript now
@@ -50,15 +51,22 @@ export const addChatMessage = async ({ sessionData, chatData, body, set }: any) 
         const userMessage = chatRepository.addMessage(chatData.id, 'user', trimmedText); // Sync
 
         // 2. Load Structured Transcript Content
+        console.log(`[API addChatMessage] Loading transcript for session ${sessionData.id}...`); // DEBUG LOG
         const structuredTranscript: StructuredTranscript = await loadTranscriptContent(sessionData.id); // Async, returns StructuredTranscript
+        console.log(`[API addChatMessage] Loaded ${structuredTranscript.length} paragraphs for session ${sessionData.id}.`); // DEBUG LOG
 
         // 3. Convert structured transcript to a single string for the LLM context
         // Simple join with double newlines between paragraphs
         const transcriptString = structuredTranscript.map(p => p.text).join('\n\n');
+        console.log(`[API addChatMessage DEBUG] Transcript string length: ${transcriptString.length}`); // DEBUG LOG
+        // console.log(`[API addChatMessage DEBUG] Transcript string (first 300 chars): "${transcriptString.substring(0,300).replace(/\n/g, '\\n')}"`); // Optional VERBOSE log
 
+        // *** CHECK IF transcriptString IS EMPTY ***
         if (!transcriptString) {
              // Log a warning but proceed, the LLM prompt handles empty transcript case
-             console.warn(`[API addChatMessage] Transcript for session ${sessionData.id} is empty or could not be loaded/formatted.`);
+             console.warn(`[API addChatMessage] Transcript for session ${sessionData.id} resulted in an EMPTY STRING after processing. Passing this to LLM.`);
+        } else {
+             console.log(`[API addChatMessage] Transcript string is NOT empty. Length: ${transcriptString.length}`);
         }
 
         // 4. Get current chat messages from DB (including the one just added)
@@ -67,11 +75,12 @@ export const addChatMessage = async ({ sessionData, chatData, body, set }: any) 
              // This should theoretically not happen as we just added a message
              throw new InternalServerError(`CRITICAL: Chat ${chatData.id} has no messages immediately after adding one.`);
         }
+        console.log(`[API addChatMessage] Found ${currentMessages.length} messages in chat history for chat ${chatData.id}.`); // DEBUG LOG
 
         // 5. Generate AI response using the stringified transcript and chat history
-        console.log(`[API] Sending context (transcript + ${currentMessages.length} messages) to Ollama...`);
+        console.log(`[API addChatMessage] Sending context (transcript string length ${transcriptString.length} + ${currentMessages.length} messages) to Ollama...`);
         const aiResponseText = await generateChatResponse(transcriptString, currentMessages); // Async, pass stringified transcript
-        console.log(`[API] Received Ollama response.`);
+        console.log(`[API addChatMessage] Received Ollama response.`);
 
         // 6. Add AI response message to DB
         const aiMessage = chatRepository.addMessage(chatData.id, 'ai', aiResponseText); // Sync
@@ -139,3 +148,4 @@ export const deleteChat = ({ chatData, set }: any) => { // Using 'any', becomes 
         throw new InternalServerError('Failed to delete chat', error instanceof Error ? error : undefined);
     }
 };
+// </file>
