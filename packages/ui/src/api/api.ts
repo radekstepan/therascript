@@ -111,7 +111,6 @@ export const startNewChat = async (sessionId: number): Promise<ChatSession> => {
     };
 };
 
-// --- Modified addChatMessageStream with Base URL and Refined Error Handling ---
 // POST /api/sessions/{sessionId}/chats/{chatId}/messages (Streaming)
 export const addChatMessageStream = async (
     sessionId: number,
@@ -119,12 +118,10 @@ export const addChatMessageStream = async (
     text: string
 ): Promise<{ userMessageId: number; stream: ReadableStream<Uint8Array> }> => {
     let response: Response;
-    // --- Construct full URL for fetch ---
     const url = `${API_BASE_URL}/api/sessions/${sessionId}/chats/${chatId}/messages`;
     console.log(`[addChatMessageStream] Fetching URL: ${url}`);
-    // --- End URL construction ---
     try {
-        response = await fetch(url, { // Use the constructed URL
+        response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ text }),
@@ -138,16 +135,14 @@ export const addChatMessageStream = async (
         let errorBodyText = `HTTP error ${response.status}`;
         let errorJson = null;
         try {
-            errorJson = await response.json(); // Try JSON first
+            errorJson = await response.json();
             errorBodyText = errorJson?.message || JSON.stringify(errorJson);
             console.error(`[addChatMessageStream] Server error response (JSON): ${response.status}`, errorJson);
         } catch (e) {
             console.warn("[addChatMessageStream] Error response was not valid JSON.");
             try {
-                 // IMPORTANT: Clone the response before reading text if you might need JSON later
-                 // However, since JSON failed, we likely just need the text now.
-                 const textResponse = await response.text(); // Read as text
-                 errorBodyText = textResponse || errorBodyText; // Use text if available
+                 const textResponse = await response.text();
+                 errorBodyText = textResponse || errorBodyText;
                  console.error(`[addChatMessageStream] Server error response (Text): ${response.status}`, errorBodyText);
             } catch (textError) {
                  console.error("[addChatMessageStream] Failed to read error response body as Text:", textError);
@@ -165,7 +160,6 @@ export const addChatMessageStream = async (
 
     return { userMessageId, stream: response.body };
 };
-// --- End Modification ---
 
 // PATCH /api/sessions/{sessionId}/chats/{chatId}/name
 export const renameChat = async (sessionId: number, chatId: number, name: string | null): Promise<ChatSession> => {
@@ -206,12 +200,18 @@ export const fetchAvailableModels = async (): Promise<AvailableModelsResponse> =
     return response.data;
 };
 
-// Set Active Model
-export const setOllamaModel = async (modelName: string): Promise<{ message: string }> => {
-    console.log(`Sending request to set active model: ${modelName}`);
-    const response = await axios.post('/api/ollama/set-model', { modelName });
+// --- Modified Set Active Model API Call ---
+export const setOllamaModel = async (modelName: string, contextSize?: number | null): Promise<{ message: string }> => {
+    console.log(`Sending request to set active model: ${modelName} with contextSize: ${contextSize ?? 'default'}`);
+    // Pass contextSize in the request body (ensure it's null if undefined/empty)
+    const payload = {
+        modelName,
+        contextSize: contextSize === undefined || (contextSize ?? 0) <= 0 ? null : contextSize
+    };
+    const response = await axios.post('/api/ollama/set-model', payload);
     return response.data;
 };
+// --- End Modification ---
 
 // Pull Model
 export const pullOllamaModel = async (modelName: string): Promise<{ message: string }> => {

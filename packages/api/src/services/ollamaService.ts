@@ -3,15 +3,18 @@ import ollama, { ChatResponse, Message, ListResponse, ShowResponse, GenerateResp
 import axios, { AxiosError } from 'axios';
 import config from '../config/index.js';
 import { BackendChatMessage, OllamaModelInfo } from '../types/index.js';
-import { InternalServerError, BadRequestError, ApiError } from '../errors.js'; // Added ApiError
-import { getActiveModel } from './activeModelService.js'; // Import the getter
+import { InternalServerError, BadRequestError, ApiError } from '../errors.js';
+// --- Import context size getter ---
+import { getActiveModel, getConfiguredContextSize } from './activeModelService.js';
+// --- End Import ---
 
 console.log(`[OllamaService] Using Ollama host: ${config.ollama.baseURL} (or OLLAMA_HOST env var)`);
 
 const SYSTEM_PROMPT = `You are an AI assistant analyzing a therapy session transcript. You will be provided with the transcript context and chat history. Answer user questions based *only* on the provided information. Be concise. If the answer isn't present, state that clearly. Do not invent information. Refer to participants as "Therapist" and "Patient" unless names are explicitly clear in the transcript.`;
 
-// --- List Models ---
+// --- List Models (no change) ---
 export const listModels = async (): Promise<OllamaModelInfo[]> => {
+    // ... existing code ...
     console.log(`[OllamaService] Fetching available models from ${config.ollama.baseURL}/api/tags`);
     try {
         const response: ListResponse = await ollama.list();
@@ -44,8 +47,9 @@ export const listModels = async (): Promise<OllamaModelInfo[]> => {
 // --- End List Models ---
 
 
-// --- Pull Model (Using axios to initiate, not wait for completion) ---
+// --- Pull Model (no change) ---
 export const pullOllamaModel = async (modelName: string): Promise<void> => {
+    // ... existing code ...
     const pullUrl = `${config.ollama.baseURL}/api/pull`;
     console.log(`[OllamaService] Initiating pull for model '${modelName}' via POST to ${pullUrl}...`);
     try {
@@ -92,9 +96,9 @@ export const pullOllamaModel = async (modelName: string): Promise<void> => {
 // --- End Pull Model ---
 
 
-// --- Check Model Status (Accepts model name) ---
-// This checks if a *specific* model is loaded in Ollama's memory via /api/ps
+// --- Check Model Status (no change) ---
 export const checkModelStatus = async (modelToCheck: string): Promise<OllamaModelInfo | null> => {
+    // ... existing code ...
     const psUrl = `${config.ollama.baseURL}/api/ps`;
     console.log(`[OllamaService] Checking if specific model '${modelToCheck}' is loaded using ${psUrl}...`); // Log specific model
     try {
@@ -134,12 +138,13 @@ export const checkModelStatus = async (modelToCheck: string): Promise<OllamaMode
         console.log(`[OllamaService] Assuming specific model '${modelToCheck}' is not loaded due to error.`); return null;
      }
 };
-// --- End Modified Check Model Status ---
+// --- End Check Model Status ---
 
 
-// --- Load Model Function (Handle void pull result) ---
+// --- Load Model Function (no change) ---
 export const loadOllamaModel = async (modelName: string): Promise<void> => {
-    if (!modelName) {
+    // ... existing code ...
+     if (!modelName) {
         throw new BadRequestError("Model name must be provided to load.");
     }
     console.log(`[OllamaService] Triggering load for model '${modelName}' using a minimal chat request...`);
@@ -149,24 +154,17 @@ export const loadOllamaModel = async (modelName: string): Promise<void> => {
             model: modelName,
             messages: [{ role: 'user', content: 'ping' }], // Minimal prompt
             stream: false,
-            // --- REMOVED keep_alive: '1s' ---
-            // Let Ollama use its default keep-alive mechanism
         });
         console.log(`[OllamaService] Minimal chat request completed for '${modelName}'. Status: ${response.done}. Ollama should now be loading/have loaded it.`);
-        // The frontend polling mechanism will verify the final loaded state via /api/ps.
 
     } catch (error: any) {
         console.error(`[OllamaService] Error during load trigger chat request for '${modelName}':`, error);
         if (error.status === 404 || (error.message?.includes('model') && error.message?.includes('not found'))) {
              console.error(`[OllamaService] Model '${modelName}' not found locally during load attempt. It needs to be pulled first.`);
-             // Attempt to pull the model if not found locally
              console.warn(`[OllamaService] Model '${modelName}' not found locally during load. Attempting to pull...`);
              try {
-                 // --- FIX: Call pullOllamaModel, but don't check its truthiness ---
                  await pullOllamaModel(modelName); // Call the pull initiator, returns void
                  console.log(`[OllamaService] Pull initiated for '${modelName}'. Load *might* succeed later. Returning success from load trigger.`);
-                 // --- END FIX ---
-                 // Don't throw error here, let the frontend poll status
                  return;
              } catch (pullError) {
                 console.error(`[OllamaService] Failed to initiate pull for '${modelName}'. Load cannot proceed. Pull error:`, pullError);
@@ -182,8 +180,7 @@ export const loadOllamaModel = async (modelName: string): Promise<void> => {
 // --- End Load Model Function ---
 
 
-// --- Generate Chat Response (Non-Streaming - Deprecated internally) ---
-// Kept for internal use (e.g., loadOllamaModel) but streaming is preferred for UI
+// --- Generate Chat Response (Deprecated Internally - Use context size) ---
 export const generateChatResponse = async (
     contextTranscript: string,
     chatHistory: BackendChatMessage[],
@@ -191,46 +188,44 @@ export const generateChatResponse = async (
 ): Promise<{ content: string; promptTokens?: number; completionTokens?: number }> => {
 
     const modelToUse = getActiveModel();
-    console.log(`[OllamaService:generateChatResponse] Attempting chat with ACTIVE model: ${modelToUse}`);
+    const contextSize = getConfiguredContextSize(); // <-- Get configured size
+    console.log(`[OllamaService:generateChatResponse] Attempting chat with ACTIVE model: ${modelToUse}, Context Size: ${contextSize ?? 'default'}`);
 
+    // ... (rest of setup logic unchanged) ...
     if (!contextTranscript) console.warn("[OllamaService] Generating response with empty or missing transcript context string.");
     else console.log(`[OllamaService] Transcript context string provided (length: ${contextTranscript.length}).`);
-
     if (!chatHistory || chatHistory.length === 0) throw new InternalServerError("Internal Error: Cannot generate response without chat history.");
     if (chatHistory[chatHistory.length - 1].sender !== 'user') throw new InternalServerError("Internal Error: Malformed chat history for LLM.");
 
-    console.log(`[OllamaService] Generating response (model: ${modelToUse})...`);
-
     const latestUserMessage = chatHistory[chatHistory.length - 1];
     const previousHistory = chatHistory.slice(0, -1);
-
     const transcriptContextMessage: Message = { role: 'user', content: `CONTEXT TRANSCRIPT:\n"""\n${contextTranscript || 'No transcript available.'}\n"""` };
     const messages: Message[] = [ { role: 'system', content: SYSTEM_PROMPT }, ...previousHistory.map((msg): Message => ({ role: msg.sender === 'ai' ? 'assistant' : 'user', content: msg.text })), transcriptContextMessage, { role: 'user', content: latestUserMessage.text } ];
-
+    console.log(`[OllamaService] Generating response (model: ${modelToUse})...`);
     console.log(`[OllamaService] Sending ${messages.length} messages to Ollama.`);
-    messages.slice(-3).forEach((msg, index) => { const snippet = msg.content.substring(0, 150).replace(/\n/g, '\\n') + (msg.content.length > 150 ? '...' : ''); console.log(`[OllamaService DEBUG] Message [-${messages.length - index}]: Role=${msg.role}, Content Snippet="${snippet}"`); });
 
     try {
         const response: ChatResponse = await ollama.chat({
-            model: modelToUse, // Use the active model
+            model: modelToUse,
             messages: messages,
             stream: false,
-            keep_alive: config.ollama.keepAlive, // Use keep_alive from config for actual chats
+            keep_alive: config.ollama.keepAlive,
              options: {
-                 // TODO: Make context size configurable via the UI/Modal
-                 // num_ctx: 4096, // Example: Set context size if needed
+                 // --- Add num_ctx if configured ---
+                 ...(contextSize !== null && { num_ctx: contextSize }),
+                 // --- End Add ---
              }
         });
 
+        // ... (rest of response handling unchanged) ...
         if (!response?.message?.content) throw new InternalServerError('Invalid response structure from AI.');
-
         const durationInfo = response.total_duration ? `(${(response.total_duration / 1e9).toFixed(2)}s)` : '';
         const tokensInfo = response.prompt_eval_count && response.eval_count ? `(${response.prompt_eval_count} prompt + ${response.eval_count} completion tokens)` : '';
         console.log(`[OllamaService] Response received ${durationInfo} ${tokensInfo}.`);
-
         return { content: response.message.content.trim(), promptTokens: response.prompt_eval_count, completionTokens: response.eval_count };
 
     } catch (error: any) { // Error handling including pull/retry
+        // ... (error handling logic unchanged) ...
         console.error('[OllamaService] Error during generateChatResponse:', error);
         const isModelNotFoundError = error.status === 404 || (error.message?.includes('model') && (error.message?.includes('not found') || error.message?.includes('missing')));
         if (isModelNotFoundError && !retryAttempt) {
@@ -257,28 +252,25 @@ export const generateChatResponse = async (
 };
 // --- End Generate Chat Response ---
 
-// --- Stream Chat Response ---
+// --- Stream Chat Response (Use context size) ---
 export const streamChatResponse = async (
     contextTranscript: string,
     chatHistory: BackendChatMessage[],
     retryAttempt: boolean = false
-): Promise<AsyncIterable<ChatResponse>> => { // Return AsyncIterable for streaming
+): Promise<AsyncIterable<ChatResponse>> => {
 
     const modelToUse = getActiveModel();
-    console.log(`[OllamaService:streamChatResponse] Attempting streaming chat with ACTIVE model: ${modelToUse}`);
+    const contextSize = getConfiguredContextSize(); // <-- Get configured size
+    console.log(`[OllamaService:streamChatResponse] Attempting streaming chat with ACTIVE model: ${modelToUse}, Context Size: ${contextSize ?? 'default'}`);
 
+    // ... (rest of setup logic unchanged) ...
     if (!contextTranscript) console.warn("[OllamaService] Streaming response with empty or missing transcript context string.");
     else console.log(`[OllamaService] Transcript context string provided (length: ${contextTranscript.length}).`);
-
     if (!chatHistory || chatHistory.length === 0) throw new InternalServerError("Internal Error: Cannot stream response without chat history.");
     if (chatHistory[chatHistory.length - 1].sender !== 'user') throw new InternalServerError("Internal Error: Malformed chat history for LLM.");
 
-    console.log(`[OllamaService] Streaming response (model: ${modelToUse})...`);
-
     const latestUserMessage = chatHistory[chatHistory.length - 1];
     const previousHistory = chatHistory.slice(0, -1);
-
-    // Ensure message format matches Ollama API expectations
     const transcriptContextMessage: OllamaApiMessage = { role: 'user', content: `CONTEXT TRANSCRIPT:\n"""\n${contextTranscript || 'No transcript available.'}\n"""` };
     const messages: OllamaApiMessage[] = [
         { role: 'system', content: SYSTEM_PROMPT },
@@ -286,7 +278,7 @@ export const streamChatResponse = async (
         transcriptContextMessage,
         { role: 'user', content: latestUserMessage.text }
     ];
-
+    console.log(`[OllamaService] Streaming response (model: ${modelToUse})...`);
     console.log(`[OllamaService] Sending ${messages.length} messages to Ollama for streaming.`);
 
     try {
@@ -296,12 +288,17 @@ export const streamChatResponse = async (
             messages: messages,
             stream: true, // Enable streaming
             keep_alive: config.ollama.keepAlive,
-             options: { /* context size etc. */ }
+             options: {
+                 // --- Add num_ctx if configured ---
+                 ...(contextSize !== null && { num_ctx: contextSize }),
+                 // --- End Add ---
+             }
         });
         console.log(`[OllamaService] Stream initiated for model ${modelToUse}.`);
         return stream; // Return the async iterator directly
 
     } catch (error: any) { // Error handling for initiating the stream
+        // ... (error handling logic unchanged) ...
         console.error('[OllamaService] Error initiating chat stream:', error);
         const isModelNotFoundError = error.status === 404 || (error.message?.includes('model') && (error.message?.includes('not found') || error.message?.includes('missing')));
 

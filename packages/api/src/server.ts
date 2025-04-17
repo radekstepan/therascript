@@ -1,5 +1,4 @@
 /* packages/api/src/server.ts */
-// packages/api/src/server.ts
 import http from 'node:http';
 import { WritableStream } from 'node:stream/web';
 import { Elysia, t, ValidationError } from 'elysia';
@@ -11,14 +10,16 @@ import { sessionRoutes } from './routes/sessionRoutes.js';
 import { chatRoutes } from './routes/chatRoutes.js';
 import { ApiError, InternalServerError, ConflictError, BadRequestError } from './errors.js';
 // --- Update service imports ---
-import { checkModelStatus, listModels, loadOllamaModel, pullOllamaModel } from './services/ollamaService.js'; // Added pullOllamaModel
-import { setActiveModel, getActiveModel } from './services/activeModelService.js'; // Added state management
+import { checkModelStatus, listModels, loadOllamaModel, pullOllamaModel } from './services/ollamaService.js';
+// --- Import new service functions ---
+import { setActiveModelAndContext, getActiveModel, getConfiguredContextSize } from './services/activeModelService.js';
 // --- End Update ---
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import axios from 'axios';
 
+// ... (initial setup, version reading, CORS, request logging - unchanged) ...
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 let appVersion = '0.0.0';
@@ -52,7 +53,7 @@ const OllamaModelDetailSchema = t.Object({
 });
 const OllamaModelInfoSchema = t.Object({
     name: t.String(),
-    modified_at: t.String(), // Expecting string from service layer now
+    modified_at: t.String(),
     size: t.Number(),
     digest: t.String(),
     details: OllamaModelDetailSchema,
@@ -64,20 +65,26 @@ const AvailableModelsResponseSchema = t.Object({
     models: t.Array(OllamaModelInfoSchema),
 });
 // --- Modified OllamaStatusResponseSchema ---
-// Added modelChecked field
 const OllamaStatusResponseSchema = t.Object({
-    activeModel: t.String(), // The model name currently active in the backend state
-    modelChecked: t.String(), // The specific model name whose status was checked
-    loaded: t.Boolean(),         // Whether modelChecked is loaded
-    details: t.Optional(OllamaModelInfoSchema) // Details if modelChecked is loaded
+    activeModel: t.String(),
+    modelChecked: t.String(),
+    loaded: t.Boolean(),
+    details: t.Optional(OllamaModelInfoSchema),
+    // --- Added configuredContextSize ---
+    configuredContextSize: t.Optional(t.Union([t.Number(), t.Null()])),
 });
 // --- End Schema ---
-// --- Rename LoadModelBodySchema to SetModelBodySchema ---
+// --- Modified SetModelBodySchema ---
 const SetModelBodySchema = t.Object({
-    modelName: t.String({ minLength: 1, error: "Model name is required." })
+    modelName: t.String({ minLength: 1, error: "Model name is required." }),
+    // --- Added optional contextSize ---
+    contextSize: t.Optional(t.Union([
+        t.Number({ minimum: 1, error: "Context size must be a positive integer." }),
+        t.Null() // Allow null to explicitly request default
+    ]))
 });
 // --- End Schema ---
-// --- Add PullModelBodySchema ---
+// --- Add PullModelBodySchema (no change) ---
 const PullModelBodySchema = t.Object({
     modelName: t.String({ minLength: 1, error: "Model name is required." })
 });
@@ -86,9 +93,9 @@ const PullModelBodySchema = t.Object({
 
 const app = new Elysia()
     .model({
-        setModelBody: SetModelBodySchema, // Use new name
-        pullModelBody: PullModelBodySchema, // Add new schema
-        ollamaModelInfo: OllamaModelInfoSchema, // Add for reuse
+        setModelBody: SetModelBodySchema, // Use updated schema
+        pullModelBody: PullModelBodySchema,
+        ollamaModelInfo: OllamaModelInfoSchema,
         availableModelsResponse: AvailableModelsResponseSchema,
         ollamaStatusResponse: OllamaStatusResponseSchema, // Use updated schema
     })
@@ -96,7 +103,7 @@ const app = new Elysia()
     .onRequest(({ request }) => { const origin = request.headers.get('origin'); console.log(`[Request] --> ${request.method} ${new URL(request.url).pathname}${origin ? ` (Origin: ${origin})` : ''}`); })
     .onAfterHandle(({ request, set }) => { console.log(`[Request] <-- ${request.method} ${new URL(request.url).pathname} ${set.status ?? '???'}`); })
     .use(swagger({ path: '/api/docs', exclude: ['/api/docs', '/api/docs/json', '/api/health', '/api/schema'], documentation: { info: { title: 'Therascript API (Elysia)', version: appVersion }, tags: [ { name: 'Ollama', description: 'Ollama Management Endpoints' } ] } }))
-    .onError(({ code, error, set, request }) => { // Standard Error Handling Logic
+    .onError(({ code, error, set, request }) => { /* ... (Error Handling unchanged) ... */
          const errorMessage = getErrorMessage(error); let path = 'N/A'; let method = 'N/A'; try { if (request?.url) path = new URL(request.url).pathname; if (request?.method) method = request.method; } catch { }
          console.error(`[Error] Code: ${code} | Method: ${method} | Path: ${path} | Message: ${errorMessage}`);
          if (!config.server.isProduction) { const stack = getErrorStack(error); if (stack) console.error("Stack:", stack); if (!(error instanceof Error)) console.error("Full Error Object:", error); }
@@ -117,60 +124,54 @@ const app = new Elysia()
              else { const dbError = new InternalServerError('A database operation failed.', error instanceof Error ? error : undefined); set.status = dbError.status; return { error: dbError.name, message: dbError.message, details: dbError.details }; }
          }
          console.error("[Error Handler] Unhandled Error Type:", error); const fallbackError = new InternalServerError('An unexpected server error occurred.', error instanceof Error ? error : undefined); set.status = fallbackError.status; return { error: fallbackError.name, message: fallbackError.message, details: fallbackError.details };
-     })
+    })
     // --- Ollama Management Routes ---
     .group('/api/ollama', { detail: { tags: ['Ollama'] } }, (app) => app
         .get('/available-models', async ({ set }) => {
+            // ... (available models logic unchanged) ...
             console.log(`[API Models] Requesting available models`);
             try { const models = await listModels(); set.status = 200; return { models }; }
             catch (error: any) { console.error(`[API Models] Error fetching available models:`, error); if (error instanceof InternalServerError) throw error; throw new InternalServerError(`Failed to fetch available models from Ollama.`, error); }
         }, { response: { 200: 'availableModelsResponse', 500: t.Object({ error: t.String(), message: t.String(), details: t.Optional(t.Any()) }) }, detail: { summary: 'List locally available Ollama models' } })
 
-        // --- NEW: Set Model Endpoint ---
+        // --- Modified Set Model Endpoint ---
         .post('/set-model', async ({ body, set }) => {
-            const { modelName } = body;
-            console.log(`[API SetModel] Received request to set active model to: ${modelName}`);
+            const { modelName, contextSize } = body; // Destructure contextSize
+            const sizeLog = contextSize === undefined ? 'default' : (contextSize === null ? 'explicit default' : contextSize);
+            console.log(`[API SetModel] Request: Set active model=${modelName}, contextSize=${sizeLog}`);
             try {
-                // 1. Update the active model in the state service
-                setActiveModel(modelName);
+                // 1. Update active model and context size in the state service
+                setActiveModelAndContext(modelName, contextSize); // Pass both
 
-                // 2. Trigger the load process for the new active model
-                // (This uses generate/chat to ensure Ollama attempts loading)
-                await loadOllamaModel(modelName); // This might throw if model not found locally
+                // 2. Trigger load process (uses updated active model implicitly)
+                await loadOllamaModel(modelName);
 
-                set.status = 200; // OK - state updated, load triggered
-                return { message: `Active model set to ${modelName}. Load initiated. Check status.` };
+                set.status = 200;
+                return { message: `Active model set to ${modelName} (context: ${getConfiguredContextSize() ?? 'default'}). Load initiated. Check status.` };
             } catch (error: any) {
-                 console.error(`[API SetModel] Error setting or loading model ${modelName}:`, error);
-                 // Don't revert active model on load error? Or should we? For now, leave it set.
-                 if (error instanceof ApiError) throw error; // Re-throw known errors (like BadRequest if model not found)
+                 console.error(`[API SetModel] Error setting/loading model ${modelName} (context: ${sizeLog}):`, error);
+                 if (error instanceof ApiError) throw error;
                  throw new InternalServerError(`Failed to set active model or initiate load for ${modelName}.`, error);
             }
         }, {
-            body: 'setModelBody', // Use the schema model
+            body: 'setModelBody', // Use updated schema
             response: {
-                 200: t.Object({ message: t.String() }), // Changed status code to 200 OK
+                 200: t.Object({ message: t.String() }),
                  400: t.Object({ error: t.String(), message: t.String(), details: t.Optional(t.Any()), validationErrors: t.Optional(t.Any()) }),
                  500: t.Object({ error: t.String(), message: t.String(), details: t.Optional(t.Any()) })
              },
-            detail: { summary: 'Set the active Ollama model for the backend and trigger its load' }
+            detail: { summary: 'Set the active Ollama model and context size, trigger load' }
         })
-        // --- END NEW ---
+        // --- END Modified Set Model ---
 
-        // --- Modified Unload Endpoint ---
+        // --- Unload Endpoint (no change needed) ---
         .post('/unload', async ({ set }) => {
-            const modelToUnload = getActiveModel(); // Unload the currently active model
+            // ... existing code ...
+            const modelToUnload = getActiveModel();
             console.log(`[API Unload] Received request to unload active model: ${modelToUnload}`);
             try {
-                // Use keep_alive: 0 on a chat request for the *active* model
-                await ollama.chat({
-                    model: modelToUnload, // Target the active model
-                    messages: [{ role: 'user', content: 'unload request' }],
-                    keep_alive: 0,
-                    stream: false,
-                });
+                await ollama.chat({ model: modelToUnload, messages: [{ role: 'user', content: 'unload request' }], keep_alive: 0, stream: false, });
                 console.log(`[API Unload] Sent unload request (keep_alive: 0) for active model ${modelToUnload}`);
-                // Note: We don't reset the activeModel state here, /status will reflect it's not loaded
                 set.status = 200;
                 return { message: `Unload request sent for model ${modelToUnload}. It will be unloaded shortly.` };
             } catch (error: any) {
@@ -184,49 +185,46 @@ const app = new Elysia()
              response: { 200: t.Object({ message: t.String() }), 400: t.Object({ /*...*/ }), 500: t.Object({ /*...*/ }) },
              detail: { summary: 'Request Ollama to unload the currently active model' }
         })
-        // --- End Modified Unload ---
+        // --- End Unload ---
 
-        // --- NEW: Pull Model Endpoint ---
+        // --- Pull Model Endpoint (no change needed) ---
         .post('/pull-model', async ({ body, set }) => {
-            const { modelName } = body;
+            // ... existing code ...
+             const { modelName } = body;
             console.log(`[API PullModel] Received request to pull model: ${modelName}`);
             try {
-                // Call the service function to initiate the pull
                 await pullOllamaModel(modelName);
-                set.status = 202; // Accepted - Pull initiated, not completed
+                set.status = 202;
                 return { message: `Pull initiated for model ${modelName}. Check available models or Ollama logs for progress.` };
             } catch (error: any) {
                  console.error(`[API PullModel] Error initiating pull for model ${modelName}:`, error);
-                 if (error instanceof ApiError) throw error; // Re-throw known errors (like BadRequest)
+                 if (error instanceof ApiError) throw error;
                  throw new InternalServerError(`Failed to initiate pull for model ${modelName}.`, error);
             }
         }, {
-            body: 'pullModelBody', // Use the new schema model
-            response: {
-                 202: t.Object({ message: t.String() }),
-                 400: t.Object({ error: t.String(), message: t.String(), details: t.Optional(t.Any()), validationErrors: t.Optional(t.Any()) }),
-                 500: t.Object({ error: t.String(), message: t.String(), details: t.Optional(t.Any()) })
-             },
+            body: 'pullModelBody',
+            response: { 202: t.Object({ message: t.String() }), /* ... */ },
             detail: { summary: 'Initiate downloading a new Ollama model from the registry' }
         })
-        // --- END NEW ---
+        // --- End Pull Model ---
 
         // --- Updated Status Endpoint ---
         .get('/status', async ({ query, set }) => {
-            const currentActiveModel = getActiveModel(); // Get dynamically active model
-            // Check specific model if requested, otherwise check the active model
+            const currentActiveModel = getActiveModel();
+            const currentConfiguredContext = getConfiguredContextSize(); // Get context size
             const modelNameToCheck = query.modelName ?? currentActiveModel;
 
-            console.log(`[API Status] Checking status for model: ${modelNameToCheck} (Current Active: ${currentActiveModel})`);
+            console.log(`[API Status] Checking status for model: ${modelNameToCheck} (Current Active: ${currentActiveModel}, Configured Context: ${currentConfiguredContext ?? 'default'})`);
             try {
                 const loadedModelInfo = await checkModelStatus(modelNameToCheck);
                 set.status = 200;
                 // --- Return updated structure ---
                 return {
-                    activeModel: currentActiveModel, // Report the dynamic active model
-                    modelChecked: modelNameToCheck,     // Return the name we actually checked
-                    loaded: !!loadedModelInfo,          // Status of the checked model
-                    details: loadedModelInfo ?? undefined, // Details of the checked model (if loaded)
+                    activeModel: currentActiveModel,
+                    modelChecked: modelNameToCheck,
+                    loaded: !!loadedModelInfo,
+                    details: loadedModelInfo ?? undefined,
+                    configuredContextSize: currentConfiguredContext, // Add context size
                 };
                 // --- End update ---
             } catch (error: any) {
@@ -235,27 +233,22 @@ const app = new Elysia()
                 throw new InternalServerError(`Failed to check status of model ${modelNameToCheck}.`);
             }
         }, {
-            query: t.Optional(t.Object({ // Make query param optional
-                modelName: t.Optional(t.String())
-            })),
-            response: {
-                200: 'ollamaStatusResponse', // Use the updated schema
-                500: t.Object({ error: t.String(), message: t.String(), details: t.Optional(t.Any()) })
-            },
-            detail: { summary: 'Check if a specific (or the currently active) Ollama model is loaded & get details' }
+            query: t.Optional(t.Object({ modelName: t.Optional(t.String()) })),
+            response: { 200: 'ollamaStatusResponse', /* ... errors */ }, // Use updated schema
+            detail: { summary: 'Check loaded status & configured context size for active/specific model' }
         })
-        // --- End Update ---
+        // --- End Status ---
     ) // End /api/ollama group
 
-    // --- Existing API Routes ---
+    // --- Existing API Routes (unchanged) ---
     .get('/api/health', ({ set }) => { try { set.status = 200; return { status: 'OK', database: 'connected', timestamp: new Date().toISOString() }; } catch (dbError) { console.error("[Health Check] Database error:", dbError); throw new InternalServerError('Database connection failed', dbError instanceof Error ? dbError : undefined); } }, { detail: { tags: ['Meta'] } })
     .get('/api/schema', ({ set }) => { set.status = 501; return { message: "Use /api/docs for Swagger UI." }; }, { detail: { tags: ['Meta'] } })
     .use(sessionRoutes)
     .use(chatRoutes);
 
-// --- Server Creation & Start ---
+// --- Server Creation & Start (unchanged) ---
 console.log(`[Server] Creating Node.js HTTP server wrapper on port ${config.server.port}...`);
-const server = http.createServer((req, res) => { // Request handling wrapper
+const server = http.createServer((req, res) => { /* ... wrapper logic ... */
     const host = req.headers.host || `localhost:${config.server.port}`; const pathAndQuery = req.url && req.url.startsWith('/') ? req.url : '/'; const url = `http://${host}${pathAndQuery}`;
     let bodyChunks: Buffer[] = []; req.on('data', chunk => { bodyChunks.push(chunk); }).on('end', () => {
         const bodyBuffer = Buffer.concat(bodyChunks); const requestInit: RequestInit = { method: req.method, headers: req.headers as HeadersInit, body: (req.method !== 'GET' && req.method !== 'HEAD' && bodyBuffer.length > 0) ? bodyBuffer : undefined, };
@@ -265,7 +258,8 @@ const server = http.createServer((req, res) => { // Request handling wrapper
         }).catch((err) => { console.error('Error in app.handle:', err); if (!res.headersSent) { res.writeHead(500, { 'Content-Type': 'application/json' }); } if (!res.writableEnded) { res.end(JSON.stringify({ error: 'Internal Server Error during request handling' })); } });
     }).on('error', (err) => { console.error('Request stream error:', err); if (!res.headersSent) { res.writeHead(400, { 'Content-Type': 'application/json' }); } if (!res.writableEnded) { res.end(JSON.stringify({ error: 'Bad Request stream' })); } });
 });
-server.listen(config.server.port, () => { console.log(`-------------------------------------------------------`); console.log(`🚀 Therapy Analyzer Backend (Elysia/Node) listening on port ${config.server.port}`); console.log(`   Version: ${appVersion}`); console.log(`   Mode: ${config.server.nodeEnv}`); console.log(`   CORS Origin Allowed: ${config.server.corsOrigin}`); console.log(`   DB Path: ${config.db.sqlitePath}`); console.log(`   Ollama URL: ${config.ollama.baseURL}`); console.log(`   Ollama Model: ${getActiveModel()} (Active)`); console.log(`-------------------------------------------------------`); console.log(`Access API Docs at: http://localhost:${config.server.port}/api/docs`); console.log(`Health Check: http://localhost:${config.server.port}/api/health`); console.log(`-------------------------------------------------------`); });
+server.listen(config.server.port, () => { console.log(`-------------------------------------------------------`); console.log(`🚀 Therapy Analyzer Backend (Elysia/Node) listening on port ${config.server.port}`); console.log(`   Version: ${appVersion}`); console.log(`   Mode: ${config.server.nodeEnv}`); console.log(`   CORS Origin Allowed: ${config.server.corsOrigin}`); console.log(`   DB Path: ${config.db.sqlitePath}`); console.log(`   Ollama URL: ${config.ollama.baseURL}`); console.log(`   Ollama Model: ${getActiveModel()} (Active)`); console.log(`   Configured Context: ${getConfiguredContextSize() ?? 'default'}`); console.log(`-------------------------------------------------------`); console.log(`Access API Docs at: http://localhost:${config.server.port}/api/docs`); console.log(`Health Check: http://localhost:${config.server.port}/api/health`); console.log(`-------------------------------------------------------`); });
+
 
 export default app;
 export type App = typeof app;

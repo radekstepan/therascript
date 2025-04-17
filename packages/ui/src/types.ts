@@ -1,4 +1,4 @@
-// packages/ui/src/types.ts
+/* packages/ui/src/types.ts */
 // TODO can we infer these from the API?
 
 // Add the new structured transcript types
@@ -72,14 +72,12 @@ export interface OllamaModelInfo {
 
 
 export interface OllamaStatus {
-    // --- Renamed configuredModel to activeModel ---
     activeModel: string; // The model currently active in the backend state
-    // --- End Rename ---
-    // --- Add modelChecked field ---
     modelChecked: string; // The specific model name whose status was checked
-    // --- End Add ---
     loaded: boolean; // Whether modelChecked is loaded
     details?: OllamaModelInfo; // Details if loaded (refers to modelChecked)
+    // --- Add configuredContextSize ---
+    configuredContextSize?: number | null; // Currently configured num_ctx for active model
 }
 
 export interface AvailableModelsResponse {
