@@ -1,6 +1,8 @@
-import { exec as callbackExec } from 'child_process';
+// packages/ollama/src/dockerManager.ts
+import { exec as callbackExec, spawn, ChildProcess } from 'child_process'; // Import spawn
 import * as util from 'util';
 import * as path from 'path';
+import { Readable } from 'stream'; // Import Readable
 
 const exec = util.promisify(callbackExec);
 
@@ -83,23 +85,93 @@ export async function isModelPulled(modelName: string): Promise<boolean> {
     }
 }
 
-/** Pulls the specified model using Docker Compose */
-export async function pullModel(modelName: string): Promise<void> {
-    console.log(`⏳ Pulling model "${modelName}"... This may take a while.`);
+/**
+ * Pulls the specified model using Docker Compose and returns a stream of progress updates.
+ * @param modelName The name of the model to pull.
+ * @returns A Readable stream that yields progress update strings.
+ */
+export function pullModelStream(modelName: string): Readable {
+    console.log(`⏳ [Stream] Starting pull for model "${modelName}"...`);
+    const stream = new Readable({ read() {} }); // Create a push-based Readable stream
+
+    // --- Use spawn instead of exec ---
+    const command = 'docker';
+    const args = ['compose', '-f', COMPOSE_FILE, 'exec', '-T', OLLAMA_SERVICE_NAME, 'ollama', 'pull', modelName];
+    // '-T' disables pseudo-tty allocation, which is better for non-interactive exec
+
+    let pullProcess: ChildProcess | null = null;
+
     try {
-        const { stdout, stderr } = await exec(`docker compose -f "${COMPOSE_FILE}" exec ${OLLAMA_SERVICE_NAME} ollama pull ${modelName}`);
-        console.log("--- Ollama Pull Output ---");
-        console.log(stdout || "(No stdout)");
-        if(stderr) console.warn("Stderr:", stderr);
-        console.log("------------------------");
-        console.log(`✅ Successfully pulled model "${modelName}" (or it was already up to date).`);
+        pullProcess = spawn(command, args, {
+            stdio: ['ignore', 'pipe', 'pipe'] // Ignore stdin, pipe stdout/stderr
+        });
+
+        stream.push(`{"status": "Starting pull for ${modelName}..."}\n`);
+
+        pullProcess.stdout?.on('data', (data: Buffer) => {
+            const output = data.toString('utf-8');
+            // Push raw output lines for the service layer to parse
+            output.split('\n').forEach(line => {
+                if (line.trim()) {
+                    stream.push(line + '\n');
+                }
+            });
+        });
+
+        pullProcess.stderr?.on('data', (data: Buffer) => {
+            const errorOutput = data.toString('utf-8');
+             // Push raw error lines too, prefix them for easier parsing?
+             errorOutput.split('\n').forEach(line => {
+                 if (line.trim()) {
+                    stream.push(`stderr: ${line}\n`);
+                 }
+            });
+        });
+
+        pullProcess.on('error', (err) => {
+            console.error(`❌ [Stream] Failed to start pull process for ${modelName}:`, err);
+            stream.push(`{"error": "Failed to start docker compose process: ${err.message}"}\n`);
+            stream.push(null); // End the stream on error
+        });
+
+        pullProcess.on('close', (code) => {
+            if (code === 0) {
+                console.log(`✅ [Stream] Pull process for "${modelName}" finished successfully.`);
+                stream.push(`{"status": "completed", "message": "Model pull finished."}\n`);
+            } else {
+                console.error(`❌ [Stream] Pull process for "${modelName}" exited with code ${code}.`);
+                 // Don't push an error object here if stderr already pushed details
+                 // Just signal completion, the consumer should check the log for errors
+                stream.push(`{"status": "failed", "message": "Pull process exited with code ${code}."}\n`);
+            }
+            stream.push(null); // End the stream
+        });
+
     } catch (error: any) {
-        console.error(`❌ Failed to pull model "${modelName}".`);
-        if (error.stderr) console.error(`Stderr: ${error.stderr}`);
-        if (error.stdout) console.error(`Stdout: ${error.stdout}`);
-        throw new Error(`Failed to pull model ${modelName}`);
+        console.error(`❌ [Stream] Error setting up pull process for ${modelName}:`, error);
+        // Push an error message into the stream before ending it
+        stream.push(`{"error": "Error setting up pull process: ${error.message}"}\n`);
+        stream.push(null); // End the stream immediately on setup error
     }
+
+    // Handle stream destruction (e.g., client disconnects)
+    stream.on('close', () => {
+        console.log(`[Stream] Readable stream for pulling ${modelName} closed.`);
+        if (pullProcess && !pullProcess.killed) {
+            console.log(`[Stream] Attempting to terminate pull process ${pullProcess.pid}...`);
+            pullProcess.kill('SIGTERM'); // Try graceful termination first
+            setTimeout(() => {
+                if (pullProcess && !pullProcess.killed) {
+                    console.warn(`[Stream] Pull process ${pullProcess.pid} did not terminate, forcing kill.`);
+                    pullProcess.kill('SIGKILL');
+                }
+            }, 2000); // Force kill after 2 seconds
+        }
+    });
+
+    return stream;
 }
+// --- End Stream Function ---
 
 /** Ensures the Ollama service is running */
 export async function ensureOllamaRunning(): Promise<void> {

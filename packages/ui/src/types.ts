@@ -1,4 +1,3 @@
-/* packages/ui/src/types.ts */
 // TODO can we infer these from the API?
 
 // Add the new structured transcript types
@@ -33,7 +32,7 @@ export interface ChatSession {
 export interface SessionMetadata {
     clientName: string;
     sessionName: string;
-    date: string;
+    date: string; // Expects YYYY-MM-DD format for input, backend stores ISO
     sessionType: string;
     therapy: string;
 }
@@ -47,10 +46,12 @@ export interface Session extends SessionMetadata {
     status: 'pending' | 'transcribing' | 'completed' | 'failed';
     whisperJobId: string | null;
     // Chats array might initially contain only metadata
+    // Date is now an ISO string from backend
+    date: string;
     chats: ChatSession[];
 }
 
-// --- New Types for LLM Management ---
+// --- LLM Management Types ---
 
 export interface OllamaModelInfo {
     name: string;
@@ -76,11 +77,25 @@ export interface OllamaStatus {
     modelChecked: string; // The specific model name whose status was checked
     loaded: boolean; // Whether modelChecked is loaded
     details?: OllamaModelInfo; // Details if loaded (refers to modelChecked)
-    // --- Add configuredContextSize ---
+    // Add configuredContextSize
     configuredContextSize?: number | null; // Currently configured num_ctx for active model
 }
 
 export interface AvailableModelsResponse {
     models: OllamaModelInfo[];
 }
-// --- End New Types ---
+
+// --- NEW: Add Pull Job Status Type for UI ---
+// Matches the PullStatusResponseSchema in the backend API
+export type UIPullJobStatusState = 'queued' | 'parsing' | 'downloading' | 'verifying' | 'completed' | 'failed' | 'canceling' | 'canceled';
+export interface UIPullJobStatus {
+    jobId: string;
+    modelName: string;
+    status: UIPullJobStatusState;
+    message: string;
+    progress?: number; // Overall percentage
+    error?: string;
+    // Optional detailed bytes, maybe useful later
+    completedBytes?: number;
+    totalBytes?: number;
+}
