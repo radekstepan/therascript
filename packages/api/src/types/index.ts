@@ -4,6 +4,9 @@ export interface BackendChatMessage {
   sender: 'user' | 'ai';
   text: string;
   timestamp: number;
+  // Add optional token counts - will only be present on 'ai' messages after generation
+  promptTokens?: number;
+  completionTokens?: number;
 }
 
 export interface BackendChatSession {
@@ -89,3 +92,23 @@ export interface ApiErrorResponse {
     details?: string | Record<string, any>;
     validationErrors?: any;
 }
+
+// --- Type for Ollama /api/tags response model item ---
+export interface OllamaModelInfo {
+    name: string;
+    modified_at: string;
+    size: number;
+    digest: string;
+    details: {
+        format: string;
+        family: string;
+        families: string[] | null;
+        parameter_size: string;
+        quantization_level: string;
+    };
+    // Optional fields added by /ps
+    size_vram?: number;
+    expires_at?: string;
+    size_total?: number; // Added for clarity if different from 'size' in list
+}
+// --- End Type ---

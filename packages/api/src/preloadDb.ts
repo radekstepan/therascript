@@ -1,12 +1,24 @@
+// packages/api/src/preloadDb.ts
 import Database from 'better-sqlite3';
-import path from 'path';
-import fs from 'fs/promises';
-import config from './config/index.js';
-// *** Import the initializeDatabase function ***
-import { initializeDatabase } from './db/sqliteService.js';
+import path from 'node:path';
+import fs from 'node:fs/promises';
+// --- Use fileURLToPath to get directory ---
+import { fileURLToPath } from 'node:url';
+// --- Don't rely on config for paths in preload, resolve directly ---
+import { initializeDatabase } from './db/sqliteService.js'; // Keep this import
 
-const dbPath = config.db.sqlitePath;
-const transcriptsBaseDir = config.db.transcriptsDir;
+// --- Determine paths relative to *this file's* location within packages/api ---
+const __filename = fileURLToPath(import.meta.url);
+// Assuming build output is in 'dist', navigate up to the 'packages/api' root
+// dist/preloadDb.js -> dist/ -> packages/api/
+const packageApiDir = path.resolve(__filename, '../../'); // Go up two levels from dist/preloadDb.js
+
+// --- Construct paths *within* packages/api/data ---
+const dbDir = path.join(packageApiDir, 'data'); // Target packages/api/data
+const dbPath = path.join(dbDir, 'therapy-analyzer.sqlite'); // Target packages/api/data/therapy-analyzer.sqlite
+const transcriptsBaseDir = path.join(dbDir, 'transcripts'); // Target packages/api/data/transcripts
+// --- End Path Determination ---
+
 
 interface SessionVerificationData {
     id: number;
@@ -103,32 +115,57 @@ const sampleSessions = [
 ];
 
 async function preloadDatabase() {
-    console.log(`[Preload] Connecting to database at ${dbPath}`);
+    // --- Use paths resolved relative to this script ---
+    console.log(`[Preload] Database file target: ${dbPath}`);
+    console.log(`[Preload] Transcripts directory target: ${transcriptsBaseDir}`);
+
     // Ensure DB file is deleted before preloading for clean slate
+    console.log(`[Preload] Attempting to delete existing database file: ${dbPath}`);
     try {
         await fs.unlink(dbPath);
-        console.log(`[Preload] Deleted existing database file: ${dbPath}`);
+        console.log(`[Preload] Deleted existing database file.`);
     } catch (err: any) {
-        if (err.code !== 'ENOENT') { // Ignore error if file didn't exist
+        if (err.code === 'ENOENT') {
+             console.log(`[Preload] Database file not found (ENOENT), proceeding.`);
+        } else {
              console.error(`[Preload] Error deleting existing database file:`, err);
-             process.exit(1);
+             // Don't exit immediately, let directory creation handle it
         }
     }
 
-    const db = new Database(dbPath, { verbose: console.log });
+    // --- Ensure the target directory exists ---
+    console.log(`[Preload] Ensuring database directory exists: ${dbDir}`);
+    try {
+        await fs.mkdir(dbDir, { recursive: true });
+        console.log(`[Preload] Database directory confirmed/created: ${dbDir}`);
+    } catch (err) {
+         console.error(`[Preload] Failed to create database directory ${dbDir}:`, err);
+         process.exit(1); // Exit if we can't create the directory
+    }
+    // --- End Directory Check ---
+
+    // --- Connect using the resolved path ---
+    console.log(`[Preload] Connecting to database at ${dbPath}`);
+    let db: Database.Database | null = null; // Initialize as null
     let success = false;
 
     const fileWritePromises: Promise<void>[] = [];
     const sessionsToVerify: { name: string; expectedPathEnding: string; expectedDate: string }[] = [];
 
     try {
+        // --- Initialize DB Connection Inside Try ---
+        db = new Database(dbPath, { verbose: console.log });
+        console.log(`[Preload] Database connection established: ${dbPath}`);
+        // --- End Initialization ---
+
+
         console.log(`[Preload] Ensuring transcript directory exists: ${transcriptsBaseDir}`);
         await fs.mkdir(transcriptsBaseDir, { recursive: true });
         console.log(`[Preload] Transcript directory confirmed/created.`);
 
-        // *** Initialize the schema using the imported function ***
+        // Initialize the schema using the imported function
         console.log('[Preload] Initializing database schema...');
-        initializeDatabase(db); // <--- CALL INITIALIZE FUNCTION
+        initializeDatabase(db); // This function needs the DB instance
         console.log('[Preload] Database schema initialized.');
 
         // Prepare statements (now safe, tables exist)
@@ -144,8 +181,8 @@ async function preloadDatabase() {
           VALUES (?, ?, ?)
         `);
         const insertMessage = db.prepare(/* SQL */ `
-          INSERT INTO messages (chatId, sender, text, timestamp)
-          VALUES (?, ?, ?, ?)
+          INSERT INTO messages (chatId, sender, text, timestamp, promptTokens, completionTokens)
+          VALUES (?, ?, ?, ?, ?, ?)
         `);
 
         console.log('[Preload] Starting DB transaction for data insertion...');
@@ -164,6 +201,7 @@ async function preloadDatabase() {
                 });
                 const sessionId = sessionResult.lastInsertRowid as number;
 
+                // Use correctly resolved transcriptsBaseDir
                 const correctTranscriptPath = path.join(transcriptsBaseDir, `${sessionId}.json`);
                 const expectedPathEnding = `${sessionId}.json`;
                 updateSessionPath.run(correctTranscriptPath, sessionId);
@@ -188,7 +226,7 @@ async function preloadDatabase() {
                     for (const message of chat.messages) {
                         // Use timestamp slightly offset from chat timestamp for realism
                         const messageTimestamp = timestamp + Math.floor(Math.random() * 100);
-                        insertMessage.run(chatId, message.sender, message.text, messageTimestamp);
+                        insertMessage.run(chatId, message.sender, message.text, messageTimestamp, null, null);
                     }
                 }
             }
@@ -203,10 +241,17 @@ async function preloadDatabase() {
 
     } catch (error) {
         console.error('[Preload] Error during preloading process:', error);
-        success = false;
+        success = false; // Ensure success is false on error
+        // If the error is the Disk I/O error, provide more context
+        if (error instanceof Error && error.message.includes('disk I/O error')) {
+            console.error('[Preload Hint] Disk I/O errors often relate to permissions, file locking, or directory issues.');
+            console.error(`[Preload Hint] Check write permissions for the target directory: ${dbDir}`);
+            console.error('[Preload Hint] Ensure no other process is holding the database file open.');
+        }
     } finally {
         // --- Verification Step ---
-        if (success && db.open) {
+        // Check if db was successfully initialized before verifying
+        if (success && db && db.open) {
             console.log('[Preload Verification] Checking database entries...');
             try {
                 const verifyStmt = db.prepare('SELECT id, status, transcriptPath, date FROM sessions WHERE sessionName = ?');
@@ -241,10 +286,19 @@ async function preloadDatabase() {
                 else { console.error('[Preload Verification] One or more verification checks FAILED.'); success = false; }
 
             } catch(verifyError) { console.error('[Preload Verification] Error checking DB entries:', verifyError); success = false; }
+        } else if (!db) {
+             console.error('[Preload] Database connection was not established. Skipping verification.');
+             success = false; // Ensure success is false if DB connection failed
         }
         // --- End Verification ---
 
-        if (db.open) { db.close(); console.log('[Preload] Database connection closed.'); }
+        // --- Close DB Connection ---
+        if (db && db.open) {
+             db.close();
+             console.log('[Preload] Database connection closed.');
+        }
+        // --- End Close ---
+
         if (success) console.log('[Preload] Database preloaded successfully!');
         else { console.error('[Preload] Database preloading FAILED. Please check errors above.'); process.exitCode = 1; }
     }

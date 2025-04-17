@@ -1,19 +1,12 @@
-// <file path="packages/api/src/api/chatHandler.ts">
-/* packages/api/src/api/chatHandler.ts */
 import { chatRepository } from '../repositories/chatRepository.js';
-import { loadTranscriptContent } from '../services/fileService.js'; // Loads structured transcript now
+import { loadTranscriptContent } from '../services/fileService.js';
 import { generateChatResponse } from '../services/ollamaService.js';
 import { NotFoundError, InternalServerError, ApiError } from '../errors.js';
-import type { StructuredTranscript, TranscriptParagraphData } from '../types/index.js'; // Import types
-
-// No need for explicit context types here, rely on Elysia's inference
+import type { StructuredTranscript, TranscriptParagraphData, BackendChatMessage } from '../types/index.js'; // Added BackendChatMessage
 
 // GET /:sessionId/chats/:chatId - Get details of a specific chat
-// Let Elysia infer the context, including 'chatData' from the derive block
-export const getChatDetails = ({ chatData, set }: any) => { // Using 'any' for simplicity, Elysia infers
-    if (!chatData) {
-        throw new NotFoundError(`Chat details not found in context.`);
-    }
+export const getChatDetails = ({ chatData, set }: any) => {
+    if (!chatData) throw new NotFoundError(`Chat details not found in context.`);
     // Ensure chatData includes messages as expected by the schema
     // If findChatById doesn't include messages, fetch them here (but it does now)
     set.status = 200;
@@ -21,7 +14,6 @@ export const getChatDetails = ({ chatData, set }: any) => { // Using 'any' for s
 };
 
 // POST /:sessionId/chats - Create a new chat
-// Let Elysia infer the context, including 'sessionData'
 export const createChat = ({ sessionData, set }: any) => { // Using 'any', becomes sync
     const sessionId = sessionData.id;
     try {
@@ -37,7 +29,6 @@ export const createChat = ({ sessionData, set }: any) => { // Using 'any', becom
 };
 
 // POST /:sessionId/chats/:chatId/messages - Send message, get AI response
-// Let Elysia infer context, including 'sessionData', 'chatData', 'body'
 export const addChatMessage = async ({ sessionData, chatData, body, set }: any) => { // Using 'any', remains async
     const { text } = body; // Body is validated by schema
     const trimmedText = text.trim();
@@ -47,8 +38,8 @@ export const addChatMessage = async ({ sessionData, chatData, body, set }: any) 
     }
 
     try {
-        // 1. Add user message to DB
-        const userMessage = chatRepository.addMessage(chatData.id, 'user', trimmedText); // Sync
+        // 1. Add user message to DB (no tokens)
+        const userMessage: BackendChatMessage = chatRepository.addMessage(chatData.id, 'user', trimmedText);
 
         // 2. Load Structured Transcript Content
         console.log(`[API addChatMessage] Loading transcript for session ${sessionData.id}...`); // DEBUG LOG
@@ -77,17 +68,24 @@ export const addChatMessage = async ({ sessionData, chatData, body, set }: any) 
         }
         console.log(`[API addChatMessage] Found ${currentMessages.length} messages in chat history for chat ${chatData.id}.`); // DEBUG LOG
 
-        // 5. Generate AI response using the stringified transcript and chat history
+        // 5. Generate AI response using the stringified transcript and chat history (now returns object with tokens)
         console.log(`[API addChatMessage] Sending context (transcript string length ${transcriptString.length} + ${currentMessages.length} messages) to Ollama...`);
-        const aiResponseText = await generateChatResponse(transcriptString, currentMessages); // Async, pass stringified transcript
+        const aiResponse = await generateChatResponse(transcriptString, currentMessages); // Returns { content, promptTokens?, completionTokens? }
         console.log(`[API addChatMessage] Received Ollama response.`);
 
-        // 6. Add AI response message to DB
-        const aiMessage = chatRepository.addMessage(chatData.id, 'ai', aiResponseText); // Sync
+        // 6. Add AI response message to DB (passing tokens)
+        const aiMessage: BackendChatMessage = chatRepository.addMessage(
+            chatData.id,
+            'ai',
+            aiResponse.content,
+            aiResponse.promptTokens, // Pass promptTokens
+            aiResponse.completionTokens // Pass completionTokens
+        );
 
         console.log(`[API] Added user (${userMessage.id}) and AI (${aiMessage.id}) messages to chat ${chatData.id}.`);
         set.status = 201;
-        return { userMessage, aiMessage }; // Matches AddMessageResponseSchema
+        // Return both messages; aiMessage will include tokens if provided by ollamaService
+        return { userMessage, aiMessage };
 
     } catch (error) {
          console.error(`[API Error] addChatMessage (Chat ID: ${chatData?.id}, Session ID: ${sessionData?.id}):`, error);
@@ -97,7 +95,6 @@ export const addChatMessage = async ({ sessionData, chatData, body, set }: any) 
 };
 
 // PATCH /:sessionId/chats/:chatId/name - Rename a chat
-// Let Elysia infer context
 export const renameChat = ({ chatData, body, set }: any) => { // Using 'any', becomes sync
     const { name } = body; // Body validated by schema
     // Ensure name is string or null for the repository
@@ -128,7 +125,6 @@ export const renameChat = ({ chatData, body, set }: any) => { // Using 'any', be
 };
 
 // DELETE /:sessionId/chats/:chatId - Delete a chat
-// Let Elysia infer context
 export const deleteChat = ({ chatData, set }: any) => { // Using 'any', becomes sync
     if (!chatData) {
         throw new NotFoundError(`Chat not found in context for delete.`);
@@ -148,4 +144,3 @@ export const deleteChat = ({ chatData, set }: any) => { // Using 'any', becomes 
         throw new InternalServerError('Failed to delete chat', error instanceof Error ? error : undefined);
     }
 };
-// </file>

@@ -1,3 +1,4 @@
+// packages/ui/src/types.ts
 // TODO can we infer these from the API?
 
 // Add the new structured transcript types
@@ -15,6 +16,9 @@ export interface ChatMessage {
     text: string;
     starred?: boolean;
     starredName?: string;
+    // Add token counts from the AI response that generated this message (if sender is 'ai')
+    promptTokens?: number;
+    completionTokens?: number;
 }
 
 export interface ChatSession {
@@ -45,3 +49,40 @@ export interface Session extends SessionMetadata {
     // Chats array might initially contain only metadata
     chats: ChatSession[];
 }
+
+// --- New Types for LLM Management ---
+
+export interface OllamaModelInfo {
+    name: string;
+    modified_at: string;
+    size: number;
+    digest: string;
+    details: {
+        format: string;
+        family: string;
+        families: string[] | null;
+        parameter_size: string;
+        quantization_level: string;
+    };
+    // Add optional fields from /ps check
+    size_vram?: number;
+    expires_at?: string;
+    size_total?: number;
+}
+
+
+export interface OllamaStatus {
+    // --- Renamed configuredModel to activeModel ---
+    activeModel: string; // The model currently active in the backend state
+    // --- End Rename ---
+    // --- Add modelChecked field ---
+    modelChecked: string; // The specific model name whose status was checked
+    // --- End Add ---
+    loaded: boolean; // Whether modelChecked is loaded
+    details?: OllamaModelInfo; // Details if loaded (refers to modelChecked)
+}
+
+export interface AvailableModelsResponse {
+    models: OllamaModelInfo[];
+}
+// --- End New Types ---

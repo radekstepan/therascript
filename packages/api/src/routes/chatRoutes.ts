@@ -6,6 +6,7 @@ import {
 } from '../api/chatHandler.js';
 import { NotFoundError, BadRequestError } from '../errors.js';
 
+// --- Schemas ---
 const SessionIdParamSchema = t.Object({
     sessionId: t.String({ pattern: '^[0-9]+$', error: "Session ID must be a positive number" })
 });
@@ -27,23 +28,34 @@ const ChatMetadataResponseSchema = t.Object({
     timestamp: t.Number(),
     name: t.Optional(t.Union([t.String(), t.Null()]))
 });
+
+// --- Updated ChatMessageResponseSchema ---
 const ChatMessageResponseSchema = t.Object({
     id: t.Number(),
     chatId: t.Number(),
     sender: t.Union([t.Literal('user'), t.Literal('ai')]),
     text: t.String(),
-    timestamp: t.Number()
+    timestamp: t.Number(),
+    // Add optional token counts
+    promptTokens: t.Optional(t.Union([t.Number(), t.Null()])),
+    completionTokens: t.Optional(t.Union([t.Number(), t.Null()])),
 });
+// --- End Update ---
+
 const FullChatSessionResponseSchema = t.Intersect([
     ChatMetadataResponseSchema,
     t.Object({
-        messages: t.Array(ChatMessageResponseSchema)
+        messages: t.Array(ChatMessageResponseSchema) // Uses updated message schema
     })
 ]);
+
+// --- Updated AddMessageResponseSchema ---
 const AddMessageResponseSchema = t.Object({
-    userMessage: ChatMessageResponseSchema,
-    aiMessage: ChatMessageResponseSchema
+    userMessage: ChatMessageResponseSchema, // User message won't have tokens from backend
+    aiMessage: ChatMessageResponseSchema // AI message might have tokens
 });
+// --- End Update ---
+
 const DeleteChatResponseSchema = t.Object({ message: t.String() });
 
 
@@ -56,8 +68,9 @@ export const chatRoutes = new Elysia({ prefix: '/api/sessions/:sessionId/chats' 
         chatMessageBody: ChatMessageBodySchema,
         chatRenameBody: ChatRenameBodySchema,
         chatMetadataResponse: ChatMetadataResponseSchema,
+        chatMessageResponse: ChatMessageResponseSchema, // Added updated schema model
         fullChatSessionResponse: FullChatSessionResponseSchema,
-        addMessageResponse: AddMessageResponseSchema,
+        addMessageResponse: AddMessageResponseSchema, // Use updated schema model
         deleteChatResponse: DeleteChatResponseSchema
     })
     // Apply session loading and tagging to all routes in this group
@@ -110,7 +123,7 @@ export const chatRoutes = new Elysia({ prefix: '/api/sessions/:sessionId/chats' 
                 // addChatMessage handler is already marked async
                 .post('/:chatId/messages', addChatMessage, {
                     body: 'chatMessageBody',
-                    response: { 201: 'addMessageResponse' },
+                    response: { 201: 'addMessageResponse' }, // Uses updated response schema
                     detail: { summary: 'Add user message & get AI response' }
                 })
 
@@ -131,4 +144,3 @@ export const chatRoutes = new Elysia({ prefix: '/api/sessions/:sessionId/chats' 
             )
         )
     );
-    

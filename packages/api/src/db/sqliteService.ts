@@ -15,7 +15,7 @@ if (!fs.existsSync(dbDir)) {
     fs.mkdirSync(dbDir, { recursive: true });
 }
 
-// --- Schema Definition (Remove individual export) ---
+// --- Schema Definition (Updated) ---
 // *** REMOVE export keyword here ***
 const schema = `
     -- Sessions Table
@@ -43,13 +43,17 @@ const schema = `
     CREATE INDEX IF NOT EXISTS idx_chat_session ON chats (sessionId);
     CREATE INDEX IF NOT EXISTS idx_chat_timestamp ON chats (timestamp); -- Added index for chat sorting
 
-    -- Messages Table
+    -- Messages Table (Updated)
     CREATE TABLE IF NOT EXISTS messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         chatId INTEGER NOT NULL,
         sender TEXT NOT NULL CHECK(sender IN ('user', 'ai')),
         text TEXT NOT NULL,
         timestamp INTEGER NOT NULL, -- UNIX Millis Timestamp for sorting/display
+        -- Added token counts (nullable integers) --
+        promptTokens INTEGER,
+        completionTokens INTEGER,
+        -- End Added --
         FOREIGN KEY (chatId) REFERENCES chats (id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_message_chat ON messages (chatId);
@@ -140,7 +144,7 @@ function verifySchemaVersion(dbInstance: DB, currentSchemaDefinition: string) {
 }
 
 
-// --- Initialize Function Definition ---
+// --- Initialize Function Definition (Updated for new columns) ---
 // *** REMOVE export keyword here ***
 function initializeDatabase(dbInstance: DB) {
     console.log('[db Init Func]: Attempting to initialize schema...'); // Log entry
@@ -158,6 +162,8 @@ function initializeDatabase(dbInstance: DB) {
         // Check and add columns (simple migrations)
         const sessionColumns = dbInstance.pragma("table_info(sessions)") as { name: string; type: string; }[];
         const chatColumns = dbInstance.pragma("table_info(chats)") as { name: string; type: string; }[];
+        // --- Get Message Columns ---
+        const messageColumns = dbInstance.pragma("table_info(messages)") as { name: string; type: string; }[];
 
         // --- Session Table Migrations ---
         const hasStatus = sessionColumns.some((col) => col.name === 'status');
@@ -189,8 +195,26 @@ function initializeDatabase(dbInstance: DB) {
          }
         // Chat timestamp remains INTEGER (Unix ms)
 
-        // --- Message Table Migrations ---
-        // Add index for timestamp if not exists
+
+        // --- Message Table Migrations (Added Token Columns) ---
+        const hasPromptTokens = messageColumns.some((col) => col.name === 'promptTokens');
+        const hasCompletionTokens = messageColumns.some((col) => col.name === 'completionTokens');
+
+        if (!hasPromptTokens) {
+             console.log('[db Init Func Migration]: Adding "promptTokens" column to messages...');
+             // Add as INTEGER, allowing NULL
+             dbInstance.exec("ALTER TABLE messages ADD COLUMN promptTokens INTEGER NULL");
+             console.log('[db Init Func Migration]: "promptTokens" column added.');
+        }
+        if (!hasCompletionTokens) {
+             console.log('[db Init Func Migration]: Adding "completionTokens" column to messages...');
+             // Add as INTEGER, allowing NULL
+             dbInstance.exec("ALTER TABLE messages ADD COLUMN completionTokens INTEGER NULL");
+             console.log('[db Init Func Migration]: "completionTokens" column added.');
+        }
+        // --- End Message Migrations ---
+
+        // Add index for message timestamp if not exists
         const messageIndexes = dbInstance.pragma("index_list('messages')") as { name: string }[];
          if (!messageIndexes.some(idx => idx.name === 'idx_message_timestamp')) {
              console.log('[db Init Func Migration]: Adding message timestamp index...');

@@ -1,11 +1,9 @@
 export { SessionView } from './SessionView'; // Explicitly export SessionView
-
-// Export SessionContent separately if needed elsewhere,
-// otherwise it's primarily used within SessionView
 export { SessionContent } from './SessionContent'; // Explicitly export SessionContent
 
 // Chat Components
-export * from './Chat/ChatHeader';
+// export * from './Chat/ChatHeader'; // Keep commented or remove old header
+export * from './Chat/ChatPanelHeader'; // Export new header
 export * from './Chat/ChatInput';
 export * from './Chat/ChatMessages';
 export * from './Chat/ChatInterface';
@@ -14,14 +12,13 @@ export * from './Chat/StartChatPrompt';
 
 // Sidebar Components
 export * from './Sidebar/SessionSidebar';
-export * from './Sidebar/PastChatsList';
+// Removed PastChatsList export as it seems integrated into SessionSidebar
 
 // Transcription Components
 export * from './Transcription/Transcription';
-// Note: Assuming TranscriptParagraph is potentially reusable outside SessionView,
-// it might live in src/components/Transcription/TranscriptParagraph.tsx
-// If it's *only* used here, it could be nested inside SessionView/Transcription/
-// export * from '../Transcription/TranscriptParagraph'; // Or './Transcription/TranscriptParagraph' if nested
+// Assuming TranscriptParagraph lives in its own folder now
+// export * from '../Transcription/TranscriptParagraph';
 
 // Modal Components
 export * from './Modals/EditDetailsModal';
+export * from './Modals/LlmManagementModal'; // Export new modal

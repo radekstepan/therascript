@@ -1,13 +1,16 @@
-// <file path="packages/api/src/repositories/chatRepository.ts">
 import { get, all, run } from '../db/sqliteService.js'; // Use synchronous helpers
 import type { BackendChatSession, BackendChatMessage } from '../types/index.js';
 
-// SQL statements (prepared later by sqliteService helpers)
+// --- SQL Statements ---
 const insertChatSql = 'INSERT INTO chats (sessionId, timestamp, name) VALUES (?, ?, ?)';
-const insertMessageSql = 'INSERT INTO messages (chatId, sender, text, timestamp) VALUES (?, ?, ?, ?)';
+// --- Modified INSERT statement for messages ---
+const insertMessageSql = `
+    INSERT INTO messages (chatId, sender, text, timestamp, promptTokens, completionTokens)
+    VALUES (?, ?, ?, ?, ?, ?)
+`;
+// --- End Modification ---
 const selectChatsBySessionIdSql = 'SELECT * FROM chats WHERE sessionId = ? ORDER BY timestamp DESC';
-// *** MODIFICATION: Prioritize sorting by insertion order (id) ***
-const selectMessagesByChatIdSql = 'SELECT * FROM messages WHERE chatId = ? ORDER BY id ASC';
+const selectMessagesByChatIdSql = 'SELECT * FROM messages WHERE chatId = ? ORDER BY id ASC'; // Keep sort by ID
 const selectChatByIdSql = 'SELECT * FROM chats WHERE id = ?';
 const selectMessageByIdSql = 'SELECT * FROM messages WHERE id = ?';
 const updateChatNameSql = 'UPDATE chats SET name = ? WHERE id = ?';
@@ -43,21 +46,38 @@ export const chatRepository = {
         }
     },
 
-    addMessage: (chatId: number, sender: 'user' | 'ai', text: string): BackendChatMessage => {
+    // --- Modified addMessage to include optional tokens ---
+    addMessage: (
+        chatId: number,
+        sender: 'user' | 'ai',
+        text: string,
+        promptTokens?: number | null, // Optional
+        completionTokens?: number | null // Optional
+    ): BackendChatMessage => {
         const timestamp = Date.now(); // Keep timestamp for potential display or other uses
         try {
-            const info = run(insertMessageSql, chatId, sender, text, timestamp);
+            // Pass tokens (or null if undefined/null) to the SQL query
+            const info = run(
+                insertMessageSql,
+                chatId,
+                sender,
+                text,
+                timestamp,
+                promptTokens ?? null,
+                completionTokens ?? null
+            );
             const newMessageId = info.lastInsertRowid as number;
             const newMessage = get<BackendChatMessage>(selectMessageByIdSql, newMessageId);
             if (!newMessage) throw new Error(`Failed retrieve message ${newMessageId} immediately after creation.`);
-            // Log the inserted message details
-            console.log(`[chatRepository.addMessage DEBUG] Inserted Msg ID: ${newMessage.id}, Sender: ${newMessage.sender}, Timestamp: ${newMessage.timestamp}`);
+            // Log the inserted message details including tokens
+            console.log(`[chatRepository.addMessage DEBUG] Inserted Msg ID: ${newMessage.id}, Sender: ${newMessage.sender}, Tokens: P${newMessage.promptTokens ?? '-'}/C${newMessage.completionTokens ?? '-'}`);
             return newMessage;
         } catch (error) {
             console.error(`DB error adding message to chat ${chatId}:`, error);
             throw new Error(`Database error adding message.`);
         }
     },
+    // --- End Modification ---
 
     findChatsBySessionId: (sessionId: number): BackendChatSession[] => {
         try {
@@ -83,8 +103,8 @@ export const chatRepository = {
              // Use the modified SQL query here too
             const messages = all<BackendChatMessage>(selectMessagesByChatIdSql, chatId);
             console.log(`[findMessagesByChatId DEBUG] Fetched ${messages.length} messages for Chat ID ${chatId} using ORDER BY id ASC.`); // Add log
-            // Log timestamps for debugging if needed
-            messages.slice(-5).forEach(m => console.log(`[findMessagesByChatId DEBUG] Msg ID=${m.id}, Sender=${m.sender}, TS=${m.timestamp}`));
+            // Log timestamps and tokens for debugging if needed
+            messages.slice(-5).forEach(m => console.log(`[findMessagesByChatId DEBUG] Msg ID=${m.id}, Sender=${m.sender}, TS=${m.timestamp}, Tokens=P${m.promptTokens ?? '-'}/C${m.completionTokens ?? '-'}`));
             return messages;
         } catch (error) {
             console.error(`DB error fetching messages for chat ${chatId}:`, error);
@@ -114,4 +134,3 @@ export const chatRepository = {
         }
     },
 };
-// </file>

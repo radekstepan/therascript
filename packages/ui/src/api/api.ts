@@ -1,3 +1,4 @@
+// packages/ui/src/api/api.ts
 import axios from 'axios';
 import type {
     Session,
@@ -5,7 +6,11 @@ import type {
     ChatSession,
     ChatMessage,
     StructuredTranscript,
-    TranscriptParagraphData
+    TranscriptParagraphData,
+    // --- Import new LLM types ---
+    OllamaStatus,
+    AvailableModelsResponse,
+    // --- End LLM types ---
     // Remove WhisperJobStatus from this import
 } from '../types';
 
@@ -110,12 +115,12 @@ export const startNewChat = async (sessionId: number): Promise<ChatSession> => {
     };
 };
 
-// POST /api/sessions/{sessionId}/chats/{chatId}/messages
+// POST /api/sessions/{sessionId}/chats/{chatId}/messages (Modified Return Type)
 export const addChatMessage = async (
     sessionId: number,
     chatId: number,
     text: string
-): Promise<{ userMessage: ChatMessage; aiMessage: ChatMessage }> => {
+): Promise<{ userMessage: ChatMessage; aiMessage: ChatMessage }> => { // aiMessage now includes tokens
     const response = await axios.post(`/api/sessions/${sessionId}/chats/${chatId}/messages`, { text });
     // The response type from the backend should match { userMessage: ChatMessage; aiMessage: ChatMessage }
     return response.data;
@@ -147,9 +152,31 @@ export const unloadOllamaModel = async (): Promise<{ message: string }> => {
     return response.data;
 };
 
-// GET /api/ollama/status
-export const fetchOllamaStatus = async (): Promise<{ loaded: boolean; model?: string }> => {
-    console.log("Fetching Ollama status from /api/ollama/status");
-    const response = await axios.get('/api/ollama/status');
+// --- Modified fetchOllamaStatus ---
+// Accepts optional modelName to check specific model status
+export const fetchOllamaStatus = async (modelName?: string): Promise<OllamaStatus> => {
+    const endpoint = '/api/ollama/status';
+    const params = modelName ? { modelName } : {}; // Add query param if name is provided
+    console.log(`Fetching Ollama status from ${endpoint} ${modelName ? `for model ${modelName}`: '(active)'}`);
+    const response = await axios.get<OllamaStatus>(endpoint, { params });
+    // The response from the backend *should* now include modelChecked field matching the requested modelName (or default)
     return response.data;
 };
+// --- End Modification ---
+
+export const fetchAvailableModels = async (): Promise<AvailableModelsResponse> => {
+    console.log("Fetching available models from /api/ollama/available-models");
+    const response = await axios.get<AvailableModelsResponse>('/api/ollama/available-models');
+    return response.data;
+};
+
+// --- NEW: Set Active Model API Call ---
+export const setOllamaModel = async (modelName: string): Promise<{ message: string }> => {
+    console.log(`Sending request to set active model: ${modelName}`);
+    const response = await axios.post('/api/ollama/set-model', { modelName });
+    return response.data; // { message: "Active model set to..." }
+};
+// --- End New API Call ---
+
+// --- Removed loadOllamaModel ---
+// --- End Remove ---

@@ -1,55 +1,133 @@
-import React, { useRef, useEffect, useCallback } from 'react';
-// Removed useAtomValue if not needed elsewhere
+// packages/ui/src/components/SessionView/Chat/ChatInterface.tsx
+import React, { useRef, useEffect, useCallback, useState } from 'react';
 import { Box, Flex, ScrollArea, Spinner, Text } from '@radix-ui/themes';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'; // Keep useQueryClient
 import { ChatInput } from './ChatInput';
 import { ChatMessages } from './ChatMessages';
-import { ChatHeader } from './ChatHeader'; // Import ChatHeader
-import { fetchChatDetails } from '../../../api/api';
-import { debounce } from '../../../helpers'; // Import debounce
-import type { ChatSession, Session } from '../../../types'; // Add Session type
+import { ChatPanelHeader } from './ChatPanelHeader';
+import { fetchChatDetails, addChatMessage } from '../../../api/api';
+import { debounce } from '../../../helpers';
+import type { ChatSession, Session, ChatMessage, OllamaStatus } from '../../../types';
+import { currentQueryAtom } from '../../../store';
+import { useAtom } from 'jotai';
 
 interface ChatInterfaceProps {
-    session: Session | null; // Accept session prop
-    activeChatId: number | null; // Accept activeChatId prop
-    isLoadingSessionMeta?: boolean; // Pass session meta loading state
+    session: Session | null;
+    activeChatId: number | null;
+    isLoadingSessionMeta?: boolean;
+    ollamaStatus: OllamaStatus | undefined;
+    isLoadingOllamaStatus: boolean;
+    onOpenLlmModal: () => void;
     isTabActive?: boolean;
     initialScrollTop?: number;
     onScrollUpdate?: (scrollTop: number) => void;
 }
 
+// Helper function to create a temporary message ID
+const createTemporaryId = () => Date.now();
+
 export function ChatInterface({
-    session, // Use prop
-    activeChatId, // Use prop
-    isLoadingSessionMeta, // Use prop
+    session,
+    activeChatId,
+    isLoadingSessionMeta,
+    ollamaStatus,
+    isLoadingOllamaStatus,
+    onOpenLlmModal,
     isTabActive,
     initialScrollTop = 0,
     onScrollUpdate,
 }: ChatInterfaceProps) {
-    // REMOVE activeSessionId/activeChatId from useAtomValue if they are now props
-    // const activeChatId = useAtomValue(activeChatIdAtom);
-    const activeSessionId = session?.id ?? null; // Get session ID from prop if needed for query key
+    const activeSessionId = session?.id ?? null;
 
     const restoreScrollRef = useRef(false);
     const chatContentRef = useRef<HTMLDivElement | null>(null);
     const viewportRef = useRef<HTMLDivElement | null>(null);
+    const queryClient = useQueryClient(); // Get query client instance
+    const [currentQuery, setCurrentQuery] = useAtom(currentQueryAtom);
 
-    // Fetch chat details using Tanstack Query
+    const [latestPromptTokens, setLatestPromptTokens] = useState<number | null>(null);
+    const [latestCompletionTokens, setLatestCompletionTokens] = useState<number | null>(null);
+
+    // Fetch chat details query
     const { data: chatData, isLoading: isLoadingMessages, error: chatError, isFetching } = useQuery<ChatSession | null, Error>({
-        queryKey: ['chat', activeSessionId, activeChatId], // Use IDs from props/derived prop
+        queryKey: ['chat', activeSessionId, activeChatId],
         queryFn: () => {
-            if (!activeSessionId || activeChatId === null) return Promise.resolve(null); // Return null if IDs aren't valid
+            if (!activeSessionId || activeChatId === null) return Promise.resolve(null);
             return fetchChatDetails(activeSessionId, activeChatId);
         },
-        enabled: !!activeSessionId && activeChatId !== null, // Only run query if IDs are valid
-        staleTime: 5 * 60 * 1000, // Example: Consider messages stale after 5 minutes
-        refetchOnWindowFocus: true, // Refetch if chat might have updated elsewhere
+        enabled: !!activeSessionId && activeChatId !== null,
+        staleTime: 5 * 60 * 1000,
+        refetchOnWindowFocus: true,
     });
 
+     // Add Message Mutation
+     const addMessageMutation = useMutation({
+        mutationFn: (text: string) => {
+            if (!activeSessionId || !activeChatId) {
+                throw new Error("Session ID or Chat ID missing");
+            }
+            return addChatMessage(activeSessionId, activeChatId, text);
+        },
+        onMutate: async (newMessageText) => {
+            if (!activeSessionId || !activeChatId) return;
+            const queryKey = ['chat', activeSessionId, activeChatId];
+            await queryClient.cancelQueries({ queryKey });
+            const previousChatData = queryClient.getQueryData<ChatSession>(queryKey);
+            const temporaryMessage: ChatMessage = { id: createTemporaryId(), sender: 'user', text: newMessageText };
+            queryClient.setQueryData<ChatSession>(queryKey, (oldData) => ({
+                ...(oldData ?? { id: activeChatId, sessionId: activeSessionId, timestamp: Date.now(), name: 'Unknown Chat', messages: [] }),
+                messages: [...(oldData?.messages ?? []), temporaryMessage],
+            }));
+            console.log('[Optimistic ChatInterface] Added temporary message ID:', temporaryMessage.id);
+            return { previousChatData, temporaryMessageId: temporaryMessage.id };
+        },
+        onError: (error, newMessageText, context) => {
+            console.error("Failed to send message:", error);
+            if (context?.previousChatData && activeSessionId && activeChatId) {
+                queryClient.setQueryData(['chat', activeSessionId, activeChatId], context.previousChatData);
+            }
+            // TODO: Show error toast
+        },
+        onSuccess: (data, newMessageText, context) => {
+            if (!activeSessionId || !activeChatId || !context?.temporaryMessageId) return;
+            const queryKey = ['chat', activeSessionId, activeChatId];
+             console.log('[Optimistic ChatInterface] onSuccess: Replacing temp msg', context.temporaryMessageId, 'with real msg', data.userMessage.id, 'and adding AI msg', data.aiMessage.id);
+
+            setLatestPromptTokens(data.aiMessage.promptTokens ?? null);
+            setLatestCompletionTokens(data.aiMessage.completionTokens ?? null);
+
+            queryClient.setQueryData<ChatSession>(queryKey, (oldData) => {
+                 if (!oldData) {
+                      console.warn('[Optimistic onSuccess ChatInterface] Cache data missing unexpectedly.');
+                      return { id: activeChatId, sessionId: activeSessionId, timestamp: Date.now(), name: 'Unknown Chat', messages: [data.userMessage, data.aiMessage] };
+                 }
+                 const messagesWithRealUser = (oldData.messages || []).map(msg =>
+                     msg.id === context.temporaryMessageId ? data.userMessage : msg
+                 );
+                 return { ...oldData, messages: [...messagesWithRealUser, data.aiMessage] };
+            });
+            setCurrentQuery(''); // Clear input field
+
+            // --- Invalidate Ollama Status Query ---
+            // This tells Tanstack Query that the status data might be outdated
+            // and should be refetched the next time it's needed (or immediately if observed).
+            console.log('[ChatInterface] Invalidating ollamaStatus query after successful message send.');
+            queryClient.invalidateQueries({ queryKey: ['ollamaStatus'] });
+            // --- End Invalidation ---
+
+        },
+         onSettled: (data, error, variables, context) => {
+             if (activeSessionId && activeChatId) {
+                 console.log('[Optimistic ChatInterface] onSettled: Invalidating chat query.');
+                 queryClient.invalidateQueries({ queryKey: ['chat', activeSessionId, activeChatId] });
+             }
+         },
+    });
+    // --- End Mutation ---
+
+
     const chatMessages = chatData?.messages || [];
-    // Combined loading state: consider initial prop, this query's loading, and background fetching
-    const combinedIsLoading = isLoadingSessionMeta || isLoadingMessages; // Simpler: initial load or explicit chat load
-    const isBackgroundFetching = isFetching && !combinedIsLoading; // Is fetching but not the initial load
+    const combinedIsLoading = isLoadingSessionMeta || isLoadingMessages;
 
      const debouncedScrollSave = useCallback(
          debounce((scrollTop: number) => {
@@ -59,14 +137,16 @@ export function ChatInterface({
          }, 150),
      [onScrollUpdate]);
 
-     const handleScroll = (event: React.UIEvent<HTMLDivElement>) => {
-         if (!restoreScrollRef.current && event.currentTarget) {
-             debouncedScrollSave(event.currentTarget.scrollTop);
-         }
-         if (restoreScrollRef.current) {
-              restoreScrollRef.current = false;
-         }
-     };
+     const handleScroll = useCallback(
+         (event: React.UIEvent<HTMLDivElement>) => {
+            if (!restoreScrollRef.current && event.currentTarget) {
+                debouncedScrollSave(event.currentTarget.scrollTop);
+            }
+            if (restoreScrollRef.current) {
+                restoreScrollRef.current = false;
+            }
+        },
+    [debouncedScrollSave]);
 
      useEffect(() => {
          if (isTabActive) {
@@ -92,7 +172,6 @@ export function ChatInterface({
 
     // Scroll to bottom effect
     useEffect(() => {
-        // Scroll only if the tab is active (or tabs aren't used), not restoring scroll, not loading, and there are messages
         if ((isTabActive === undefined || isTabActive) && !restoreScrollRef.current && !combinedIsLoading && chatMessages.length > 0) {
             if (chatContentRef.current) {
                 const lastElement = chatContentRef.current.lastElementChild;
@@ -103,19 +182,21 @@ export function ChatInterface({
                 }
             }
         }
-    }, [chatMessages.length, combinedIsLoading, isTabActive]); // Depend on length for new messages
+    }, [chatMessages.length, combinedIsLoading, isTabActive]);
 
 
     return (
-        <Flex direction="column" style={{ height: '100%', minHeight: 0 }}>
-            {/* Add ChatHeader and pass props */}
-            <Box style={{ borderBottom: '1px solid var(--gray-a6)', flexShrink: 0, backgroundColor: 'var(--color-panel-solid)' }}>
-                <ChatHeader
-                    session={session}
-                    activeChatId={activeChatId}
-                    isLoadingSessionMeta={isLoadingSessionMeta} // Pass loading state
-                />
-            </Box>
+        <Flex direction="column" style={{ height: '100%', minHeight: 0, border: '1px solid var(--gray-a6)', borderRadius: 'var(--radius-3)', overflow: 'hidden' }}>
+            {/* Use ChatPanelHeader */}
+            <ChatPanelHeader
+                ollamaStatus={ollamaStatus}
+                isLoadingStatus={isLoadingOllamaStatus}
+                latestPromptTokens={latestPromptTokens}
+                latestCompletionTokens={latestCompletionTokens}
+                onOpenLlmModal={onOpenLlmModal}
+            />
+            {/* End Header */}
+
             <ScrollArea
                 type="auto"
                 scrollbars="vertical"
@@ -123,51 +204,28 @@ export function ChatInterface({
                 onScroll={handleScroll}
                 style={{ flexGrow: 1, minHeight: 0, position: 'relative' }}
             >
-                {combinedIsLoading && ( // Show spinner overlay only during initial load
-                    <Flex
-                       align="center"
-                       justify="center"
-                       style={{
-                           position: 'absolute',
-                           inset: 0,
-                           backgroundColor: 'var(--color-panel-translucent)',
-                           zIndex: 10,
-                           borderRadius: 'var(--radius-3)',
-                       }}
-                       >
-                        <Spinner size="3" />
-                        <Text ml="2" color="gray">Loading messages...</Text>
+                {/* Loading/Error states */}
+                {combinedIsLoading && (
+                    <Flex align="center" justify="center" style={{ position: 'absolute', inset: 0, backgroundColor: 'var(--color-panel-translucent)', zIndex: 10, borderRadius: 'var(--radius-3)' }} >
+                        <Spinner size="3" /> <Text ml="2" color="gray">Loading messages...</Text>
                     </Flex>
                 )}
-                 {chatError && !combinedIsLoading && ( // Show error only if loading finished with error
-                     <Flex justify="center" p="4">
-                        <Text color="red">Error loading chat: {chatError.message}</Text>
-                     </Flex>
+                 {chatError && !combinedIsLoading && (
+                     <Flex justify="center" p="4"><Text color="red">Error loading chat: {chatError.message}</Text></Flex>
                  )}
-                {/* Render messages even if background fetching is happening */}
+
                 <Box p="4" ref={chatContentRef} style={{ opacity: combinedIsLoading ? 0.5 : 1, transition: 'opacity 0.2s ease-in-out' }}>
-                    {/* Pass fetched messages down */}
                     <ChatMessages messages={chatMessages} activeChatId={activeChatId} />
-                     {/* Optionally indicate background refresh */}
-                     {/* {isBackgroundFetching && <Text size="1" color="gray" align="center">Checking for new messages...</Text>} */}
                 </Box>
             </ScrollArea>
+
             <Box
-                px="4"
-                pt="4"
-                pb="2"
-                style={{
-                    flexShrink: 0,
-                    borderTop: '1px solid var(--gray-a6)',
-                    backgroundColor: 'var(--color-panel-solid)', // Match header/sidebar?
-                    opacity: combinedIsLoading ? 0.6 : 1, // Fade slightly during initial load
-                    // Don't disable pointer events entirely, let ChatInput handle its disabled state
-                    // pointerEvents: combinedIsLoading ? 'none' : 'auto',
-                    transition: 'opacity 0.2s ease-in-out',
-                }}
-            >
-                 {/* ChatInput disabled state is managed internally based on mutation status and activeChatId */}
-                <ChatInput disabled={combinedIsLoading || !activeChatId} />
+                px="4" pt="4" pb="2"
+                style={{ flexShrink: 0, borderTop: '1px solid var(--gray-a6)', backgroundColor: 'var(--color-panel-solid)', opacity: combinedIsLoading ? 0.6 : 1, transition: 'opacity 0.2s ease-in-out' }} >
+                <ChatInput
+                    disabled={combinedIsLoading || !activeChatId}
+                    addMessageMutation={addMessageMutation}
+                />
             </Box>
         </Flex>
     );
