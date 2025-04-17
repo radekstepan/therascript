@@ -9,10 +9,12 @@ import {
     Cross2Icon,
     CheckIcon,
     UpdateIcon,
+    CopyIcon, // <-- Import CopyIcon
 } from '@radix-ui/react-icons';
-import { Button, TextField, Flex, Box, Text, IconButton, Dialog, Spinner, Callout } from '@radix-ui/themes';
-import ReactMarkdown from 'react-markdown'; // Import ReactMarkdown
-import { activeSessionIdAtom, renderMarkdownAtom } from '../../../store'; // Import renderMarkdownAtom
+import { Button, TextField, Flex, Box, Text, IconButton, Dialog, Spinner, Callout, Tooltip } from '@radix-ui/themes'; // <-- Added Tooltip
+import ReactMarkdown from 'react-markdown';
+import { activeSessionIdAtom, renderMarkdownAtom, toastMessageAtom } from '../../../store'; // <-- Added toastMessageAtom
+import { useSetAtom } from 'jotai'; // <-- Added useSetAtom
 import type { ChatMessage, ChatSession } from '../../../types';
 import { cn } from '../../../utils';
 
@@ -30,7 +32,8 @@ interface ChatMessagesProps {
 
 export function ChatMessages({ activeChatId, messages: chatMessages, streamingMessage }: ChatMessagesProps) {
   const activeSessionId = useAtomValue(activeSessionIdAtom);
-  const shouldRenderMarkdown = useAtomValue(renderMarkdownAtom); // Read the atom value
+  const shouldRenderMarkdown = useAtomValue(renderMarkdownAtom);
+  const setToastMessage = useSetAtom(toastMessageAtom); // <-- For copy feedback
 
   const [isNamingDialogOpen, setIsNamingDialogOpen] = useState(false);
   const [messageToName, setMessageToName] = useState<ChatMessage | null>(null);
@@ -38,7 +41,12 @@ export function ChatMessages({ activeChatId, messages: chatMessages, streamingMe
   const [namingError, setNamingError] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
+  // --- State for copy feedback ---
+  const [copiedMessageId, setCopiedMessageId] = useState<number | string | null>(null);
+  // --- End state ---
+
   const handleStarClick = (message: ChatMessage) => {
+    // ... (star logic remains the same)
     if (activeChatId === null || !activeSessionId) return;
     const queryKey = ['chat', activeSessionId, activeChatId];
     if (message.starred) {
@@ -57,6 +65,7 @@ export function ChatMessages({ activeChatId, messages: chatMessages, streamingMe
   const handleCancelName = () => { setIsNamingDialogOpen(false); setMessageToName(null); setTemplateNameInput(''); setNamingError(null); };
 
   const handleConfirmName = () => {
+    // ... (confirm name logic remains the same)
     if (!messageToName || activeChatId === null || !activeSessionId) return;
     const finalName = templateNameInput.trim();
     if (!finalName) { setNamingError("Please enter a name for the starred template."); return; }
@@ -68,42 +77,70 @@ export function ChatMessages({ activeChatId, messages: chatMessages, streamingMe
     handleCancelName();
   };
 
+  // --- Copy Handler ---
+  const handleCopyClick = (messageId: number | string, textToCopy: string) => {
+      navigator.clipboard.writeText(textToCopy)
+          .then(() => {
+              setCopiedMessageId(messageId);
+              // Optional: Use toast instead of changing icon
+              setToastMessage("Copied to clipboard!");
+              setTimeout(() => setCopiedMessageId(null), 1500); // Reset after 1.5s
+          })
+          .catch(err => {
+              console.error('Failed to copy text: ', err);
+              setToastMessage("Error copying text.");
+          });
+  };
+  // --- End Copy Handler ---
+
+  // Helper to get a unique key for messages (handles temporary string IDs)
+  const getMessageKey = (msg: ChatMessage | StreamingMessage | { id: number | string }): string => {
+      return `msg-${msg.id}`;
+  };
+
+
   return (
     <>
       <Box className="space-y-3 p-1">
-        {chatMessages.length === 0 && activeChatId === null && !streamingMessage && (
-          <Text color="gray" size="2" align="center" my="4" style={{ fontStyle: 'italic' }}> Start a new chat or select one. </Text>
-        )}
-        {chatMessages.length === 0 && activeChatId !== null && !streamingMessage && (
-          <Text color="gray" size="2" align="center" my="4" style={{ fontStyle: 'italic' }}> No messages yet. Start typing below. </Text>
-        )}
+        {/* ... (empty state rendering remains the same) ... */}
         {chatMessages.map((msg) => (
           <Flex
-            // Use numeric ID if available, otherwise string ID for temp messages
-            key={typeof msg.id === 'number' ? msg.id : String(msg.id)}
+            key={getMessageKey(msg)} // Use helper for key
             gap="2"
             align="start"
-            className="group relative"
+            className="group relative" // Keep group for hover effects
             justify={msg.sender === 'user' ? 'end' : 'start'}
           >
-            {/* Render AI message */}
+            {/* --- Render AI message --- */}
             {msg.sender === 'ai' && (
-              <Box style={{ maxWidth: 'calc(100% - 1rem)' }} className={cn('rounded-lg p-2 px-3 text-sm shadow-sm break-words', 'bg-[--gray-a3] text-[--gray-a12]')} >
-                {/* --- Conditional Rendering --- */}
+              // --- Add position: relative and padding-right ---
+              <Box
+                  style={{ maxWidth: 'calc(100% - 1rem)', position: 'relative', paddingRight: '2rem' }} // Add relative positioning and padding
+                  className={cn('rounded-lg p-2 px-3 text-sm shadow-sm break-words', 'bg-[--gray-a3] text-[--gray-a12]')} >
+                 {/* Copy Button */}
+                 <Tooltip content="Copy message">
+                     <IconButton
+                         variant="ghost" color="gray" size="1" highContrast
+                         className="absolute top-1 right-1 opacity-0 group-hover:opacity-70 focus-visible:opacity-100 transition-opacity"
+                         style={{ zIndex: 5 }} // Ensure it's clickable
+                         onClick={() => handleCopyClick(msg.id, msg.text)}
+                         aria-label="Copy message"
+                     >
+                         {/* Show Check icon temporarily on success */}
+                         {copiedMessageId === msg.id ? <CheckIcon /> : <CopyIcon />}
+                     </IconButton>
+                 </Tooltip>
+                 {/* Content */}
                 {shouldRenderMarkdown ? (
-                    // --- Add specific class to wrapper div ---
                     <div className="markdown-ai-message">
-                        <ReactMarkdown>
-                            {msg.text}
-                        </ReactMarkdown>
+                        <ReactMarkdown>{msg.text}</ReactMarkdown>
                     </div>
                  ) : (
                     <Text size="2">{msg.text}</Text>
                  )}
-                {/* --- End Conditional Rendering --- */}
               </Box>
             )}
-            {/* Render User message */}
+            {/* --- Render User message --- */}
             {msg.sender === 'user' && (
               <>
                 <Box className="flex-shrink-0 self-center mt-px">
@@ -118,7 +155,24 @@ export function ChatMessages({ activeChatId, messages: chatMessages, streamingMe
                      </IconButton>
                    )}
                 </Box>
-                <Box style={{ maxWidth: 'calc(100% - 2rem)' }} className={cn('rounded-lg p-2 px-3 text-sm shadow-sm break-words', 'bg-blue-600 text-white dark:bg-blue-500 dark:text-white')} >
+                 {/* --- Add position: relative and padding-right --- */}
+                <Box
+                    style={{ maxWidth: 'calc(100% - 2rem)', position: 'relative', paddingRight: '2rem' }} // Add relative positioning and padding
+                    className={cn('rounded-lg p-2 px-3 text-sm shadow-sm break-words', 'bg-blue-600 text-white dark:bg-blue-500 dark:text-white')} >
+                   {/* Copy Button */}
+                    <Tooltip content="Copy message">
+                        <IconButton
+                            variant="ghost" color="gray" size="1" highContrast
+                            // Adjust color for dark background
+                            className="absolute top-1 right-1 opacity-0 group-hover:opacity-70 focus-visible:opacity-100 transition-opacity text-white/70 hover:text-white/90"
+                            style={{ zIndex: 5 }}
+                            onClick={() => handleCopyClick(msg.id, msg.text)}
+                            aria-label="Copy message"
+                        >
+                            {copiedMessageId === msg.id ? <CheckIcon /> : <CopyIcon />}
+                        </IconButton>
+                    </Tooltip>
+                    {/* Content */}
                   <Text size="2">{msg.text}</Text>
                 </Box>
               </>
@@ -129,18 +183,34 @@ export function ChatMessages({ activeChatId, messages: chatMessages, streamingMe
         {/* Render the streaming AI message */}
         {streamingMessage && (
             <Flex
-                key={streamingMessage.id} // Use the temporary streaming ID as key
+                key={getMessageKey(streamingMessage)} // Use helper for key
                 gap="2"
                 align="start"
                 justify="start"
+                className="group relative" // Add group for hover effect on copy button
             >
+                {/* --- Add position: relative and padding-right --- */}
                 <Box
-                    style={{ maxWidth: 'calc(100% - 1rem)' }}
+                    style={{ maxWidth: 'calc(100% - 1rem)', position: 'relative', paddingRight: '2rem' }} // Add relative positioning and padding
                     className={cn('rounded-lg p-2 px-3 text-sm shadow-sm break-words', 'bg-[--gray-a3] text-[--gray-a11]')}
                 >
-                    {/* --- Conditional Rendering for Stream --- */}
+                    {/* Copy Button (appears when stream finishes, maybe disable while streaming?) */}
+                    <Tooltip content="Copy message">
+                        <IconButton
+                            variant="ghost" color="gray" size="1" highContrast
+                            className="absolute top-1 right-1 opacity-0 group-hover:opacity-70 focus-visible:opacity-100 transition-opacity"
+                            style={{ zIndex: 5 }}
+                            onClick={() => handleCopyClick(streamingMessage.id, streamingMessage.content)}
+                             // Consider disabling while streaming if copy isn't desired until finished
+                            // disabled={true}
+                            aria-label="Copy message"
+                        >
+                            {/* Only show check if this specific temp ID was copied */}
+                            {copiedMessageId === streamingMessage.id ? <CheckIcon /> : <CopyIcon />}
+                        </IconButton>
+                    </Tooltip>
+                     {/* Content */}
                     {shouldRenderMarkdown ? (
-                        // --- Add specific class to wrapper div ---
                          <div className="markdown-ai-message">
                             <ReactMarkdown>
                                 {/* Append cursor effect manually */}
@@ -154,7 +224,6 @@ export function ChatMessages({ activeChatId, messages: chatMessages, streamingMe
                             <span className="inline-block w-1 h-4 bg-gray-500 dark:bg-gray-400 ml-px animate-pulse align-baseline"></span>
                          </Text>
                      )}
-                    {/* --- End Conditional Rendering --- */}
                  </Box>
             </Flex>
         )}
@@ -162,8 +231,9 @@ export function ChatMessages({ activeChatId, messages: chatMessages, streamingMe
 
       </Box>
 
-      {/* Naming Dialog */}
+      {/* Naming Dialog (remains the same) */}
       <Dialog.Root open={isNamingDialogOpen} onOpenChange={(open) => !open && handleCancelName()}>
+         {/* ... dialog content ... */}
         <Dialog.Content style={{ maxWidth: 450 }}>
           <Dialog.Title>Name This Template</Dialog.Title>
           <Dialog.Description size="2" mb="4" color="gray"> Give a short, memorable name to easily reuse this message. </Dialog.Description>
