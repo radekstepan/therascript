@@ -1,3 +1,4 @@
+/* packages/api/src/routes/chatRoutes.ts */
 import { Elysia, t } from 'elysia';
 import { chatRepository } from '../repositories/chatRepository.js';
 import { sessionRepository } from '../repositories/sessionRepository.js';
@@ -29,32 +30,24 @@ const ChatMetadataResponseSchema = t.Object({
     name: t.Optional(t.Union([t.String(), t.Null()]))
 });
 
-// --- Updated ChatMessageResponseSchema ---
+// Base message schema (doesn't change)
 const ChatMessageResponseSchema = t.Object({
     id: t.Number(),
     chatId: t.Number(),
     sender: t.Union([t.Literal('user'), t.Literal('ai')]),
     text: t.String(),
     timestamp: t.Number(),
-    // Add optional token counts
     promptTokens: t.Optional(t.Union([t.Number(), t.Null()])),
     completionTokens: t.Optional(t.Union([t.Number(), t.Null()])),
 });
-// --- End Update ---
 
+// Full chat includes array of messages
 const FullChatSessionResponseSchema = t.Intersect([
     ChatMetadataResponseSchema,
     t.Object({
-        messages: t.Array(ChatMessageResponseSchema) // Uses updated message schema
+        messages: t.Array(ChatMessageResponseSchema)
     })
 ]);
-
-// --- Updated AddMessageResponseSchema ---
-const AddMessageResponseSchema = t.Object({
-    userMessage: ChatMessageResponseSchema, // User message won't have tokens from backend
-    aiMessage: ChatMessageResponseSchema // AI message might have tokens
-});
-// --- End Update ---
 
 const DeleteChatResponseSchema = t.Object({ message: t.String() });
 
@@ -68,26 +61,23 @@ export const chatRoutes = new Elysia({ prefix: '/api/sessions/:sessionId/chats' 
         chatMessageBody: ChatMessageBodySchema,
         chatRenameBody: ChatRenameBodySchema,
         chatMetadataResponse: ChatMetadataResponseSchema,
-        chatMessageResponse: ChatMessageResponseSchema, // Added updated schema model
+        chatMessageResponse: ChatMessageResponseSchema,
         fullChatSessionResponse: FullChatSessionResponseSchema,
-        addMessageResponse: AddMessageResponseSchema, // Use updated schema model
         deleteChatResponse: DeleteChatResponseSchema
     })
     // Apply session loading and tagging to all routes in this group
     .guard({ params: 'sessionIdParam' }, (app) => app
-        // Make derive block async
-        .derive(async ({ params }) => { // Added async
+        .derive(({ params }) => { // Sync derive for session
+            console.log(`[Derive Session] Received Session ID Param: ${params.sessionId}`); // Log Param
             const sessionId = parseInt(params.sessionId, 10);
-            if (isNaN(sessionId)) throw new BadRequestError('Invalid session ID');
-            // sessionRepository.findById is now async
-            const session = await sessionRepository.findById(sessionId); // Added await
+            if (isNaN(sessionId)) throw new BadRequestError('Invalid session ID format');
+            const session = sessionRepository.findById(sessionId); // Use sync version
+            console.log(`[Derive Session] Found session? ${!!session}`); // Log Result
             if (!session) throw new NotFoundError(`Session with ID ${sessionId}`);
-            // Return the resolved session
             return { sessionData: session };
         })
         .group('', { detail: { tags: ['Chat'] } }, (app) => app
             // POST /api/sessions/:sessionId/chats - Create a new chat
-            // createChat handler is already marked async
             .post('/', createChat, {
                 response: { 201: 'chatMetadataResponse' },
                 detail: { summary: 'Create a new chat' }
@@ -95,40 +85,39 @@ export const chatRoutes = new Elysia({ prefix: '/api/sessions/:sessionId/chats' 
 
             // --- Routes requiring :chatId ---
             .guard({ params: 'sessionAndChatParams' }, (app) => app
-                // Make derive block async
-                .derive(async ({ params, sessionData }) => { // Added async
+                .derive(({ params, sessionData }) => { // Sync derive for chat
+                    console.log(`[Derive Chat] Received Chat ID Param: ${params.chatId} for Session ID: ${params.sessionId}`); // Log Param
                     const chatId = parseInt(params.chatId, 10);
-                    if (isNaN(chatId)) throw new BadRequestError('Invalid chat ID');
-                    // chatRepository.findChatById is now async
-                    const chat = await chatRepository.findChatById(chatId); // Added await
-                    // Check the resolved chat object
+                    if (isNaN(chatId)) throw new BadRequestError('Invalid chat ID format');
+                    // chatRepository.findChatById is sync
+                    const chat = chatRepository.findChatById(chatId);
+                    console.log(`[Derive Chat] Found chat? ${!!chat}. Does it belong to session ${sessionData.id}? ${chat?.sessionId === sessionData.id}`); // Log Result
                     if (!chat || chat.sessionId !== sessionData.id) {
-                        // Access id on resolved sessionData
+                        // Log specific reason for throwing NotFoundError
+                        if(!chat) console.error(`[Derive Chat] Error: Chat ${chatId} not found.`);
+                        else console.error(`[Derive Chat] Error: Chat ${chatId} found, but belongs to session ${chat.sessionId}, not ${sessionData.id}.`);
                         throw new NotFoundError(`Chat ${chatId} in session ${sessionData.id}`);
                     }
-                    // Ensure messages are loaded if findChatById didn't guarantee it
-                    // (Our current findChatById *does* include messages)
-                    // Return the resolved chat object
                     return { chatData: chat };
                 })
 
                 // GET /:chatId - Get full chat details (including messages)
-                // getChatDetails handler is synchronous, receives resolved chatData
                 .get('/:chatId', getChatDetails, {
                     response: { 200: 'fullChatSessionResponse' },
                     detail: { summary: 'Get full details for a specific chat' }
                 })
 
-                // POST /:chatId/messages - Add message
-                // addChatMessage handler is already marked async
+                // POST /:chatId/messages - Add message (Streaming)
                 .post('/:chatId/messages', addChatMessage, {
                     body: 'chatMessageBody',
-                    response: { 201: 'addMessageResponse' }, // Uses updated response schema
-                    detail: { summary: 'Add user message & get AI response' }
+                    response: { /* No specific 200 body for stream */ },
+                    detail: {
+                        summary: 'Add user message & get AI response (stream)',
+                        produces: ['text/event-stream'],
+                    }
                 })
 
                 // PATCH /:chatId/name - Rename chat
-                // renameChat handler is already marked async
                 .patch('/:chatId/name', renameChat, {
                     body: 'chatRenameBody',
                     response: { 200: 'chatMetadataResponse' },
@@ -136,7 +125,6 @@ export const chatRoutes = new Elysia({ prefix: '/api/sessions/:sessionId/chats' 
                 })
 
                  // DELETE /:chatId - Delete chat
-                 // deleteChat handler is already marked async
                 .delete('/:chatId', deleteChat, {
                      response: { 200: 'deleteChatResponse' },
                      detail: { summary: 'Delete a chat' }
@@ -144,3 +132,4 @@ export const chatRoutes = new Elysia({ prefix: '/api/sessions/:sessionId/chats' 
             )
         )
     );
+    

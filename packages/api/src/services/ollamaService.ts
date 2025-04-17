@@ -1,5 +1,5 @@
 /* packages/api/src/services/ollamaService.ts */
-import ollama, { ChatResponse, Message, ListResponse, ShowResponse, GenerateResponse } from 'ollama';
+import ollama, { ChatResponse, Message, ListResponse, ShowResponse, GenerateResponse, Message as OllamaApiMessage } from 'ollama'; // Added OllamaApiMessage
 import axios, { AxiosError } from 'axios';
 import config from '../config/index.js';
 import { BackendChatMessage, OllamaModelInfo } from '../types/index.js';
@@ -93,7 +93,7 @@ export const pullOllamaModel = async (modelName: string): Promise<void> => {
 
 
 // --- Check Model Status (Accepts model name) ---
-// This checks if a *specific* model is loaded in Ollama's memory via /ps
+// This checks if a *specific* model is loaded in Ollama's memory via /api/ps
 export const checkModelStatus = async (modelToCheck: string): Promise<OllamaModelInfo | null> => {
     const psUrl = `${config.ollama.baseURL}/api/ps`;
     console.log(`[OllamaService] Checking if specific model '${modelToCheck}' is loaded using ${psUrl}...`); // Log specific model
@@ -182,7 +182,8 @@ export const loadOllamaModel = async (modelName: string): Promise<void> => {
 // --- End Load Model Function ---
 
 
-// --- Generate Chat Response (Uses Active Model) ---
+// --- Generate Chat Response (Non-Streaming - Deprecated internally) ---
+// Kept for internal use (e.g., loadOllamaModel) but streaming is preferred for UI
 export const generateChatResponse = async (
     contextTranscript: string,
     chatHistory: BackendChatMessage[],
@@ -254,3 +255,73 @@ export const generateChatResponse = async (
         throw new InternalServerError('Failed to get response from AI service.', error instanceof Error ? error : undefined);
     }
 };
+// --- End Generate Chat Response ---
+
+// --- Stream Chat Response ---
+export const streamChatResponse = async (
+    contextTranscript: string,
+    chatHistory: BackendChatMessage[],
+    retryAttempt: boolean = false
+): Promise<AsyncIterable<ChatResponse>> => { // Return AsyncIterable for streaming
+
+    const modelToUse = getActiveModel();
+    console.log(`[OllamaService:streamChatResponse] Attempting streaming chat with ACTIVE model: ${modelToUse}`);
+
+    if (!contextTranscript) console.warn("[OllamaService] Streaming response with empty or missing transcript context string.");
+    else console.log(`[OllamaService] Transcript context string provided (length: ${contextTranscript.length}).`);
+
+    if (!chatHistory || chatHistory.length === 0) throw new InternalServerError("Internal Error: Cannot stream response without chat history.");
+    if (chatHistory[chatHistory.length - 1].sender !== 'user') throw new InternalServerError("Internal Error: Malformed chat history for LLM.");
+
+    console.log(`[OllamaService] Streaming response (model: ${modelToUse})...`);
+
+    const latestUserMessage = chatHistory[chatHistory.length - 1];
+    const previousHistory = chatHistory.slice(0, -1);
+
+    // Ensure message format matches Ollama API expectations
+    const transcriptContextMessage: OllamaApiMessage = { role: 'user', content: `CONTEXT TRANSCRIPT:\n"""\n${contextTranscript || 'No transcript available.'}\n"""` };
+    const messages: OllamaApiMessage[] = [
+        { role: 'system', content: SYSTEM_PROMPT },
+        ...previousHistory.map((msg): OllamaApiMessage => ({ role: msg.sender === 'ai' ? 'assistant' : 'user', content: msg.text })),
+        transcriptContextMessage,
+        { role: 'user', content: latestUserMessage.text }
+    ];
+
+    console.log(`[OllamaService] Sending ${messages.length} messages to Ollama for streaming.`);
+
+    try {
+        // Use ollama.chat with stream: true
+        const stream = await ollama.chat({
+            model: modelToUse,
+            messages: messages,
+            stream: true, // Enable streaming
+            keep_alive: config.ollama.keepAlive,
+             options: { /* context size etc. */ }
+        });
+        console.log(`[OllamaService] Stream initiated for model ${modelToUse}.`);
+        return stream; // Return the async iterator directly
+
+    } catch (error: any) { // Error handling for initiating the stream
+        console.error('[OllamaService] Error initiating chat stream:', error);
+        const isModelNotFoundError = error.status === 404 || (error.message?.includes('model') && (error.message?.includes('not found') || error.message?.includes('missing')));
+
+        if (isModelNotFoundError && !retryAttempt) {
+            console.warn(`[OllamaService] Active Model '${modelToUse}' not found during stream init. Attempting pull...`);
+            try {
+                await pullOllamaModel(modelToUse);
+                console.log(`[OllamaService] Pull initiated for '${modelToUse}'. Retrying stream request...`);
+                return streamChatResponse(contextTranscript, chatHistory, true); // Retry
+            } catch (pullError) {
+                 console.error(`[OllamaService] Failed to initiate pull for '${modelToUse}'. Aborting stream. Pull error:`, pullError);
+                 throw new InternalServerError(`Ollama model '${modelToUse}' not found and could not be pulled.`);
+            }
+        }
+        if (error instanceof Error) {
+            const connectionError = (error as NodeJS.ErrnoException)?.code === 'ECONNREFUSED' || (axios.isAxiosError(error) && error.code === 'ECONNREFUSED');
+            if (connectionError) throw new InternalServerError(`Connection refused: Could not connect to Ollama at ${config.ollama.baseURL}.`);
+            if (isModelNotFoundError && retryAttempt) throw new InternalServerError(`Ollama model '${modelToUse}' not found even after attempting pull.`);
+        }
+        throw new InternalServerError('Failed to initiate stream from AI service.', error instanceof Error ? error : undefined);
+    }
+};
+// --- End Stream Chat Response ---

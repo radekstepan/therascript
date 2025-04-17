@@ -1,7 +1,7 @@
+/* packages/ui/src/components/SessionView/Chat/ChatInput.tsx */
 import React, { useState, useRef, useEffect } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { StarIcon, PaperPlaneIcon, StopIcon } from '@radix-ui/react-icons';
-// Removed: useMutation, useQueryClient, addChatMessage API call
 import { UseMutationResult } from '@tanstack/react-query'; // Import mutation type
 import { TextField, Flex, Box, Text, IconButton, Spinner } from '@radix-ui/themes';
 import { StarredTemplatesList } from './StarredTemplates';
@@ -13,16 +13,23 @@ import {
 } from '../../../store';
 import type { ChatMessage } from '../../../types'; // Keep ChatMessage type
 
+// --- Define expected props for the mutation ---
+interface AddMessageStreamMutationResult {
+    userMessageId: number;
+    stream: ReadableStream<Uint8Array>;
+}
+// --- End type definition ---
+
 interface ChatInputProps {
     disabled?: boolean;
-    // --- Accept Mutation as Prop ---
+    // --- Update Mutation Prop Type ---
     addMessageMutation: UseMutationResult<
-        { userMessage: ChatMessage; aiMessage: ChatMessage }, // Success data type
+        AddMessageStreamMutationResult, // Success data type (stream info)
         Error, // Error type
         string, // Variables type (the text message)
-        unknown // Context type (adjust if you use context)
+        unknown // Context type (adjust if needed)
     >;
-    // --- End Prop ---
+    // --- End Prop Update ---
 }
 
 export function ChatInput({ disabled = false, addMessageMutation }: ChatInputProps) { // Destructure prop
@@ -34,36 +41,27 @@ export function ChatInput({ disabled = false, addMessageMutation }: ChatInputPro
 
     const inputRef = useRef<HTMLInputElement>(null);
     const [showTemplates, setShowTemplates] = useState(false);
-    // Removed: queryClient
-
-    // Removed: Internal addMessageMutation hook
 
     // Use the passed mutation's state
     const isAiResponding = addMessageMutation.isPending;
     // Input is disabled if the base disabled prop is true, OR if the mutation is pending (AI is responding)
     const isEffectivelyDisabled = disabled || isAiResponding || !activeChatId;
 
-    useEffect(() => { // Focus effect remains the same
+    useEffect(() => { // Focus effect
         if (activeChatId !== null && !isEffectivelyDisabled) {
             inputRef.current?.focus();
         }
     }, [activeChatId, isEffectivelyDisabled]);
 
-    useEffect(() => { // Error clearing effect remains the same
+    useEffect(() => { // Error clearing effect
         if ((inputError === "Cannot send an empty message." || inputError === "Please select a chat first.") && currentQuery !== '') {
             setInputError('');
         }
-        if (inputError.startsWith("Failed to get response:") && currentQuery !== '') {
-             setInputError('');
+        // Clear API errors if user starts typing again
+        if (addMessageMutation.isError && currentQuery !== '') {
+            addMessageMutation.reset(); // Reset mutation error state
         }
-    }, [currentQuery, inputError]);
-
-     // Clear input error if mutation resets or succeeds
-     useEffect(() => {
-        if (!addMessageMutation.isError && inputError.startsWith("Failed to get response:")) {
-            setInputError('');
-        }
-     }, [addMessageMutation.isError, inputError]);
+    }, [currentQuery, inputError, addMessageMutation]);
 
 
     const handleSelectTemplate = (text: string) => { // Remains the same
@@ -74,9 +72,8 @@ export function ChatInput({ disabled = false, addMessageMutation }: ChatInputPro
         }
     };
 
-    const trySubmit = async () => {
-        // Use the passed mutation's state
-        if (disabled || addMessageMutation.isPending) {
+    const trySubmit = () => { // Changed from async
+        if (isEffectivelyDisabled) {
              console.log("Submit prevented: ChatInput is disabled or AI is responding.");
              return false;
         }
@@ -93,13 +90,15 @@ export function ChatInput({ disabled = false, addMessageMutation }: ChatInputPro
         try {
             setInputError('');
             const queryToSend = currentQuery;
-            // setCurrentQuery(''); // Clear input immediately - MOVED to parent's onSuccess
-            // Use the passed mutate function
+            // DO NOT clear input here, let the mutation's onSettled handle it
+            // setCurrentQuery('');
+            // Use the passed mutate function - this starts the stream initiation
             addMessageMutation.mutate(queryToSend);
+            // The actual stream processing happens in ChatInterface's onSuccess
         } catch (err) {
-            console.error("Error during mutation initiation:", err);
+            console.error("Error initiating mutation:", err);
             setInputError('An unexpected error occurred.');
-            // Error handling is primarily done in the parent component's onError now
+            // Let mutation's onError handle detailed feedback
         }
         return true;
     };
@@ -118,19 +117,21 @@ export function ChatInput({ disabled = false, addMessageMutation }: ChatInputPro
 
     const handleCancelClick = (e: React.MouseEvent<HTMLButtonElement>) => { // Remains the same
         e.preventDefault();
-        setToastMessageAtom("❗ Cancellation not supported by backend yet.");
+        setToastMessageAtom("❗ Cancellation not supported yet.");
         console.warn("Cancellation attempt - not implemented.");
-        // TODO: Implement cancellation if the API supports it (AbortController)
-        // addMessageMutation.reset(); // Reset client state?
+        // TODO: Implement cancellation (AbortController needs to be passed through)
+        // Maybe reset the mutation client-side?
+        // addMessageMutation.reset();
         if (!isEffectivelyDisabled && inputRef.current) {
            inputRef.current.focus();
         }
     };
 
-    const showCancelButton = isAiResponding && !disabled; // Uses passed mutation state
-    const sendButtonDisabled = isEffectivelyDisabled || !currentQuery.trim(); // Uses passed mutation state
-    const starredButtonDisabled = isEffectivelyDisabled; // Uses passed mutation state
-    const inputFieldDisabled = isEffectivelyDisabled; // Uses passed mutation state
+    // Use mutation's pending state
+    const showCancelButton = isAiResponding && !disabled;
+    const sendButtonDisabled = isEffectivelyDisabled || !currentQuery.trim();
+    const starredButtonDisabled = isEffectivelyDisabled;
+    const inputFieldDisabled = isEffectivelyDisabled;
 
     return (
         <Flex direction="column" gap="1">
@@ -151,7 +152,7 @@ export function ChatInput({ disabled = false, addMessageMutation }: ChatInputPro
                 {/* Input Field */}
                 <TextField.Root
                     ref={inputRef} size="2" style={{ flexGrow: 1 }}
-                    placeholder={isAiResponding ? "AI is responding..." : "Ask about the session..."} // Uses passed mutation state
+                    placeholder={isAiResponding ? "AI is responding..." : "Ask about the session..."}
                     value={currentQuery}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCurrentQuery(e.target.value)}
                     disabled={inputFieldDisabled}
@@ -165,7 +166,8 @@ export function ChatInput({ disabled = false, addMessageMutation }: ChatInputPro
                        onClick={handleCancelClick}
                        title="Cancel response (Not Implemented)"
                        aria-label="Cancel AI response"
-                       disabled={!isAiResponding} // Should always be enabled if shown
+                       // Disable if mutation isn't actually pending (shouldn't happen if shown)
+                       disabled={!isAiResponding}
                        >
                         <StopIcon />
                     </IconButton>
@@ -174,8 +176,8 @@ export function ChatInput({ disabled = false, addMessageMutation }: ChatInputPro
                         type="button" variant="solid" size="2"
                         onClick={handleSubmitClick}
                         disabled={sendButtonDisabled}
-                        title={isAiResponding ? "AI is responding..." : "Send message"} // Uses passed mutation state
-                        aria-label={isAiResponding ? "AI is responding" : "Send message"} // Uses passed mutation state
+                        title={isAiResponding ? "AI is responding..." : "Send message"}
+                        aria-label={isAiResponding ? "AI is responding" : "Send message"}
                     >
                         {isAiResponding ? <Spinner size="1" /> : <PaperPlaneIcon />}
                     </IconButton>
@@ -184,7 +186,7 @@ export function ChatInput({ disabled = false, addMessageMutation }: ChatInputPro
             {/* Input Error Display */}
             {inputError && <Text size="1" color="red" align="center" mt="1">{inputError}</Text>}
             {/* Display mutation error if present */}
-            {addMessageMutation.isError && !inputError && (
+            {addMessageMutation.isError && (
                  <Text size="1" color="red" align="center" mt="1">Error: {addMessageMutation.error.message}</Text>
             )}
         </Flex>

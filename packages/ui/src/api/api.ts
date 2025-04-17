@@ -1,5 +1,4 @@
 /* packages/ui/src/api/api.ts */
-// packages/ui/src/api/api.ts
 import axios from 'axios';
 import type {
     Session,
@@ -8,12 +7,12 @@ import type {
     ChatMessage,
     StructuredTranscript,
     TranscriptParagraphData,
-    // --- Import new LLM types ---
     OllamaStatus,
     AvailableModelsResponse,
-    // --- End LLM types ---
-    // Remove WhisperJobStatus from this import
 } from '../types';
+
+// Define the API base URL (ensure this matches your backend)
+const API_BASE_URL = 'http://localhost:3001'; // Or use an environment variable
 
 // Define WhisperJobStatus for UI (matching API response schema)
 export interface UITranscriptionStatus {
@@ -24,6 +23,7 @@ export interface UITranscriptionStatus {
     duration?: number;
 }
 
+// --- Axios requests remain unchanged, assuming baseURL is set globally ---
 
 // GET /api/sessions/
 export const fetchSessions = async (): Promise<Session[]> => {
@@ -39,7 +39,6 @@ export const uploadSession = async (file: File, metadata: SessionMetadata): Prom
     const formData = new FormData();
     formData.append('audioFile', file);
     Object.entries(metadata).forEach(([key, value]) => formData.append(key, value));
-    // Endpoint now returns { sessionId, jobId, message } with status 202
     const response = await axios.post('/api/sessions/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
     });
@@ -55,7 +54,6 @@ export const fetchTranscriptionStatus = async (jobId: string): Promise<UITranscr
 // NEW: POST /api/sessions/{sessionId}/finalize
 export const finalizeSession = async (sessionId: number): Promise<Session> => {
     const response = await axios.post<Session>(`/api/sessions/${sessionId}/finalize`);
-     // API returns the full session details including chats after finalization
      return {
         ...response.data,
         chats: response.data.chats || [], // Ensure chats array exists
@@ -100,15 +98,12 @@ export const updateTranscriptParagraph = async (
     newText: string
 ): Promise<StructuredTranscript> => { // Returns the full updated structured transcript
     const response = await axios.patch<StructuredTranscript>(`/api/sessions/${sessionId}/transcript`, { paragraphIndex, newText });
-    // API returns the updated full transcript array
     return response.data;
 };
 
 // POST /api/sessions/{sessionId}/chats/
 export const startNewChat = async (sessionId: number): Promise<ChatSession> => {
-    // Returns the new chat metadata
     const response = await axios.post(`/api/sessions/${sessionId}/chats/`);
-    // Map response to ChatSession type
     const chatMetadata = response.data;
     return {
         ...chatMetadata,
@@ -116,26 +111,68 @@ export const startNewChat = async (sessionId: number): Promise<ChatSession> => {
     };
 };
 
-// POST /api/sessions/{sessionId}/chats/{chatId}/messages (Modified Return Type)
-export const addChatMessage = async (
+// --- Modified addChatMessageStream with Base URL and Refined Error Handling ---
+// POST /api/sessions/{sessionId}/chats/{chatId}/messages (Streaming)
+export const addChatMessageStream = async (
     sessionId: number,
     chatId: number,
     text: string
-): Promise<{ userMessage: ChatMessage; aiMessage: ChatMessage }> => { // aiMessage now includes tokens
-    const response = await axios.post(`/api/sessions/${sessionId}/chats/${chatId}/messages`, { text });
-    // The response type from the backend should match { userMessage: ChatMessage; aiMessage: ChatMessage }
-    return response.data;
+): Promise<{ userMessageId: number; stream: ReadableStream<Uint8Array> }> => {
+    let response: Response;
+    // --- Construct full URL for fetch ---
+    const url = `${API_BASE_URL}/api/sessions/${sessionId}/chats/${chatId}/messages`;
+    console.log(`[addChatMessageStream] Fetching URL: ${url}`);
+    // --- End URL construction ---
+    try {
+        response = await fetch(url, { // Use the constructed URL
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text }),
+        });
+    } catch (networkError) {
+        console.error("[addChatMessageStream] Network error during fetch:", networkError);
+        throw new Error(`Network error sending message: ${networkError instanceof Error ? networkError.message : 'Unknown network error'}`);
+    }
+
+    if (!response.ok || !response.body) {
+        let errorBodyText = `HTTP error ${response.status}`;
+        let errorJson = null;
+        try {
+            errorJson = await response.json(); // Try JSON first
+            errorBodyText = errorJson?.message || JSON.stringify(errorJson);
+            console.error(`[addChatMessageStream] Server error response (JSON): ${response.status}`, errorJson);
+        } catch (e) {
+            console.warn("[addChatMessageStream] Error response was not valid JSON.");
+            try {
+                 // IMPORTANT: Clone the response before reading text if you might need JSON later
+                 // However, since JSON failed, we likely just need the text now.
+                 const textResponse = await response.text(); // Read as text
+                 errorBodyText = textResponse || errorBodyText; // Use text if available
+                 console.error(`[addChatMessageStream] Server error response (Text): ${response.status}`, errorBodyText);
+            } catch (textError) {
+                 console.error("[addChatMessageStream] Failed to read error response body as Text:", textError);
+            }
+        }
+        throw new Error(`Failed to initiate stream: ${errorBodyText}`);
+    }
+
+    const userMessageIdStr = response.headers.get('X-User-Message-Id');
+    const userMessageId = userMessageIdStr ? parseInt(userMessageIdStr, 10) : -1;
+
+    if(userMessageId === -1) {
+        console.warn("[addChatMessageStream] X-User-Message-Id header not found in response. Will rely on SSE event.");
+    }
+
+    return { userMessageId, stream: response.body };
 };
+// --- End Modification ---
 
 // PATCH /api/sessions/{sessionId}/chats/{chatId}/name
 export const renameChat = async (sessionId: number, chatId: number, name: string | null): Promise<ChatSession> => {
-    // Returns updated chat metadata
     const response = await axios.patch(`/api/sessions/${sessionId}/chats/${chatId}/name`, { name });
-    // Map response to ChatSession type
     const chatMetadata = response.data;
     return {
         ...chatMetadata,
-        // Messages are not returned by this endpoint
         messages: undefined
     };
 };
@@ -153,37 +190,32 @@ export const unloadOllamaModel = async (): Promise<{ message: string }> => {
     return response.data;
 };
 
-// --- Modified fetchOllamaStatus ---
-// Accepts optional modelName to check specific model status
+// Fetch Ollama Status
 export const fetchOllamaStatus = async (modelName?: string): Promise<OllamaStatus> => {
     const endpoint = '/api/ollama/status';
-    const params = modelName ? { modelName } : {}; // Add query param if name is provided
+    const params = modelName ? { modelName } : {};
     console.log(`Fetching Ollama status from ${endpoint} ${modelName ? `for model ${modelName}`: '(active)'}`);
     const response = await axios.get<OllamaStatus>(endpoint, { params });
-    // The response from the backend *should* now include modelChecked field matching the requested modelName (or default)
     return response.data;
 };
-// --- End Modification ---
 
+// Fetch Available Models
 export const fetchAvailableModels = async (): Promise<AvailableModelsResponse> => {
     console.log("Fetching available models from /api/ollama/available-models");
     const response = await axios.get<AvailableModelsResponse>('/api/ollama/available-models');
     return response.data;
 };
 
-// --- NEW: Set Active Model API Call ---
+// Set Active Model
 export const setOllamaModel = async (modelName: string): Promise<{ message: string }> => {
     console.log(`Sending request to set active model: ${modelName}`);
     const response = await axios.post('/api/ollama/set-model', { modelName });
-    return response.data; // { message: "Active model set to..." }
+    return response.data;
 };
-// --- End New API Call ---
 
-// --- NEW: Pull Model API Call ---
+// Pull Model
 export const pullOllamaModel = async (modelName: string): Promise<{ message: string }> => {
     console.log(`Sending request to pull model: ${modelName}`);
-    // Backend returns 202 Accepted
     const response = await axios.post('/api/ollama/pull-model', { modelName });
-    return response.data; // { message: "Pull initiated for model..." }
+    return response.data;
 };
-// --- End New API Call ---
