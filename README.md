@@ -1,7 +1,5 @@
 # TODO
 
-- [x] when you upload a new session, create an initial chat behind the scenes for it and redirect the page to this chat details page
-- [x] when you create a new chat, redirect the UI to that chat page
 - [ ] make the chat paragraph icons larger, add a gap between them AND/OR move the play icon to the left of the paragraph
 - [ ] fix vertical align of transcript header, items too close to the top; `align-items: flex-end`
 - [ ] reduce the left and right padding on the chat/transcript section and be consistent with the chats section
@@ -19,8 +17,8 @@
 - [ ] the edit transcript modal should let you delete the whole transcript. That will delete the transcript and all chat messages. Well, it'll "archive" it so that it's hidden from the UI but it's still in the DB just in case.
 - [ ] when you upload/transcribe a file, you should reset the New Session modal
 - [ ] when I click to Rename Chat, the input field that opens in the modal should be focused
-- [x] fix not downloading larger ollama models
 - [ ] make sure the AI response "cursor" is less dark and is still blinking.The copy icon shouldn't show until after the whole response has been received.
+- [ ] switching between the diffent chats the number of tokens stays the same for some reason
 
 ## Nice to have
 

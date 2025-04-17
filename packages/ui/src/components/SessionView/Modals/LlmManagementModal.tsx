@@ -1,3 +1,4 @@
+// packages/ui/src/components/SessionView/Modals/LlmManagementModal.tsx
 import React, { useState, useEffect } from 'react'; // Removed useRef
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 // Import Strong component
@@ -482,7 +483,11 @@ export function LlmManagementModal({ isOpen, onOpenChange }: LlmManagementModalP
                              {(pullStatus?.status === 'downloading' || pullStatus?.status === 'verifying' || pullStatus?.status === 'parsing') && (
                                  <Progress value={displayPullProgress} size="2" mt="1" mb="1"/>
                              )}
-                             <Text size="1" color="gray" mt="1" align="center">{displayPullMessage}</Text>
+                             {/* --- MODIFICATION: Hide status message text when completed or canceled/canceling --- */}
+                             {pullStatus?.status !== 'completed' && pullStatus?.status !== 'canceled' && pullStatus?.status !== 'canceling' && (
+                                 <Text size="1" color="gray" mt="1" align="center">{displayPullMessage}</Text>
+                             )}
+                             {/* --- END MODIFICATION --- */}
                          </Box>
                     )}
                     {/* --- Pull Error Display (reads from pullStatus query or error state) --- */}

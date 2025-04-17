@@ -1,3 +1,4 @@
+// packages/api/src/services/ollamaService.ts
 import ollama, { ChatResponse, Message, ListResponse, ShowResponse, GenerateResponse, Message as OllamaApiMessage, ProgressResponse, PullRequest } from 'ollama'; // Added PullRequest type
 import axios, { AxiosError } from 'axios';
 import crypto from 'node:crypto'; // Import crypto for job ID
@@ -125,8 +126,15 @@ async function runPullInBackground(jobId: string, modelName: string) {
                  activePullJobs.set(jobId, {
                      ...activePullJobs.get(jobId)!, status: 'canceled', message: 'Pull canceled by user.', endTime: Date.now(),
                  });
-                 // TODO: Find a way to reliably abort the underlying ollama.pull if library exposes it
-                 // For now, just breaking the loop relies on Ollama server handling the closed connection.
+                 // --- CLARIFICATION COMMENT ---
+                 // NOTE: This stops processing the stream in the backend and updates the job status.
+                 // However, due to limitations in the 'ollama-js' library and the Ollama API,
+                 // this *does not* guarantee the underlying download process on the Ollama
+                 // server itself is aborted. The server might continue downloading the layer.
+                 // We are relying on breaking the loop and letting the connection potentially close.
+                 // A more robust solution would require ollama-js supporting AbortSignal
+                 // or a dedicated Ollama API endpoint for cancelling pulls.
+                 // --- END CLARIFICATION ---
                  return; // Exit the background task
             }
 
@@ -257,6 +265,10 @@ export const cancelPullModelJob = (jobId: string): boolean => {
      activePullJobs.set(jobId, { ...job, status: 'canceling', message: 'Cancellation requested...' });
 
      // TODO: If ollama-js library or future API provides an abort handle for ollama.pull, call it here.
+     // --- CLARIFICATION COMMENT ---
+     // NOTE: Currently, setting the flag only stops the *backend* from processing further updates.
+     // It doesn't abort the actual download process running within the Ollama container.
+     // --- END CLARIFICATION ---
 
      return true; // Cancellation initiated
 };
