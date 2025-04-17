@@ -20,7 +20,7 @@
 - [ ] show how large the context is in tokens and warn if context is too large
 - [ ] when you upload/transcribe a file, you should reset the New Session modal
 - [ ] when I click to Rename Chat, the input field that opens in the modal should be focused
-- [ ] the response messages should display within the chat without horizontal scrollbar, even if part of a code block
+- [x] the response messages should display within the chat without horizontal scrollbar, even if part of a code block
 
 ## Nice to have
 

@@ -65,34 +65,47 @@ html, body {
      margin-bottom: 0;
 }
 
+/* --- Modified <pre> block styles --- */
 .markdown-ai-message pre {
     background-color: var(--gray-a4); /* Use a theme background */
     padding: var(--space-2);
     border-radius: var(--radius-2);
-    overflow-x: auto; /* Allow horizontal scroll for long code */
     margin-top: var(--space-2);
     margin-bottom: var(--space-2);
     font-family: var(--font-mono);
     font-size: calc(var(--font-size-2) * 0.9); /* Slightly smaller font for code */
     line-height: var(--line-height-2);
+    /* --- Key changes for wrapping --- */
+    white-space: pre-wrap;   /* Allow wrapping while preserving whitespace */
+    word-break: break-all; /* Force break for long words/lines without spaces */
+    overflow-x: hidden;      /* Explicitly hide horizontal scrollbar */
+     /* --- End Key changes --- */
 }
 
+/* --- Modified inline <code> styles --- */
 .markdown-ai-message code { /* Inline code */
     background-color: var(--gray-a4);
     padding: 0.1em 0.3em;
     border-radius: var(--radius-1);
     font-family: var(--font-mono);
     font-size: inherit; /* Inherit size from parent (like pre or p) */
+     /* --- Allow breaking for inline code too if needed --- */
+     word-break: break-word; /* More conservative than break-all */
 }
 .markdown-ai-message pre code { /* Code specifically inside pre blocks */
     background-color: transparent; /* No extra background */
     padding: 0;
     border-radius: 0;
+    /* Inherit wrapping behavior from <pre> */
+    white-space: inherit;
+    word-break: inherit;
 }
 
 .markdown-ai-message a {
     color: var(--accent-11);
     text-decoration: underline;
+     /* --- Allow links to break --- */
+     word-break: break-word;
 }
 .markdown-ai-message a:hover {
     color: var(--accent-10);
