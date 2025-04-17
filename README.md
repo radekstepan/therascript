@@ -16,18 +16,17 @@
 - [ ] the `sessionSortCriteriaAtom` says it's sorting by "date", but in the UI it shows sorted by "Client"
 - [ ] change the theme dropodown such that we highlight rather than show a checkmark next to the selected theme
 - [ ] make sure to unload whisper when we are done transcribing
-- [x] add hamburger icon in the session history table for each row to be able to edit the details there as well much like on the session page
 - [ ] the edit transcript modal should let you delete the whole transcript. That will delete the transcript and all chat messages. Well, it'll "archive" it so that it's hidden from the UI but it's still in the DB just in case.
-- [x] show the user message in the UI immediately after sending it
-- [x] when sorting by date in session history, make sure we use a full datetime
 - [ ] show how large the context is in tokens and warn if context is too large
 - [ ] when you upload/transcribe a file, you should reset the New Session modal
 - [ ] when I click to Rename Chat, the input field that opens in the modal should be focused
 - [ ] stream responses from Ollama
+- [x] be able to add new models from ollama to download
 
 ## Nice to have
 
 - [ ] autocomplete client name when typing in both the create new session and editing an existing one (select dropdown with a free form input too?)
+- [ ] for reasoning models, display the <think> section separately
 
 ## Future
 

@@ -1,3 +1,4 @@
+/* packages/ui/src/api/api.ts */
 // packages/ui/src/api/api.ts
 import axios from 'axios';
 import type {
@@ -178,5 +179,11 @@ export const setOllamaModel = async (modelName: string): Promise<{ message: stri
 };
 // --- End New API Call ---
 
-// --- Removed loadOllamaModel ---
-// --- End Remove ---
+// --- NEW: Pull Model API Call ---
+export const pullOllamaModel = async (modelName: string): Promise<{ message: string }> => {
+    console.log(`Sending request to pull model: ${modelName}`);
+    // Backend returns 202 Accepted
+    const response = await axios.post('/api/ollama/pull-model', { modelName });
+    return response.data; // { message: "Pull initiated for model..." }
+};
+// --- End New API Call ---

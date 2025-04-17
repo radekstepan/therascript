@@ -1,3 +1,4 @@
+/* packages/api/src/server.ts */
 // packages/api/src/server.ts
 import http from 'node:http';
 import { WritableStream } from 'node:stream/web';
@@ -10,7 +11,7 @@ import { sessionRoutes } from './routes/sessionRoutes.js';
 import { chatRoutes } from './routes/chatRoutes.js';
 import { ApiError, InternalServerError, ConflictError, BadRequestError } from './errors.js';
 // --- Update service imports ---
-import { checkModelStatus, listModels, loadOllamaModel } from './services/ollamaService.js';
+import { checkModelStatus, listModels, loadOllamaModel, pullOllamaModel } from './services/ollamaService.js'; // Added pullOllamaModel
 import { setActiveModel, getActiveModel } from './services/activeModelService.js'; // Added state management
 // --- End Update ---
 import fs from 'node:fs';
@@ -76,11 +77,17 @@ const SetModelBodySchema = t.Object({
     modelName: t.String({ minLength: 1, error: "Model name is required." })
 });
 // --- End Schema ---
+// --- Add PullModelBodySchema ---
+const PullModelBodySchema = t.Object({
+    modelName: t.String({ minLength: 1, error: "Model name is required." })
+});
+// --- End Schema ---
 
 
 const app = new Elysia()
     .model({
         setModelBody: SetModelBodySchema, // Use new name
+        pullModelBody: PullModelBodySchema, // Add new schema
         ollamaModelInfo: OllamaModelInfoSchema, // Add for reuse
         availableModelsResponse: AvailableModelsResponseSchema,
         ollamaStatusResponse: OllamaStatusResponseSchema, // Use updated schema
@@ -178,6 +185,31 @@ const app = new Elysia()
              detail: { summary: 'Request Ollama to unload the currently active model' }
         })
         // --- End Modified Unload ---
+
+        // --- NEW: Pull Model Endpoint ---
+        .post('/pull-model', async ({ body, set }) => {
+            const { modelName } = body;
+            console.log(`[API PullModel] Received request to pull model: ${modelName}`);
+            try {
+                // Call the service function to initiate the pull
+                await pullOllamaModel(modelName);
+                set.status = 202; // Accepted - Pull initiated, not completed
+                return { message: `Pull initiated for model ${modelName}. Check available models or Ollama logs for progress.` };
+            } catch (error: any) {
+                 console.error(`[API PullModel] Error initiating pull for model ${modelName}:`, error);
+                 if (error instanceof ApiError) throw error; // Re-throw known errors (like BadRequest)
+                 throw new InternalServerError(`Failed to initiate pull for model ${modelName}.`, error);
+            }
+        }, {
+            body: 'pullModelBody', // Use the new schema model
+            response: {
+                 202: t.Object({ message: t.String() }),
+                 400: t.Object({ error: t.String(), message: t.String(), details: t.Optional(t.Any()), validationErrors: t.Optional(t.Any()) }),
+                 500: t.Object({ error: t.String(), message: t.String(), details: t.Optional(t.Any()) })
+             },
+            detail: { summary: 'Initiate downloading a new Ollama model from the registry' }
+        })
+        // --- END NEW ---
 
         // --- Updated Status Endpoint ---
         .get('/status', async ({ query, set }) => {

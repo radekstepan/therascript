@@ -1,10 +1,9 @@
-// packages/api/src/services/ollamaService.ts
 /* packages/api/src/services/ollamaService.ts */
 import ollama, { ChatResponse, Message, ListResponse, ShowResponse, GenerateResponse } from 'ollama';
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import config from '../config/index.js';
 import { BackendChatMessage, OllamaModelInfo } from '../types/index.js';
-import { InternalServerError, BadRequestError } from '../errors.js';
+import { InternalServerError, BadRequestError, ApiError } from '../errors.js'; // Added ApiError
 import { getActiveModel } from './activeModelService.js'; // Import the getter
 
 console.log(`[OllamaService] Using Ollama host: ${config.ollama.baseURL} (or OLLAMA_HOST env var)`);
@@ -45,25 +44,53 @@ export const listModels = async (): Promise<OllamaModelInfo[]> => {
 // --- End List Models ---
 
 
-// --- Pull Model ---
-async function pullOllamaModel(modelName: string): Promise<boolean> {
+// --- Pull Model (Using axios to initiate, not wait for completion) ---
+export const pullOllamaModel = async (modelName: string): Promise<void> => {
     const pullUrl = `${config.ollama.baseURL}/api/pull`;
-    console.log(`[OllamaService] Attempting to pull model '${modelName}' from ${pullUrl}...`);
+    console.log(`[OllamaService] Initiating pull for model '${modelName}' via POST to ${pullUrl}...`);
     try {
-        const response = await axios.post(pullUrl, { name: modelName, stream: false }, { timeout: 300000 });
-        if (response.status === 200 && response.data?.status?.includes('success')) {
-             console.log(`[OllamaService] Successfully pulled model '${modelName}' or it was already present.`);
-             return true;
+        // Send the request but don't wait for the potentially long stream
+        const response = await axios.post(pullUrl, { name: modelName, stream: false }, {
+            // Very short timeout just to ensure the request is accepted by Ollama
+            timeout: 15000, // 15 seconds should be enough for Ollama to start the process
+        });
+
+        // Check if Ollama accepted the request (200 OK)
+        if (response.status === 200) {
+             console.log(`[OllamaService] Pull request for model '${modelName}' accepted by Ollama (status: ${response.data?.status}). Check logs or list models later.`);
+             // Returning void, success indicates the request was accepted, not that the pull is finished.
+             return;
         } else {
-            console.warn(`[OllamaService] Pull request for model '${modelName}' completed, but status was unexpected:`, response.data?.status);
-            return response.status === 200;
+            // Should not happen if status is 200, but good practice
+            console.warn(`[OllamaService] Pull request for model '${modelName}' returned status ${response.status}, but expected 200.`);
+             throw new InternalServerError(`Ollama returned unexpected status ${response.status} when initiating pull.`);
         }
     } catch (error: any) {
-        console.error(`[OllamaService] Error pulling model '${modelName}':`, error.message);
-        if (axios.isAxiosError(error) && error.response) { console.error('[OllamaService] Pull Error Details:', error.response.data); }
-        return false;
+        console.error(`[OllamaService] Error initiating pull for model '${modelName}':`, error.message);
+        if (axios.isAxiosError(error)) {
+            const axiosError = error as AxiosError;
+            if (axiosError.response) {
+                // Handle specific errors like 400 Bad Request (e.g., invalid model format)
+                if (axiosError.response.status === 400) {
+                    throw new BadRequestError(`Invalid model name format or request: ${JSON.stringify(axiosError.response.data)}`);
+                }
+                console.error('[OllamaService] Pull Initiation Error Details:', axiosError.response.data);
+                throw new InternalServerError(`Ollama service failed to initiate pull: ${axiosError.response.status} ${JSON.stringify(axiosError.response.data)}`, error);
+            } else if (axiosError.request) {
+                 if (axiosError.code === 'ECONNREFUSED') {
+                     throw new InternalServerError(`Connection refused: Could not connect to Ollama at ${config.ollama.baseURL} to initiate pull.`);
+                 }
+                throw new InternalServerError('Ollama service did not respond during pull initiation.', error);
+            } else {
+                 // Network error before request could be made
+                throw new InternalServerError('Network error initiating pull request.', error);
+            }
+        }
+        throw new InternalServerError('Failed to initiate pull from Ollama service.', error instanceof Error ? error : undefined);
     }
-}
+};
+// --- End Pull Model ---
+
 
 // --- Check Model Status (Accepts model name) ---
 // This checks if a *specific* model is loaded in Ollama's memory via /ps
@@ -110,7 +137,7 @@ export const checkModelStatus = async (modelToCheck: string): Promise<OllamaMode
 // --- End Modified Check Model Status ---
 
 
-// --- Load Model Function (Reverted to use ollama.chat AND REMOVED keep_alive: '1s') ---
+// --- Load Model Function (Handle void pull result) ---
 export const loadOllamaModel = async (modelName: string): Promise<void> => {
     if (!modelName) {
         throw new BadRequestError("Model name must be provided to load.");
@@ -132,7 +159,19 @@ export const loadOllamaModel = async (modelName: string): Promise<void> => {
         console.error(`[OllamaService] Error during load trigger chat request for '${modelName}':`, error);
         if (error.status === 404 || (error.message?.includes('model') && error.message?.includes('not found'))) {
              console.error(`[OllamaService] Model '${modelName}' not found locally during load attempt. It needs to be pulled first.`);
-             throw new BadRequestError(`Model '${modelName}' not found locally. Please ensure it is pulled.`);
+             // Attempt to pull the model if not found locally
+             console.warn(`[OllamaService] Model '${modelName}' not found locally during load. Attempting to pull...`);
+             try {
+                 // --- FIX: Call pullOllamaModel, but don't check its truthiness ---
+                 await pullOllamaModel(modelName); // Call the pull initiator, returns void
+                 console.log(`[OllamaService] Pull initiated for '${modelName}'. Load *might* succeed later. Returning success from load trigger.`);
+                 // --- END FIX ---
+                 // Don't throw error here, let the frontend poll status
+                 return;
+             } catch (pullError) {
+                console.error(`[OllamaService] Failed to initiate pull for '${modelName}'. Load cannot proceed. Pull error:`, pullError);
+                throw new BadRequestError(`Model '${modelName}' not found locally and could not be pulled.`);
+             }
         }
         if (error.message?.includes('ECONNREFUSED')) {
              throw new InternalServerError(`Connection refused: Could not connect to Ollama at ${config.ollama.baseURL} to load model.`);
@@ -191,18 +230,25 @@ export const generateChatResponse = async (
         return { content: response.message.content.trim(), promptTokens: response.prompt_eval_count, completionTokens: response.eval_count };
 
     } catch (error: any) { // Error handling including pull/retry
-        console.error('[OllamaService] Error:', error);
+        console.error('[OllamaService] Error during generateChatResponse:', error);
         const isModelNotFoundError = error.status === 404 || (error.message?.includes('model') && (error.message?.includes('not found') || error.message?.includes('missing')));
         if (isModelNotFoundError && !retryAttempt) {
-            console.warn(`[OllamaService] Active Model '${modelToUse}' not found during chat. Attempting pull/retry...`);
-            const pullSuccess = await pullOllamaModel(modelToUse);
-            if (pullSuccess) { console.log(`[OllamaService] Model pull ok. Retrying chat request...`); return generateChatResponse(contextTranscript, chatHistory, true); }
-            else { console.error(`[OllamaService] Failed to pull model '${modelToUse}'. Aborting chat.`); throw new InternalServerError(`Ollama model '${modelToUse}' not found and could not be pulled.`); }
+            console.warn(`[OllamaService] Active Model '${modelToUse}' not found during chat. Attempting pull initiation...`);
+            try {
+                await pullOllamaModel(modelToUse); // Initiate pull
+                console.log(`[OllamaService] Pull initiated for '${modelToUse}'. Retrying chat request...`);
+                return generateChatResponse(contextTranscript, chatHistory, true); // Retry the chat
+            } catch (pullError) {
+                console.error(`[OllamaService] Failed to initiate pull for '${modelToUse}'. Aborting chat. Pull error:`, pullError);
+                 throw new InternalServerError(`Ollama model '${modelToUse}' not found and could not be pulled.`);
+            }
         }
         if (error instanceof Error) {
              const connectionError = (error as NodeJS.ErrnoException)?.code === 'ECONNREFUSED' || (axios.isAxiosError(error) && error.code === 'ECONNREFUSED');
              if (connectionError) { throw new InternalServerError(`Connection refused: Could not connect to Ollama at ${config.ollama.baseURL}.`); }
-             if (isModelNotFoundError) { throw new InternalServerError(`Ollama model '${modelToUse}' not found.`); }
+             if (isModelNotFoundError && retryAttempt) {
+                 throw new InternalServerError(`Ollama model '${modelToUse}' not found even after attempting pull.`);
+             }
              if (error.name === 'TimeoutError' || error.message.includes('timeout')) { throw new InternalServerError('AI service request timed out.'); }
         }
         throw new InternalServerError('Failed to get response from AI service.', error instanceof Error ? error : undefined);
