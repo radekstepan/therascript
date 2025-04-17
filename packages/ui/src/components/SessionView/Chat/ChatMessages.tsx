@@ -8,10 +8,11 @@ import {
     InfoCircledIcon,
     Cross2Icon,
     CheckIcon,
-    UpdateIcon, // Import spinner icon
+    UpdateIcon,
 } from '@radix-ui/react-icons';
 import { Button, TextField, Flex, Box, Text, IconButton, Dialog, Spinner, Callout } from '@radix-ui/themes';
-import { activeSessionIdAtom } from '../../../store';
+import ReactMarkdown from 'react-markdown'; // Import ReactMarkdown
+import { activeSessionIdAtom, renderMarkdownAtom } from '../../../store'; // Import renderMarkdownAtom
 import type { ChatMessage, ChatSession } from '../../../types';
 import { cn } from '../../../utils';
 
@@ -29,6 +30,7 @@ interface ChatMessagesProps {
 
 export function ChatMessages({ activeChatId, messages: chatMessages, streamingMessage }: ChatMessagesProps) {
   const activeSessionId = useAtomValue(activeSessionIdAtom);
+  const shouldRenderMarkdown = useAtomValue(renderMarkdownAtom); // Read the atom value
 
   const [isNamingDialogOpen, setIsNamingDialogOpen] = useState(false);
   const [messageToName, setMessageToName] = useState<ChatMessage | null>(null);
@@ -38,9 +40,7 @@ export function ChatMessages({ activeChatId, messages: chatMessages, streamingMe
 
   const handleStarClick = (message: ChatMessage) => {
     if (activeChatId === null || !activeSessionId) return;
-
     const queryKey = ['chat', activeSessionId, activeChatId];
-
     if (message.starred) {
       queryClient.setQueryData<ChatSession>(queryKey, (oldData) => {
         if (!oldData) return oldData;
@@ -79,7 +79,8 @@ export function ChatMessages({ activeChatId, messages: chatMessages, streamingMe
         )}
         {chatMessages.map((msg) => (
           <Flex
-            key={msg.id} // Use message ID as key
+            // Use numeric ID if available, otherwise string ID for temp messages
+            key={typeof msg.id === 'number' ? msg.id : String(msg.id)}
             gap="2"
             align="start"
             className="group relative"
@@ -88,7 +89,18 @@ export function ChatMessages({ activeChatId, messages: chatMessages, streamingMe
             {/* Render AI message */}
             {msg.sender === 'ai' && (
               <Box style={{ maxWidth: 'calc(100% - 1rem)' }} className={cn('rounded-lg p-2 px-3 text-sm shadow-sm break-words', 'bg-[--gray-a3] text-[--gray-a12]')} >
-                <Text size="2">{msg.text}</Text>
+                {/* --- Conditional Rendering --- */}
+                {shouldRenderMarkdown ? (
+                    // --- Add specific class to wrapper div ---
+                    <div className="markdown-ai-message">
+                        <ReactMarkdown>
+                            {msg.text}
+                        </ReactMarkdown>
+                    </div>
+                 ) : (
+                    <Text size="2">{msg.text}</Text>
+                 )}
+                {/* --- End Conditional Rendering --- */}
               </Box>
             )}
             {/* Render User message */}
@@ -124,13 +136,25 @@ export function ChatMessages({ activeChatId, messages: chatMessages, streamingMe
             >
                 <Box
                     style={{ maxWidth: 'calc(100% - 1rem)' }}
-                    className={cn('rounded-lg p-2 px-3 text-sm shadow-sm break-words', 'bg-[--gray-a3] text-[--gray-a11]')} // Slightly different text color maybe?
+                    className={cn('rounded-lg p-2 px-3 text-sm shadow-sm break-words', 'bg-[--gray-a3] text-[--gray-a11]')}
                 >
-                    <Text size="2">
-                        {streamingMessage.content}
-                        {/* Blinking cursor effect */}
-                        <span className="inline-block w-2 h-4 bg-gray-500 dark:bg-gray-400 ml-1 animate-pulse"></span>
-                    </Text>
+                    {/* --- Conditional Rendering for Stream --- */}
+                    {shouldRenderMarkdown ? (
+                        // --- Add specific class to wrapper div ---
+                         <div className="markdown-ai-message">
+                            <ReactMarkdown>
+                                {/* Append cursor effect manually */}
+                                {streamingMessage.content + '█'}
+                            </ReactMarkdown>
+                         </div>
+                     ) : (
+                         <Text size="2">
+                            {streamingMessage.content}
+                            {/* Blinking cursor effect */}
+                            <span className="inline-block w-1 h-4 bg-gray-500 dark:bg-gray-400 ml-px animate-pulse align-baseline"></span>
+                         </Text>
+                     )}
+                    {/* --- End Conditional Rendering --- */}
                  </Box>
             </Flex>
         )}

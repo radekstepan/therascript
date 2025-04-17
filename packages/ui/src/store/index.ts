@@ -1,3 +1,4 @@
+// packages/ui/src/store/index.ts
 export * from './action/closeUploadModalAtom';
 export * from './action/openUploadModalAtom';
 export * from './action/setSessionSortAtom';
@@ -14,5 +15,6 @@ export * from './session/sessionSortDirectionAtom';
 export * from './ui/clampedSidebarWidthAtom';
 export * from './ui/effectiveThemeAtom';
 export * from './ui/isUploadModalOpenAtom';
+export * from './ui/renderMarkdownAtom'; // <-- Add this line
 export * from './ui/sidebarWidthAtom';
 export * from './ui/themeAtom';

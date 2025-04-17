@@ -1,20 +1,26 @@
+/* packages/ui/src/components/User/UserThemeDropdown.tsx */
 import React from 'react';
 import { useAtom } from 'jotai';
-// Removed unused imports: useState, useEffect, useSetAtom, useMutation, useQuery, useQueryClient, toastMessageAtom, unloadOllamaModel, fetchOllamaStatus, Spinner, ReloadIcon
-import { Button, DropdownMenu, Text } from '@radix-ui/themes';
+import { Button, DropdownMenu, Text, Flex, Switch } from '@radix-ui/themes'; // Import Flex and Switch
 import {
     SunIcon, MoonIcon, DesktopIcon, ExitIcon, PersonIcon,
+    ChatBubbleIcon, // Optional: Use a different icon for markdown setting
 } from '@radix-ui/react-icons';
-import { themeAtom, Theme as ThemeType } from '../../store';
-// Removed API calls
+import { themeAtom, renderMarkdownAtom, Theme as ThemeType } from '../../store'; // Import renderMarkdownAtom
 
 export function UserThemeDropdown() {
     const [theme, setTheme] = useAtom(themeAtom);
-    // Removed state and hooks related to Ollama status and unloading
+    const [renderMarkdown, setRenderMarkdown] = useAtom(renderMarkdownAtom); // Use the atom
 
     const handleSignOut = () => {
         console.log("Sign Out clicked (Placeholder)");
         // TODO Add actual sign-out logic here
+    };
+
+    // Prevent dropdown from closing when clicking the switch
+    const handleMarkdownSwitchClick = (e: React.MouseEvent) => {
+        e.preventDefault();
+        setRenderMarkdown(!renderMarkdown);
     };
 
     return (
@@ -42,8 +48,25 @@ export function UserThemeDropdown() {
                 </DropdownMenu.RadioGroup>
                 <DropdownMenu.Separator />
 
-                {/* Ollama Action Removed */}
-                {/* Separator Removed */}
+                {/* Render Markdown Toggle */}
+                <DropdownMenu.Item onSelect={(e) => e.preventDefault()} className="cursor-default">
+                    {/* --- Remove align="center" from Flex --- */}
+                    <Flex justify="between" width="100%" gap="2">
+                        <ChatBubbleIcon width="16" height="16" />
+                        <Text size="2" style={{ flexGrow: 1 }}>
+                            Render Markdown
+                        </Text>
+                        <Switch
+                            size="1"
+                            checked={renderMarkdown}
+                            onClick={handleMarkdownSwitchClick}
+                            aria-label="Toggle Markdown rendering for AI responses"
+                         />
+                    </Flex>
+                     {/* --- End Change --- */}
+                </DropdownMenu.Item>
+
+                <DropdownMenu.Separator />
 
                 {/* Sign Out */}
                 <DropdownMenu.Item color="red" onSelect={handleSignOut}>

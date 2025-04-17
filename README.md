@@ -20,8 +20,6 @@
 - [ ] show how large the context is in tokens and warn if context is too large
 - [ ] when you upload/transcribe a file, you should reset the New Session modal
 - [ ] when I click to Rename Chat, the input field that opens in the modal should be focused
-- [x] stream responses from Ollama
-- [x] be able to add new models from ollama to download
 
 ## Nice to have
 

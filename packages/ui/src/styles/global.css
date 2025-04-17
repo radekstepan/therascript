@@ -1,3 +1,4 @@
+/* packages/ui/src/styles/global.css */
 @import '@radix-ui/themes/styles.css';
 
 *,
@@ -25,3 +26,100 @@ html, body {
 :focus-visible {
   outline: none;
 }
+
+/* --- Add Scoped Markdown Styles for AI Messages --- */
+.markdown-ai-message {
+    /* Reset potential global overrides */
+    font-size: var(--font-size-2); /* Match Radix Text size 2 */
+    line-height: var(--line-height-3); /* Match Radix Text size 2 line height */
+    color: var(--gray-a12); /* Default text color */
+}
+
+.markdown-ai-message p {
+    margin-top: 0; /* Reset paragraph top margin */
+    margin-bottom: var(--space-2); /* Add space below paragraphs */
+}
+.markdown-ai-message p:last-child {
+    margin-bottom: 0; /* No margin on the very last paragraph */
+}
+
+.markdown-ai-message ul,
+.markdown-ai-message ol {
+    margin-top: var(--space-2);
+    margin-bottom: var(--space-2);
+    padding-left: var(--space-4); /* Indent lists */
+}
+
+.markdown-ai-message ul {
+    list-style-type: disc;
+}
+
+.markdown-ai-message ol {
+    list-style-type: decimal;
+}
+
+.markdown-ai-message li {
+    margin-bottom: var(--space-1); /* Space between list items */
+}
+.markdown-ai-message li p { /* Handle paragraphs inside list items */
+     margin-bottom: 0;
+}
+
+.markdown-ai-message pre {
+    background-color: var(--gray-a4); /* Use a theme background */
+    padding: var(--space-2);
+    border-radius: var(--radius-2);
+    overflow-x: auto; /* Allow horizontal scroll for long code */
+    margin-top: var(--space-2);
+    margin-bottom: var(--space-2);
+    font-family: var(--font-mono);
+    font-size: calc(var(--font-size-2) * 0.9); /* Slightly smaller font for code */
+    line-height: var(--line-height-2);
+}
+
+.markdown-ai-message code { /* Inline code */
+    background-color: var(--gray-a4);
+    padding: 0.1em 0.3em;
+    border-radius: var(--radius-1);
+    font-family: var(--font-mono);
+    font-size: inherit; /* Inherit size from parent (like pre or p) */
+}
+.markdown-ai-message pre code { /* Code specifically inside pre blocks */
+    background-color: transparent; /* No extra background */
+    padding: 0;
+    border-radius: 0;
+}
+
+.markdown-ai-message a {
+    color: var(--accent-11);
+    text-decoration: underline;
+}
+.markdown-ai-message a:hover {
+    color: var(--accent-10);
+}
+
+/* Add styles for other elements like blockquote, h1-h6 if needed */
+.markdown-ai-message blockquote {
+    border-left: 3px solid var(--gray-a6);
+    padding-left: var(--space-3);
+    margin-left: 0;
+    margin-top: var(--space-2);
+    margin-bottom: var(--space-2);
+    color: var(--gray-a11);
+    font-style: italic;
+}
+.markdown-ai-message h1,
+.markdown-ai-message h2,
+.markdown-ai-message h3,
+.markdown-ai-message h4,
+.markdown-ai-message h5,
+.markdown-ai-message h6 {
+    margin-top: var(--space-4);
+    margin-bottom: var(--space-2);
+    font-weight: 600; /* Example: make headers bold */
+    line-height: 1.3;
+}
+.markdown-ai-message h1 { font-size: 1.5em; }
+.markdown-ai-message h2 { font-size: 1.25em; }
+.markdown-ai-message h3 { font-size: 1.1em; }
+/* --- End Scoped Markdown Styles --- */
