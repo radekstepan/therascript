@@ -1,3 +1,4 @@
+// packages/api/src/db/sqliteService.ts
 import crypto from 'node:crypto'; // <-- Import crypto
 import Database, { type Database as DB, type Statement, type RunResult } from 'better-sqlite3';
 import path from 'node:path';
@@ -16,7 +17,6 @@ if (!fs.existsSync(dbDir)) {
 }
 
 // --- Schema Definition (Updated) ---
-// *** REMOVE export keyword here ***
 const schema = `
     -- Sessions Table
     CREATE TABLE IF NOT EXISTS sessions (
@@ -24,13 +24,13 @@ const schema = `
         fileName TEXT NOT NULL,
         clientName TEXT NOT NULL,
         sessionName TEXT NOT NULL,
-        -- *** Store date as ISO 8601 timestamp string ***
-        date TEXT NOT NULL, -- Changed from DATE to TEXT
+        date TEXT NOT NULL, -- ISO 8601 timestamp string
         sessionType TEXT NOT NULL,
         therapy TEXT NOT NULL,
         transcriptPath TEXT NULL,
         status TEXT NOT NULL DEFAULT 'pending',
-        whisperJobId TEXT NULL
+        whisperJobId TEXT NULL,
+        audioPath TEXT NULL -- Added column for the path to the original audio file
     );
     -- Chats Table
     CREATE TABLE IF NOT EXISTS chats (
@@ -50,10 +50,8 @@ const schema = `
         sender TEXT NOT NULL CHECK(sender IN ('user', 'ai')),
         text TEXT NOT NULL,
         timestamp INTEGER NOT NULL, -- UNIX Millis Timestamp for sorting/display
-        -- Added token counts (nullable integers) --
         promptTokens INTEGER,
         completionTokens INTEGER,
-        -- End Added --
         FOREIGN KEY (chatId) REFERENCES chats (id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_message_chat ON messages (chatId);
@@ -65,7 +63,6 @@ const schema = `
         value TEXT NOT NULL
     );
 `;
-// *** END REMOVAL ***
 
 // --- Database Instance ---
 let db: DB;
@@ -89,7 +86,6 @@ function calculateSchemaHash(schemaString: string): string {
 }
 
 // --- Helper Function: Verify Schema Version ---
-// *** Modify to accept dbInstance as argument ***
 function verifySchemaVersion(dbInstance: DB, currentSchemaDefinition: string) {
     console.log('[db Schema Check]: Verifying schema version...');
     const currentSchemaHash = calculateSchemaHash(currentSchemaDefinition);
@@ -97,13 +93,18 @@ function verifySchemaVersion(dbInstance: DB, currentSchemaDefinition: string) {
 
     let storedSchemaHash: string | undefined;
     try {
-        // Use dbInstance here
+        // Ensure schema_metadata table exists before querying it
+        dbInstance.exec(`
+            CREATE TABLE IF NOT EXISTS schema_metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+        `);
         const row = dbInstance.prepare('SELECT value FROM schema_metadata WHERE key = ?').get(SCHEMA_HASH_KEY) as { value: string } | undefined;
         storedSchemaHash = row?.value;
     } catch (error) {
-        // This might happen if the table doesn't exist yet (very first run)
         console.warn(`[db Schema Check]: Could not read stored schema hash (Table might not exist yet?):`, error);
-        storedSchemaHash = undefined; // Treat as if no hash is stored
+        storedSchemaHash = undefined;
     }
 
     if (storedSchemaHash) {
@@ -123,20 +124,17 @@ function verifySchemaVersion(dbInstance: DB, currentSchemaDefinition: string) {
             console.error('  >   3. Delete the database file to allow re-initialization with the new schema,');
             console.error('  >      OR implement a proper migration strategy.');
             console.error('---------------------------------------------------------------------');
-             // Ensure closeDb uses the correct instance if called from here (though it uses global `db`)
-            closeDb(); // Close the main app DB connection if mismatch detected
-            process.exit(1); // Exit the application
+            closeDb();
+            process.exit(1);
         }
     } else {
         console.log('[db Schema Check]: No stored schema hash found. Assuming first run or new database.');
         try {
-            // Use dbInstance here
             dbInstance.prepare('INSERT OR REPLACE INTO schema_metadata (key, value) VALUES (?, ?)')
                       .run(SCHEMA_HASH_KEY, currentSchemaHash);
             console.log(`[db Schema Check]: Stored current schema hash (${currentSchemaHash}) in database.`);
         } catch (insertError) {
             console.error(`[db Schema Check]: FATAL: Failed to store initial schema hash:`, insertError);
-             // Close the main app DB connection if error occurs
             closeDb();
             process.exit(1);
         }
@@ -145,98 +143,57 @@ function verifySchemaVersion(dbInstance: DB, currentSchemaDefinition: string) {
 
 
 // --- Initialize Function Definition (Updated for new columns) ---
-// *** REMOVE export keyword here ***
 function initializeDatabase(dbInstance: DB) {
     console.log('[db Init Func]: Attempting to initialize schema...'); // Log entry
     try {
-        // Enable PRAGMAs
         dbInstance.pragma('journal_mode = WAL');
         dbInstance.pragma('busy_timeout = 5000');
         dbInstance.pragma('foreign_keys = ON');
         console.log('[db Init Func]: WAL mode and foreign keys enabled.');
 
-        // Execute schema creation statements using the schema constant
-        dbInstance.exec(schema); // Uses the schema constant
+        dbInstance.exec(schema);
         console.log('[db Init Func]: Database schema exec command executed.');
 
-        // Check and add columns (simple migrations)
         const sessionColumns = dbInstance.pragma("table_info(sessions)") as { name: string; type: string; }[];
         const chatColumns = dbInstance.pragma("table_info(chats)") as { name: string; type: string; }[];
-        // --- Get Message Columns ---
         const messageColumns = dbInstance.pragma("table_info(messages)") as { name: string; type: string; }[];
 
         // --- Session Table Migrations ---
         const hasStatus = sessionColumns.some((col) => col.name === 'status');
         const hasWhisperJobId = sessionColumns.some((col) => col.name === 'whisperJobId');
+        const hasAudioPath = sessionColumns.some((col) => col.name === 'audioPath'); // Check for new column
 
-        if (!hasStatus) {
-             console.log('[db Init Func Migration]: Adding "status" column...');
-             dbInstance.exec("ALTER TABLE sessions ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'");
-             console.log('[db Init Func Migration]: "status" column added.');
-         }
-        if (!hasWhisperJobId) {
-             console.log('[db Init Func Migration]: Adding "whisperJobId" column...');
-             dbInstance.exec("ALTER TABLE sessions ADD COLUMN whisperJobId TEXT NULL");
-             console.log('[db Init Func Migration]: "whisperJobId" column added.');
-         }
+        if (!hasStatus) { console.log('[db Init Func Migration]: Adding "status" column...'); dbInstance.exec("ALTER TABLE sessions ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'"); console.log('[db Init Func Migration]: "status" column added.'); }
+        if (!hasWhisperJobId) { console.log('[db Init Func Migration]: Adding "whisperJobId" column...'); dbInstance.exec("ALTER TABLE sessions ADD COLUMN whisperJobId TEXT NULL"); console.log('[db Init Func Migration]: "whisperJobId" column added.'); }
+        if (!hasAudioPath) { console.log('[db Init Func Migration]: Adding "audioPath" column...'); dbInstance.exec("ALTER TABLE sessions ADD COLUMN audioPath TEXT NULL"); console.log('[db Init Func Migration]: "audioPath" column added.'); }
+
         const dateColumn = sessionColumns.find(col => col.name === 'date');
-        if (dateColumn && dateColumn.type.toUpperCase() !== 'TEXT') {
-             console.warn(`[db Init Func Migration]: 'date' column type mismatch...`);
-         }
+        if (dateColumn && dateColumn.type.toUpperCase() !== 'TEXT') { console.warn(`[db Init Func Migration]: 'date' column type mismatch...`); }
 
 
         // --- Chat Table Migrations ---
-        // Add index for timestamp if not exists
         const chatIndexes = dbInstance.pragma("index_list('chats')") as { name: string }[];
-        if (!chatIndexes.some(idx => idx.name === 'idx_chat_timestamp')) {
-             console.log('[db Init Func Migration]: Adding chat timestamp index...');
-             dbInstance.exec("CREATE INDEX IF NOT EXISTS idx_chat_timestamp ON chats (timestamp);");
-             console.log('[db Init Func Migration]: Chat timestamp index added.');
-         }
-        // Chat timestamp remains INTEGER (Unix ms)
-
+        if (!chatIndexes.some(idx => idx.name === 'idx_chat_timestamp')) { console.log('[db Init Func Migration]: Adding chat timestamp index...'); dbInstance.exec("CREATE INDEX IF NOT EXISTS idx_chat_timestamp ON chats (timestamp);"); console.log('[db Init Func Migration]: Chat timestamp index added.'); }
 
         // --- Message Table Migrations (Added Token Columns) ---
         const hasPromptTokens = messageColumns.some((col) => col.name === 'promptTokens');
         const hasCompletionTokens = messageColumns.some((col) => col.name === 'completionTokens');
+        if (!hasPromptTokens) { console.log('[db Init Func Migration]: Adding "promptTokens" column to messages...'); dbInstance.exec("ALTER TABLE messages ADD COLUMN promptTokens INTEGER NULL"); console.log('[db Init Func Migration]: "promptTokens" column added.'); }
+        if (!hasCompletionTokens) { console.log('[db Init Func Migration]: Adding "completionTokens" column to messages...'); dbInstance.exec("ALTER TABLE messages ADD COLUMN completionTokens INTEGER NULL"); console.log('[db Init Func Migration]: "completionTokens" column added.'); }
 
-        if (!hasPromptTokens) {
-             console.log('[db Init Func Migration]: Adding "promptTokens" column to messages...');
-             // Add as INTEGER, allowing NULL
-             dbInstance.exec("ALTER TABLE messages ADD COLUMN promptTokens INTEGER NULL");
-             console.log('[db Init Func Migration]: "promptTokens" column added.');
-        }
-        if (!hasCompletionTokens) {
-             console.log('[db Init Func Migration]: Adding "completionTokens" column to messages...');
-             // Add as INTEGER, allowing NULL
-             dbInstance.exec("ALTER TABLE messages ADD COLUMN completionTokens INTEGER NULL");
-             console.log('[db Init Func Migration]: "completionTokens" column added.');
-        }
-        // --- End Message Migrations ---
-
-        // Add index for message timestamp if not exists
+        // --- Message Timestamp Index ---
         const messageIndexes = dbInstance.pragma("index_list('messages')") as { name: string }[];
-         if (!messageIndexes.some(idx => idx.name === 'idx_message_timestamp')) {
-             console.log('[db Init Func Migration]: Adding message timestamp index...');
-             dbInstance.exec("CREATE INDEX IF NOT EXISTS idx_message_timestamp ON messages (timestamp);");
-             console.log('[db Init Func Migration]: Message timestamp index added.');
-         }
-        // Message timestamp remains INTEGER (Unix ms)
+        if (!messageIndexes.some(idx => idx.name === 'idx_message_timestamp')) { console.log('[db Init Func Migration]: Adding message timestamp index...'); dbInstance.exec("CREATE INDEX IF NOT EXISTS idx_message_timestamp ON messages (timestamp);"); console.log('[db Init Func Migration]: Message timestamp index added.'); }
 
         // --- Verify Schema Version (AFTER schema exec and migrations) ---
-        verifySchemaVersion(dbInstance, schema); // Pass instance and schema constant
+        verifySchemaVersion(dbInstance, schema);
 
     } catch (error) {
         console.error('[db Init Func]: Error initializing database:', error);
-        // Close the specific instance passed, if possible (better-sqlite3 handles this internally on error usually)
-        if (dbInstance && dbInstance.open) {
-             try { dbInstance.close(); } catch (closeErr) { console.error("Error closing DB instance after init error:", closeErr); }
-        }
-        // Re-throw or exit? Let's re-throw to let the caller handle it.
+        if (dbInstance && dbInstance.open) { try { dbInstance.close(); } catch (closeErr) { console.error("Error closing DB instance after init error:", closeErr); } }
         throw error;
     }
 }
-// *** END REMOVAL ***
 
 // --- Database Connection and Initialization (for main app) ---
 console.log(`[db]: Initializing SQLite database connection for: ${dbFilePath}`);
@@ -245,7 +202,6 @@ try {
         verbose: isDev ? console.log : undefined,
     });
     console.log(`[db]: Successfully connected to database: ${dbFilePath}`);
-    // *** Call the internal function with the global db instance ***
     initializeDatabase(db);
 } catch (err) {
     console.error(`[db]: FATAL: Could not connect or initialize database at ${dbFilePath}:`, (err as Error).message);
@@ -259,7 +215,6 @@ function prepare(sql: string): Statement {
     let stmt = statementCache.get(sql);
     if (!stmt) {
         try {
-            // console.log(`[db]: Preparing statement: ${sql.split('\n')[0]}...`); // Less verbose logging
             stmt = db.prepare(sql);
             statementCache.set(sql, stmt);
         } catch (error) {
@@ -304,5 +259,4 @@ process.on('unhandledRejection', (reason, promise) => {
     process.exit(1);
 });
 
-// *** Keep the single export statement at the end ***
 export { db, run, get, all, exec, transaction, closeDb, initializeDatabase, schema };

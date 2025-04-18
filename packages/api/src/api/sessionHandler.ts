@@ -1,3 +1,4 @@
+// packages/api/src/api/sessionHandler.ts
 import { sessionRepository } from '../repositories/sessionRepository.js';
 import { chatRepository } from '../repositories/chatRepository.js';
 import {
@@ -14,7 +15,6 @@ const dateToIsoString = (dateString: string): string | null => {
         return null;
     }
     try {
-        // *** Use Noon UTC (T12) instead of Midnight (T00) ***
         const dt = new Date(`${dateString}T12:00:00.000Z`);
         if (isNaN(dt.getTime())) {
             throw new Error('Invalid date produced');
@@ -27,19 +27,20 @@ const dateToIsoString = (dateString: string): string | null => {
 };
 
 // GET / - List all sessions (metadata only)
+// FIX: Add audioPath to the returned DTO
 export const listSessions = ({ set }: any) => {
     try {
         const sessions = sessionRepository.findAll();
-        // Response date is already ISO string from DB
         const sessionDTOs = sessions.map(s => ({
             id: s.id,
             fileName: s.fileName,
             clientName: s.clientName,
             sessionName: s.sessionName,
-            date: s.date, // Keep ISO string
+            date: s.date,
             sessionType: s.sessionType,
             therapy: s.therapy,
             transcriptPath: s.transcriptPath,
+            audioPath: s.audioPath, // <-- Add audioPath
             status: s.status,
             whisperJobId: s.whisperJobId,
         }));
@@ -54,6 +55,7 @@ export const listSessions = ({ set }: any) => {
 // POST /upload handler remains inline in routes and async (uses current time)
 
 // GET /:sessionId - Get session metadata and list of chat metadata
+// FIX: Add audioPath to the returned DTO
 export const getSessionDetails = ({ sessionData, set }: any) => {
     try {
         const chats = chatRepository.findChatsBySessionId(sessionData.id);
@@ -62,16 +64,16 @@ export const getSessionDetails = ({ sessionData, set }: any) => {
         }));
 
         set.status = 200;
-        // Return data matching SessionWithChatsMetadataResponseSchema (date is ISO string)
         return {
              id: sessionData.id,
              fileName: sessionData.fileName,
              clientName: sessionData.clientName,
              sessionName: sessionData.sessionName,
-             date: sessionData.date, // Keep ISO string
+             date: sessionData.date,
              sessionType: sessionData.sessionType,
              therapy: sessionData.therapy,
              transcriptPath: sessionData.transcriptPath,
+             audioPath: sessionData.audioPath, // <-- Add audioPath
              status: sessionData.status,
              whisperJobId: sessionData.whisperJobId,
              chats: chatMetadata
@@ -83,6 +85,7 @@ export const getSessionDetails = ({ sessionData, set }: any) => {
 };
 
 // PUT /:sessionId/metadata - Update metadata
+// FIX: Add audioPath to the returned DTO
 export const updateSessionMetadata = ({ sessionData, body, set }: any) => {
     const sessionId = sessionData.id;
     const { date: dateInput, ...restOfBody } = body; // Separate date input
@@ -92,9 +95,8 @@ export const updateSessionMetadata = ({ sessionData, body, set }: any) => {
          throw new BadRequestError('No metadata provided for update.');
     }
 
-    // Convert date string to ISO string using Noon UTC if provided
     if (dateInput) {
-        const isoDate = dateToIsoString(dateInput); // Uses the updated helper
+        const isoDate = dateToIsoString(dateInput);
         if (!isoDate) {
             throw new BadRequestError(`Invalid date format provided: ${dateInput}. Must be YYYY-MM-DD.`);
         }
@@ -109,16 +111,16 @@ export const updateSessionMetadata = ({ sessionData, body, set }: any) => {
         }
         console.log(`[API] Updated metadata for session ${sessionId}`);
         set.status = 200;
-        // Return data matching SessionMetadataResponseSchema (date is ISO string)
         return {
             id: updatedSession.id,
             fileName: updatedSession.fileName,
             clientName: updatedSession.clientName,
             sessionName: updatedSession.sessionName,
-            date: updatedSession.date, // Return ISO string
+            date: updatedSession.date,
             sessionType: updatedSession.sessionType,
             therapy: updatedSession.therapy,
             transcriptPath: updatedSession.transcriptPath,
+            audioPath: updatedSession.audioPath, // <-- Add audioPath
             status: updatedSession.status,
             whisperJobId: updatedSession.whisperJobId,
         };

@@ -4,12 +4,8 @@
 - [ ] fix vertical align of transcript header, items too close to the top; `align-items: flex-end`
 - [ ] reduce the left and right padding on the chat/transcript section and be consistent with the chats section
 - [ ] in the sessions sidebar the session link active onclick outline is being cutoff (top and left)
-- [ ] when you send a message and there's an error from the API, the message could still be saved, so keep showing it in the UI
-- [ ] the star message icon is too small and not vertically aligned with the message itself
-- [ ] think about the starred messages popover, the list/UI looks odd
 - [ ] the formatting of date fields is not consistent when rendered as an `input type="date"` and text field
 - [ ] show progress bar when transcribing a chat session and be able to abort the process
-- [ ] starred messages don't show in the popover
 - [ ] if you can't find chat data, show the same message when we fail to load the session
 - [ ] the `sessionSortCriteriaAtom` says it's sorting by "date", but in the UI it shows sorted by "Client"
 - [ ] change the theme dropodown such that we highlight rather than show a checkmark next to the selected theme
@@ -17,8 +13,15 @@
 - [ ] the edit transcript modal should let you delete the whole transcript. That will delete the transcript and all chat messages. Well, it'll "archive" it so that it's hidden from the UI but it's still in the DB just in case.
 - [ ] when you upload/transcribe a file, you should reset the New Session modal
 - [ ] when I click to Rename Chat, the input field that opens in the modal should be focused
+- [ ] toast should above modal
 - [ ] make sure the AI response "cursor" is less dark and is still blinking.The copy icon shouldn't show until after the whole response has been received.
-- [ ] switching between the diffent chats the number of tokens stays the same for some reason
+- [*] switching between the diffent chats the number of tokens stays the same for some reason
+- [x] play the original audio at a timestamp. Be able to pause/stop the audio as well
+- [*] starred messages don't show in the popover
+- [*] the star message icon is too small and not vertically aligned with the message itself
+- [*] think about the starred messages popover, the list/UI looks odd
+- [*] split the files again
+- [*] move env files to root dir
 
 ## Nice to have
 

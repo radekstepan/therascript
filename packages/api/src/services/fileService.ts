@@ -1,4 +1,3 @@
-// <file path="packages/api/src/services/fileService.ts">
 import fs from 'fs/promises';
 import path from 'path';
 import config from '../config/index.js';
@@ -8,13 +7,29 @@ import type { StructuredTranscript } from '../types/index.js'; // Import the typ
 const transcriptsDir = config.db.transcriptsDir;
 const uploadsDir = config.db.uploadsDir;
 
-// Now uses .json extension
+// --- FIX: getTranscriptPath now expects ID, not a relative path ---
+// It constructs the expected RELATIVE path within the transcripts directory
 const getTranscriptPath = (sessionId: number): string => {
   return path.join(transcriptsDir, `${sessionId}.json`);
 };
 
+// --- FIX: getAudioPath expects RELATIVE filename, returns absolute path ---
+// Renamed from getTranscriptPath for clarity
+const getAudioAbsolutePath = (relativeFilename: string | null): string | null => {
+    if (!relativeFilename) return null;
+    // Make sure we don't accidentally join an absolute path
+    if (path.isAbsolute(relativeFilename)) {
+        console.error(`[FileService:getAudioAbsolutePath] Received absolute path '${relativeFilename}' when expecting relative. Returning null.`);
+        return null; // Or handle error differently
+    }
+    return path.resolve(uploadsDir, relativeFilename);
+};
+// --- End FIX ---
+
+
 // Loads and parses JSON, returns StructuredTranscript
 export const loadTranscriptContent = async (sessionId: number): Promise<StructuredTranscript> => {
+  // Use the helper that creates the path based on ID
   const filePath = getTranscriptPath(sessionId);
   console.log(`[FileService DEBUG] Attempting to load transcript from: ${filePath}`); // DEBUG LOG
   try {
@@ -54,31 +69,35 @@ export const loadTranscriptContent = async (sessionId: number): Promise<Structur
   }
 };
 
-// Saves StructuredTranscript as JSON
+// Saves StructuredTranscript as JSON, returns the relative path stored
 export const saveTranscriptContent = async (sessionId: number, content: StructuredTranscript): Promise<string> => {
-  const filePath = getTranscriptPath(sessionId);
+  // Get the absolute path for saving
+  const absoluteFilePath = getTranscriptPath(sessionId);
+  // Determine the relative path to store/return (relative to transcriptsDir)
+  const relativeFilePath = `${sessionId}.json`;
   try {
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.mkdir(path.dirname(absoluteFilePath), { recursive: true });
     // Stringify the structured content with indentation for readability
     const jsonContent = JSON.stringify(content, null, 2);
-    await fs.writeFile(filePath, jsonContent, 'utf-8');
-    console.log(`[FileService] Transcript saved: ${filePath}`);
-    return filePath;
+    await fs.writeFile(absoluteFilePath, jsonContent, 'utf-8');
+    console.log(`[FileService] Transcript saved to absolute path: ${absoluteFilePath}`);
+    // Return the relative path that should be stored in the DB
+    return relativeFilePath;
   } catch (error) {
     console.error(`[FileService] Error saving transcript ${sessionId}:`, error);
     throw new Error(`Could not save transcript ${sessionId}.`);
   }
 };
 
-// Deletes the .json file
+// Deletes the .json file based on Session ID
 export const deleteTranscriptFile = async (sessionId: number): Promise<void> => {
-    const filePath = getTranscriptPath(sessionId);
+    const filePath = getTranscriptPath(sessionId); // Gets absolute path
     try {
         await fs.unlink(filePath);
         console.log(`[FileService] Deleted transcript file: ${filePath}`);
     } catch (error) {
         if (isNodeError(error) && error.code === 'ENOENT') {
-          console.warn(`[FileService] Transcript ${sessionId} not found during delete.`);
+          console.warn(`[FileService] Transcript file for session ${sessionId} not found during delete.`);
         } else {
           console.error(`[FileService] Error deleting transcript ${sessionId}:`, error);
           throw new Error(`Could not delete transcript ${sessionId}.`);
@@ -86,30 +105,32 @@ export const deleteTranscriptFile = async (sessionId: number): Promise<void> => 
     }
 };
 
-export const deleteUploadedFile = async (filePath: string): Promise<void> => {
+// --- FIX: deleteUploadedFile now accepts ABSOLUTE path for safety check ---
+export const deleteUploadedFile = async (absoluteFilePath: string): Promise<void> => {
     // Ensure filePath is within the expected uploads directory for safety
     const resolvedUploadsDir = path.resolve(uploadsDir);
-    const resolvedFilePath = path.resolve(filePath);
 
-    if (!resolvedFilePath.startsWith(resolvedUploadsDir)) {
-        console.error(`[FileService] Attempted to delete unsafe path outside uploads directory: ${filePath}`);
+    // --- FIX: Check absoluteFilePath starts with resolvedUploadsDir ---
+    if (!absoluteFilePath.startsWith(resolvedUploadsDir)) {
+        console.error(`[FileService] Attempted to delete unsafe path outside uploads directory: ${absoluteFilePath}`);
         return; // Do not proceed if path seems unsafe
     }
-    if (!filePath) {
-         console.warn('[FileService] deleteUploadedFile called with empty filePath.');
+    // --- End FIX ---
+
+    if (!absoluteFilePath) {
+         console.warn('[FileService] deleteUploadedFile called with empty absoluteFilePath.');
          return;
     }
     try {
-        await fs.unlink(resolvedFilePath);
-        console.log(`[FileService] Deleted uploaded audio file: ${resolvedFilePath}`);
+        await fs.unlink(absoluteFilePath);
+        console.log(`[FileService] Deleted uploaded audio file: ${absoluteFilePath}`);
     } catch (error) {
         if (isNodeError(error) && error.code === 'ENOENT') {
-            console.warn(`[FileService] Uploaded file not found during delete: ${resolvedFilePath}`);
+            console.warn(`[FileService] Uploaded file not found during delete: ${absoluteFilePath}`);
         } else {
-            console.error(`[FileService] Error deleting uploaded file ${resolvedFilePath}:`, error);
+            console.error(`[FileService] Error deleting uploaded file ${absoluteFilePath}:`, error);
             // Decide whether to re-throw or just log
             // throw new Error(`Could not delete uploaded file ${filePath}.`);
         }
     }
 };
-// </file>
