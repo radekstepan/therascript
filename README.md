@@ -22,6 +22,9 @@
 - [*] think about the starred messages popover, the list/UI looks odd
 - [*] split the files again
 - [*] move env files to root dir
+- [ ] after you edit the transcript, the transcript is no longer included in the call to the API and you need to unload/reload the model
+- [x] even after unloading the model, the ollama docker container still has a model loaded, why not just kill the container when you unload the model?
+- [ ] is the token count actually accurate? the current "used" tokens, but also the tokens in the transcript. Do they update after edititing a paragraph?
 
 ## Nice to have
 

@@ -4,15 +4,128 @@ import axios, { AxiosError } from 'axios';
 import FormData from 'form-data';
 import config from '../config/index.js'; // Import config
 import { isNodeError } from '../utils/helpers.js';
-import { InternalServerError, ApiError, BadRequestError } from '../errors.js';
+// --- FIX: Import NotFoundError ---
+import { InternalServerError, ApiError, BadRequestError, NotFoundError } from '../errors.js';
+// --- END FIX ---
 import type {
     StructuredTranscript,
     WhisperJobStatus,
     WhisperSegment
 } from '../types/index.js';
+import { exec as callbackExec } from 'node:child_process'; // <-- Import exec
+import * as util from 'node:util';
+import * as fsSync from 'node:fs'; // For checking compose file
+// --- FIX: Import fileURLToPath ---
+import { fileURLToPath } from 'node:url';
+// --- END FIX ---
+
+const exec = util.promisify(callbackExec); // <-- Promisify exec
+
 
 const WHISPER_API_URL = config.whisper.apiUrl;
 const WHISPER_MODEL_TO_USE = config.whisper.model; // Get model from config
+
+// --- Docker Management Logic for Whisper ---
+const ROOT_DIR = path.resolve(fileURLToPath(import.meta.url), '../../../..'); // Navigate up to project root
+const ROOT_COMPOSE_FILE = path.join(ROOT_DIR, 'docker-compose.yml');
+const WHISPER_SERVICE_NAME = 'whisper'; // Match service name in root compose file
+
+// Helper to run docker compose commands for the root file
+async function runRootComposeCommand(command: string): Promise<string> {
+    if (!fsSync.existsSync(ROOT_COMPOSE_FILE)) {
+        console.error(`[Whisper Docker] Root compose file not found at: ${ROOT_COMPOSE_FILE}`);
+        throw new InternalServerError(`Root docker-compose.yml not found at ${ROOT_COMPOSE_FILE}`);
+    }
+    // Use -p <project_name> to avoid conflicts if other compose files are used
+    const projectName = path.basename(ROOT_DIR).replace(/[^a-z0-9]/gi, ''); // Simple project name from dir
+    const composeCommand = `docker compose -p ${projectName} -f "${ROOT_COMPOSE_FILE}" ${command}`;
+    console.log(`[Whisper Docker] Running: ${composeCommand}`);
+    try {
+        const { stdout, stderr } = await exec(composeCommand);
+        if (stderr && !stderr.toLowerCase().includes("warn") && !stderr.toLowerCase().includes("found orphan containers")) {
+            console.warn(`[Whisper Docker] Compose stderr: ${stderr}`);
+        }
+        return stdout.trim();
+    } catch (error: any) {
+        console.error(`[Whisper Docker] Error executing: ${composeCommand}`);
+        if (error.stderr) console.error(`[Whisper Docker] Stderr: ${error.stderr}`);
+        if (error.stdout) console.error(`[Whisper Docker] Stdout: ${error.stdout}`);
+        throw new InternalServerError(`Failed to run Whisper Docker Compose command: ${command}. Error: ${error.message}`);
+    }
+}
+
+// Check if the Whisper container is running
+async function isWhisperContainerRunning(): Promise<boolean> {
+    try {
+        const containerId = await runRootComposeCommand(`ps -q ${WHISPER_SERVICE_NAME}`);
+        return !!containerId;
+    } catch (error: any) {
+        console.warn(`[Whisper Docker] Error checking running status (likely not running): ${error.message}`);
+        return false;
+    }
+}
+
+// Check if the Whisper API is responsive
+async function isWhisperApiResponsive(): Promise<boolean> {
+    try {
+        await axios.get(`${WHISPER_API_URL}/health`, { timeout: 3000 });
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
+
+// Ensure Whisper service is running and healthy
+export async function ensureWhisperReady(timeoutMs = 90000): Promise<void> { // Increased timeout for model loading
+    console.log("[Whisper Docker] Ensuring Whisper service is ready...");
+    if (await isWhisperContainerRunning() && await isWhisperApiResponsive()) {
+        console.log("[Whisper Docker] ✅ Whisper container running and API responsive.");
+        return;
+    }
+
+    if (!(await isWhisperContainerRunning())) {
+        console.log("[Whisper Docker] 🅾️ Whisper container not running. Attempting to start...");
+        try {
+            // Use --remove-orphans to clean up potential stale containers
+            await runRootComposeCommand(`up -d --remove-orphans ${WHISPER_SERVICE_NAME}`);
+            console.log(`[Whisper Docker] 'docker compose up -d whisper' command issued.`);
+        } catch (startError: any) {
+            console.error("[Whisper Docker] ❌ Failed to issue start command for Whisper service:", startError);
+            throw new InternalServerError("Failed to start Whisper Docker service.", startError);
+        }
+    } else {
+        console.log("[Whisper Docker] Container process found, but API was not responsive. Waiting...");
+    }
+
+    // Wait for API to become responsive (health check)
+    const startTime = Date.now();
+    while (Date.now() - startTime < timeoutMs) {
+        console.log("[Whisper Docker] ⏳ Waiting for Whisper API (/health) to become responsive...");
+        if (await isWhisperApiResponsive()) {
+            console.log("[Whisper Docker] ✅ Whisper API is now responsive.");
+            return;
+        }
+        await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds before retrying
+    }
+
+    console.error(`[Whisper Docker] ❌ Whisper API did not become responsive within ${timeoutMs / 1000} seconds.`);
+    throw new InternalServerError(`Whisper service started but API did not respond within timeout.`);
+}
+
+// Function to stop the Whisper service (optional, could be called after jobs)
+export async function stopWhisperService(): Promise<void> {
+    console.log("[Whisper Docker] Attempting to stop Whisper service...");
+    try {
+        await runRootComposeCommand(`down`); // Use down to stop and remove
+        console.log("[Whisper Docker] ✅ Whisper service stopped.");
+    } catch (error: any) {
+        console.error("[Whisper Docker] ❌ Failed to stop Whisper service:", error);
+        // Decide if this should throw or just warn
+        // throw new InternalServerError("Failed to stop Whisper Docker service.", error);
+    }
+}
+// --- End Docker Management Logic ---
+
 
 // --- Helper Function: Group segments into paragraphs (Corrected) ---
 function groupSegmentsIntoParagraphs(segments: WhisperSegment[]): StructuredTranscript {
@@ -85,6 +198,18 @@ function groupSegmentsIntoParagraphs(segments: WhisperSegment[]): StructuredTran
 export const startTranscriptionJob = async (filePath: string): Promise<string> => {
     const absoluteFilePath = path.resolve(filePath);
     const fileName = path.basename(absoluteFilePath);
+
+    // --- Ensure Whisper is Ready ---
+    try {
+         await ensureWhisperReady();
+         console.log(`[TranscriptionService] Whisper service is ready. Proceeding with job submission for: ${fileName}`);
+    } catch (error) {
+         console.error(`[TranscriptionService] Could not ensure Whisper service readiness before starting job.`, error);
+         // Propagate the error (already likely an InternalServerError)
+         throw error;
+    }
+    // --- End Ensure Whisper ---
+
     console.log(`[TranscriptionService] Requesting transcription job for: ${fileName} via ${WHISPER_API_URL} using model '${WHISPER_MODEL_TO_USE}'`); // Log model
 
     let fileHandle;
@@ -139,7 +264,7 @@ export const startTranscriptionJob = async (filePath: string): Promise<string> =
     }
 };
 
-// --- Get Transcription Status (No change needed) ---
+// --- Get Transcription Status (Fixed NotFoundError import) ---
 export const getTranscriptionStatus = async (jobId: string): Promise<WhisperJobStatus> => {
     if (!jobId) throw new BadRequestError("Job ID is required to check status.");
     console.log(`[TranscriptionService] Checking status for job ${jobId}...`);
@@ -156,7 +281,10 @@ export const getTranscriptionStatus = async (jobId: string): Promise<WhisperJobS
         if (axios.isAxiosError(error)) {
             const axiosError = error as AxiosError;
             if (axiosError.response?.status === 404) {
-                throw new InternalServerError(`Job ID ${jobId} not found on Whisper service.`);
+                 // Don't throw InternalServerError here, the job might just not exist
+                 console.warn(`[TranscriptionService] Job ID ${jobId} not found on Whisper service.`);
+                 throw new NotFoundError(`Job ID ${jobId} not found on Whisper service.`); // <-- Use imported NotFoundError
+                // throw new InternalServerError(`Job ID ${jobId} not found on Whisper service.`);
             }
              if (axiosError.code === 'ECONNREFUSED' || axiosError.code === 'ENOTFOUND') {
                  throw new InternalServerError(`Could not connect to Whisper service at ${WHISPER_API_URL} to check status.`);

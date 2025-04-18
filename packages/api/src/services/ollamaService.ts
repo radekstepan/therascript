@@ -6,6 +6,104 @@ import config from '../config/index.js';
 import { BackendChatMessage, OllamaModelInfo } from '../types/index.js';
 import { InternalServerError, BadRequestError, ApiError, NotFoundError } from '../errors.js';
 import { getActiveModel, getConfiguredContextSize } from './activeModelService.js';
+import { exec as callbackExec } from 'node:child_process'; // <-- Import exec
+import * as util from 'node:util';
+import * as path from 'node:path';
+import * as fs from 'node:fs'; // For checking compose file
+import { fileURLToPath } from 'node:url'; // <-- Import fileURLToPath
+
+const exec = util.promisify(callbackExec); // <-- Promisify exec
+
+// --- Docker Management Logic for Ollama ---
+// Resolve path relative to this file's location in dist/
+const OLLAMA_PACKAGE_DIR = path.resolve(fileURLToPath(import.meta.url), '../../../..', 'ollama');
+const OLLAMA_COMPOSE_FILE = path.join(OLLAMA_PACKAGE_DIR, 'docker-compose.yml');
+const OLLAMA_SERVICE_NAME = 'ollama'; // Match service name in ollama's compose file
+
+// Helper to run docker compose commands specifically for Ollama
+async function runOllamaComposeCommand(command: string): Promise<string> {
+    if (!fs.existsSync(OLLAMA_COMPOSE_FILE)) {
+        console.error(`[Ollama Docker] Compose file not found at: ${OLLAMA_COMPOSE_FILE}`);
+        throw new InternalServerError(`Ollama docker-compose.yml not found at ${OLLAMA_COMPOSE_FILE}`);
+    }
+    const composeCommand = `docker compose -f "${OLLAMA_COMPOSE_FILE}" ${command}`;
+    console.log(`[Ollama Docker] Running: ${composeCommand}`);
+    try {
+        const { stdout, stderr } = await exec(composeCommand);
+        if (stderr && !stderr.toLowerCase().includes("warn")) {
+            console.warn(`[Ollama Docker] Compose stderr: ${stderr}`);
+        }
+        return stdout.trim();
+    } catch (error: any) {
+        console.error(`[Ollama Docker] Error executing: ${composeCommand}`);
+        if (error.stderr) console.error(`[Ollama Docker] Stderr: ${error.stderr}`);
+        if (error.stdout) console.error(`[Ollama Docker] Stdout: ${error.stdout}`);
+        throw new InternalServerError(`Failed to run Ollama Docker Compose command: ${command}. Error: ${error.message}`);
+    }
+}
+
+// Check if the Ollama container is running
+async function isOllamaContainerRunning(): Promise<boolean> {
+    try {
+        // Use ps -q to get the container ID if running
+        const containerId = await runOllamaComposeCommand(`ps -q ${OLLAMA_SERVICE_NAME}`);
+        return !!containerId; // If ID exists, it's running (or starting)
+    } catch (error: any) {
+        // Ignore errors like "no such service" which indicate it's not running
+        console.warn(`[Ollama Docker] Error checking running status (likely not running): ${error.message}`);
+        return false;
+    }
+}
+
+// Check if the Ollama API is responsive
+async function isOllamaApiResponsive(): Promise<boolean> {
+    try {
+        // Simple GET to the base URL should work if Ollama is running
+        await axios.get(config.ollama.baseURL, { timeout: 3000 });
+        return true;
+    } catch (error) {
+        return false; // Not responsive
+    }
+}
+
+// Ensure Ollama is running and responsive
+export async function ensureOllamaReady(timeoutMs = 30000): Promise<void> {
+    console.log("[Ollama Docker] Ensuring Ollama service is ready...");
+    if (await isOllamaContainerRunning() && await isOllamaApiResponsive()) {
+        console.log("[Ollama Docker] ✅ Ollama container running and API responsive.");
+        return;
+    }
+
+    if (!(await isOllamaContainerRunning())) {
+        console.log("[Ollama Docker] 🅾️ Ollama container not running. Attempting to start...");
+        try {
+            await runOllamaComposeCommand(`up -d ${OLLAMA_SERVICE_NAME}`);
+            console.log("[Ollama Docker] 'docker compose up -d ollama' command issued.");
+        } catch (startError: any) {
+            console.error("[Ollama Docker] ❌ Failed to issue start command for Ollama service:", startError);
+            throw new InternalServerError("Failed to start Ollama Docker service.", startError);
+        }
+    } else {
+        console.log("[Ollama Docker] Container process found, but API was not responsive. Waiting...");
+    }
+
+    // Wait for API to become responsive
+    const startTime = Date.now();
+    while (Date.now() - startTime < timeoutMs) {
+        console.log("[Ollama Docker] ⏳ Waiting for Ollama API to become responsive...");
+        if (await isOllamaApiResponsive()) {
+            console.log("[Ollama Docker] ✅ Ollama API is now responsive.");
+            return;
+        }
+        await new Promise(resolve => setTimeout(resolve, 3000)); // Wait 3 seconds before retrying
+    }
+
+    console.error(`[Ollama Docker] ❌ Ollama API did not become responsive within ${timeoutMs / 1000} seconds.`);
+    throw new InternalServerError(`Ollama service started but API did not respond within timeout.`);
+}
+
+// --- End Docker Management Logic ---
+
 
 console.log(`[OllamaService] Using Ollama host: ${config.ollama.baseURL} (or OLLAMA_HOST env var)`);
 
@@ -36,10 +134,15 @@ const pullJobCancellationFlags = new Map<string, boolean>();
 // --- END NEW ---
 
 
-// --- List Models (no change) ---
+// --- List Models (Ensure Ready Added) ---
 export const listModels = async (): Promise<OllamaModelInfo[]> => {
-    console.log(`[OllamaService] Fetching available models from ${config.ollama.baseURL}/api/tags`);
+    console.log(`[OllamaService] Request to list available models...`);
     try {
+        // --- Ensure Ollama is ready before listing ---
+        await ensureOllamaReady();
+        console.log(`[OllamaService] Ollama ready. Fetching models from ${config.ollama.baseURL}/api/tags`);
+        // --- End Ensure Ready ---
+
         const response: ListResponse = await ollama.list();
         // TODO: Add more robust mapping and error handling for details
         return response.models.map(model => {
@@ -60,10 +163,15 @@ export const listModels = async (): Promise<OllamaModelInfo[]> => {
          });
     } catch (error: any) {
         console.error('[OllamaService] Error fetching available models:', error);
+        // If ensureOllamaReady failed, it would throw InternalServerError already.
+        // Handle other errors during the actual list call.
         if (error.message?.includes('ECONNREFUSED')) {
-             throw new InternalServerError(`Connection refused: Could not connect to Ollama at ${config.ollama.baseURL} to list models.`);
+             // This shouldn't happen if ensureOllamaReady succeeded, but handle defensively.
+             throw new InternalServerError(`Connection refused after readiness check: Could not connect to Ollama at ${config.ollama.baseURL} to list models.`);
         }
-        throw new InternalServerError('Failed to list models from Ollama service.', error instanceof Error ? error : new Error(String(error)));
+        // Re-throw other internal server errors or wrap unknown errors
+        if (error instanceof ApiError) throw error;
+        throw new InternalServerError('Failed to list models from Ollama service after readiness check.', error instanceof Error ? error : new Error(String(error)));
     }
 };
 
@@ -110,6 +218,9 @@ async function runPullInBackground(jobId: string, modelName: string) {
     pullJobCancellationFlags.set(jobId, false); // Initialize cancellation flag
 
     try {
+        // Ensure Ollama is running before starting the pull
+        await ensureOllamaReady();
+
         // --- FIX: Use 'model' property instead of 'name' ---
         const stream = await ollama.pull({ model: modelName, stream: true });
         // --- END FIX ---
@@ -275,12 +386,12 @@ export const cancelPullModelJob = (jobId: string): boolean => {
 // --- END NEW ---
 
 
-// --- Check Model Status (no change) ---
-export const checkModelStatus = async (modelToCheck: string): Promise<OllamaModelInfo | null> => {
+// --- Check Model Status (Modified to Handle Offline) ---
+export const checkModelStatus = async (modelToCheck: string): Promise<OllamaModelInfo | null | { status: 'unavailable' }> => {
     const psUrl = `${config.ollama.baseURL}/api/ps`;
     console.log(`[OllamaService] Checking if specific model '${modelToCheck}' is loaded using ${psUrl}...`);
     try {
-        const response = await axios.get(psUrl, { timeout: 10000 }); // Using axios directly
+        const response = await axios.get(psUrl, { timeout: 5000 }); // Using axios directly
         if (response.status === 200) {
             const loadedModels = response.data.models || [];
             const loadedModel = loadedModels.find((model: any) => model.name === modelToCheck); // Find specific model
@@ -303,62 +414,70 @@ export const checkModelStatus = async (modelToCheck: string): Promise<OllamaMode
                 };
             } else {
                 console.log(`[OllamaService] Specific model '${modelToCheck}' not found among loaded models:`, loadedModels.map((m: any) => m.name));
-                return null;
+                return null; // Model exists but is not loaded
             }
         } else {
             console.warn(`[OllamaService] Unexpected status code ${response.status} from /api/ps`);
-            return null;
+            return null; // Treat unexpected status as not loaded for safety
         }
     } catch (error: any) {
-        console.error(`[OllamaService] Error checking status for specific model '${modelToCheck}':`, error.message);
-        if (axios.isAxiosError(error)) {
-             if (error.code === 'ECONNREFUSED') {
-                 throw new InternalServerError(`Connection refused: Could not connect to Ollama at ${config.ollama.baseURL}.`);
-             }
+        console.warn(`[OllamaService] Error checking status for specific model '${modelToCheck}':`, error.message);
+        // --- Specific check for connection refused ---
+        if (axios.isAxiosError(error) && error.code === 'ECONNREFUSED') {
+             console.warn(`[OllamaService] Connection refused. Ollama service appears to be unavailable.`);
+             return { status: 'unavailable' }; // Return specific status
         }
-        console.log(`[OllamaService] Assuming specific model '${modelToCheck}' is not loaded due to error.`);
-        return null; // Don't throw, just indicate not loaded on error
+        // --- End specific check ---
+        console.log(`[OllamaService] Assuming specific model '${modelToCheck}' is not loaded due to other error.`);
+        return null; // Don't throw, just indicate not loaded on other errors
      }
 };
 
 
-// --- Load Model Function (no change) ---
+// --- Load Model Function (Modified to Ensure Running) ---
 export const loadOllamaModel = async (modelName: string): Promise<void> => {
      if (!modelName) {
         throw new BadRequestError("Model name must be provided to load.");
     }
+    console.log(`[OllamaService] Request to load model '${modelName}'...`);
+
+    // 1. Ensure Ollama Docker service is running and API is responsive
+    try {
+         await ensureOllamaReady();
+         console.log(`[OllamaService] Ollama service is ready. Proceeding with load trigger for '${modelName}'.`);
+    } catch (error) {
+         // Propagate error from ensureOllamaReady (already logged)
+         throw error;
+    }
+
+    // 2. Trigger load via chat request
     console.log(`[OllamaService] Triggering load for model '${modelName}' using a minimal chat request...`);
     try {
-        // Send a trivial chat request to force loading
         const response = await ollama.chat({
             model: modelName,
             messages: [{ role: 'user', content: 'ping' }], // Minimal prompt
             stream: false,
-            // keep_alive defaults might be sufficient, or use config: keep_alive: config.ollama.keepAlive
+            keep_alive: config.ollama.keepAlive, // Use configured keep_alive
         });
         console.log(`[OllamaService] Minimal chat request completed for '${modelName}'. Status: ${response.done}. Ollama should now be loading/have loaded it.`);
-        // TODO: Could add a checkModelStatus poll here to confirm load before resolving?
 
     } catch (error: any) {
         console.error(`[OllamaService] Error during load trigger chat request for '${modelName}':`, error);
-        // Check if it's a model not found error
         const isModelNotFoundError = error.status === 404 || (error.message?.includes('model') && (error.message?.includes('not found') || error.message?.includes('missing')));
         if (isModelNotFoundError) {
              console.error(`[OllamaService] Model '${modelName}' not found locally during load attempt. It needs to be pulled first.`);
-             // TODO: Should this just warn or throw BadRequestError? Throwing seems better.
              throw new BadRequestError(`Model '${modelName}' not found locally. Please pull the model first.`);
         }
-        // Check for connection errors
+        // Connection errors likely caught by ensureOllamaReady, but check again just in case
         if (error.message?.includes('ECONNREFUSED')) {
              throw new InternalServerError(`Connection refused: Could not connect to Ollama at ${config.ollama.baseURL} to load model.`);
         }
-        // General internal server error for other issues
         throw new InternalServerError(`Failed to trigger load for model '${modelName}' via chat request.`, error instanceof Error ? error : undefined);
     }
 };
 
 
-// --- Generate Chat Response (no change) ---
+// --- Generate Chat Response (Modified to Ensure Running) ---
 export const generateChatResponse = async (
     contextTranscript: string,
     chatHistory: BackendChatMessage[],
@@ -369,6 +488,15 @@ export const generateChatResponse = async (
     const contextSize = getConfiguredContextSize(); // Get configured size
     console.log(`[OllamaService:generateChatResponse] Attempting chat with ACTIVE model: ${modelToUse}, Context Size: ${contextSize ?? 'default'}`);
 
+    // --- Ensure Ollama is ready before proceeding ---
+    try {
+         await ensureOllamaReady();
+         console.log(`[OllamaService:generateChatResponse] Ollama service is ready.`);
+    } catch (error) {
+         throw error; // Propagate error if Ollama couldn't be started/reached
+    }
+    // --- End ensure ready ---
+
     if (!contextTranscript) console.warn("[OllamaService] Generating response with empty or missing transcript context string.");
     else console.log(`[OllamaService] Transcript context string provided (length: ${contextTranscript.length}).`);
     if (!chatHistory || chatHistory.length === 0) throw new InternalServerError("Internal Error: Cannot generate response without chat history.");
@@ -376,13 +504,10 @@ export const generateChatResponse = async (
 
     const latestUserMessage = chatHistory[chatHistory.length - 1];
     const previousHistory = chatHistory.slice(0, -1);
-    // TODO: Consider token limits when constructing the context message
     const transcriptContextMessage: Message = { role: 'user', content: `CONTEXT TRANSCRIPT:\n"""\n${contextTranscript || 'No transcript available.'}\n"""` };
     const messages: Message[] = [
         { role: 'system', content: SYSTEM_PROMPT },
-        // Map previous history
         ...previousHistory.map((msg): Message => ({ role: msg.sender === 'ai' ? 'assistant' : 'user', content: msg.text })),
-        // Add context and latest user message
         transcriptContextMessage,
         { role: 'user', content: latestUserMessage.text }
     ];
@@ -396,7 +521,6 @@ export const generateChatResponse = async (
             stream: false,
             keep_alive: config.ollama.keepAlive,
              options: {
-                 // Add num_ctx if configured
                  ...(contextSize !== null && { num_ctx: contextSize }),
              }
         });
@@ -420,11 +544,8 @@ export const generateChatResponse = async (
 
         if (isModelNotFoundError) {
              console.error(`[OllamaService] Active Model '${modelToUse}' not found during chat.`);
-             // TODO: Maybe trigger a status check or inform the user more directly?
              throw new BadRequestError(`Model '${modelToUse}' not found. Please pull or select an available model.`);
         }
-
-        // Handle connection errors and timeouts
         if (error instanceof Error) {
              const connectionError = (error as NodeJS.ErrnoException)?.code === 'ECONNREFUSED' || (axios.isAxiosError(error) && error.code === 'ECONNREFUSED');
              if (connectionError) {
@@ -434,13 +555,12 @@ export const generateChatResponse = async (
                  throw new InternalServerError('AI service request timed out.');
              }
         }
-        // Fallback for other errors
         throw new InternalServerError('Failed to get response from AI service.', error instanceof Error ? error : undefined);
     }
 };
 
 
-// --- Stream Chat Response (no change) ---
+// --- Stream Chat Response (Modified to Ensure Running) ---
 export const streamChatResponse = async (
     contextTranscript: string,
     chatHistory: BackendChatMessage[],
@@ -451,6 +571,15 @@ export const streamChatResponse = async (
     const contextSize = getConfiguredContextSize(); // Get configured size
     console.log(`[OllamaService:streamChatResponse] Attempting streaming chat with ACTIVE model: ${modelToUse}, Context Size: ${contextSize ?? 'default'}`);
 
+    // --- Ensure Ollama is ready before proceeding ---
+    try {
+         await ensureOllamaReady();
+         console.log(`[OllamaService:streamChatResponse] Ollama service is ready.`);
+    } catch (error) {
+         throw error; // Propagate error if Ollama couldn't be started/reached
+    }
+    // --- End ensure ready ---
+
     if (!contextTranscript) console.warn("[OllamaService] Streaming response with empty or missing transcript context string.");
     else console.log(`[OllamaService] Transcript context string provided (length: ${contextTranscript.length}).`);
     if (!chatHistory || chatHistory.length === 0) throw new InternalServerError("Internal Error: Cannot stream response without chat history.");
@@ -458,7 +587,6 @@ export const streamChatResponse = async (
 
     const latestUserMessage = chatHistory[chatHistory.length - 1];
     const previousHistory = chatHistory.slice(0, -1);
-    // TODO: Consider token limits when constructing the context message
     const transcriptContextMessage: OllamaApiMessage = { role: 'user', content: `CONTEXT TRANSCRIPT:\n"""\n${contextTranscript || 'No transcript available.'}\n"""` };
     const messages: OllamaApiMessage[] = [
         { role: 'system', content: SYSTEM_PROMPT },

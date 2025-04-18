@@ -6,9 +6,9 @@ import { Readable } from 'node:stream';
 import { sessionRepository } from '../repositories/sessionRepository.js';
 import { chatRepository } from '../repositories/chatRepository.js';
 import {
-    listSessions, getSessionDetails, updateSessionMetadata,
-    getTranscript, updateTranscriptParagraph
-} from '../api/sessionHandler.js';
+    listSessions, getSessionDetails, updateSessionMetadata, // <-- Ensure these are imported
+    getTranscript, updateTranscriptParagraph                 // <-- Ensure these are imported
+} from '../api/sessionHandler.js'; // <-- Import fixed
 import {
     saveTranscriptContent,
     deleteTranscriptFile,
@@ -20,7 +20,9 @@ import {
 import {
     startTranscriptionJob,
     getTranscriptionStatus,
-    getStructuredTranscriptionResult
+    getStructuredTranscriptionResult,
+    ensureWhisperReady, // <-- Import ensureWhisperReady
+    // stopWhisperService // <-- Optional: Import stop if implementing auto-stop
 } from '../services/transcriptionService.js';
 import type {
     BackendSession,
@@ -170,6 +172,12 @@ const sessionRoutesInstance = new Elysia({ prefix: '/api' })
             let tempSavedAudioPathForTranscription: string | null = null; // Absolute path for Whisper
 
             try {
+                // --- Ensure Whisper is Ready FIRST ---
+                console.log('[API Upload] Ensuring Whisper service is ready...');
+                await ensureWhisperReady(); // Wait for Whisper to be up
+                console.log('[API Upload] Whisper service is ready.');
+                // --- End Ensure Whisper ---
+
                 // 1. Create initial DB record to get ID
                 const creationTimestamp = new Date().toISOString();
                 console.log('[API Upload] Creating initial DB record...');

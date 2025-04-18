@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { WritableStream, ReadableStream } from 'node:stream/web';
-import { Elysia, t, ValidationError, type Context, type Static } from 'elysia';
+import { Elysia, t, ValidationError, type Context, type Static } from 'elysia'; // Ensure Context is imported
 import { cors } from '@elysiajs/cors';
 import { swagger } from '@elysiajs/swagger';
 import ollama from 'ollama';
@@ -20,6 +20,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import axios from 'axios';
+import type { OllamaModelInfo } from './types/index.js'; // <-- Import OllamaModelInfo type
+
 // Removed TextEncoder as it's not needed for polling
 
 // --- Initial setup, version reading, CORS, request logging (unchanged) ---
@@ -68,12 +70,14 @@ const OllamaModelInfoSchema = t.Object({
 const AvailableModelsResponseSchema = t.Object({
     models: t.Array(OllamaModelInfoSchema),
 });
+// --- Update Ollama Status Response Schema ---
 const OllamaStatusResponseSchema = t.Object({
-    activeModel: t.String(),
-    modelChecked: t.String(),
-    loaded: t.Boolean(),
-    details: t.Optional(OllamaModelInfoSchema),
-    configuredContextSize: t.Optional(t.Union([t.Number(), t.Null()])),
+    status: t.Union([t.Literal('available'), t.Literal('unavailable')]), // Added status field
+    activeModel: t.String(), // Keep, might be N/A if unavailable
+    modelChecked: t.String(), // Keep
+    loaded: t.Boolean(), // Keep
+    details: t.Optional(OllamaModelInfoSchema), // Keep
+    configuredContextSize: t.Optional(t.Union([t.Number(), t.Null()])), // Keep
 });
 const SetModelBodySchema = t.Object({
     modelName: t.String({ minLength: 1, error: "Model name is required." }),
@@ -119,7 +123,7 @@ const app = new Elysia()
         pullModelBody: PullModelBodySchema,
         ollamaModelInfo: OllamaModelInfoSchema,
         availableModelsResponse: AvailableModelsResponseSchema,
-        ollamaStatusResponse: OllamaStatusResponseSchema,
+        ollamaStatusResponse: OllamaStatusResponseSchema, // Use updated schema
         // --- Add new models ---
         startPullResponse: StartPullResponseSchema,
         pullStatusResponse: PullStatusResponseSchema,
@@ -260,7 +264,7 @@ const app = new Elysia()
                 // 1. Update active model and context size in the state service
                 setActiveModelAndContext(modelName, contextSize); // Pass both
 
-                // 2. Trigger load process (uses updated active model implicitly)
+                // 2. Trigger load process (which now includes ensureOllamaReady)
                 await loadOllamaModel(modelName);
 
                 set.status = 200;
@@ -285,29 +289,36 @@ const app = new Elysia()
             const modelToUnload = getActiveModel();
             console.log(`[API Unload] Received request to unload active model: ${modelToUnload}`);
             try {
-                // Use ollama.chat with keep_alive: 0 to request unload
+                // Use ollama.chat with keep_alive: 0 to request unload via the API
+                // This asks the Ollama server *running inside the container* to free up resources
+                // It does NOT stop or kill the Docker container itself.
                 await ollama.chat({
                     model: modelToUnload,
-                    messages: [{ role: 'user', content: 'unload request' }], // Trivial message
-                    keep_alive: 0, // Key parameter to request unload
+                    messages: [{ role: 'user', content: 'unload request' }], // Trivial message required by API
+                    keep_alive: 0, // Key parameter to request unload from memory after this request
                     stream: false,
                 });
                 console.log(`[API Unload] Sent unload request (keep_alive: 0) for active model ${modelToUnload}`);
                 set.status = 200;
-                return { message: `Unload request sent for model ${modelToUnload}. It will be unloaded shortly.` };
+                return { message: `Unload request sent for model ${modelToUnload}. It will be unloaded shortly if idle.` };
             } catch (error: any) {
                 console.error(`[API Unload] Error sending unload request for ${modelToUnload}:`, error);
-                // Handle model not found gracefully (might already be unloaded)
+                // Handle model not found gracefully (might already be unloaded by Ollama)
                 if (error.message?.includes('model') && error.message?.includes('not found')) {
-                    set.status = 200; // Still OK, model wasn't loaded
+                    console.log(`[API Unload] Model ${modelToUnload} was not found by Ollama (likely already unloaded).`);
+                    set.status = 200; // Still OK from API perspective
                     return { message: `Model ${modelToUnload} was not found (likely already unloaded).` };
                 }
                  // Handle connection errors
                  const isConnectionError = (error as NodeJS.ErrnoException)?.code === 'ECONNREFUSED' || error.message?.includes('ECONNREFUSED');
                  if (isConnectionError) {
-                     throw new InternalServerError(`Connection refused: Could not connect to Ollama at ${config.ollama.baseURL}.`);
+                    // Return 200 but indicate it couldn't connect, maybe it's already stopped/unloaded
+                    console.warn(`[API Unload] Connection refused when trying to unload ${modelToUnload}. Assuming stopped/unloaded.`);
+                    set.status = 200;
+                    return { message: `Could not connect to Ollama to explicitly unload ${modelToUnload}. It might already be stopped or unloaded.`};
+                    // Previous: throw new InternalServerError(`Connection refused: Could not connect to Ollama at ${config.ollama.baseURL}.`);
                  }
-                // Other errors
+                // Other errors communicating with Ollama API
                 throw new InternalServerError(`Failed to send unload request to Ollama service for model ${modelToUnload}.`);
              }
         }, {
@@ -315,7 +326,7 @@ const app = new Elysia()
                  200: t.Object({ message: t.String() }),
                  500: t.Any() // For connection or other internal errors
              },
-             detail: { summary: 'Request Ollama to unload the currently active model' }
+             detail: { summary: 'Request Ollama to unload the currently active model from memory' }
         })
 
         // --- MODIFIED Pull Model Endpoint (Polling - POST to start) ---
@@ -433,24 +444,37 @@ const app = new Elysia()
 
             console.log(`[API Status] Checking status for model: ${modelNameToCheck} (Current Active: ${currentActiveModel}, Configured Context: ${currentConfiguredContext ?? 'default'})`);
             try {
-                const loadedModelInfo = await checkModelStatus(modelNameToCheck);
+                // checkModelStatus now returns OllamaModelInfo | null | { status: 'unavailable' }
+                const loadedModelResult = await checkModelStatus(modelNameToCheck);
+
                 set.status = 200;
-                // --- Return updated structure ---
-                return {
-                    activeModel: currentActiveModel,
-                    modelChecked: modelNameToCheck,
-                    loaded: !!loadedModelInfo,
-                    details: loadedModelInfo ?? undefined,
-                    configuredContextSize: currentConfiguredContext, // Add context size
-                };
-                // --- End update ---
-            } catch (error: any) {
-                console.error(`[API Status] Error checking status for ${modelNameToCheck}:`, error);
-                // Propagate specific errors like connection refused
-                if (error instanceof InternalServerError && error.message.includes('Connection refused')) {
-                    throw error;
+                // Handle the different return types from checkModelStatus
+                if (loadedModelResult && 'status' in loadedModelResult && loadedModelResult.status === 'unavailable') {
+                    // Ollama service is not running or reachable
+                    return {
+                        status: 'unavailable',
+                        activeModel: currentActiveModel, // Still report the configured active model
+                        modelChecked: modelNameToCheck,
+                        loaded: false,
+                        details: undefined,
+                        configuredContextSize: currentConfiguredContext,
+                    };
+                } else {
+                    // Ollama is available, check if the specific model is loaded
+                    const loadedModelInfo = loadedModelResult as OllamaModelInfo | null; // Cast after checking unavailable case
+                    return {
+                        status: 'available', // Ollama service is running
+                        activeModel: currentActiveModel,
+                        modelChecked: modelNameToCheck,
+                        loaded: !!loadedModelInfo, // True if model info was returned, false if null
+                        details: loadedModelInfo ?? undefined,
+                        configuredContextSize: currentConfiguredContext,
+                    };
                 }
-                // Generic error for other issues
+            } catch (error: any) {
+                // This catch block might be less likely to be hit now that checkModelStatus handles unavailability
+                // but keep it for unexpected errors during the check process.
+                console.error(`[API Status] Unexpected error checking status for ${modelNameToCheck}:`, error);
                 throw new InternalServerError(`Failed to check status of model ${modelNameToCheck}.`);
             }
         }, {
@@ -483,21 +507,23 @@ const app = new Elysia()
     .use(chatRoutes);
 
 
-// --- Server Startup Check (unchanged) ---
-async function checkOllamaConnection() {
+// --- Server Startup Check (Modified to be less critical) ---
+async function checkOllamaConnectionOnStartup() {
     console.log(`[Server Startup] Checking Ollama connection at ${config.ollama.baseURL}...`);
     try {
-        await axios.get(config.ollama.baseURL, { timeout: 5000 });
+        // Use a shorter timeout for startup check
+        await axios.get(config.ollama.baseURL, { timeout: 2000 });
         console.log("[Server Startup] ✅ Ollama connection successful.");
         return true;
     } catch (error: any) {
+        // This is now just a warning, not a fatal error
         console.warn("-------------------------------------------------------");
-        console.warn(`[Server Startup] ⚠️ WARNING: Could not connect to Ollama at ${config.ollama.baseURL}`);
+        console.warn(`[Server Startup] ⚠️ Ollama service NOT DETECTED at ${config.ollama.baseURL}`);
         if (axios.isAxiosError(error)) {
-            if (error.code === 'ECONNREFUSED') { console.warn("   Reason: Connection refused. Is the Ollama Docker service running?"); console.warn("   => Try running 'docker compose ps' or 'docker ps'."); console.warn("   => Ensure the 'ollama' service is listed and running."); }
+            if (error.code === 'ECONNREFUSED') { console.warn("   Reason: Connection refused. (This is expected if not started yet)."); }
             else { console.warn(`   Reason: ${error.message}`); }
         } else { console.warn(`   Reason: An unexpected error occurred: ${error.message}`); }
-        console.warn("   Features requiring Ollama (like chat and model management) may not work.");
+        console.warn("   Ollama service will be started on demand when needed (e.g., loading a model).");
         console.warn("-------------------------------------------------------");
         return false;
     }
@@ -534,9 +560,7 @@ const server = http.createServer((req, res) => {
                         }));
                     } else {
                         // Handle non-stream bodies (like JSON from error handlers)
-                        console.warn('[Server Response] Response body is not a ReadableStream, attempting direct write/end.');
-                        // If it's likely JSON, stringify (Elysia might do this automatically?)
-                        // For safety, just end with the body content
+                        // console.warn('[Server Response] Response body is not a ReadableStream, attempting direct write/end.');
                         res.end(response.body);
                     }
                 } catch (pipeError) {
@@ -564,8 +588,8 @@ const server = http.createServer((req, res) => {
     });
 });
 
-// Start server AFTER checking Ollama connection
-checkOllamaConnection().then(() => {
+// Start server AFTER checking Ollama connection (check is now non-blocking)
+checkOllamaConnectionOnStartup().then(() => {
     server.listen(config.server.port, () => {
         console.log(`-------------------------------------------------------`);
         console.log(`🚀 Therapy Analyzer Backend (Elysia/Node) listening on port ${config.server.port}`);
