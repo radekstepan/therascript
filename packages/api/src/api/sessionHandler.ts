@@ -1,4 +1,3 @@
-// packages/api/src/api/sessionHandler.ts
 import { sessionRepository } from '../repositories/sessionRepository.js';
 import { chatRepository } from '../repositories/chatRepository.js';
 import {
@@ -31,6 +30,7 @@ const dateToIsoString = (dateString: string): string | null => {
 export const listSessions = ({ set }: any) => {
     try {
         const sessions = sessionRepository.findAll();
+        // Ensure audioPath is included in the response DTO
         const sessionDTOs = sessions.map(s => ({
             id: s.id,
             fileName: s.fileName,
@@ -40,7 +40,7 @@ export const listSessions = ({ set }: any) => {
             sessionType: s.sessionType,
             therapy: s.therapy,
             transcriptPath: s.transcriptPath,
-            audioPath: s.audioPath, // <-- Add audioPath
+            audioPath: s.audioPath, // <-- Included audioPath
             status: s.status,
             whisperJobId: s.whisperJobId,
         }));
@@ -64,6 +64,7 @@ export const getSessionDetails = ({ sessionData, set }: any) => {
         }));
 
         set.status = 200;
+        // Ensure audioPath is included in the response DTO
         return {
              id: sessionData.id,
              fileName: sessionData.fileName,
@@ -73,7 +74,7 @@ export const getSessionDetails = ({ sessionData, set }: any) => {
              sessionType: sessionData.sessionType,
              therapy: sessionData.therapy,
              transcriptPath: sessionData.transcriptPath,
-             audioPath: sessionData.audioPath, // <-- Add audioPath
+             audioPath: sessionData.audioPath, // <-- Included audioPath
              status: sessionData.status,
              whisperJobId: sessionData.whisperJobId,
              chats: chatMetadata
@@ -89,6 +90,7 @@ export const getSessionDetails = ({ sessionData, set }: any) => {
 export const updateSessionMetadata = ({ sessionData, body, set }: any) => {
     const sessionId = sessionData.id;
     const { date: dateInput, ...restOfBody } = body; // Separate date input
+    // Explicitly define type allowing audioPath update
     const metadataUpdate: Partial<BackendSession> = { ...restOfBody };
 
     if (Object.keys(body).length === 0) {
@@ -111,6 +113,7 @@ export const updateSessionMetadata = ({ sessionData, body, set }: any) => {
         }
         console.log(`[API] Updated metadata for session ${sessionId}`);
         set.status = 200;
+        // Ensure audioPath is included in the response DTO
         return {
             id: updatedSession.id,
             fileName: updatedSession.fileName,
@@ -120,7 +123,7 @@ export const updateSessionMetadata = ({ sessionData, body, set }: any) => {
             sessionType: updatedSession.sessionType,
             therapy: updatedSession.therapy,
             transcriptPath: updatedSession.transcriptPath,
-            audioPath: updatedSession.audioPath, // <-- Add audioPath
+            audioPath: updatedSession.audioPath, // <-- Included audioPath
             status: updatedSession.status,
             whisperJobId: updatedSession.whisperJobId,
         };

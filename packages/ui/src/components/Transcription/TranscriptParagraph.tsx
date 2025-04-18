@@ -1,4 +1,3 @@
-// packages/ui/src/components/Transcription/TranscriptParagraph.tsx
 import React, { useState, useRef, useEffect, Dispatch, SetStateAction } from 'react';
 import { Button, TextArea, Flex, Box, IconButton, Tooltip, Text } from '@radix-ui/themes';
 import {
@@ -7,7 +6,8 @@ import {
 } from '@radix-ui/react-icons';
 import { cn } from '../../utils';
 import type { TranscriptParagraphData } from '../../types';
-import { formatTimestamp } from '../../helpers';
+// Removed formatTimestamp, using new helper
+// import { formatTimestamp } from '../../helpers';
 
 const textStyles = {
     whiteSpace: 'pre-wrap' as const,
@@ -18,6 +18,7 @@ const textStyles = {
     color: 'var(--gray-a12)',
 };
 
+// Helper to format milliseconds timestamp to MM:SS
 const formatParagraphTimestamp = (ms: number | undefined): string => {
      if (ms === undefined || isNaN(ms)) return '';
      const totalSeconds = Math.floor(ms / 1000);
@@ -89,7 +90,10 @@ export function TranscriptParagraph({
         if (isSaving) return;
         if (trimmedValue !== paragraph.text.trim()) {
             try { await onSave(index, trimmedValue); } catch (error) { console.error(`Error saving paragraph ${index}:`, error); }
-        } else { setActiveEditIndex(null); }
+            // No need for separate setActiveEditIndex(null) here, mutation's onSuccess handles it
+        } else {
+            setActiveEditIndex(null); // Close if no change was made
+        }
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -116,7 +120,8 @@ export function TranscriptParagraph({
                         size="1"
                         className={cn(
                             "transition-opacity p-0 h-5 w-5",
-                            !isEditing && (isPlaying || "opacity-0 group-hover:opacity-100 focus-visible:opacity-100") // Always show if playing, else show on hover/focus
+                            // Always show if editing or playing this one, otherwise show on hover/focus
+                            isEditing || isPlaying || "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
                         )}
                         onClick={handlePlayPauseClick} // Use combined handler
                         title={isPlaying ? "Pause" : "Play"}

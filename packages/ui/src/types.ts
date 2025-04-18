@@ -1,4 +1,3 @@
-// packages/ui/src/types.ts
 // TODO can we infer these from the API?
 
 export interface TranscriptParagraphData {
@@ -39,7 +38,7 @@ export interface Session extends SessionMetadata {
     id: number;
     fileName: string;
     transcriptPath: string | null;
-    audioPath: string | null; // Path to the original audio file
+    audioPath: string | null; // Path/Identifier to the original uploaded audio file
     status: 'pending' | 'transcribing' | 'completed' | 'failed';
     whisperJobId: string | null;
     date: string; // ISO string from backend

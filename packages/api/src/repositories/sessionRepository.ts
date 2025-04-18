@@ -18,6 +18,8 @@ const updateSessionMetadataStmt = prepareStmt(
 );
 const deleteSessionStmt = prepareStmt('DELETE FROM sessions WHERE id = ?');
 const findSessionByTranscriptPathStmt = prepareStmt('SELECT * FROM sessions WHERE transcriptPath = ?');
+// *** ADDED Statement to find session by audioPath ***
+const findSessionByAudioPathStmt = prepareStmt('SELECT * FROM sessions WHERE audioPath = ?');
 
 export const sessionRepository = {
     create: (
@@ -27,9 +29,7 @@ export const sessionRepository = {
         audioIdentifier: string | null, // Changed parameter name - should be relative filename or null
         sessionTimestamp: string // ISO 8601 string
     ): BackendSession => {
-        // --- ADDED LOGGING ---
         console.log(`[SessionRepo:create] Received parameters - originalFileName: ${originalFileName}, transcriptPath: ${transcriptPath}, audioIdentifier: ${audioIdentifier}`);
-        // --- END LOGGING ---
 
         // --- ADDED CHECK ---
         // Check if audioIdentifier looks absolute (add a warning/error)
@@ -51,9 +51,17 @@ export const sessionRepository = {
 
         try {
              if (transcriptPath) {
-                 // Check for existing path (should be relative)
-                 const existing = findSessionByTranscriptPathStmt.get(transcriptPath);
-                 if (existing) throw new Error(`Transcript path ${transcriptPath} already linked.`);
+                 // Check for existing transcript path (should be relative)
+                 const existingTranscript = findSessionByTranscriptPathStmt.get(transcriptPath);
+                 if (existingTranscript) throw new Error(`Transcript path ${transcriptPath} already linked.`);
+             }
+             // *** ADDED Check for existing audio path ***
+             if (audioIdentifier) {
+                 const existingAudio = findSessionByAudioPathStmt.get(audioIdentifier);
+                 if (existingAudio) {
+                     // This should ideally not happen if identifiers are unique, but good to check.
+                     throw new Error(`Audio identifier ${audioIdentifier} already linked to session ${(existingAudio as BackendSession).id}.`);
+                 }
              }
             console.log(`[SessionRepo:create] Executing insert with audioIdentifier: ${audioIdentifier}`); // Log before execution
             const info: RunResult = insertSessionStmt.run(
@@ -120,6 +128,13 @@ export const sessionRepository = {
                       throw new Error(`Transcript path ${updatedData.transcriptPath} conflict.`);
                  }
              }
+             // *** ADDED Check for audio path conflict ***
+              if (updatedData.audioPath && updatedData.audioPath !== existingSession.audioPath) {
+                  const existingAudio = findSessionByAudioPathStmt.get(updatedData.audioPath);
+                  if (existingAudio && (existingAudio as BackendSession).id !== id) {
+                      throw new Error(`Audio identifier ${updatedData.audioPath} conflict with session ${(existingAudio as BackendSession).id}.`);
+                  }
+              }
 
             console.log(`[SessionRepo:update] Executing update for ID ${id} with audioPath: ${updatedData.audioPath}`); // Log before execution
             // Execute the update using all fields, including audioPath (relative identifier)

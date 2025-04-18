@@ -12,7 +12,10 @@ import {
 import {
     saveTranscriptContent,
     deleteTranscriptFile,
-    deleteUploadedFile
+    // *** Import renamed function ***
+    deleteUploadedAudioFile,
+    saveUploadedAudio, // *** Import save function ***
+    getAudioAbsolutePath // *** Import helper ***
 } from '../services/fileService.js';
 import {
     startTranscriptionJob,
@@ -29,7 +32,7 @@ import type {
 import { NotFoundError, InternalServerError, ApiError, BadRequestError, ConflictError } from '../errors.js';
 import config from '../config/index.js';
 
-// --- Schemas (remain the same) ---
+// --- Schemas (add audioPath to responses) ---
 const SessionIdParamSchema = t.Object({
     sessionId: t.String({ pattern: '^[0-9]+$', error: "Session ID must be a positive number" })
 });
@@ -49,7 +52,7 @@ const SessionMetadataUpdateBodySchema = t.Partial(t.Object({
     fileName: t.Optional(t.String()),
     status: t.Optional(t.Union([ t.Literal('pending'), t.Literal('transcribing'), t.Literal('completed'), t.Literal('failed') ])),
     whisperJobId: t.Optional(t.Union([t.String(), t.Null()])),
-    audioPath: t.Optional(t.Union([t.String(), t.Null()]))
+    audioPath: t.Optional(t.Union([t.String(), t.Null()])) // audioPath can be updated/set to null
 }));
 const SessionMetadataResponseSchema = t.Object({
     id: t.Number(),
@@ -60,7 +63,7 @@ const SessionMetadataResponseSchema = t.Object({
     sessionType: t.String(),
     therapy: t.String(),
     transcriptPath: t.Union([t.String(), t.Null()]),
-    audioPath: t.Union([t.String(), t.Null()]),
+    audioPath: t.Union([t.String(), t.Null()]), // Added audioPath
     status: t.String(),
     whisperJobId: t.Union([t.String(), t.Null()]),
 });
@@ -118,37 +121,6 @@ const parseSize = (sizeStr: string): number => {
     return value;
  };
 
-// --- Helper to get absolute audio path from stored relative/filename ---
-// --- MODIFIED HELPER ---
-const getAbsoluteAudioPath = (storedPathOrFilename: string | null): string | null => {
-    const uploadsDir = config.db.uploadsDir; // Ensure config is accessible here
-    if (!storedPathOrFilename) {
-        console.warn("[getAbsoluteAudioPath] Received null or empty path/filename.");
-        return null;
-    }
-
-    // If it somehow *is* absolute (e.g., old data), log a warning and check existence.
-    if (path.isAbsolute(storedPathOrFilename)) {
-         console.warn(`[getAbsoluteAudioPath] WARNING: Received an absolute path '${storedPathOrFilename}' from DB. This indicates old data or an issue saving relative paths. Checking if it exists...`);
-         // Check if this absolute path actually exists, otherwise it's definitely wrong.
-         if (fsSync.existsSync(storedPathOrFilename)) {
-             console.log(`[getAbsoluteAudioPath] Absolute path from DB exists. Using it directly.`);
-            return storedPathOrFilename;
-         } else {
-            console.error(`[getAbsoluteAudioPath] The absolute path '${storedPathOrFilename}' from DB does not exist. Cannot resolve audio.`);
-            // Returning null will cause a 404 in the audio handler
-            return null;
-         }
-    }
-
-    // If it's relative (expected case for new data), join it with the configured uploads directory.
-    const absolutePath = path.join(uploadsDir, storedPathOrFilename);
-    console.log(`[getAbsoluteAudioPath] Resolved relative identifier '${storedPathOrFilename}' to absolute path: ${absolutePath}`);
-    return absolutePath;
-};
-// --- END MODIFIED HELPER ---
-
-
 // --- Elysia Plugins ---
 const sessionRoutesInstance = new Elysia({ prefix: '/api' })
     .model({
@@ -193,63 +165,107 @@ const sessionRoutesInstance = new Elysia({ prefix: '/api' })
         })
         .post('/upload', async ({ body, set }) => {
             const { audioFile, date, ...metadata } = body;
-            let absoluteTempAudioPath: string | null = null;
-            let savedAudioIdentifier: string | null = null; // This will hold the FILENAME
+            let savedAudioIdentifier: string | null = null; // This will hold the RELATIVE filename
             let newSession: BackendSession | null = null;
+            let tempSavedAudioPathForTranscription: string | null = null; // Absolute path for Whisper
 
             try {
-                const tempFileName = `upload-${Date.now()}-${path.parse(audioFile.name).name}${path.extname(audioFile.name)}`;
-                absoluteTempAudioPath = path.resolve(config.db.uploadsDir, tempFileName);
-                savedAudioIdentifier = tempFileName; // Store ONLY the filename
-                // --- ADDED LOGGING ---
-                console.log(`[API Upload] Generated audioIdentifier (relative filename): ${savedAudioIdentifier}`);
-                // --- END LOGGING ---
-
-                const audioBuffer = await audioFile.arrayBuffer();
-                await fs.writeFile(absoluteTempAudioPath, Buffer.from(audioBuffer));
-                console.log(`[API Upload] Temporary audio saved to ${absoluteTempAudioPath}`);
-
-                const jobId = await startTranscriptionJob(absoluteTempAudioPath);
-                console.log(`[API Upload] Transcription job started. Job ID: ${jobId}`);
-
+                // 1. Create initial DB record to get ID
                 const creationTimestamp = new Date().toISOString();
-                // --- ADDED LOGGING ---
-                console.log(`[API Upload] Calling sessionRepository.create with audioIdentifier: ${savedAudioIdentifier}`);
-                // --- END LOGGING ---
+                console.log('[API Upload] Creating initial DB record...');
                 newSession = sessionRepository.create(
                     { ...metadata, date },
-                    audioFile.name, // Keep original filename for metadata if needed
-                    null,
-                    savedAudioIdentifier, // Pass the relative filename to the repository
+                    audioFile.name,
+                    null, // No transcript path yet
+                    null, // No audio path yet
                     creationTimestamp
                 );
                 if (!newSession) throw new InternalServerError('Failed to create initial session record.');
+                const sessionId = newSession.id;
+                console.log(`[API Upload] Initial DB record created (ID: ${sessionId})`);
 
-                 const updatedSession = sessionRepository.updateMetadata(newSession.id, {
+                // 2. Save the audio file using the session ID
+                const audioBuffer = await audioFile.arrayBuffer();
+                // saveUploadedAudio returns the relative filename (e.g., '123-timestamp.mp3')
+                console.log(`[API Upload] Saving audio file for session ${sessionId}...`);
+                savedAudioIdentifier = await saveUploadedAudio(sessionId, audioFile.name, Buffer.from(audioBuffer));
+                console.log(`[API Upload] Audio saved successfully. Identifier: ${savedAudioIdentifier}`);
+
+                // 3. Update the session record with the relative audio path
+                console.log(`[API Upload] Updating DB record with audioPath: ${savedAudioIdentifier}`);
+                const updatedSessionWithAudioPath = sessionRepository.updateMetadata(sessionId, {
+                    audioPath: savedAudioIdentifier
+                });
+                if (!updatedSessionWithAudioPath) throw new InternalServerError(`Failed to update session ${sessionId} with audio path.`);
+                console.log(`[API Upload] DB record updated with audioPath.`);
+
+                // 4. Resolve the absolute path *only* for sending to Whisper
+                tempSavedAudioPathForTranscription = getAudioAbsolutePath(savedAudioIdentifier);
+                if (!tempSavedAudioPathForTranscription) {
+                    // This indicates an issue with resolving the path we just saved, serious problem
+                    throw new InternalServerError(`Could not resolve absolute path for saved audio identifier: ${savedAudioIdentifier}`);
+                }
+                console.log(`[API Upload] Resolved absolute path for transcription: ${tempSavedAudioPathForTranscription}`);
+
+                // 5. Start transcription job using the absolute path
+                console.log(`[API Upload] Starting transcription job...`);
+                const jobId = await startTranscriptionJob(tempSavedAudioPathForTranscription);
+                console.log(`[API Upload] Transcription job started for session ${sessionId}. Job ID: ${jobId}`);
+
+                // 6. Update session status and job ID in DB
+                 console.log(`[API Upload] Updating DB record status to 'transcribing' and jobId ${jobId}...`);
+                 const finalUpdatedSession = sessionRepository.updateMetadata(sessionId, {
                     status: 'transcribing', whisperJobId: jobId,
                  });
-                 if (!updatedSession) throw new InternalServerError(`Failed to update status for session ${newSession.id}.`);
+                 if (!finalUpdatedSession) throw new InternalServerError(`Failed to update status/jobId for session ${sessionId}.`);
+                 console.log(`[API Upload] DB record update complete. Session ${sessionId} is now 'transcribing'.`);
 
-                console.log(`[API Upload] DB session record created (ID: ${updatedSession.id}). Audio identifier saved: ${savedAudioIdentifier}`);
                 set.status = 202;
-                return { sessionId: updatedSession.id, jobId: jobId, message: "Upload successful, transcription started." };
+                return { sessionId: finalUpdatedSession.id, jobId: jobId, message: "Upload successful, transcription started." };
+
             } catch (error) {
-                 console.error('[API Error] Error during session upload initiation:', error);
-                 if (newSession?.id) {
-                     console.log(`[API Upload Cleanup] Attempting cleanup for incomplete session ${newSession.id}...`);
-                     try {
-                         // Use absolute path for deletion check/call
-                         if (absoluteTempAudioPath && fsSync.existsSync(absoluteTempAudioPath)) {
-                             await deleteUploadedFile(absoluteTempAudioPath);
-                         }
-                         sessionRepository.deleteById(newSession.id);
-                         console.log(`[API Upload Cleanup] DB record and potentially temp audio deleted.`);
-                      }
-                     catch (cleanupError) { console.error(`[API Upload Cleanup] Error during cleanup:`, cleanupError); }
+                 const originalError = error instanceof Error ? error : new Error(String(error));
+                 console.error('[API Error] Error during session upload processing:', originalError.message);
+                 if (!(error instanceof ApiError)) { // Log stack for unexpected errors
+                    console.error(originalError.stack);
                  }
-                  if (error instanceof ApiError) throw error;
-                  const errorMessage = error instanceof Error ? error.message : 'Unknown error during upload';
-                  throw new InternalServerError(`Session upload failed: ${errorMessage}`, error instanceof Error ? error : undefined);
+
+                 // --- Refined Cleanup Logic ---
+                 if (newSession?.id) {
+                     const sessionIdForCleanup = newSession.id;
+                     console.log(`[API Upload Cleanup] Initiating cleanup for session ${sessionIdForCleanup}. Audio identifier: ${savedAudioIdentifier}`);
+                     try {
+                         const currentSessionState = sessionRepository.findById(sessionIdForCleanup);
+                         // Only proceed with cleanup actions if the session still exists
+                         if (currentSessionState) {
+                             if (savedAudioIdentifier) {
+                                 // Audio WAS saved, but a later step failed (e.g., starting whisper).
+                                 // Mark DB as failed, DO NOT delete audio.
+                                 console.log(`[API Upload Cleanup] Audio was saved but subsequent step failed. Marking session ${sessionIdForCleanup} as 'failed'.`);
+                                 sessionRepository.updateMetadata(sessionIdForCleanup, { status: 'failed' });
+                             } else {
+                                 // Audio was NEVER saved (error happened before/during save).
+                                 // Delete the DB record as it's incomplete.
+                                 console.log(`[API Upload Cleanup] Audio was not saved. Deleting incomplete DB record for session ${sessionIdForCleanup}.`);
+                                 sessionRepository.deleteById(sessionIdForCleanup);
+                             }
+                         } else {
+                              console.log(`[API Upload Cleanup] Session ${sessionIdForCleanup} not found in DB, likely already cleaned up or never fully created.`);
+                         }
+                      }
+                     catch (cleanupError) {
+                         console.error(`[API Upload Cleanup] Error during cleanup for session ${sessionIdForCleanup}:`, cleanupError);
+                         // Log the cleanup error but still throw the original error below
+                     }
+                 } else {
+                     console.log("[API Upload Cleanup] No session ID available, skipping specific cleanup.");
+                 }
+                 // --- End Refined Cleanup ---
+
+                 // Re-throw the original error to be handled by the global error handler
+                 if (error instanceof ApiError) throw error;
+                 const errorMessage = error instanceof Error ? error.message : 'Unknown error during upload';
+                 throw new InternalServerError(`Session upload failed: ${errorMessage}`, error instanceof Error ? error : undefined);
              }
         }, {
              beforeHandle: ({ body, set }) => { /* ... validation ... */
@@ -294,23 +310,24 @@ const sessionRoutesInstance = new Elysia({ prefix: '/api' })
                  detail: { summary: 'Update transcript paragraph (if completed)' }
              })
 
-             // GET audio handler uses the corrected getAbsoluteAudioPath
+             // *** GET /:sessionId/audio Endpoint ***
              .get('/:sessionId/audio', (
                  context: {
                      params: Static<typeof SessionIdParamSchema>,
                      request: Request,
                      set: ElysiaContext['set'],
-                     sessionData: BackendSession
+                     sessionData: BackendSession // Use derived session data
+                     // Add other context properties if needed by Elysia v1+
                      query: Record<string, string | undefined>,
                      body: unknown,
                  }
              ) => {
                 const { params, request, set, sessionData } = context;
                 const sessionId = sessionData.id;
-                // Call helper with the relative path stored in DB
-                const absoluteAudioPath = getAbsoluteAudioPath(sessionData.audioPath);
+                // Use the helper service function with the relative path from DB
+                const absoluteAudioPath = getAudioAbsolutePath(sessionData.audioPath);
 
-                console.log(`[API Audio] Request for audio for session ${sessionId}. Stored Identifier: ${sessionData.audioPath}, Resolved Path: ${absoluteAudioPath}`); // Log identifier and resolved path
+                console.log(`[API Audio] Request for audio for session ${sessionId}. Stored Identifier: ${sessionData.audioPath}, Resolved Path: ${absoluteAudioPath}`);
 
                 // Check existence using the resolved absolute path
                 if (!absoluteAudioPath || !fsSync.existsSync(absoluteAudioPath)) {
@@ -324,38 +341,46 @@ const sessionRoutesInstance = new Elysia({ prefix: '/api' })
                     const range = request.headers.get('range');
 
                     if (range) {
+                        // Handle range requests (partial content)
                         const parts = range.replace(/bytes=/, "").split("-");
                         const start = parseInt(parts[0], 10);
+                        // End might be missing for requests like "bytes=100-"
                         const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
                         const chunksize = (end - start) + 1;
 
+                        // Validate range
                         if (start >= fileSize || end >= fileSize || start > end) {
-                            set.status = 416;
+                            set.status = 416; // Range Not Satisfiable
                             set.headers['Content-Range'] = `bytes */${fileSize}`;
                             return "Range Not Satisfiable";
                         }
 
                         const fileStream = fsSync.createReadStream(absoluteAudioPath, { start, end });
-                        set.status = 206;
+                        set.status = 206; // Partial Content
                         set.headers['Content-Range'] = `bytes ${start}-${end}/${fileSize}`;
                         set.headers['Accept-Ranges'] = 'bytes';
                         set.headers['Content-Length'] = chunksize.toString();
+                        // Determine Content-Type based on file extension
                         const ext = path.extname(absoluteAudioPath).toLowerCase();
                         const mimeTypes: Record<string, string> = { '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', };
                         set.headers['Content-Type'] = mimeTypes[ext] || 'application/octet-stream';
 
                         console.log(`[API Audio] Serving range ${start}-${end}/${fileSize}`);
+                        // Use Response with ReadableStream for Elysia v1+
                         return new Response(Readable.toWeb(fileStream) as ReadableStream<Uint8Array>);
 
                     } else {
-                        set.status = 200;
+                        // Serve the whole file
+                        set.status = 200; // OK
                         set.headers['Content-Length'] = fileSize.toString();
+                         // Determine Content-Type based on file extension
                          const ext = path.extname(absoluteAudioPath).toLowerCase();
                          const mimeTypes: Record<string, string> = { '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', };
                         set.headers['Content-Type'] = mimeTypes[ext] || 'application/octet-stream';
                         set.headers['Accept-Ranges'] = 'bytes';
 
                         console.log(`[API Audio] Serving full file (${fileSize} bytes)`);
+                        // Use Response with ReadableStream for Elysia v1+
                         return new Response(Readable.toWeb(fsSync.createReadStream(absoluteAudioPath)) as ReadableStream<Uint8Array>);
                     }
                 } catch (error) {
@@ -364,17 +389,20 @@ const sessionRoutesInstance = new Elysia({ prefix: '/api' })
                      throw new InternalServerError('Failed to stream audio file', error instanceof Error ? error : undefined);
                  }
              }, {
+                 // Define possible responses (Elysia v1+)
                  response: { 200: t.Unknown(), 206: t.Unknown(), 404: t.Any(), 416: t.Any(), 500: t.Any() },
                  detail: { summary: 'Stream the original session audio file' }
              })
-             // Finalize and Delete routes remain the same...
-             .post('/:sessionId/finalize', async ({ params, set, sessionData }) => { /* ... */
+
+             // Finalize and Delete routes need to handle audio file deletion
+             .post('/:sessionId/finalize', async ({ params, set, sessionData }) => {
                   const sessionId = sessionData.id;
                   console.log(`[API Finalize] Request received for session ${sessionId}`);
                   if (sessionData.status !== 'transcribing') { throw new ConflictError(`Session ${sessionId} status is '${sessionData.status}', not 'transcribing'.`); }
                   if (!sessionData.whisperJobId) { throw new InternalServerError(`Session ${sessionId} is transcribing but has no Whisper Job ID.`); }
                   const jobId = sessionData.whisperJobId;
-                  const audioIdentifierToDelete = sessionData.audioPath; // Relative filename
+                  // *** No longer need to delete audio here, it's persistent ***
+                  // const audioIdentifierToDelete = sessionData.audioPath; // Relative filename
 
                   try {
                       const structuredTranscript = await getStructuredTranscriptionResult(jobId);
@@ -391,36 +419,40 @@ const sessionRoutesInstance = new Elysia({ prefix: '/api' })
                       const chatsMetadata = chatsRaw.map(c => ({id: c.id, sessionId: c.sessionId, timestamp: c.timestamp, name: c.name}));
                       console.log(`[API Finalize] Session ${sessionId} finalized successfully.`);
                       set.status = 200;
+                      // Make sure audioPath is included in the final response
                       return { ...finalSessionState, audioPath: finalSessionState.audioPath, chats: chatsMetadata };
                   } catch (error) {
                       console.error(`[API Error] Finalize Session ${sessionId}:`, error);
                       try { sessionRepository.updateMetadata(sessionId, { status: 'failed' }); console.log(`[API Finalize] Marked session ${sessionId} as 'failed'.`); } catch (updateError) { console.error(`[API Finalize] CRITICAL: Failed to mark session ${sessionId} as failed:`, updateError); }
                       if (error instanceof ApiError) throw error;
                       throw new InternalServerError(`Failed to finalize session ${sessionId}`, error instanceof Error ? error : undefined);
-                   } finally {
-                       // Resolve path for deletion
-                       const absoluteAudioPathToDelete = getAbsoluteAudioPath(audioIdentifierToDelete);
-                       if (absoluteAudioPathToDelete) { deleteUploadedFile(absoluteAudioPathToDelete).catch(delErr => { console.error(`[API Finalize Cleanup] Failed to delete uploaded audio file ${absoluteAudioPathToDelete}:`, delErr); }); } else { console.warn(`[API Finalize Cleanup] Could not resolve audio path from identifier '${audioIdentifierToDelete}' for session ${sessionId} to delete.`); }
-                   }
+                   } // *** Removed Finally block that deleted audio ***
              }, {
                   response: { 200: 'sessionWithChatsMetadataResponse', 409: t.Any(), 500: t.Any() },
                   detail: { summary: 'Finalize session after successful transcription' }
              })
-             .delete('/:sessionId', async ({ params, set, sessionData }) => { /* ... */
+             .delete('/:sessionId', async ({ params, set, sessionData }) => {
                  const sessionId = sessionData.id;
                  console.log(`[API Delete] Request received for session ${sessionId}`);
                  const transcriptPathToDelete = sessionData.transcriptPath; // Relative path if set
                  const audioIdentifierToDelete = sessionData.audioPath; // Relative filename
 
                  try {
-                     // deleteTranscriptFile expects ID
+                     // Delete transcript file (uses session ID)
                      if (transcriptPathToDelete) { await deleteTranscriptFile(sessionId); } else { console.log(`[API Delete] Session ${sessionId} has no transcript file.`); }
+
+                     // Delete the DB record first (cascades to chats/messages)
                      const deleted = sessionRepository.deleteById(sessionId);
                      if (!deleted) { throw new NotFoundError(`Session ${sessionId} not found during deletion.`); }
                      console.log(`[API Delete] Successfully deleted session DB record ${sessionId}.`);
-                     // Resolve path for deletion
-                     const absoluteAudioPathToDelete = getAbsoluteAudioPath(audioIdentifierToDelete);
-                     if (absoluteAudioPathToDelete) { await deleteUploadedFile(absoluteAudioPathToDelete); } else { console.warn(`[API Delete] Could not resolve audio path from identifier '${audioIdentifierToDelete}' for session ${sessionId} to delete.`); }
+
+                     // Now delete the associated audio file using its stored identifier
+                     if (audioIdentifierToDelete) {
+                        await deleteUploadedAudioFile(audioIdentifierToDelete);
+                     } else {
+                        console.warn(`[API Delete] No audio identifier found for session ${sessionId} to delete.`);
+                     }
+
                      set.status = 200;
                      return { message: `Session ${sessionId} deleted successfully.` };
                  } catch (error) {

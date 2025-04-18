@@ -1,5 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
+import crypto from 'node:crypto'; // Import crypto for unique name generation
 import config from '../config/index.js';
 import { isNodeError } from '../utils/helpers.js';
 import type { StructuredTranscript } from '../types/index.js'; // Import the type
@@ -7,13 +8,50 @@ import type { StructuredTranscript } from '../types/index.js'; // Import the typ
 const transcriptsDir = config.db.transcriptsDir;
 const uploadsDir = config.db.uploadsDir;
 
+// Helper to create a safe, unique filename
+// Example: 123-1678886400000-audio.mp3
+const generateUniqueAudioFilename = (sessionId: number, originalFilename: string): string => {
+    const timestamp = Date.now();
+    const extension = path.extname(originalFilename).toLowerCase();
+    // Basic slugify for the ID part (though sessionID is numeric)
+    const safeSessionId = String(sessionId).replace(/[^a-z0-9]/gi, '_');
+    // Remove potentially problematic characters from extension too
+    const safeExtension = extension.replace(/[^a-z0-9.]/gi, '');
+    return `${safeSessionId}-${timestamp}${safeExtension}`;
+};
+
+// Function to save the uploaded audio file
+// Returns the *relative* path (identifier) that should be stored in the DB
+export const saveUploadedAudio = async (
+    sessionId: number,
+    originalFilename: string,
+    audioBuffer: Buffer
+): Promise<string> => {
+    const uniqueFilename = generateUniqueAudioFilename(sessionId, originalFilename);
+    const absoluteFilePath = path.join(uploadsDir, uniqueFilename);
+    const relativeFilePath = uniqueFilename; // Store just the filename
+
+    console.log(`[FileService] Saving audio for session ${sessionId}: ${originalFilename} -> ${absoluteFilePath}`);
+    try {
+        // Ensure the uploads directory exists
+        await fs.mkdir(uploadsDir, { recursive: true });
+        await fs.writeFile(absoluteFilePath, audioBuffer);
+        console.log(`[FileService] Audio saved successfully to: ${absoluteFilePath}`);
+        return relativeFilePath; // Return the unique filename (relative path)
+    } catch (error) {
+        console.error(`[FileService] Error saving uploaded audio file for session ${sessionId} (${uniqueFilename}):`, error);
+        throw new Error(`Could not save uploaded audio file for session ${sessionId}.`);
+    }
+};
+
+
 // --- FIX: getTranscriptPath now expects ID, not a relative path ---
-// It constructs the expected RELATIVE path within the transcripts directory
+// It constructs the expected ABSOLUTE path within the transcripts directory
 const getTranscriptPath = (sessionId: number): string => {
   return path.join(transcriptsDir, `${sessionId}.json`);
 };
 
-// --- FIX: getAudioPath expects RELATIVE filename, returns absolute path ---
+// --- FIX: getAudioAbsolutePath expects RELATIVE filename, returns absolute path ---
 // Renamed from getTranscriptPath for clarity
 const getAudioAbsolutePath = (relativeFilename: string | null): string | null => {
     if (!relativeFilename) return null;
@@ -22,7 +60,15 @@ const getAudioAbsolutePath = (relativeFilename: string | null): string | null =>
         console.error(`[FileService:getAudioAbsolutePath] Received absolute path '${relativeFilename}' when expecting relative. Returning null.`);
         return null; // Or handle error differently
     }
-    return path.resolve(uploadsDir, relativeFilename);
+    const absolutePath = path.resolve(uploadsDir, relativeFilename);
+    // --- ADDED SAFETY CHECK ---
+    const resolvedUploadsDir = path.resolve(uploadsDir);
+    if (!absolutePath.startsWith(resolvedUploadsDir)) {
+        console.error(`[FileService:getAudioAbsolutePath] Resolved path '${absolutePath}' is outside the expected uploads directory '${resolvedUploadsDir}'. Aborting.`);
+        return null; // Prevent potential path traversal
+    }
+    // --- END SAFETY CHECK ---
+    return absolutePath;
 };
 // --- End FIX ---
 
@@ -73,7 +119,7 @@ export const loadTranscriptContent = async (sessionId: number): Promise<Structur
 export const saveTranscriptContent = async (sessionId: number, content: StructuredTranscript): Promise<string> => {
   // Get the absolute path for saving
   const absoluteFilePath = getTranscriptPath(sessionId);
-  // Determine the relative path to store/return (relative to transcriptsDir)
+  // Determine the relative path to store/return (relative to transcriptsDir base)
   const relativeFilePath = `${sessionId}.json`;
   try {
     await fs.mkdir(path.dirname(absoluteFilePath), { recursive: true });
@@ -106,31 +152,38 @@ export const deleteTranscriptFile = async (sessionId: number): Promise<void> => 
 };
 
 // --- FIX: deleteUploadedFile now accepts ABSOLUTE path for safety check ---
-export const deleteUploadedFile = async (absoluteFilePath: string): Promise<void> => {
-    // Ensure filePath is within the expected uploads directory for safety
-    const resolvedUploadsDir = path.resolve(uploadsDir);
-
-    // --- FIX: Check absoluteFilePath starts with resolvedUploadsDir ---
-    if (!absoluteFilePath.startsWith(resolvedUploadsDir)) {
-        console.error(`[FileService] Attempted to delete unsafe path outside uploads directory: ${absoluteFilePath}`);
-        return; // Do not proceed if path seems unsafe
-    }
-    // --- End FIX ---
+// --- Changed function name to reflect it deletes audio ---
+export const deleteUploadedAudioFile = async (relativeFilename: string | null): Promise<void> => {
+    // Resolve the relative filename to an absolute path first
+    const absoluteFilePath = getAudioAbsolutePath(relativeFilename);
 
     if (!absoluteFilePath) {
-         console.warn('[FileService] deleteUploadedFile called with empty absoluteFilePath.');
-         return;
+        console.warn(`[FileService] deleteUploadedAudioFile called with null or invalid relative filename: ${relativeFilename}. Skipping deletion.`);
+        return;
     }
+
+    // --- Safety Check Moved to getAudioAbsolutePath ---
+    // const resolvedUploadsDir = path.resolve(uploadsDir);
+    // if (!absoluteFilePath.startsWith(resolvedUploadsDir)) {
+    //     console.error(`[FileService] Attempted to delete unsafe path outside uploads directory: ${absoluteFilePath}`);
+    //     return; // Do not proceed if path seems unsafe
+    // }
+    // --- End Safety Check ---
+
+    console.log(`[FileService] Attempting to delete uploaded audio file: ${absoluteFilePath}`);
     try {
         await fs.unlink(absoluteFilePath);
         console.log(`[FileService] Deleted uploaded audio file: ${absoluteFilePath}`);
     } catch (error) {
         if (isNodeError(error) && error.code === 'ENOENT') {
-            console.warn(`[FileService] Uploaded file not found during delete: ${absoluteFilePath}`);
+            console.warn(`[FileService] Uploaded audio file not found during delete: ${absoluteFilePath}`);
         } else {
-            console.error(`[FileService] Error deleting uploaded file ${absoluteFilePath}:`, error);
+            console.error(`[FileService] Error deleting uploaded audio file ${absoluteFilePath}:`, error);
             // Decide whether to re-throw or just log
-            // throw new Error(`Could not delete uploaded file ${filePath}.`);
+            // throw new Error(`Could not delete uploaded audio file ${absoluteFilePath}.`);
         }
     }
 };
+
+// Expose the new function and the helper for resolving paths
+export { getAudioAbsolutePath };

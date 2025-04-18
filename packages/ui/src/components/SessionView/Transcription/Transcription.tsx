@@ -1,8 +1,6 @@
-// packages/ui/src/components/SessionView/Transcription/Transcription.tsx
-/* packages/ui/src/components/SessionView/Transcription/Transcription.tsx */
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import type { Session, StructuredTranscript, TranscriptParagraphData } from '../../../types';
+import type { Session, StructuredTranscript } from '../../../types'; // Removed TranscriptParagraphData
 import { TranscriptParagraph } from '../../Transcription/TranscriptParagraph';
 import { Box, ScrollArea, Text, Flex, Button, Badge, Spinner, Tooltip } from '@radix-ui/themes';
 import {
@@ -12,8 +10,7 @@ import {
     PersonIcon,
     BadgeIcon as SessionTypeIcon,
     LightningBoltIcon,
-    PlayIcon, // For global play/pause
-    PauseIcon // For global play/pause
+    // Removed Play/Pause imports from here, handled in paragraph
 } from '@radix-ui/react-icons';
 import { cn } from '../../../utils';
 import { updateTranscriptParagraph } from '../../../api/api';
@@ -101,6 +98,7 @@ export function Transcription({
     const [playingParagraphIndex, setPlayingParagraphIndex] = useState<number | null>(null);
     const [audioError, setAudioError] = useState<string | null>(null);
     const [audioReady, setAudioReady] = useState(false);
+    const [isAudioLoading, setIsAudioLoading] = useState(false); // Track initial load
 
     const estimatedTokenCount = useMemo(() => {
         if (!transcriptContent || transcriptContent.length === 0) { return 0; }
@@ -112,42 +110,71 @@ export function Transcription({
     const audioSrc = session?.audioPath ? `${API_BASE_URL}/api/sessions/${session.id}/audio` : null;
 
     // --- Audio Event Handlers ---
-    const handleAudioCanPlay = () => {
+    const handleAudioCanPlay = useCallback(() => {
         console.log("[Audio] Ready to play");
         setAudioReady(true);
+        setIsAudioLoading(false); // Loading finished
         setAudioError(null);
-    };
+    }, []);
 
-    const handleAudioError = (e: React.SyntheticEvent<HTMLAudioElement>) => {
+    const handleAudioError = useCallback((e: React.SyntheticEvent<HTMLAudioElement>) => {
         const error = (e.target as HTMLAudioElement).error;
         console.error("[Audio] Error:", error);
-        setAudioError(`Audio Error: ${error?.message || 'Unknown error'}`);
+        let errorMessage = 'Unknown audio error';
+        if (error) {
+             switch (error.code) {
+                 case MediaError.MEDIA_ERR_ABORTED: errorMessage = 'Audio playback aborted.'; break;
+                 case MediaError.MEDIA_ERR_NETWORK: errorMessage = 'Network error loading audio.'; break;
+                 case MediaError.MEDIA_ERR_DECODE: errorMessage = 'Error decoding audio file.'; break;
+                 case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED: errorMessage = 'Audio format not supported.'; break;
+                 default: errorMessage = `Audio Error Code: ${error.code}`;
+             }
+        }
+        setAudioError(`Audio Error: ${errorMessage}`);
         setIsPlaying(false);
         setPlayingParagraphIndex(null);
-        setAudioReady(false); // Mark as not ready on error
-    };
+        setAudioReady(false);
+        setIsAudioLoading(false);
+    }, []);
 
-    const handleAudioEnded = () => {
+    const handleAudioEnded = useCallback(() => {
         console.log("[Audio] Playback ended");
         setIsPlaying(false);
         setPlayingParagraphIndex(null);
-    };
+    }, []);
 
-    const handleAudioPause = () => {
+    const handleAudioPause = useCallback(() => {
         console.log("[Audio] Playback paused");
-        setIsPlaying(false);
+        // Only set isPlaying to false if the pause wasn't triggered by seeking
+        // This requires tracking if a seek is in progress, maybe too complex.
+        // Simpler: Let onPlay handle setting isPlaying back to true.
+        if (audioRef.current && !audioRef.current.seeking) {
+             setIsPlaying(false);
+        }
         // Keep playingParagraphIndex to potentially resume
-    };
+    }, []);
 
-    const handleAudioPlay = () => {
+    const handleAudioPlay = useCallback(() => {
         console.log("[Audio] Playback started/resumed");
         setIsPlaying(true);
         setAudioError(null); // Clear error on successful play
-    };
+        setIsAudioLoading(false); // No longer loading once playing starts
+    }, []);
+
+    const handleAudioWaiting = useCallback(() => {
+        console.log("[Audio] Waiting for data (buffering)...");
+        setIsAudioLoading(true); // Show loading indicator while buffering
+    }, []);
+
+    const handleAudioPlaying = useCallback(() => {
+        console.log("[Audio] Buffering complete, playback continuing.");
+        setIsAudioLoading(false); // Buffering finished
+    }, []);
+
 
     // --- Audio Time Update Handler ---
     const handleAudioTimeUpdate = useCallback(() => {
-        if (!audioRef.current || !transcriptContent) return;
+        if (!audioRef.current || !transcriptContent || audioRef.current.seeking) return; // Ignore updates while seeking
         const currentTimeMs = audioRef.current.currentTime * 1000;
 
         // Find the paragraph that *contains* the current time
@@ -167,82 +194,93 @@ export function Transcription({
             }
         }
 
-        // Update playing index only if it changes
-        if (currentParagraphIdx !== -1 && currentParagraphIdx !== playingParagraphIndex) {
+        // Update playing index only if it changes AND we are actually playing
+        if (isPlaying && currentParagraphIdx !== -1 && currentParagraphIdx !== playingParagraphIndex) {
             setPlayingParagraphIndex(currentParagraphIdx);
-        } else if (currentParagraphIdx === -1 && playingParagraphIndex !== null) {
-            // If time is outside all known paragraph ranges, clear the highlight
-            // setPlayingParagraphIndex(null); // Or keep highlighting the last one? Let's keep it for now.
         }
-    }, [transcriptContent, playingParagraphIndex]); // Dependency on transcriptContent and playingParagraphIndex
+    }, [transcriptContent, playingParagraphIndex, isPlaying]); // Add isPlaying dependency
 
     // --- Playback Control Functions ---
-    const playAudioFromTimestamp = (timestampMs: number, index: number) => {
+    const playAudioFromTimestamp = useCallback((timestampMs: number, index: number) => {
         if (!audioRef.current || !audioSrc) {
             setAudioError("Audio element or source not available.");
             return;
         }
-        // Ensure audio src is set
+        // Ensure audio src is set if not already
         if (audioRef.current.currentSrc !== audioSrc) {
              console.log(`[Audio] Setting src to ${audioSrc}`);
              audioRef.current.src = audioSrc;
-             // Play will be triggered by 'canplay' event or resume logic
+             audioRef.current.load(); // Explicitly load the new source
+             setIsAudioLoading(true); // Expect loading state
         }
 
         const seekTimeSeconds = timestampMs / 1000;
         console.log(`[Audio] Attempting to play paragraph ${index} from ${seekTimeSeconds.toFixed(2)}s`);
 
+        const playAction = () => {
+             const playPromise = audioRef.current!.play();
+             if (playPromise !== undefined) {
+                 playPromise.then(() => {
+                     // Set playing index immediately for UI feedback
+                     setPlayingParagraphIndex(index);
+                 }).catch(err => {
+                     console.error("[Audio] Playback error:", err);
+                     setAudioError(`Playback error: ${err.message}. Browser might require user interaction first.`);
+                     setIsPlaying(false);
+                     setPlayingParagraphIndex(null);
+                     setIsAudioLoading(false);
+                 });
+             }
+         };
+
         // If paused at the same paragraph, just resume
         if (!isPlaying && playingParagraphIndex === index) {
             console.log("[Audio] Resuming playback");
-            audioRef.current.play().catch(err => setAudioError(`Resume error: ${err.message}`));
+             playAction();
         } else {
             // Seek and play
-            try {
-                // Only seek if the time difference is significant to avoid jitter
-                if (Math.abs(audioRef.current.currentTime - seekTimeSeconds) > 0.2) {
-                    console.log(`[Audio] Seeking to ${seekTimeSeconds.toFixed(2)}s`);
-                    audioRef.current.currentTime = seekTimeSeconds;
-                } else {
-                    console.log(`[Audio] Current time close enough (${audioRef.current.currentTime.toFixed(2)}s), not seeking.`);
-                }
-
-                // Attempt to play. Browser might block this if not user-initiated.
-                const playPromise = audioRef.current.play();
-                if (playPromise !== undefined) {
-                    playPromise.catch(err => {
-                         console.error("[Audio] Playback error:", err);
-                         setAudioError(`Playback error: ${err.message}. Browser might require user interaction first.`);
-                         setIsPlaying(false);
-                         setPlayingParagraphIndex(null);
-                    });
-                }
-                // Set playing index immediately for UI feedback
-                setPlayingParagraphIndex(index);
-
-            } catch (err: any) {
-                console.error("[Audio] Error during seek/play:", err);
-                setAudioError(`Seek/Play Error: ${err.message}`);
-                setIsPlaying(false);
-                setPlayingParagraphIndex(null);
+            // Need to handle readyState. If not ready, wait for 'canplay' or 'canplaythrough'
+            if (audioRef.current.readyState >= (HTMLMediaElement.HAVE_FUTURE_DATA || 3)) {
+                 // Only seek if the time difference is significant to avoid jitter
+                 if (Math.abs(audioRef.current.currentTime - seekTimeSeconds) > 0.2) {
+                     console.log(`[Audio] Seeking to ${seekTimeSeconds.toFixed(2)}s`);
+                     // Set seek time, play will happen after seek completes (handle in onseeked event)
+                     audioRef.current.currentTime = seekTimeSeconds;
+                     // Set target index immediately for UI feedback
+                     setPlayingParagraphIndex(index);
+                     // Play might be triggered by onseeked, or call playAction() directly if seek is fast
+                     // For simplicity, let's try playing directly after setting currentTime
+                     playAction();
+                 } else {
+                     console.log(`[Audio] Current time close enough (${audioRef.current.currentTime.toFixed(2)}s), not seeking.`);
+                     playAction();
+                 }
+            } else {
+                 console.log(`[Audio] Audio not ready (state ${audioRef.current.readyState}), seeking to ${seekTimeSeconds.toFixed(2)}s and waiting for canplay.`);
+                 // Set the time, the 'canplay' event or subsequent interaction should trigger play
+                 audioRef.current.currentTime = seekTimeSeconds;
+                 setPlayingParagraphIndex(index); // Set index for UI highlight
+                 setIsAudioLoading(true); // Show loading
+                 // Don't call play() yet, let 'canplay' handle it if src was just set, or rely on subsequent toggle if already loaded
+                 // If audio was already loaded but paused, we might need to call play() after a delay or on canplay event.
             }
         }
-    };
+    }, [audioSrc, isPlaying, playingParagraphIndex]);
 
-    const pauseAudio = () => {
+    const pauseAudio = useCallback(() => {
         if (audioRef.current) {
             audioRef.current.pause();
             // State update handled by 'onPause' event
         }
-    };
+    }, []);
 
-    const togglePlayback = (timestampMs: number, index: number) => {
+    const togglePlayback = useCallback((timestampMs: number, index: number) => {
         if (playingParagraphIndex === index && isPlaying) {
             pauseAudio();
         } else {
             playAudioFromTimestamp(timestampMs, index);
         }
-    };
+    }, [isPlaying, playingParagraphIndex, pauseAudio, playAudioFromTimestamp]);
 
 
     // Mutation for saving (no changes)
@@ -268,6 +306,24 @@ export function Transcription({
     useEffect(() => { if (restoreScrollRef.current && viewportRef.current) { requestAnimationFrame(() => { if (restoreScrollRef.current && viewportRef.current) { if (viewportRef.current.scrollTop !== initialScrollTop) { viewportRef.current.scrollTop = initialScrollTop; } else { restoreScrollRef.current = false; } } }); } }, [isTabActive, initialScrollTop]);
 
 
+    // --- Effect to load audio source when component mounts or session/audioPath changes ---
+    useEffect(() => {
+        if (audioRef.current && audioSrc && audioRef.current.currentSrc !== audioSrc) {
+            console.log("[Audio Effect] Setting audio source URL:", audioSrc);
+            audioRef.current.src = audioSrc;
+            audioRef.current.load(); // Trigger loading metadata
+            setIsAudioLoading(true); // Indicate loading started
+            setAudioReady(false); // Not ready until 'canplay' fires
+        } else if (!audioSrc) {
+            // Clear state if audio becomes unavailable
+             setAudioReady(false);
+             setIsPlaying(false);
+             setPlayingParagraphIndex(null);
+             setAudioError(null);
+             setIsAudioLoading(false);
+        }
+    }, [audioSrc]); // Depend only on audioSrc
+
     if (!session) {
         return <Box p="4"><Text color="gray" style={{ fontStyle: 'italic' }}>Session data not available.</Text></Box>;
     }
@@ -275,6 +331,10 @@ export function Transcription({
     const paragraphs = transcriptContent || [];
 
     const handleSaveParagraphInternal = async (index: number, newText: string) => {
+        // Pause playback if saving the currently playing paragraph
+        if (isPlaying && playingParagraphIndex === index) {
+            pauseAudio();
+        }
         saveParagraphMutation.mutate({ index, newText });
     };
 
@@ -282,10 +342,11 @@ export function Transcription({
     return (
         <Flex direction="column" style={{ height: '100%', minHeight: 0, border: '1px solid var(--gray-a6)', borderRadius: 'var(--radius-3)' }}>
              {/* --- Audio Element (Hidden) --- */}
+             {/* Render audio tag only if audioSrc exists */}
              {audioSrc && (
                 <audio
                     ref={audioRef}
-                    // src={audioSrc} // Set dynamically on play? Or preload? Preload seems better.
+                    // src={audioSrc} // Set in useEffect
                     preload="metadata" // Load metadata (duration etc.) but not full audio
                     onCanPlay={handleAudioCanPlay}
                     onError={handleAudioError}
@@ -293,6 +354,8 @@ export function Transcription({
                     onPause={handleAudioPause}
                     onPlay={handleAudioPlay}
                     onTimeUpdate={handleAudioTimeUpdate} // Add time update handler
+                    onWaiting={handleAudioWaiting} // Handle buffering
+                    onPlaying={handleAudioPlaying} // Handle end of buffering
                     controls={false} // Hide default controls
                     style={{ display: 'none' }}
                  />
@@ -316,12 +379,20 @@ export function Transcription({
                 </Box>
             </Flex>
 
-            {/* Display Audio Error if any */}
-            {audioError && (
-                 <Box px="3" py="1" style={{ backgroundColor: 'var(--red-a3)', borderBottom: '1px solid var(--red-a6)' }}>
-                     <Text size="1" color="red">{audioError}</Text>
-                 </Box>
-             )}
+            {/* Display Audio Status/Error */}
+            <Box px="3" py="1" style={{
+                backgroundColor: audioError ? 'var(--red-a3)' : (isAudioLoading ? 'var(--amber-a3)' : 'transparent'),
+                borderBottom: audioError || isAudioLoading ? `1px solid ${audioError ? 'var(--red-a6)' : 'var(--amber-a6)'}` : 'none',
+                display: audioError || isAudioLoading ? 'block' : 'none', // Only show if error or loading
+                transition: 'background-color 0.3s ease',
+            }}>
+                <Flex align="center" gap="2">
+                    {isAudioLoading && <Spinner size="1" />}
+                    <Text size="1" color={audioError ? "red" : (isAudioLoading ? "amber" : "gray")}>
+                        {audioError || (isAudioLoading ? 'Loading audio...' : '')}
+                    </Text>
+                </Flex>
+            </Box>
 
             <ScrollArea type="auto" scrollbars="vertical" ref={viewportRef} onScroll={handleScroll} style={{ flexGrow: 1, minHeight: 0 }} >
                 {isLoadingTranscript && ( <Flex align="center" justify="center" style={{minHeight: '100px'}}><Spinner size="2" /><Text ml="2" color="gray">Loading transcript...</Text></Flex> )}

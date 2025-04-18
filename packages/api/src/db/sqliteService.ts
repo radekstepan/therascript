@@ -1,4 +1,3 @@
-// packages/api/src/db/sqliteService.ts
 import crypto from 'node:crypto'; // <-- Import crypto
 import Database, { type Database as DB, type Statement, type RunResult } from 'better-sqlite3';
 import path from 'node:path';
@@ -30,7 +29,7 @@ const schema = `
         transcriptPath TEXT NULL,
         status TEXT NOT NULL DEFAULT 'pending',
         whisperJobId TEXT NULL,
-        audioPath TEXT NULL -- Added column for the path to the original audio file
+        audioPath TEXT NULL -- Added column for the path/identifier to the original audio file
     );
     -- Chats Table
     CREATE TABLE IF NOT EXISTS chats (
@@ -165,7 +164,9 @@ function initializeDatabase(dbInstance: DB) {
 
         if (!hasStatus) { console.log('[db Init Func Migration]: Adding "status" column...'); dbInstance.exec("ALTER TABLE sessions ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'"); console.log('[db Init Func Migration]: "status" column added.'); }
         if (!hasWhisperJobId) { console.log('[db Init Func Migration]: Adding "whisperJobId" column...'); dbInstance.exec("ALTER TABLE sessions ADD COLUMN whisperJobId TEXT NULL"); console.log('[db Init Func Migration]: "whisperJobId" column added.'); }
+        // *** ADD Migration for audioPath ***
         if (!hasAudioPath) { console.log('[db Init Func Migration]: Adding "audioPath" column...'); dbInstance.exec("ALTER TABLE sessions ADD COLUMN audioPath TEXT NULL"); console.log('[db Init Func Migration]: "audioPath" column added.'); }
+        // *** END Migration ***
 
         const dateColumn = sessionColumns.find(col => col.name === 'date');
         if (dateColumn && dateColumn.type.toUpperCase() !== 'TEXT') { console.warn(`[db Init Func Migration]: 'date' column type mismatch...`); }
