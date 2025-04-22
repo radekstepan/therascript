@@ -1,4 +1,3 @@
-// packages/api/src/preloadDb.ts
 import Database from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs/promises';
@@ -6,6 +5,7 @@ import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 // --- Don't rely on config for paths in preload, resolve directly ---
 import { initializeDatabase } from './db/sqliteService.js'; // Keep this import
+import { calculateTokenCount } from './services/fileService.js'; // <-- Import token calculator
 
 // --- Determine paths relative to *this file's* location within packages/api ---
 const __filename = fileURLToPath(import.meta.url);
@@ -23,8 +23,9 @@ const transcriptsBaseDir = path.join(dbDir, 'transcripts'); // Target packages/a
 interface SessionVerificationData {
     id: number;
     status: string;
-    transcriptPath: string | null;
+    transcriptPath: string | null; // This will now be RELATIVE
     date: string; // Expect ISO string now
+    transcriptTokenCount: number | null; // <-- Added for verification
 }
 
 // Helper to create ISO timestamp slightly offset for sorting demo
@@ -150,7 +151,7 @@ async function preloadDatabase() {
     let success = false;
 
     const fileWritePromises: Promise<void>[] = [];
-    const sessionsToVerify: { name: string; expectedPathEnding: string; expectedDate: string }[] = [];
+    const sessionsToVerify: { name: string; expectedRelativePath: string; expectedDate: string; expectedTokenCount: number | null }[] = []; // <-- Renamed expectedPathEnding
 
     try {
         // --- Initialize DB Connection Inside Try ---
@@ -170,11 +171,11 @@ async function preloadDatabase() {
 
         // Prepare statements (now safe, tables exist)
         const insertSession = db.prepare(/* SQL */ `
-          INSERT INTO sessions (fileName, clientName, sessionName, date, sessionType, therapy, transcriptPath, status, whisperJobId)
-          VALUES (@fileName, @clientName, @sessionName, @date, @sessionType, @therapy, NULL, @status, @whisperJobId)
-        `);
-        const updateSessionPath = db.prepare(/* SQL */ `
-          UPDATE sessions SET transcriptPath = ? WHERE id = ?
+          INSERT INTO sessions (fileName, clientName, sessionName, date, sessionType, therapy, transcriptPath, audioPath, status, whisperJobId, transcriptTokenCount)
+          VALUES (@fileName, @clientName, @sessionName, @date, @sessionType, @therapy, NULL, NULL, @status, @whisperJobId, @transcriptTokenCount)
+        `); // <-- Added tokenCount placeholder
+        const updateSessionPathAndAudio = db.prepare(/* SQL */ `
+          UPDATE sessions SET transcriptPath = ?, audioPath = ? WHERE id = ?
         `);
         const insertChat = db.prepare(/* SQL */ `
           INSERT INTO chats (sessionId, timestamp, name)
@@ -188,7 +189,12 @@ async function preloadDatabase() {
         console.log('[Preload] Starting DB transaction for data insertion...');
         db.transaction(() => {
             for (const session of sampleSessions) {
-                // Insert session with ISO timestamp
+                // --- Calculate Token Count ---
+                const fullTranscriptText = session.transcriptContent.map(p => p.text).join('\n\n');
+                const tokenCount = calculateTokenCount(fullTranscriptText);
+                // --- End Calculation ---
+
+                // Insert session with ISO timestamp and token count
                 const sessionResult = insertSession.run({
                     fileName: session.fileName,
                     clientName: session.clientName,
@@ -197,24 +203,29 @@ async function preloadDatabase() {
                     sessionType: session.sessionType,
                     therapy: session.therapy,
                     status: session.status,
-                    whisperJobId: session.whisperJobId
+                    whisperJobId: session.whisperJobId,
+                    transcriptTokenCount: tokenCount, // <-- Insert token count
                 });
                 const sessionId = sessionResult.lastInsertRowid as number;
 
-                // Use correctly resolved transcriptsBaseDir
-                const correctTranscriptPath = path.join(transcriptsBaseDir, `${sessionId}.json`);
-                const expectedPathEnding = `${sessionId}.json`;
-                updateSessionPath.run(correctTranscriptPath, sessionId);
+                // *** Store RELATIVE path in DB ***
+                const relativeTranscriptPath = `${sessionId}.json`;
+                const absoluteTranscriptPath = path.join(transcriptsBaseDir, relativeTranscriptPath); // For writing file
+                // *** End Change ***
 
-                console.log(`[Preload DB] Added session ${sessionId}: ${session.sessionName} (Date: ${session.date}). Path set to: ${correctTranscriptPath}`);
-                sessionsToVerify.push({ name: session.sessionName, expectedPathEnding, expectedDate: session.date });
+                // Simulate audio path being stored (use filename as identifier)
+                const audioIdentifier = `${sessionId}-audio.mp3`;
+                updateSessionPathAndAudio.run(relativeTranscriptPath, audioIdentifier, sessionId); // <-- Store relative path
+
+                console.log(`[Preload DB] Added session ${sessionId}: ${session.sessionName} (Date: ${session.date}, Tokens: ${tokenCount ?? 'N/A'}). Relative Path: ${relativeTranscriptPath}, Audio ID: ${audioIdentifier}`);
+                sessionsToVerify.push({ name: session.sessionName, expectedRelativePath: relativeTranscriptPath, expectedDate: session.date, expectedTokenCount: tokenCount }); // <-- Store expected relative path
 
                 const transcriptJson = JSON.stringify(session.transcriptContent, null, 2);
                 fileWritePromises.push(
-                    fs.writeFile(correctTranscriptPath, transcriptJson, 'utf-8')
-                        .then(() => console.log(`[Preload Files] Successfully wrote transcript to ${correctTranscriptPath}`))
+                    fs.writeFile(absoluteTranscriptPath, transcriptJson, 'utf-8') // <-- Write using absolute path
+                        .then(() => console.log(`[Preload Files] Successfully wrote transcript to ${absoluteTranscriptPath}`))
                         .catch(err => {
-                             console.error(`[Preload Files] Error writing transcript ${correctTranscriptPath}:`, err);
+                             console.error(`[Preload Files] Error writing transcript ${absoluteTranscriptPath}:`, err);
                              throw new Error(`Failed to write transcript for session ${sessionId}`);
                         })
                 );
@@ -254,7 +265,9 @@ async function preloadDatabase() {
         if (success && db && db.open) {
             console.log('[Preload Verification] Checking database entries...');
             try {
-                const verifyStmt = db.prepare('SELECT id, status, transcriptPath, date FROM sessions WHERE sessionName = ?');
+                // --- Update verification query ---
+                const verifyStmt = db.prepare('SELECT id, status, transcriptPath, date, transcriptTokenCount FROM sessions WHERE sessionName = ?');
+                // --- End update ---
                 let verificationPassed = true;
 
                 for (const sessionToVerify of sessionsToVerify) {
@@ -273,13 +286,29 @@ async function preloadDatabase() {
                         console.error(`[Preload Verification] FAILED: Session '${sessionToVerify.name}' (ID: ${dbSession.id}) has date '${dbSession.date}', expected '${sessionToVerify.expectedDate}'.`);
                          verificationPassed = false;
                     }
-                    if (!dbSession.transcriptPath || !dbSession.transcriptPath.endsWith(sessionToVerify.expectedPathEnding)) {
-                        console.error(`[Preload Verification] FAILED: Session '${sessionToVerify.name}' (ID: ${dbSession.id}) path '${dbSession.transcriptPath}' mismatch or missing.`);
+                    // --- Verify token count ---
+                    if (dbSession.transcriptTokenCount !== sessionToVerify.expectedTokenCount) {
+                        console.error(`[Preload Verification] FAILED: Session '${sessionToVerify.name}' (ID: ${dbSession.id}) has token count '${dbSession.transcriptTokenCount}', expected '${sessionToVerify.expectedTokenCount}'.`);
+                        verificationPassed = false;
+                    }
+                    // --- End verification ---
+
+                    // *** Check relative path and file existence ***
+                    if (!dbSession.transcriptPath || dbSession.transcriptPath !== sessionToVerify.expectedRelativePath) {
+                        console.error(`[Preload Verification] FAILED: Session '${sessionToVerify.name}' (ID: ${dbSession.id}) relative path mismatch or missing. Found: '${dbSession.transcriptPath}', Expected: '${sessionToVerify.expectedRelativePath}'.`);
                         verificationPassed = false;
                     } else {
-                        try { await fs.access(dbSession.transcriptPath); }
-                        catch (fileError) { console.error(`[Preload Verification] FAILED: File check failed for path '${dbSession.transcriptPath}'. Error: ${fileError}`); verificationPassed = false; }
+                        const absolutePathToCheck = path.join(transcriptsBaseDir, dbSession.transcriptPath); // Reconstruct absolute path
+                        try {
+                            await fs.access(absolutePathToCheck);
+                            console.log(`[Preload Verification] File check PASSED for path '${absolutePathToCheck}'.`);
+                         }
+                        catch (fileError) {
+                            console.error(`[Preload Verification] FAILED: File check failed for reconstructed path '${absolutePathToCheck}'. Error: ${fileError}`);
+                            verificationPassed = false;
+                        }
                     }
+                    // *** End Change ***
                 }
 
                 if(verificationPassed) console.log('[Preload Verification] All database entries and file checks look OK.');

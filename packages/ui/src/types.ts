@@ -42,10 +42,12 @@ export interface Session extends SessionMetadata {
     status: 'pending' | 'transcribing' | 'completed' | 'failed';
     whisperJobId: string | null;
     date: string; // ISO string from backend
+    transcriptTokenCount?: number | null; // <-- Added optional token count
     chats: ChatSession[];
 }
 
 // --- LLM Management Types ---
+// ... (rest of the types remain the same) ...
 
 export interface OllamaModelInfo {
     name: string;

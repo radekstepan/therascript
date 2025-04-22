@@ -16,7 +16,8 @@ import {
     // *** Import renamed function ***
     deleteUploadedAudioFile,
     saveUploadedAudio, // *** Import save function ***
-    getAudioAbsolutePath // *** Import helper ***
+    getAudioAbsolutePath, // *** Import helper ***
+    calculateTokenCount, // <-- Import token calculation helper
 } from '../services/fileService.js';
 import {
     startTranscriptionJob, // Keep this
@@ -35,7 +36,7 @@ import type {
 import { NotFoundError, InternalServerError, ApiError, BadRequestError, ConflictError } from '../errors.js';
 import config from '../config/index.js';
 
-// --- Schemas (add audioPath to responses) ---
+// --- Schemas (add transcriptTokenCount to responses) ---
 const SessionIdParamSchema = t.Object({
     sessionId: t.String({ pattern: '^[0-9]+$', error: "Session ID must be a positive number" })
 });
@@ -55,7 +56,8 @@ const SessionMetadataUpdateBodySchema = t.Partial(t.Object({
     fileName: t.Optional(t.String()),
     status: t.Optional(t.Union([ t.Literal('pending'), t.Literal('transcribing'), t.Literal('completed'), t.Literal('failed') ])),
     whisperJobId: t.Optional(t.Union([t.String(), t.Null()])),
-    audioPath: t.Optional(t.Union([t.String(), t.Null()])) // audioPath can be updated/set to null
+    audioPath: t.Optional(t.Union([t.String(), t.Null()])), // audioPath can be updated/set to null
+    transcriptTokenCount: t.Optional(t.Union([t.Number(), t.Null()])), // <-- Added transcriptTokenCount
 }));
 const SessionMetadataResponseSchema = t.Object({
     id: t.Number(),
@@ -69,6 +71,7 @@ const SessionMetadataResponseSchema = t.Object({
     audioPath: t.Union([t.String(), t.Null()]), // Added audioPath
     status: t.String(),
     whisperJobId: t.Union([t.String(), t.Null()]),
+    transcriptTokenCount: t.Optional(t.Union([t.Number(), t.Null()])), // <-- Added transcriptTokenCount
 });
 const SessionListResponseItemSchema = SessionMetadataResponseSchema;
 
@@ -171,12 +174,6 @@ const sessionRoutesInstance = new Elysia({ prefix: '/api' })
             let tempSavedAudioPathForTranscription: string | null = null; // Absolute path for Whisper
 
             try {
-                // --- REMOVE ensureWhisperReady call ---
-                // console.log('[API Upload] Ensuring Whisper service is ready...');
-                // await ensureWhisperReady(); // <-- REMOVE THIS LINE
-                // console.log('[API Upload] Whisper service is ready.');
-                // --- END REMOVE ---
-
                 // 1. Create initial DB record to get ID
                 const creationTimestamp = new Date().toISOString();
                 console.log('[API Upload] Creating initial DB record...');
@@ -414,8 +411,13 @@ const sessionRoutesInstance = new Elysia({ prefix: '/api' })
 
                   try {
                       const structuredTranscript = await getStructuredTranscriptionResult(jobId);
-                      const relativeTranscriptPath = await saveTranscriptContent(sessionId, structuredTranscript);
-                      const finalizedSession = sessionRepository.updateMetadata(sessionId, { status: 'completed', transcriptPath: relativeTranscriptPath, }); // Store relative path
+                      // Save transcript and get token count
+                      const { relativePath: relativeTranscriptPath, tokenCount } = await saveTranscriptContent(sessionId, structuredTranscript);
+                      const finalizedSession = sessionRepository.updateMetadata(sessionId, {
+                          status: 'completed',
+                          transcriptPath: relativeTranscriptPath, // Store relative path
+                          transcriptTokenCount: tokenCount, // <-- Store token count
+                      });
                       if (!finalizedSession) throw new InternalServerError(`Failed to update session ${sessionId} status to completed.`);
                       const finalSessionState = sessionRepository.findById(sessionId);
                       if (!finalSessionState) throw new InternalServerError(`Failed to retrieve session ${sessionId} after finalizing.`);

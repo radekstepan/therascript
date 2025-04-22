@@ -1,7 +1,13 @@
-/* packages/ui/src/components/SessionView/Chat/ChatPanelHeader.tsx */
 import React from 'react';
 import { Flex, Text, Badge, Button, Tooltip, Box, Spinner } from '@radix-ui/themes';
-import { MixerVerticalIcon, InfoCircledIcon, CheckCircledIcon, SymbolIcon, LightningBoltIcon } from '@radix-ui/react-icons'; // Added LightningBoltIcon
+import {
+    MixerVerticalIcon,
+    InfoCircledIcon,
+    CheckCircledIcon,
+    SymbolIcon,
+    LightningBoltIcon,
+    ArchiveIcon // <-- Import ArchiveIcon
+} from '@radix-ui/react-icons';
 import type { OllamaStatus } from '../../../types';
 import { cn } from '../../../utils'; // Import cn
 
@@ -66,7 +72,7 @@ export function ChatPanelHeader({
                         size="1"
                         className={cn(isLoadingStatus ? 'opacity-50' : '')} // Dim if status is loading
                     >
-                        <LightningBoltIcon style={{ marginRight: '2px' }}/>
+                        <LightningBoltIcon width="14" height="14" style={{ marginRight: '2px' }}/> {/* Keep Lightning Bolt for context size */}
                         {isLoadingStatus ? '...' : (configuredContextSize ? configuredContextSize.toLocaleString() : 'Default')}
                     </Badge>
                  </Tooltip>
@@ -80,13 +86,18 @@ export function ChatPanelHeader({
 
             {/* Right Side: Tokens & Manage Button */}
             <Flex align="center" gap="3" flexShrink="0">
+                 {/* --- Updated Token Badge --- */}
                  {(latestPromptTokens !== null || latestCompletionTokens !== null) && (
-                    <Tooltip content={`Last Interaction: ${latestPromptTokens ?? '?'} Input + ${latestCompletionTokens ?? '?'} Output Tokens`}>
+                    <Tooltip content={`Last Interaction: ${latestPromptTokens?.toLocaleString() ?? '?'} Input + ${latestCompletionTokens?.toLocaleString() ?? '?'} Output Tokens`}>
                         <Badge variant="soft" color="gray" highContrast>
-                             <Text size="1">{totalTokens} Tokens</Text>
+                             {/* Add ArchiveIcon */}
+                             <ArchiveIcon width="14" height="14" style={{ marginRight: '4px', opacity: 0.8 }} />
+                             {/* Use toLocaleString for formatting */}
+                             <Text size="1">{totalTokens.toLocaleString()} Tokens</Text>
                         </Badge>
                     </Tooltip>
                  )}
+                 {/* --- End Updated Token Badge --- */}
                 <Button variant="soft" size="1" onClick={onOpenLlmModal} title="Manage LLM" aria-label="Manage large language model" >
                     <MixerVerticalIcon width="14" height="14" />
                     <Text size="1" ml="1">Manage</Text>

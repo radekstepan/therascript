@@ -9,12 +9,12 @@ const prepareStmt = (sql: string): Statement => {
     catch (error) { throw new Error(`DB stmt prep failed: ${sql}. Error: ${error}`); }
 };
 
-// Prepare statements (include audioPath)
-const insertSessionStmt = prepareStmt('INSERT INTO sessions (fileName, clientName, sessionName, date, sessionType, therapy, transcriptPath, audioPath, status, whisperJobId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+// Prepare statements (include audioPath and transcriptTokenCount)
+const insertSessionStmt = prepareStmt('INSERT INTO sessions (fileName, clientName, sessionName, date, sessionType, therapy, transcriptPath, audioPath, status, whisperJobId, transcriptTokenCount) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
 const selectAllSessionsStmt = prepareStmt('SELECT * FROM sessions ORDER BY date DESC, id DESC');
 const selectSessionByIdStmt = prepareStmt('SELECT * FROM sessions WHERE id = ?');
 const updateSessionMetadataStmt = prepareStmt(
-    `UPDATE sessions SET clientName = ?, sessionName = ?, date = ?, sessionType = ?, therapy = ?, fileName = ?, transcriptPath = ?, audioPath = ?, status = ?, whisperJobId = ? WHERE id = ?`
+    `UPDATE sessions SET clientName = ?, sessionName = ?, date = ?, sessionType = ?, therapy = ?, fileName = ?, transcriptPath = ?, audioPath = ?, status = ?, whisperJobId = ?, transcriptTokenCount = ? WHERE id = ?`
 );
 const deleteSessionStmt = prepareStmt('DELETE FROM sessions WHERE id = ?');
 const findSessionByTranscriptPathStmt = prepareStmt('SELECT * FROM sessions WHERE transcriptPath = ?');
@@ -70,7 +70,8 @@ export const sessionRepository = {
                 metadata.sessionType, metadata.therapy, transcriptPath, // Store relative transcript path
                 audioIdentifier, // Store relative audio filename/identifier
                 'pending', // Default status
-                null       // Default whisperJobId
+                null,       // Default whisperJobId
+                null        // Default transcriptTokenCount
             );
             const newId = info.lastInsertRowid as number;
             console.log(`[SessionRepo:create] Insert successful. New ID: ${newId}`);
@@ -99,10 +100,10 @@ export const sessionRepository = {
         } catch (error) { throw new Error(`DB error fetching session ${id}: ${error}`); }
     },
 
-    // Update function now accepts the extended partial type including audioPath (relative identifier)
+    // Update function now accepts the extended partial type including audioPath (relative identifier) and token count
     updateMetadata: (
         id: number,
-        metadataUpdate: Partial<BackendSessionMetadata & { fileName?: string; transcriptPath?: string | null; audioPath?: string | null; status?: 'pending' | 'transcribing' | 'completed' | 'failed'; whisperJobId?: string | null; date?: string }>
+        metadataUpdate: Partial<BackendSessionMetadata & { fileName?: string; transcriptPath?: string | null; audioPath?: string | null; status?: 'pending' | 'transcribing' | 'completed' | 'failed'; whisperJobId?: string | null; date?: string; transcriptTokenCount?: number | null }> // <-- Added transcriptTokenCount
     ): BackendSession | null => {
          try {
             const existingSession = sessionRepository.findById(id);
@@ -136,14 +137,15 @@ export const sessionRepository = {
                   }
               }
 
-            console.log(`[SessionRepo:update] Executing update for ID ${id} with audioPath: ${updatedData.audioPath}`); // Log before execution
-            // Execute the update using all fields, including audioPath (relative identifier)
+            console.log(`[SessionRepo:update] Executing update for ID ${id} with audioPath: ${updatedData.audioPath}, tokenCount: ${updatedData.transcriptTokenCount ?? 'N/A'}`); // Log before execution
+            // Execute the update using all fields, including audioPath (relative identifier) and token count
             const info: RunResult = updateSessionMetadataStmt.run(
                 updatedData.clientName, updatedData.sessionName, updatedData.date,
                 updatedData.sessionType, updatedData.therapy, updatedData.fileName,
                 updatedData.transcriptPath, // Relative path or null
                 updatedData.audioPath, // Relative filename/identifier or null
                 updatedData.status, updatedData.whisperJobId,
+                updatedData.transcriptTokenCount, // <-- Pass token count
                 id
             );
             return sessionRepository.findById(id);

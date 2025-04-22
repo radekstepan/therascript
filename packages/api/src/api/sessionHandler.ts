@@ -3,6 +3,7 @@ import { chatRepository } from '../repositories/chatRepository.js';
 import {
     loadTranscriptContent,
     saveTranscriptContent,
+    calculateTokenCount, // <-- Import token calculation helper
 } from '../services/fileService.js';
 import type { BackendSession, StructuredTranscript } from '../types/index.js';
 import { NotFoundError, BadRequestError, InternalServerError, ApiError } from '../errors.js';
@@ -26,11 +27,11 @@ const dateToIsoString = (dateString: string): string | null => {
 };
 
 // GET / - List all sessions (metadata only)
-// FIX: Add audioPath to the returned DTO
+// FIX: Add audioPath and transcriptTokenCount to the returned DTO
 export const listSessions = ({ set }: any) => {
     try {
         const sessions = sessionRepository.findAll();
-        // Ensure audioPath is included in the response DTO
+        // Ensure audioPath and transcriptTokenCount are included in the response DTO
         const sessionDTOs = sessions.map(s => ({
             id: s.id,
             fileName: s.fileName,
@@ -43,6 +44,7 @@ export const listSessions = ({ set }: any) => {
             audioPath: s.audioPath, // <-- Included audioPath
             status: s.status,
             whisperJobId: s.whisperJobId,
+            transcriptTokenCount: s.transcriptTokenCount, // <-- Included token count
         }));
         set.status = 200;
         return sessionDTOs;
@@ -55,7 +57,7 @@ export const listSessions = ({ set }: any) => {
 // POST /upload handler remains inline in routes and async (uses current time)
 
 // GET /:sessionId - Get session metadata and list of chat metadata
-// FIX: Add audioPath to the returned DTO
+// FIX: Add audioPath and transcriptTokenCount to the returned DTO
 export const getSessionDetails = ({ sessionData, set }: any) => {
     try {
         const chats = chatRepository.findChatsBySessionId(sessionData.id);
@@ -64,7 +66,7 @@ export const getSessionDetails = ({ sessionData, set }: any) => {
         }));
 
         set.status = 200;
-        // Ensure audioPath is included in the response DTO
+        // Ensure audioPath and transcriptTokenCount are included in the response DTO
         return {
              id: sessionData.id,
              fileName: sessionData.fileName,
@@ -77,6 +79,7 @@ export const getSessionDetails = ({ sessionData, set }: any) => {
              audioPath: sessionData.audioPath, // <-- Included audioPath
              status: sessionData.status,
              whisperJobId: sessionData.whisperJobId,
+             transcriptTokenCount: sessionData.transcriptTokenCount, // <-- Included token count
              chats: chatMetadata
         };
     } catch (error) {
@@ -86,7 +89,7 @@ export const getSessionDetails = ({ sessionData, set }: any) => {
 };
 
 // PUT /:sessionId/metadata - Update metadata
-// FIX: Add audioPath to the returned DTO
+// FIX: Add audioPath and transcriptTokenCount to the returned DTO
 export const updateSessionMetadata = ({ sessionData, body, set }: any) => {
     const sessionId = sessionData.id;
     const { date: dateInput, ...restOfBody } = body; // Separate date input
@@ -113,7 +116,7 @@ export const updateSessionMetadata = ({ sessionData, body, set }: any) => {
         }
         console.log(`[API] Updated metadata for session ${sessionId}`);
         set.status = 200;
-        // Ensure audioPath is included in the response DTO
+        // Ensure audioPath and transcriptTokenCount are included in the response DTO
         return {
             id: updatedSession.id,
             fileName: updatedSession.fileName,
@@ -126,6 +129,7 @@ export const updateSessionMetadata = ({ sessionData, body, set }: any) => {
             audioPath: updatedSession.audioPath, // <-- Included audioPath
             status: updatedSession.status,
             whisperJobId: updatedSession.whisperJobId,
+            transcriptTokenCount: updatedSession.transcriptTokenCount, // <-- Included token count
         };
     } catch (error) {
         console.error(`[API Error] updateSessionMetadata (ID: ${sessionId}):`, error);
@@ -153,7 +157,8 @@ export const getTranscript = async ({ sessionData, set }: any) => {
     }
 };
 
-// PATCH /:sessionId/transcript - Update a specific paragraph (no change)
+// PATCH /:sessionId/transcript - Update a specific paragraph
+// FIX: Recalculate and save token count after update
 export const updateTranscriptParagraph = async ({ sessionData, body, set }: any) => {
     const sessionId = sessionData.id;
     const { paragraphIndex, newText } = body;
@@ -161,7 +166,7 @@ export const updateTranscriptParagraph = async ({ sessionData, body, set }: any)
           throw new BadRequestError(`Cannot update transcript for session ${sessionId}: Status is ${sessionData.status} or transcript path is missing.`);
      }
     try {
-        const currentTranscript: StructuredTranscript = await loadTranscriptContent(sessionId);
+        let currentTranscript: StructuredTranscript = await loadTranscriptContent(sessionId);
         if (paragraphIndex < 0 || paragraphIndex >= currentTranscript.length) {
             throw new BadRequestError(`Invalid paragraph index: ${paragraphIndex}.`);
         }
@@ -172,10 +177,16 @@ export const updateTranscriptParagraph = async ({ sessionData, body, set }: any)
              return currentTranscript;
         }
         const updatedTranscript = currentTranscript.map((p, i) => i === paragraphIndex ? { ...p, text: trimmedNewText } : p);
-        await saveTranscriptContent(sessionId, updatedTranscript);
-        console.log(`[API] Updated paragraph ${paragraphIndex} for session ${sessionId}`);
+
+        // Save the updated transcript AND get the new token count
+        const { tokenCount } = await saveTranscriptContent(sessionId, updatedTranscript);
+
+        // Update the token count in the session metadata
+        sessionRepository.updateMetadata(sessionId, { transcriptTokenCount: tokenCount });
+
+        console.log(`[API] Updated paragraph ${paragraphIndex} for session ${sessionId}. New token count: ${tokenCount ?? 'N/A'}`);
         set.status = 200;
-        return updatedTranscript;
+        return updatedTranscript; // Return the updated transcript content
     } catch (error) {
         console.error(`[API Error] updateTranscriptParagraph (ID: ${sessionId}, Index: ${paragraphIndex}):`, error);
         if (error instanceof ApiError) throw error;

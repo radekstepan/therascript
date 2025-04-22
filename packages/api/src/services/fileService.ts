@@ -4,9 +4,47 @@ import crypto from 'node:crypto'; // Import crypto for unique name generation
 import config from '../config/index.js';
 import { isNodeError } from '../utils/helpers.js';
 import type { StructuredTranscript } from '../types/index.js'; // Import the type
+// --- Import Tiktoken class and TiktokenEncoding type ---
+import { get_encoding, type Tiktoken, type TiktokenEncoding } from '@dqbd/tiktoken';
 
 const transcriptsDir = config.db.transcriptsDir;
 const uploadsDir = config.db.uploadsDir;
+
+// --- Tokenizer Initialization ---
+let tokenizer: Tiktoken | null = null; // <-- Changed type to Tiktoken | null
+try {
+    // Use cl100k_base encoding, common for models like gpt-4, gpt-3.5-turbo, text-embedding-ada-002
+    // If using other models, you might need a different encoding.
+    tokenizer = get_encoding("cl100k_base");
+    console.log('[FileService] Tiktoken tokenizer (cl100k_base) initialized.');
+} catch (e) {
+    console.error('[FileService] Failed to initialize Tiktoken tokenizer:', e);
+    tokenizer = null; // Ensure tokenizer is null if init fails
+}
+// --- End Tokenizer Initialization ---
+
+// --- Token Calculation Helper ---
+// Returns null if tokenizer failed to initialize
+const calculateTokenCount = (text: string): number | null => {
+    if (!tokenizer) {
+        console.warn('[FileService] Tokenizer not available, cannot calculate token count.');
+        return null;
+    }
+    if (!text) {
+        return 0;
+    }
+    try {
+        const tokens = tokenizer.encode(text); // <-- This should now work correctly
+        return tokens.length;
+    } catch (e) {
+        console.error('[FileService] Error calculating tokens:', e);
+        return null; // Return null on error
+    }
+};
+// Expose the helper for use elsewhere (e.g., sessionHandler)
+export { calculateTokenCount };
+// --- End Token Calculation Helper ---
+
 
 // Helper to create a safe, unique filename
 // Example: 123-1678886400000-audio.mp3
@@ -115,8 +153,11 @@ export const loadTranscriptContent = async (sessionId: number): Promise<Structur
   }
 };
 
-// Saves StructuredTranscript as JSON, returns the relative path stored
-export const saveTranscriptContent = async (sessionId: number, content: StructuredTranscript): Promise<string> => {
+// Saves StructuredTranscript as JSON, returns the relative path stored AND token count
+export const saveTranscriptContent = async (
+    sessionId: number,
+    content: StructuredTranscript
+): Promise<{ relativePath: string; tokenCount: number | null }> => { // <-- Return type changed
   // Get the absolute path for saving
   const absoluteFilePath = getTranscriptPath(sessionId);
   // Determine the relative path to store/return (relative to transcriptsDir base)
@@ -127,8 +168,15 @@ export const saveTranscriptContent = async (sessionId: number, content: Structur
     const jsonContent = JSON.stringify(content, null, 2);
     await fs.writeFile(absoluteFilePath, jsonContent, 'utf-8');
     console.log(`[FileService] Transcript saved to absolute path: ${absoluteFilePath}`);
-    // Return the relative path that should be stored in the DB
-    return relativeFilePath;
+
+    // --- Calculate token count ---
+    const fullText = content.map(p => p.text).join('\n\n');
+    const tokenCount = calculateTokenCount(fullText);
+    console.log(`[FileService] Calculated token count for session ${sessionId}: ${tokenCount ?? 'N/A'}`);
+    // --- End Calculation ---
+
+    // Return the relative path and token count
+    return { relativePath: relativeFilePath, tokenCount: tokenCount };
   } catch (error) {
     console.error(`[FileService] Error saving transcript ${sessionId}:`, error);
     throw new Error(`Could not save transcript ${sessionId}.`);

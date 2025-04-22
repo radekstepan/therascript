@@ -31,6 +31,7 @@ export const fetchSessions = async (): Promise<Session[]> => {
     const response = await axios.get('/api/sessions/');
     return response.data.map((item: any) => ({
         ...item,
+        transcriptTokenCount: item.transcriptTokenCount, // <-- Ensure token count is mapped
         chats: item.chats || [],
     }));
 };
@@ -57,6 +58,7 @@ export const finalizeSession = async (sessionId: number): Promise<Session> => {
     const response = await axios.post<Session>(`/api/sessions/${sessionId}/finalize`);
      return {
         ...response.data,
+        transcriptTokenCount: response.data.transcriptTokenCount, // <-- Ensure token count is mapped
         chats: response.data.chats || [],
      };
 };
@@ -69,6 +71,7 @@ export const fetchSession = async (sessionId: number): Promise<Session> => {
     return {
         ...response.data,
         audioPath: response.data.audioPath || null,
+        transcriptTokenCount: response.data.transcriptTokenCount, // <-- Ensure token count is mapped
         chats: response.data.chats || [],
     };
 };
@@ -88,7 +91,7 @@ export const fetchChatDetails = async (sessionId: number, chatId: number): Promi
 // PUT /api/sessions/{sessionId}/metadata
 export const updateSessionMetadata = async (
     sessionId: number,
-    metadata: Partial<SessionMetadata & { audioPath?: string | null }> // Allow updating audioPath if needed
+    metadata: Partial<SessionMetadata & { audioPath?: string | null; transcriptTokenCount?: number | null }> // <-- Allow token count update
 ): Promise<SessionMetadata> => {
     const response = await axios.put(`/api/sessions/${sessionId}/metadata`, metadata);
     return response.data;

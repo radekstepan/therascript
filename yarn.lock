@@ -40,6 +40,11 @@
   resolved "https://registry.yarnpkg.com/@discoveryjs/json-ext/-/json-ext-0.6.3.tgz#f13c7c205915eb91ae54c557f5e92bddd8be0e83"
   integrity sha512-4B4OijXeVNOPZlYA2oEwWOTkzyltLao+xbotHQeqN++Rv27Y6s818+n2Qkp8q+Fxhn0t/5lA5X1Mxktud8eayQ==
 
+"@dqbd/tiktoken@^1.0.15":
+  version "1.0.20"
+  resolved "https://registry.yarnpkg.com/@dqbd/tiktoken/-/tiktoken-1.0.20.tgz#92e824dcd147a668ade2d654ff18f9f92a38f208"
+  integrity sha512-WsLzNYO1uzYOvIXunvwRcQObD4UsebirRnGzOuZc/x4oJ+0haEjdNxeeCfFaQami+Bai3u06QTt0/FWyYRsIhw==
+
 "@elysiajs/cors@^1.1.0":
   version "1.2.0"
   resolved "https://registry.yarnpkg.com/@elysiajs/cors/-/cors-1.2.0.tgz#5ba01d3629d942b91b662b75a10207e1b70b619d"

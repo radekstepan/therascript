@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react'; // Removed useMemo
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { Session, StructuredTranscript } from '../../../types'; // Removed TranscriptParagraphData
 import { TranscriptParagraph } from '../../Transcription/TranscriptParagraph';
@@ -11,6 +11,7 @@ import {
     BadgeIcon as SessionTypeIcon,
     LightningBoltIcon,
     // Removed Play/Pause imports from here, handled in paragraph
+    ArchiveIcon // <-- Use ArchiveIcon for token count
 } from '@radix-ui/react-icons';
 import { cn } from '../../../utils';
 import { updateTranscriptParagraph } from '../../../api/api';
@@ -28,30 +29,39 @@ const getBadgeColor = (type: string | undefined, category: BadgeCategory): React
     return type ? (map[type.toLowerCase()] || map['default']) : map['default'];
 };
 
+// --- Modified renderHeaderDetail ---
 const renderHeaderDetail = (
     IconComponent: React.ElementType,
-    value: string | undefined | number,
+    value: string | undefined | number | null, // Allow null for token count initially
     label: string,
     category?: BadgeCategory,
     isDateValue?: boolean,
-    isTokenValue?: boolean
+    isTokenValue?: boolean // <-- New flag for token type
 ) => {
-    let displayValue: string | number | undefined = isDateValue ? formatIsoDateToYMD(value as string | undefined) : value;
-    if (isTokenValue && typeof value === 'number') {
+    // Format based on type
+    let displayValue: string | number | undefined | null = value;
+    if (isDateValue && typeof value === 'string') {
+        displayValue = formatIsoDateToYMD(value);
+    } else if (isTokenValue && typeof value === 'number') {
+        // Format with thousand separators
         displayValue = value.toLocaleString();
     }
+
+    // Check if value is valid for display (not null, undefined, or empty string)
     if (displayValue === undefined || displayValue === null || displayValue === '') return null;
+
     const isBadge = category === 'session' || category === 'therapy';
     const badgeColor = isBadge && typeof value === 'string' ? getBadgeColor(value, category) : undefined;
 
     return (
         <Tooltip content={label}>
             <Flex align="center" gap="1" title={label}>
+                {/* Use ArchiveIcon specifically for token count */}
                 <IconComponent className={cn("flex-shrink-0", isBadge || isTokenValue ? "opacity-80" : "text-[--gray-a10]")} width="14" height="14" />
                 {isBadge && badgeColor ? (
                     <Badge color={badgeColor} variant="soft" radius="full" size="1">{value}</Badge>
                 ) : isTokenValue ? (
-                     <Badge color="gray" variant="soft" radius="full" size="1">{displayValue}</Badge>
+                     <Badge color="gray" variant="soft" radius="full" size="1">{displayValue}</Badge> // Render as badge
                 ) : (
                     <Text size="1" color="gray">{displayValue}</Text>
                 )}
@@ -59,6 +69,7 @@ const renderHeaderDetail = (
         </Tooltip>
     );
 };
+// --- End Modification ---
 
 
 interface TranscriptionProps {
@@ -71,11 +82,6 @@ interface TranscriptionProps {
     isLoadingTranscript: boolean;
     transcriptError?: Error | null;
 }
-
-const estimateTokens = (text: string): number => {
-    if (!text) return 0;
-    return Math.round(text.length / 4);
-};
 
 export function Transcription({
     session,
@@ -100,16 +106,10 @@ export function Transcription({
     const [audioReady, setAudioReady] = useState(false);
     const [isAudioLoading, setIsAudioLoading] = useState(false); // Track initial load
 
-    const estimatedTokenCount = useMemo(() => {
-        if (!transcriptContent || transcriptContent.length === 0) { return 0; }
-        const fullText = transcriptContent.map(p => p.text).join(' ');
-        return estimateTokens(fullText);
-    }, [transcriptContent]);
+    // Token count now comes directly from the session prop
+    const transcriptTokenCount = session?.transcriptTokenCount; // Use optional chaining
 
-    // --- Audio URL derived from session ---
-    const audioSrc = session?.audioPath ? `${API_BASE_URL}/api/sessions/${session.id}/audio` : null;
-
-    // --- Audio Event Handlers ---
+    // ... (audio handlers, mutation, scroll handling remain the same) ...
     const handleAudioCanPlay = useCallback(() => {
         console.log("[Audio] Ready to play");
         setAudioReady(true);
@@ -200,6 +200,9 @@ export function Transcription({
         }
     }, [transcriptContent, playingParagraphIndex, isPlaying]); // Add isPlaying dependency
 
+
+    const audioSrc = session?.audioPath ? `${API_BASE_URL}/api/sessions/${session.id}/audio` : null;
+
     // --- Playback Control Functions ---
     const playAudioFromTimestamp = useCallback((timestampMs: number, index: number) => {
         if (!audioRef.current || !audioSrc) {
@@ -283,13 +286,15 @@ export function Transcription({
     }, [isPlaying, playingParagraphIndex, pauseAudio, playAudioFromTimestamp]);
 
 
-    // Mutation for saving (no changes)
+    // Mutation for saving (no changes needed here, but note onSuccess invalidates sessionMeta)
     const saveParagraphMutation = useMutation({
         mutationFn: ({ index, newText }: { index: number; newText: string }) => {
             return updateTranscriptParagraph(session.id, index, newText);
         },
         onSuccess: (updatedStructuredTranscript, variables) => {
             queryClient.setQueryData(['transcript', session.id], updatedStructuredTranscript);
+            queryClient.invalidateQueries({ queryKey: ['sessionMeta', session.id] });
+            console.log(`[Transcription Save Success] Paragraph ${variables.index} saved. Invalidated sessionMeta query.`);
             setActiveEditIndex(null);
         },
         onError: (error, variables) => {
@@ -338,7 +343,6 @@ export function Transcription({
         saveParagraphMutation.mutate({ index, newText });
     };
 
-
     return (
         <Flex direction="column" style={{ height: '100%', minHeight: 0, border: '1px solid var(--gray-a6)', borderRadius: 'var(--radius-3)' }}>
              {/* --- Audio Element (Hidden) --- */}
@@ -363,14 +367,23 @@ export function Transcription({
             {/* --- End Audio Element --- */}
 
              <Flex align="baseline" justify="between" px="3" py="2" style={{ borderBottom: '1px solid var(--gray-a6)', flexShrink: 0 }} gap="3" wrap="wrap" >
-                {/* Metadata Header */}
+                {/* --- Update Metadata Header to include token count --- */}
                 <Flex align="center" gap="3" wrap="wrap" style={{ minWidth: 0, flexGrow: 1 }}>
                     {renderHeaderDetail(PersonIcon, session.clientName, "Client")}
                     {renderHeaderDetail(CalendarIcon, session.date, "Date", undefined, true)}
                     {renderHeaderDetail(SessionTypeIcon, session.sessionType, "Session Type", 'session')}
                     {renderHeaderDetail(BookmarkIcon, session.therapy, "Therapy Type", 'therapy')}
-                    {estimatedTokenCount > 0 && renderHeaderDetail( LightningBoltIcon, estimatedTokenCount, `Estimated Transcript Tokens (~${estimatedTokenCount.toLocaleString()})`, undefined, false, true )}
+                    {/* Display Token Count */}
+                    {(typeof transcriptTokenCount === 'number') && renderHeaderDetail(
+                        ArchiveIcon, // Use ArchiveIcon for tokens
+                        transcriptTokenCount,
+                        `Transcript Tokens`,
+                        undefined,
+                        false,
+                        true // Flag as token value
+                    )}
                 </Flex>
+                 {/* --- End Update --- */}
                 <Box flexShrink="0">
                     <Button variant="ghost" size="1" onClick={onEditDetailsClick} aria-label="Edit session details">
                         <Pencil1Icon width="14" height="14" />

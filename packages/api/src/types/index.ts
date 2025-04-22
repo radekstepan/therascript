@@ -67,11 +67,13 @@ export interface BackendSession {
   audioPath: string | null; // Path to the original uploaded audio file
   status: 'pending' | 'transcribing' | 'completed' | 'failed';
   whisperJobId: string | null;
+  transcriptTokenCount?: number | null; // <-- Added optional token count
   chats?: Pick<BackendChatSession, 'id' | 'sessionId' | 'timestamp' | 'name'>[];
 }
 
 // Adjusted to include optional audioPath for creation/update scenarios
-export type BackendSessionMetadata = Omit<BackendSession, 'id' | 'transcriptPath' | 'chats' | 'fileName' | 'status' | 'whisperJobId' | 'audioPath'>;
+// Metadata does not include the derived token count
+export type BackendSessionMetadata = Omit<BackendSession, 'id' | 'transcriptPath' | 'transcriptTokenCount' | 'chats' | 'fileName' | 'status' | 'whisperJobId' | 'audioPath'>;
 
 export interface ActionSchema {
     endpoint: string;

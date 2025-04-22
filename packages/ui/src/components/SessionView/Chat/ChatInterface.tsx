@@ -1,13 +1,15 @@
+// packages/ui/src/components/SessionView/Chat/ChatInterface.tsx
 /* packages/ui/src/components/SessionView/Chat/ChatInterface.tsx */
-import React, { useRef, useEffect, useCallback, useState } from 'react';
-import { Box, Flex, ScrollArea, Spinner, Text } from '@radix-ui/themes';
+import React, { useRef, useEffect, useCallback, useState, useMemo } from 'react'; // Single import
+import { Box, Flex, ScrollArea, Spinner, Text } from '@radix-ui/themes'; // Single import
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChatInput } from './ChatInput';
 import { ChatMessages } from './ChatMessages';
-import { ChatPanelHeader } from './ChatPanelHeader';
+import { ChatPanelHeader } from './ChatPanelHeader'; // Single import
 // Renamed API function import
 import { fetchChatDetails, addChatMessageStream } from '../../../api/api';
 import { debounce } from '../../../helpers';
+// Single import for types
 import type { ChatSession, Session, ChatMessage, OllamaStatus } from '../../../types';
 import { currentQueryAtom } from '../../../store';
 import { useAtom } from 'jotai';
@@ -51,9 +53,6 @@ export function ChatInterface({
     const [streamingAiPlaceholderId, setStreamingAiPlaceholderId] = useState<string | null>(null);
     const [streamingAiContent, setStreamingAiContent] = useState<string>('');
 
-    const [latestPromptTokens, setLatestPromptTokens] = useState<number | null>(null);
-    const [latestCompletionTokens, setLatestCompletionTokens] = useState<number | null>(null);
-
     // Fetch chat details query
     const { data: chatData, isLoading: isLoadingMessages, error: chatError, isFetching } = useQuery<ChatSession | null, Error>({
         queryKey: ['chat', activeSessionId, activeChatId],
@@ -65,6 +64,19 @@ export function ChatInterface({
         staleTime: 5 * 60 * 1000,
         refetchOnWindowFocus: true,
     });
+
+    // --- Derive latest tokens from chatData ---
+    const lastAiMessageWithTokens = useMemo(() => {
+        if (!chatData?.messages || chatData.messages.length === 0) {
+            return null;
+        }
+        // Find the last message sent by the AI
+        return [...chatData.messages].reverse().find(msg => msg.sender === 'ai');
+    }, [chatData]);
+
+    const latestPromptTokens = lastAiMessageWithTokens?.promptTokens ?? null;
+    const latestCompletionTokens = lastAiMessageWithTokens?.completionTokens ?? null;
+    // --- End derivation ---
 
     // Process Stream Function
     const processStream = async (
@@ -112,8 +124,7 @@ export function ChatInterface({
                             } else if (data.done) {
                                 console.log("Stream processing received done signal. Tokens:", data);
                                 finalTokens = { prompt: data.promptTokens, completion: data.completionTokens };
-                                setLatestPromptTokens(finalTokens?.prompt ?? null);
-                                setLatestCompletionTokens(finalTokens?.completion ?? null);
+                                // Tokens are derived, no local state update needed here
                             }
                         } catch (e) { console.error('SSE parse error', e); }
                     }
@@ -125,12 +136,9 @@ export function ChatInterface({
             // --- Optimistic Cache Update ---
             if (activeSessionId && activeChatId && fullText.trim()) {
                  const finalAiMessage: ChatMessage = {
-                     // Use a temporary negative ID until backend provides one or query is refetched
                      id: createTemporaryAiId(),
                      sender: 'ai',
                      text: fullText.trim(),
-                     // --- REMOVED timestamp ---
-                     // timestamp: Date.now(), // Approximate timestamp << REMOVED
                      promptTokens: finalTokens?.prompt,
                      completionTokens: finalTokens?.completion,
                  };
@@ -142,7 +150,7 @@ export function ChatInterface({
                          : msg
                      );
                      finalMessages.push(finalAiMessage);
-                     console.log(`[Stream Complete] Optimistically adding final AI message (temp ID: ${finalAiMessage.id}) to cache.`);
+                     console.log(`[Stream Complete] Optimistically adding final AI message (temp ID: ${finalAiMessage.id}) to cache with tokens P:${finalAiMessage.promptTokens ?? '?'} C:${finalAiMessage.completionTokens ?? '?'}.`);
                      return { ...oldData, messages: finalMessages };
                  });
             }
@@ -276,11 +284,12 @@ export function ChatInterface({
 
     return (
         <Flex direction="column" style={{ height: '100%', minHeight: 0, border: '1px solid var(--gray-a6)', borderRadius: 'var(--radius-3)', overflow: 'hidden' }}>
+            {/* --- Render ChatPanelHeader Component --- */}
             <ChatPanelHeader
                 ollamaStatus={ollamaStatus}
                 isLoadingStatus={isLoadingOllamaStatus}
-                latestPromptTokens={latestPromptTokens} // Use state updated upon stream completion
-                latestCompletionTokens={latestCompletionTokens} // Use state updated upon stream completion
+                latestPromptTokens={latestPromptTokens}
+                latestCompletionTokens={latestCompletionTokens}
                 onOpenLlmModal={onOpenLlmModal}
             />
 
