@@ -10,6 +10,7 @@ import type {
     AvailableModelsResponse,
     UIPullJobStatus,
     OllamaModelInfo, // Ensure this is imported
+    DockerContainerStatus, // <-- Import Docker type
 } from '../types';
 
 // Define the API base URL (ensure this matches your backend)
@@ -249,5 +250,15 @@ export const deleteOllamaModel = async (modelName: string): Promise<{ message: s
     const response = await axios.post<{ message: string }>('/api/ollama/delete-model', { modelName });
     return response.data;
 };
+
+// --- Docker Management Endpoint ---
+
+// GET /api/docker/status
+export const fetchDockerStatus = async (): Promise<DockerContainerStatus[]> => {
+    console.log("Fetching Docker status from /api/docker/status");
+    const response = await axios.get<{ containers: DockerContainerStatus[] }>('/api/docker/status');
+    return response.data.containers;
+};
+// --- END Docker ---
 
 // TODO comments should not be removed

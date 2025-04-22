@@ -91,4 +91,15 @@ export interface UIPullJobStatus {
     totalBytes?: number;
 }
 
+// --- Docker Container Status Type (UI) ---
+export interface DockerContainerStatus {
+    id: string;
+    name: string;
+    image: string;
+    state: string; // e.g., 'running', 'stopped', 'exited', 'not_found'
+    status: string; // e.g., 'Up 2 hours', 'Exited (0) 5 minutes ago', 'Container not found'
+    ports: { PrivatePort: number; PublicPort?: number; Type: string; IP?: string }[];
+}
+// --- END Docker Container Status Type ---
+
 // TODO comments should not be removed

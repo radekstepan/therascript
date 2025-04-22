@@ -16,11 +16,14 @@ import {
     OllamaPullJobStatus,
 } from './services/ollamaService.js';
 import { setActiveModelAndContext, getActiveModel, getConfiguredContextSize } from './services/activeModelService.js';
+// --- Import new Docker service ---
+import { getProjectContainerStatus } from './services/dockerManagementService.js';
+// --- End Import ---
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import axios from 'axios';
-import type { OllamaModelInfo } from './types/index.js';
+import type { OllamaModelInfo, DockerContainerStatus } from './types/index.js'; // <-- Added DockerContainerStatus
 import { closeDb } from './db/sqliteService.js'; // Import closeDb
 // REMOVED: import { stopManagedContainers } from './services/dockerService.js'; // Docker cleanup handled externally
 
@@ -60,6 +63,25 @@ const CancelPullResponseSchema = t.Object({ message: t.String() });
 const DeleteModelBodySchema = t.Object({ modelName: t.String({ minLength: 1, error: "Model name is required." }) });
 const DeleteModelResponseSchema = t.Object({ message: t.String() });
 
+// --- Docker Status Schemas ---
+const DockerPortSchema = t.Object({
+    PrivatePort: t.Number(),
+    PublicPort: t.Optional(t.Number()),
+    Type: t.String(),
+    IP: t.Optional(t.String()),
+});
+const DockerContainerStatusSchema = t.Object({
+    id: t.String(),
+    name: t.String(),
+    image: t.String(),
+    state: t.String(),
+    status: t.String(),
+    ports: t.Array(DockerPortSchema),
+});
+const DockerStatusResponseSchema = t.Object({
+    containers: t.Array(DockerContainerStatusSchema),
+});
+// --- End Docker Schemas ---
 
 const app = new Elysia()
     .model({
@@ -75,6 +97,9 @@ const app = new Elysia()
         cancelPullResponse: CancelPullResponseSchema,
         deleteModelBody: DeleteModelBodySchema,
         deleteModelResponse: DeleteModelResponseSchema,
+        // Add Docker models
+        dockerContainerStatus: DockerContainerStatusSchema,
+        dockerStatusResponse: DockerStatusResponseSchema,
     })
     .use(cors({
         origin: config.server.corsOrigin,
@@ -98,6 +123,9 @@ const app = new Elysia()
                 { name: 'Chat', description: 'Chat Interaction Endpoints' },
                 { name: 'Transcription', description: 'Transcription Job Management' },
                 { name: 'Ollama', description: 'Ollama LLM Management Endpoints' },
+                // --- Add Docker Tag ---
+                { name: 'Docker', description: 'Docker Container Management' },
+                // --- End Add ---
                 { name: 'Meta', description: 'API Metadata and Health' },
             ]
         }
@@ -134,6 +162,7 @@ const app = new Elysia()
     })
     // --- Ollama Management Routes (unchanged logic) ---
     .group('/api/ollama', { detail: { tags: ['Ollama'] } }, (app) => app
+        // ... (keep existing ollama routes) ...
         .get('/available-models', async ({ set }) => {
             console.log(`[API Models] Requesting available models`);
             try { const models = await listModels(); set.status = 200; return { models }; }
@@ -185,6 +214,31 @@ const app = new Elysia()
             catch (error: any) { console.error(`[API Status] Unexpected error checking status for ${modelNameToCheck}:`, error); throw new InternalServerError(`Failed to check status of model ${modelNameToCheck}.`); }
         }, { query: t.Optional(t.Object({ modelName: t.Optional(t.String()) })), response: { 200: 'ollamaStatusResponse', 500: t.Any() }, detail: { summary: 'Check loaded status & configured context size for active/specific model' } })
     ) // End /api/ollama group
+
+    // --- NEW Docker Status Route ---
+    .group('/api/docker', { detail: { tags: ['Docker'] } }, (app) => app
+        .get('/status', async ({ set }) => {
+            console.log('[API Docker] Requesting project container status...');
+            try {
+                const containers = await getProjectContainerStatus();
+                set.status = 200;
+                return { containers };
+            } catch (error: any) {
+                console.error('[API Docker] Error fetching Docker status:', error);
+                if (error instanceof InternalServerError) throw error;
+                throw new InternalServerError('Failed to fetch Docker container status.', error);
+            }
+        }, {
+            response: {
+                200: 'dockerStatusResponse',
+                500: t.Any() // For InternalServerError
+            },
+            detail: {
+                summary: 'Get status of project-related Docker containers'
+            }
+        })
+    ) // End /api/docker group
+    // --- END NEW Docker Route ---
 
     // --- Existing API Routes (unchanged) ---
     .get('/api/health', ({ set }) => { try { set.status = 200; return { status: 'OK', database: 'connected', timestamp: new Date().toISOString() }; } catch (dbError) { console.error("[Health Check] Database error:", dbError); throw new InternalServerError('Database connection failed', dbError instanceof Error ? dbError : undefined); } }, { detail: { tags: ['Meta'] } })

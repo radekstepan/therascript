@@ -107,3 +107,14 @@ export interface OllamaModelInfo {
     expires_at?: string;
     size_total?: number;
 }
+
+// --- Docker Container Status Type ---
+export interface DockerContainerStatus {
+    id: string;
+    name: string;
+    image: string;
+    state: string; // e.g., 'running', 'stopped', 'exited'
+    status: string; // e.g., 'Up 2 hours', 'Exited (0) 5 minutes ago'
+    ports: { PrivatePort: number; PublicPort?: number; Type: string; IP?: string }[];
+}
+// --- END Docker Container Status Type ---

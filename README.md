@@ -27,7 +27,6 @@
 
 - [ ] autocomplete client name when typing in both the create new session and editing an existing one (select dropdown with a free form input too?)
 - [ ] for reasoning models, display the <think> section separately
-- [ ] in the user/theme dropdown click to see a list of running docker containers for this project
 - [ ] actually delete cached Ollama models
 
 ## Future
@@ -37,6 +36,7 @@
 
 ## Refactor
 
+- [ ] centralize types into a separate package
 - [ ] 4 spaces everywhere plus autoformat on git commit
 - [ ] remove unused logic
 - [ ] split into smaller files
