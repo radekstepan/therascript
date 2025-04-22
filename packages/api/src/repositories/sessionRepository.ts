@@ -16,6 +16,7 @@ const selectSessionByIdStmt = prepareStmt('SELECT * FROM sessions WHERE id = ?')
 const updateSessionMetadataStmt = prepareStmt(
     `UPDATE sessions SET clientName = ?, sessionName = ?, date = ?, sessionType = ?, therapy = ?, fileName = ?, transcriptPath = ?, audioPath = ?, status = ?, whisperJobId = ?, transcriptTokenCount = ? WHERE id = ?`
 );
+// SQL statement to delete a session by ID. Foreign key constraints handle related chats/messages.
 const deleteSessionStmt = prepareStmt('DELETE FROM sessions WHERE id = ?');
 const findSessionByTranscriptPathStmt = prepareStmt('SELECT * FROM sessions WHERE transcriptPath = ?');
 // *** ADDED Statement to find session by audioPath ***
@@ -152,11 +153,18 @@ export const sessionRepository = {
         } catch (error) { throw new Error(`DB error updating metadata for session ${id}: ${error}`); }
     },
 
+    // Performs a hard delete on the session record.
+    // Associated transcript/audio files should be deleted separately in the service/route layer.
+    // Related chat/message records are deleted automatically due to `ON DELETE CASCADE`.
     deleteById: (id: number): boolean => {
         try {
-            // Deletion of associated files handled in sessionRoutes
+            console.log(`[SessionRepo:deleteById] Executing DELETE for session ID: ${id}`);
             const info: RunResult = deleteSessionStmt.run(id);
-             return info.changes > 0;
-        } catch (error) { throw new Error(`DB error deleting session ${id}: ${error}`); }
+            console.log(`[SessionRepo:deleteById] Delete result for session ID ${id}: ${info.changes} row(s) affected.`);
+            return info.changes > 0;
+        } catch (error) {
+             console.error(`[SessionRepo:deleteById] Error deleting session ${id}:`, error);
+             throw new Error(`DB error deleting session ${id}: ${error}`);
+        }
     },
 };

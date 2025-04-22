@@ -4,11 +4,11 @@ import {
     FileTextIcon,
     ChevronUpIcon,
     ChevronDownIcon,
-    // DotsHorizontalIcon, // <-- Remove Dots icon
-    Pencil1Icon,         // <-- Keep Edit icon
+    DotsHorizontalIcon, // <-- Use Dots icon for menu trigger
+    Pencil1Icon,         // <-- Keep Edit icon for menu item
+    TrashIcon,           // <-- Add Trash icon for menu item
 } from '@radix-ui/react-icons';
-// <-- Remove DropdownMenu import
-import { Table, Badge, Text, Flex, IconButton } from '@radix-ui/themes';
+import { Table, Badge, Text, Flex, IconButton, DropdownMenu } from '@radix-ui/themes'; // <-- Added DropdownMenu
 import type { Session } from '../../types';
 import type { SessionSortCriteria, SortDirection } from '../../store';
 import { sessionColorMap, therapyColorMap } from '../../constants';
@@ -21,6 +21,7 @@ interface SessionListTableProps {
     sortDirection: SortDirection;
     onSort: (criteria: SessionSortCriteria) => void;
     onEditSession: (session: Session) => void;
+    onDeleteSessionRequest: (session: Session) => void; // <-- New prop for requesting deletion
 }
 
 type AriaSort = 'none' | 'ascending' | 'descending' | 'other' | undefined;
@@ -30,24 +31,27 @@ const getBadgeColor = (type: string | undefined, category: 'session' | 'therapy'
     return type ? (map[type.toLowerCase()] || map['default']) : map['default'];
 }
 
-export function SessionListTable({ sessions, sortCriteria, sortDirection, onSort, onEditSession }: SessionListTableProps) {
+export function SessionListTable({ sessions, sortCriteria, sortDirection, onSort, onEditSession, onDeleteSessionRequest }: SessionListTableProps) {
     const navigate = useNavigate();
 
     const handleSessionClick = (e: React.MouseEvent<HTMLTableRowElement>, sessionId: number) => {
-        // Prevent triggering row click when clicking on the edit button
+        // Prevent triggering row click when clicking on elements inside the menu button cell
         const target = e.target as HTMLElement;
-        // Check if the click target is the button itself or an icon inside it
-        if (target.closest('button[aria-label="Edit session details"]')) {
-            return;
+        if (target.closest('button[aria-label="Session options"]')) {
+             return;
+        }
+        if (target.closest('[role="menu"]')) { // Prevent clicks inside the dropdown menu from navigating
+             return;
         }
         navigate(`/sessions/${sessionId}`);
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTableRowElement>, sessionId: number) => {
-        // Prevent triggering row navigation if Enter is pressed on the button
-        if (e.key === 'Enter' && !(e.target as HTMLElement).closest('button[aria-label="Edit session details"]')) {
+        // Prevent triggering row navigation if Enter is pressed on the menu button
+        if (e.key === 'Enter' && !(e.target as HTMLElement).closest('button[aria-label="Session options"]')) {
             navigate(`/sessions/${sessionId}`);
         }
+        // Allow space/enter on the button to open the menu
     };
 
     const renderSortIcon = useCallback((criteria: SessionSortCriteria) => {
@@ -94,7 +98,7 @@ export function SessionListTable({ sessions, sortCriteria, sortDirection, onSort
                              <Flex align="center" className="group">Date {renderSortIcon('date')}</Flex>
                         </Table.ColumnHeaderCell>
                         <Table.ColumnHeaderCell style={{ width: '1%', whiteSpace: 'nowrap' }} align="right">
-                            {/* Empty header or label it "Edit" */}
+                            Actions
                         </Table.ColumnHeaderCell>
                     </Table.Row>
                 </Table.Header>
@@ -134,23 +138,37 @@ export function SessionListTable({ sessions, sortCriteria, sortDirection, onSort
                             <Table.Cell>
                                 <Text color="gray">{formatIsoDateToYMD(session.date) || <span style={{ fontStyle: 'italic' }}>No Date</span>}</Text>
                             </Table.Cell>
-                            {/* *** Actions Cell with direct Edit Button *** */}
-                            <Table.Cell align="right" onClick={(e) => e.stopPropagation()}>
-                                <IconButton
-                                    variant="ghost"
-                                    color="gray"
-                                    size="1"
-                                    className="p-1" // Keep padding for click area
-                                    aria-label="Edit session details"
-                                    title="Edit session details"
-                                    onClick={(e) => {
-                                        e.stopPropagation(); // Prevent row click
-                                        onEditSession(session);
-                                    }}
-                                    onKeyDown={(e) => e.stopPropagation()} // Prevent row navigation
-                                >
-                                    <Pencil1Icon />
-                                </IconButton>
+                            {/* *** Actions Cell with Dropdown Menu *** */}
+                            <Table.Cell align="right" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                                <DropdownMenu.Root>
+                                    <DropdownMenu.Trigger>
+                                        <IconButton
+                                            variant="ghost"
+                                            color="gray"
+                                            size="1"
+                                            className="p-1"
+                                            aria-label="Session options"
+                                            title="Session options"
+                                            // No separate onClick needed for trigger
+                                        >
+                                            <DotsHorizontalIcon />
+                                        </IconButton>
+                                    </DropdownMenu.Trigger>
+                                    <DropdownMenu.Content
+                                        align="end"
+                                        size="1"
+                                        onClick={(e) => e.stopPropagation()} // Prevent menu clicks from triggering row
+                                        onMouseDown={(e) => e.stopPropagation()}
+                                     >
+                                        <DropdownMenu.Item onSelect={() => onEditSession(session)}>
+                                            <Pencil1Icon width="14" height="14" className="mr-2"/> Edit Details
+                                        </DropdownMenu.Item>
+                                        <DropdownMenu.Separator />
+                                        <DropdownMenu.Item color="red" onSelect={() => onDeleteSessionRequest(session)}>
+                                            <TrashIcon width="14" height="14" className="mr-2"/> Delete Session
+                                        </DropdownMenu.Item>
+                                    </DropdownMenu.Content>
+                                </DropdownMenu.Root>
                             </Table.Cell>
                         </Table.Row>
                     ))}

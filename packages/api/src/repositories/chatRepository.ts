@@ -14,6 +14,7 @@ const selectMessagesByChatIdSql = 'SELECT * FROM messages WHERE chatId = ? ORDER
 const selectChatByIdSql = 'SELECT * FROM chats WHERE id = ?';
 const selectMessageByIdSql = 'SELECT * FROM messages WHERE id = ?';
 const updateChatNameSql = 'UPDATE chats SET name = ? WHERE id = ?';
+// SQL statement to delete a chat by ID. Foreign key constraints handle related messages.
 const deleteChatSql = 'DELETE FROM chats WHERE id = ?';
 
 // Helper to combine chat row with its messages (now synchronous)
@@ -124,9 +125,13 @@ export const chatRepository = {
         }
     },
 
+    // Performs a hard delete on the chat record.
+    // Related message records are deleted automatically due to `ON DELETE CASCADE`.
     deleteChatById: (chatId: number): boolean => {
         try {
+            console.log(`[chatRepository:deleteChatById] Executing DELETE for chat ID: ${chatId}`);
             const info = run(deleteChatSql, chatId);
+            console.log(`[chatRepository:deleteChatById] Delete result for chat ID ${chatId}: ${info.changes} row(s) affected.`);
             return info.changes > 0;
         } catch (error) {
             console.error(`DB error deleting chat ${chatId}:`, error);

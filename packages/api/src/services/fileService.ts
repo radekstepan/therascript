@@ -183,7 +183,7 @@ export const saveTranscriptContent = async (
   }
 };
 
-// Deletes the .json file based on Session ID
+// Performs a hard delete of the transcript file using fs.unlink.
 export const deleteTranscriptFile = async (sessionId: number): Promise<void> => {
     const filePath = getTranscriptPath(sessionId); // Gets absolute path
     try {
@@ -199,8 +199,7 @@ export const deleteTranscriptFile = async (sessionId: number): Promise<void> => 
     }
 };
 
-// --- FIX: deleteUploadedFile now accepts RELATIVE audio identifier for safety ---
-// --- Changed function name to reflect it deletes audio ---
+// Performs a hard delete of the audio file using fs.unlink.
 export const deleteUploadedAudioFile = async (relativeAudioIdentifier: string | null): Promise<void> => {
     // Resolve the relative filename to an absolute path first
     const absoluteFilePath = getAudioAbsolutePath(relativeAudioIdentifier);

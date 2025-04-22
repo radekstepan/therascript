@@ -171,9 +171,11 @@ export const renameChat = ({ chatData, body, set }: any) => {
 };
 
 // DELETE /:sessionId/chats/:chatId - Delete a chat
+// Performs a hard delete of the chat record. Associated messages are deleted via CASCADE.
 export const deleteChat = ({ chatData, set }: any) => {
     if (!chatData) throw new NotFoundError(`Chat not found in context for delete.`);
     try {
+        // chatRepository.deleteChatById performs the hard delete
         const deleted = chatRepository.deleteChatById(chatData.id);
         if (!deleted) throw new NotFoundError(`Chat with ID ${chatData.id} not found during deletion.`);
         console.log(`[API] Deleted chat ${chatData.id}`);

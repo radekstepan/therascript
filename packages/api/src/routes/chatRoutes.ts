@@ -49,6 +49,7 @@ const FullChatSessionResponseSchema = t.Intersect([
     })
 ]);
 
+// Schema for the chat deletion response
 const DeleteChatResponseSchema = t.Object({ message: t.String() });
 
 
@@ -125,11 +126,11 @@ export const chatRoutes = new Elysia({ prefix: '/api/sessions/:sessionId/chats' 
                 })
 
                  // DELETE /:chatId - Delete chat
+                 // Performs a hard delete of the chat and associated messages (via ON DELETE CASCADE)
                 .delete('/:chatId', deleteChat, {
                      response: { 200: 'deleteChatResponse' },
-                     detail: { summary: 'Delete a chat' }
+                     detail: { summary: 'Delete a chat and its messages' }
                 })
             )
         )
     );
-    

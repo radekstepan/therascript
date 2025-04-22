@@ -16,6 +16,7 @@ if (!fs.existsSync(dbDir)) {
 }
 
 // --- Schema Definition (Updated) ---
+// Defines tables and ensures cascading deletes using FOREIGN KEY constraints.
 const schema = `
     -- Sessions Table
     CREATE TABLE IF NOT EXISTS sessions (
@@ -38,6 +39,7 @@ const schema = `
         sessionId INTEGER NOT NULL,
         timestamp INTEGER NOT NULL, -- UNIX Millis Timestamp for sorting/display
         name TEXT,
+        -- Ensures that deleting a session automatically deletes its associated chats
         FOREIGN KEY (sessionId) REFERENCES sessions (id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_chat_session ON chats (sessionId);
@@ -52,6 +54,7 @@ const schema = `
         timestamp INTEGER NOT NULL, -- UNIX Millis Timestamp for sorting/display
         promptTokens INTEGER,
         completionTokens INTEGER,
+        -- Ensures that deleting a chat automatically deletes its associated messages
         FOREIGN KEY (chatId) REFERENCES chats (id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_message_chat ON messages (chatId);

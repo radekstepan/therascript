@@ -107,10 +107,16 @@ export const updateTranscriptParagraph = async (
     return response.data;
 };
 
-// --- NEW: Delete Session Audio ---
 // DELETE /api/sessions/{sessionId}/audio
 export const deleteSessionAudio = async (sessionId: number): Promise<{ message: string }> => {
     const response = await axios.delete(`/api/sessions/${sessionId}/audio`);
+    return response.data;
+};
+
+// --- NEW: Delete Entire Session ---
+// DELETE /api/sessions/{sessionId}
+export const deleteSession = async (sessionId: number): Promise<{ message: string }> => {
+    const response = await axios.delete(`/api/sessions/${sessionId}`);
     return response.data;
 };
 // --- END NEW ---
@@ -236,11 +242,12 @@ export const cancelPullOllamaModel = async (jobId: string): Promise<{ message: s
      return response.data;
  };
 
-// --- NEW: Delete Ollama Model ---
+// POST /api/ollama/delete-model
 export const deleteOllamaModel = async (modelName: string): Promise<{ message: string }> => {
     console.log(`[API] Sending request to delete model: ${modelName}`);
     // Assuming backend endpoint is POST /api/ollama/delete-model
     const response = await axios.post<{ message: string }>('/api/ollama/delete-model', { modelName });
     return response.data;
 };
-// --- END NEW ---
+
+// TODO comments should not be removed

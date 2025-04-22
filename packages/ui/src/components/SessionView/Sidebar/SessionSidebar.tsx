@@ -5,6 +5,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'; // Removed 
 import {
     activeChatIdAtom, // Keep for knowing current selection
     // activeSessionIdAtom, // Keep for knowing current selection - NO, rely on sessionId from props
+    toastMessageAtom, // <-- Added for toast feedback
 } from '../../../store';
 // Removed fetchSession import
 // Added fetchChatDetails import
@@ -30,7 +31,7 @@ import {
     ScrollArea,
     Spinner
 } from '@radix-ui/themes';
-// import * as Toast from '@radix-ui/react-toast'; // For error feedback maybe
+import { useSetAtom } from 'jotai'; // <-- Added for toast
 import { formatTimestamp } from '../../../helpers';
 import type { ChatSession, Session } from '../../../types';
 import { cn } from '../../../utils';
@@ -46,6 +47,7 @@ interface SessionSidebarProps {
 export function SessionSidebar({ session, isLoading: isLoadingSession, error: sessionError, hideHeader = false }: SessionSidebarProps) {
     const { chatId: chatIdParam } = useParams<{ sessionId: string; chatId?: string }>(); // Only need chatIdParam here
     const navigate = useNavigate();
+    const setToast = useSetAtom(toastMessageAtom); // <-- For toast feedback
 
     // Always call useAtomValue unconditionally to follow rules of hooks
     const activeChatIdFromAtom = useAtomValue(activeChatIdAtom);
@@ -77,6 +79,7 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
             return startNewChatApi(sessionId);
         },
         onSuccess: (newChat) => {
+            setToast("New chat started."); // <-- Added toast
             // Update session meta cache optimistically or invalidate
             queryClient.setQueryData<Session>(['sessionMeta', sessionId], (oldData) => {
                  if (!oldData) return oldData;
@@ -104,7 +107,10 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
             // Navigate to the new chat immediately
             navigate(`/sessions/${sessionId}/chats/${newChat.id}`);
         },
-        onError: (error) => console.error("Failed to start new chat:", error), // TODO: User feedback (Toast?)
+        onError: (error) => {
+            console.error("Failed to start new chat:", error);
+            setToast(`Error starting chat: ${error.message}`); // <-- Added toast
+        }
     });
 
     // Mutation: Rename Chat
@@ -114,6 +120,7 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
             return renameChatApi(sessionId, variables.chatId, variables.newName);
         },
         onSuccess: (updatedChatMetadata) => {
+             setToast("Chat renamed successfully."); // <-- Added toast
              // Update session meta cache optimistically
              queryClient.setQueryData<Session>(['sessionMeta', sessionId], (oldData) => {
                  if (!oldData) return oldData;
@@ -133,16 +140,22 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
               });
             cancelRename(); // Close modal on success
         },
-        onError: (error) => console.error("Failed to rename chat:", error), // Error message shown in modal via mutation state
+        onError: (error) => {
+             console.error("Failed to rename chat:", error);
+             // Error message shown in modal via mutation state, but add toast
+             setToast(`Error renaming chat: ${error.message}`);
+        },
     });
 
     // Mutation: Delete Chat
+    // Performs a hard delete via the API
     const deleteChatMutation = useMutation({
         mutationFn: (chatId: number) => {
             if (!sessionId) throw new Error("Session ID missing");
-            return deleteChatApi(sessionId, chatId);
+            return deleteChatApi(sessionId, chatId); // This API performs the hard delete
         },
         onSuccess: (data, deletedChatId) => {
+            setToast(`Chat deleted successfully.`); // <-- Added toast
             let nextChatId: number | null = null;
             // Determine next navigation target *before* modifying cache
             const sessionDataBeforeDelete = queryClient.getQueryData<Session>(['sessionMeta', sessionId]);
@@ -178,7 +191,11 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
             }
              cancelDelete(); // Close modal on success
         },
-        onError: (error) => console.error("Failed to delete chat:", error), // Error message shown in modal via mutation state
+        onError: (error) => {
+             console.error("Failed to delete chat:", error);
+             // Error message shown in modal via mutation state, but add toast
+             setToast(`Error deleting chat: ${error.message}`);
+        },
     });
 
 

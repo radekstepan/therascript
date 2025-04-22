@@ -212,7 +212,8 @@ export const updateTranscriptParagraph = async ({ sessionData, body, set }: any)
 };
 
 
-// --- NEW: DELETE /:sessionId/audio ---
+// --- DELETE /:sessionId/audio ---
+// Handler performs a hard delete of the audio file and updates the DB record.
 export const deleteSessionAudioHandler = async ({ sessionData, set }: any) => {
     const sessionId = sessionData.id;
     const audioIdentifier = sessionData.audioPath;
@@ -244,4 +245,4 @@ export const deleteSessionAudioHandler = async ({ sessionData, set }: any) => {
         throw new InternalServerError('Failed to delete session audio file', error instanceof Error ? error : undefined);
     }
 };
-// --- END NEW ---
+// --- END DELETE /:sessionId/audio ---

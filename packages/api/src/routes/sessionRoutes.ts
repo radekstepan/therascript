@@ -115,11 +115,11 @@ const TranscriptionStatusResponseSchema = t.Object({
     error: t.Optional(t.Union([t.String(), t.Null()])),
     duration: t.Optional(t.Union([t.Number(), t.Null()])),
 });
-// --- NEW: Schema for Delete Audio Response ---
-const DeleteAudioResponseSchema = t.Object({
+// Schema for the general delete response
+const DeleteResponseSchema = t.Object({
     message: t.String()
 });
-// --- END NEW ---
+
 
 // Helper to parse human-readable size string
 const parseSize = (sizeStr: string): number => {
@@ -144,7 +144,7 @@ const sessionRoutesInstance = new Elysia({ prefix: '/api' })
         sessionWithChatsMetadataResponse: SessionWithChatsMetadataResponseSchema,
         transcriptResponse: TranscriptResponseSchema,
         transcriptionStatusResponse: TranscriptionStatusResponseSchema,
-        deleteAudioResponse: DeleteAudioResponseSchema, // <-- Add new schema
+        deleteResponse: DeleteResponseSchema, // Use general delete response schema
     })
     // --- Transcription Status Endpoint ---
     .group('/transcription', { detail: { tags: ['Transcription'] } }, (app) => app
@@ -240,37 +240,33 @@ const sessionRoutesInstance = new Elysia({ prefix: '/api' })
                     console.error(originalError.stack);
                  }
 
-                 // --- Refined Cleanup Logic ---
+                 // --- Refined Cleanup Logic for Hard Delete on Failure ---
                  if (newSession?.id) {
                      const sessionIdForCleanup = newSession.id;
-                     console.log(`[API Upload Cleanup] Initiating cleanup for session ${sessionIdForCleanup}. Audio identifier: ${savedAudioIdentifier}`);
+                     console.log(`[API Upload Cleanup] Initiating HARD DELETE cleanup for session ${sessionIdForCleanup} due to processing error.`);
                      try {
                          const currentSessionState = sessionRepository.findById(sessionIdForCleanup);
-                         // Only proceed with cleanup actions if the session still exists
                          if (currentSessionState) {
+                             // Attempt to delete audio file if it was saved
                              if (savedAudioIdentifier) {
-                                 // Audio WAS saved, but a later step failed (e.g., starting whisper).
-                                 // Mark DB as failed, DO NOT delete audio.
-                                 console.log(`[API Upload Cleanup] Audio was saved but subsequent step failed. Marking session ${sessionIdForCleanup} as 'failed'.`);
-                                 sessionRepository.updateMetadata(sessionIdForCleanup, { status: 'failed' });
+                                 console.log(`[API Upload Cleanup] Attempting to delete potentially saved audio file: ${savedAudioIdentifier}`);
+                                 try { await deleteUploadedAudioFile(savedAudioIdentifier); } catch (audioDelErr) { console.error(`[API Upload Cleanup] Failed to delete audio file ${savedAudioIdentifier} during cleanup:`, audioDelErr); }
                              } else {
-                                 // Audio was NEVER saved (error happened before/during save).
-                                 // Delete the DB record as it's incomplete.
-                                 console.log(`[API Upload Cleanup] Audio was not saved. Deleting incomplete DB record for session ${sessionIdForCleanup}.`);
-                                 sessionRepository.deleteById(sessionIdForCleanup);
+                                console.log(`[API Upload Cleanup] No audio file identifier recorded, skipping audio delete.`);
                              }
+                             // Delete the database record (this should cascade to chats/messages)
+                             console.log(`[API Upload Cleanup] Deleting incomplete/failed DB record for session ${sessionIdForCleanup}.`);
+                             sessionRepository.deleteById(sessionIdForCleanup);
                          } else {
-                              console.log(`[API Upload Cleanup] Session ${sessionIdForCleanup} not found in DB, likely already cleaned up or never fully created.`);
+                             console.log(`[API Upload Cleanup] Session ${sessionIdForCleanup} not found in DB for cleanup.`);
                          }
-                      }
-                     catch (cleanupError) {
-                         console.error(`[API Upload Cleanup] Error during cleanup for session ${sessionIdForCleanup}:`, cleanupError);
-                         // Log the cleanup error but still throw the original error below
+                     } catch (cleanupError) {
+                         console.error(`[API Upload Cleanup] Error during HARD DELETE cleanup for session ${sessionIdForCleanup}:`, cleanupError);
                      }
                  } else {
                      console.log("[API Upload Cleanup] No session ID available, skipping specific cleanup.");
                  }
-                 // --- End Refined Cleanup ---
+                 // --- End Hard Delete Cleanup Logic ---
 
                  // Re-throw the original error to be handled by the global error handler
                  if (error instanceof ApiError) throw error;
@@ -448,43 +444,51 @@ const sessionRoutesInstance = new Elysia({ prefix: '/api' })
                   response: { 200: 'sessionWithChatsMetadataResponse', 409: t.Any(), 500: t.Any() },
                   detail: { summary: 'Finalize session after successful transcription' }
              })
+             // Performs a hard delete of the session, associated files, and related DB entries (chats, messages)
              .delete('/:sessionId', async ({ params, set, sessionData }) => {
                  const sessionId = sessionData.id;
-                 console.log(`[API Delete] Request received for session ${sessionId}`);
+                 console.log(`[API Delete Session] Request received for session ${sessionId}`);
                  const transcriptPathToDelete = sessionData.transcriptPath; // Relative path if set
                  const audioIdentifierToDelete = sessionData.audioPath; // Relative filename
 
                  try {
-                     // Delete transcript file (uses session ID)
-                     if (transcriptPathToDelete) { await deleteTranscriptFile(sessionId); } else { console.log(`[API Delete] Session ${sessionId} has no transcript file.`); }
+                     // --- Attempt to delete files FIRST ---
+                     if (transcriptPathToDelete) {
+                         await deleteTranscriptFile(sessionId);
+                     } else { console.log(`[API Delete Session] Session ${sessionId} has no transcript file path in DB.`); }
 
-                     // Delete the DB record first (cascades to chats/messages)
-                     const deleted = sessionRepository.deleteById(sessionId);
-                     if (!deleted) { throw new NotFoundError(`Session ${sessionId} not found during deletion.`); }
-                     console.log(`[API Delete] Successfully deleted session DB record ${sessionId}.`);
-
-                     // Now delete the associated audio file using its stored identifier
                      if (audioIdentifierToDelete) {
                         await deleteUploadedAudioFile(audioIdentifierToDelete);
                      } else {
-                        console.warn(`[API Delete] No audio identifier found for session ${sessionId} to delete.`);
+                        console.warn(`[API Delete Session] No audio identifier found for session ${sessionId} to delete.`);
+                     }
+                     // --- Files deleted (or attempted) ---
+
+                     // Delete the DB record (this will cascade to chats/messages due to schema constraints)
+                     const deleted = sessionRepository.deleteById(sessionId);
+                     if (!deleted) {
+                        // If DB record wasn't found after attempting file deletion, log warning but return success
+                        console.warn(`[API Delete Session] Session DB record ${sessionId} not found during deletion attempt (may have been deleted already?).`);
+                     } else {
+                        console.log(`[API Delete Session] Successfully deleted session DB record ${sessionId}.`);
                      }
 
                      set.status = 200;
-                     return { message: `Session ${sessionId} deleted successfully.` };
+                     return { message: `Session ${sessionId} and associated data deleted successfully.` };
                  } catch (error) {
                      console.error(`[API Error] Delete Session ${sessionId}:`, error);
                      if (error instanceof ApiError) throw error;
-                     throw new InternalServerError(`Failed to delete session ${sessionId}`, error instanceof Error ? error : undefined);
+                     throw new InternalServerError(`Failed to fully delete session ${sessionId}`, error instanceof Error ? error : undefined);
                   }
              }, {
-                 response: { 200: t.Object({ message: t.String() }), 404: t.Any(), 500: t.Any() },
+                 response: { 200: 'deleteResponse' }, // Use general delete response
                  detail: { summary: 'Delete a session, its transcript, associated audio, and chats' }
              })
-             // --- NEW: DELETE Audio Route ---
+             // --- DELETE Audio Route ---
+             // Performs a hard delete of ONLY the audio file and its DB reference.
              .delete('/:sessionId/audio', ({ sessionData, set }) => deleteSessionAudioHandler({ sessionData, set }), {
                  response: {
-                     200: 'deleteAudioResponse', // Use the new schema
+                     200: 'deleteResponse', // Use general delete response
                      404: t.Any(), // Session or audio not found
                      500: t.Any()  // Internal error during file delete or DB update
                  },
@@ -493,7 +497,7 @@ const sessionRoutesInstance = new Elysia({ prefix: '/api' })
                      description: 'Deletes the audio file from storage and removes the reference from the session record in the database.'
                  }
              })
-             // --- END NEW ---
+             // --- END DELETE Audio Route ---
          ) // End session ID guard
     )
     .get('/api/schema', ({ set }) => {

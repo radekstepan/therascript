@@ -1,25 +1,27 @@
 import React, { useMemo, useState } from 'react'; // <-- Import useState
 import { useAtomValue, useSetAtom } from 'jotai';
-import { CounterClockwiseClockIcon, PlusCircledIcon } from '@radix-ui/react-icons';
-import { useQuery, useQueryClient } from '@tanstack/react-query'; // <-- Import useQueryClient
+import { CounterClockwiseClockIcon, PlusCircledIcon, TrashIcon } from '@radix-ui/react-icons'; // <-- Added TrashIcon
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'; // <-- Import useMutation
 import { SessionListTable } from './SessionListTable';
-import { Button, Card, Flex, Heading, Text, Box, Container, Spinner } from '@radix-ui/themes';
+import { Button, Card, Flex, Heading, Text, Box, Container, Spinner, AlertDialog } from '@radix-ui/themes'; // <-- Added AlertDialog
 import { UserThemeDropdown } from '../User/UserThemeDropdown';
 // <-- Import EditDetailsModal
 import { EditDetailsModal } from '../SessionView/Modals/EditDetailsModal';
-import { fetchSessions } from '../../api/api';
+import { fetchSessions, deleteSession as deleteSessionApi } from '../../api/api'; // <-- Import deleteSession API
 import {
     openUploadModalAtom,
     sessionSortCriteriaAtom,
     sessionSortDirectionAtom,
     setSessionSortAtom,
     SessionSortCriteria,
+    toastMessageAtom // <-- Import toast atom
 } from '../../store';
 // <-- Import SessionMetadata type
 import type { Session, SessionMetadata } from '../../types';
 
 export function LandingPage() {
     const openUploadModal = useSetAtom(openUploadModalAtom);
+    const setToast = useSetAtom(toastMessageAtom); // <-- For toast feedback
     const currentSortCriteria = useAtomValue(sessionSortCriteriaAtom);
     const currentSortDirection = useAtomValue(sessionSortDirectionAtom);
     const setSort = useSetAtom(setSessionSortAtom);
@@ -29,11 +31,40 @@ export function LandingPage() {
     const [isEditingModalOpen, setIsEditingModalOpen] = useState(false);
     const [sessionToEdit, setSessionToEdit] = useState<Session | null>(null);
 
+    // *** State for Delete Confirmation Modal ***
+    const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+    const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null);
+
     // Fetch sessions using Tanstack Query
     const { data: sessions, isLoading, error, refetch } = useQuery<Session[], Error>({
         queryKey: ['sessions'],
         queryFn: fetchSessions,
     });
+
+    // --- Delete Session Mutation ---
+    const deleteSessionMutation = useMutation({
+        mutationFn: (sessionId: number) => deleteSessionApi(sessionId),
+        onSuccess: (data, deletedSessionId) => {
+            setToast(data.message || `Session ${deletedSessionId} deleted successfully.`);
+            // Invalidate the sessions list query to refresh the table
+            queryClient.invalidateQueries({ queryKey: ['sessions'] });
+            // Optionally, remove specific session details if cached elsewhere, though unlikely for landing page
+            // queryClient.removeQueries({ queryKey: ['sessionMeta', deletedSessionId] });
+            // queryClient.removeQueries({ queryKey: ['transcript', deletedSessionId] });
+            // queryClient.removeQueries({ queryKey: ['chat', deletedSessionId], exact: false }); // Remove all chats for that session
+        },
+        onError: (error: Error, deletedSessionId) => {
+            console.error(`Failed to delete session ${deletedSessionId}:`, error);
+            setToast(`Error deleting session: ${error.message}`);
+        },
+        onSettled: () => {
+            // Close the confirmation modal regardless of outcome
+            setIsDeleteConfirmOpen(false);
+            setSessionToDelete(null);
+        }
+    });
+    // --- End Delete Mutation ---
+
 
     // Memoized sorting logic (no changes needed here)
     const sortedSessions = useMemo(() => { /* ... sorting logic ... */
@@ -113,6 +144,19 @@ export function LandingPage() {
         setSessionToEdit(null);
     };
 
+    // *** Handler to open the delete confirmation modal ***
+    const handleDeleteSessionRequest = (session: Session) => {
+        setSessionToDelete(session);
+        setIsDeleteConfirmOpen(true);
+    };
+
+    // *** Handler to confirm deletion ***
+    const handleConfirmDelete = () => {
+        if (!sessionToDelete || deleteSessionMutation.isPending) return;
+        deleteSessionMutation.mutate(sessionToDelete.id);
+        // Don't close modal here, mutation's onSettled will handle it
+    };
+
 
     if (isLoading) { /* ... loading state ... */
         return (
@@ -135,44 +179,47 @@ export function LandingPage() {
 
     // Main content render
     return (
-        <Box className="w-full flex-grow flex flex-col">
-            {/* Header Bar */}
-            <Box py="2" px={{ initial: '4', md: '6', lg: '8' }} flexShrink="0" style={{ backgroundColor: 'var(--color-panel-solid)', borderBottom: '1px solid var(--gray-a6)' }} >
-                <Flex justify="end">
-                    <UserThemeDropdown />
-                </Flex>
-            </Box>
-            {/* Main Content Area */}
-            <Box className="flex-grow flex flex-col py-4 md:py-6 lg:py-8">
-                <Container size="4" className="flex-grow flex flex-col">
-                    {/* Session List Card */}
-                    <Card size="3" className="flex-grow flex flex-col overflow-hidden h-full">
-                        {/* Card Header */}
-                        <Flex justify="between" align="center" px="4" pt="4" pb="3" style={{ borderBottom: '1px solid var(--gray-a6)' }}>
-                            <Heading as="h2" size="5" weight="medium">
-                                <Flex align="center" gap="2"><CounterClockwiseClockIcon />Session History</Flex>
-                            </Heading>
-                            <Button variant="soft" size="2" onClick={openUploadModal} title="Upload New Session" aria-label="Upload New Session">
-                                <PlusCircledIcon width="16" height="16" /><Text ml="2">New Session</Text>
-                            </Button>
-                        </Flex>
-                        {/* Card Body - Table or Empty State */}
-                        <Box className="flex-grow flex flex-col overflow-hidden">
-                            {sortedSessions.length === 0 && !isLoading ? (
-                                <Flex flexGrow="1" align="center" justify="center" p="6"><Text color="gray">No sessions found. Upload one to get started!</Text></Flex>
-                            ) : (
-                                <SessionListTable
-                                    sessions={sortedSessions}
-                                    sortCriteria={currentSortCriteria}
-                                    sortDirection={currentSortDirection}
-                                    onSort={handleSort}
-                                    // *** Pass edit handler down ***
-                                    onEditSession={handleEditSession}
-                                />
-                            )}
-                        </Box>
-                    </Card>
-                </Container>
+        <> {/* Fragment to contain main content and modals */}
+            <Box className="w-full flex-grow flex flex-col">
+                {/* Header Bar */}
+                <Box py="2" px={{ initial: '4', md: '6', lg: '8' }} flexShrink="0" style={{ backgroundColor: 'var(--color-panel-solid)', borderBottom: '1px solid var(--gray-a6)' }} >
+                    <Flex justify="end">
+                        <UserThemeDropdown />
+                    </Flex>
+                </Box>
+                {/* Main Content Area */}
+                <Box className="flex-grow flex flex-col py-4 md:py-6 lg:py-8">
+                    <Container size="4" className="flex-grow flex flex-col">
+                        {/* Session List Card */}
+                        <Card size="3" className="flex-grow flex flex-col overflow-hidden h-full">
+                            {/* Card Header */}
+                            <Flex justify="between" align="center" px="4" pt="4" pb="3" style={{ borderBottom: '1px solid var(--gray-a6)' }}>
+                                <Heading as="h2" size="5" weight="medium">
+                                    <Flex align="center" gap="2"><CounterClockwiseClockIcon />Session History</Flex>
+                                </Heading>
+                                <Button variant="soft" size="2" onClick={openUploadModal} title="Upload New Session" aria-label="Upload New Session">
+                                    <PlusCircledIcon width="16" height="16" /><Text ml="2">New Session</Text>
+                                </Button>
+                            </Flex>
+                            {/* Card Body - Table or Empty State */}
+                            <Box className="flex-grow flex flex-col overflow-hidden">
+                                {sortedSessions.length === 0 && !isLoading ? (
+                                    <Flex flexGrow="1" align="center" justify="center" p="6"><Text color="gray">No sessions found. Upload one to get started!</Text></Flex>
+                                ) : (
+                                    <SessionListTable
+                                        sessions={sortedSessions}
+                                        sortCriteria={currentSortCriteria}
+                                        sortDirection={currentSortDirection}
+                                        onSort={handleSort}
+                                        onEditSession={handleEditSession}
+                                        // *** Pass delete request handler down ***
+                                        onDeleteSessionRequest={handleDeleteSessionRequest}
+                                    />
+                                )}
+                            </Box>
+                        </Card>
+                    </Container>
+                </Box>
             </Box>
 
             {/* *** Render Edit Modal *** */}
@@ -185,6 +232,31 @@ export function LandingPage() {
                 session={sessionToEdit}
                 onSaveSuccess={handleEditSaveSuccess}
             />
-        </Box>
+
+            {/* *** Render Delete Confirmation Modal *** */}
+            <AlertDialog.Root open={isDeleteConfirmOpen} onOpenChange={setIsDeleteConfirmOpen}>
+                <AlertDialog.Content style={{ maxWidth: 450 }}>
+                    <AlertDialog.Title>Delete Session</AlertDialog.Title>
+                    <AlertDialog.Description size="2">
+                        Are you sure you want to permanently delete the session
+                        "<Text weight="bold">{sessionToDelete?.sessionName || sessionToDelete?.fileName || 'this session'}</Text>"?
+                        <br/><br/>
+                        This will remove the session record, original audio file, transcript, and all associated chats.
+                        <Text weight="bold" color="red"> This action cannot be undone.</Text>
+                    </AlertDialog.Description>
+                    <Flex gap="3" mt="4" justify="end">
+                         <AlertDialog.Cancel>
+                             <Button variant="soft" color="gray" disabled={deleteSessionMutation.isPending}> Cancel </Button>
+                         </AlertDialog.Cancel>
+                         <AlertDialog.Action>
+                             <Button color="red" onClick={handleConfirmDelete} disabled={deleteSessionMutation.isPending}>
+                                {deleteSessionMutation.isPending ? <Spinner size="1"/> : <TrashIcon />}
+                                <Text ml="1">Delete Session</Text>
+                             </Button>
+                         </AlertDialog.Action>
+                    </Flex>
+                 </AlertDialog.Content>
+            </AlertDialog.Root>
+        </>
     );
 }
