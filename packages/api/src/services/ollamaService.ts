@@ -1,3 +1,4 @@
+/* packages/api/src/services/ollamaService.ts */
 // packages/api/src/services/ollamaService.ts
 import ollama, { ChatResponse, Message, ListResponse, ShowResponse, GenerateResponse, Message as OllamaApiMessage, ProgressResponse, PullRequest } from 'ollama'; // Added PullRequest type
 import axios, { AxiosError } from 'axios';
@@ -222,66 +223,54 @@ export const cancelPullModelJob = (jobId: string): boolean => {
      return true;
 };
 
-// --- NEW: Delete Ollama Model Service Function ---
+// --- Delete Ollama Model Service Function ---
 export const deleteOllamaModel = async (modelName: string): Promise<string> => {
     if (!modelName || typeof modelName !== 'string' || !modelName.trim()) {
         throw new BadRequestError("Invalid model name provided for deletion.");
     }
     console.log(`[OllamaService] Request to delete model '${modelName}'...`);
 
-    // 1. Ensure Ollama service is running (needed to execute docker command)
+    // 1. Ensure Ollama service is running
     try {
         await ensureOllamaReady();
     } catch (error) {
-        // Propagate error if Ollama couldn't be started/reached
         throw error;
     }
 
-    // 2. Check if the model is currently loaded (optional but recommended)
+    // 2. Check if the model is currently loaded
     const loadedStatus = await checkModelStatus(modelName);
     if (loadedStatus && typeof loadedStatus === 'object' && 'name' in loadedStatus) {
-         console.warn(`[OllamaService] Attempting to delete model '${modelName}' which appears to be currently loaded in memory. Ollama might prevent this or require unloading first.`);
-         // Option: Throw ConflictError to force unload first
-         // throw new ConflictError(`Model '${modelName}' is currently loaded. Please unload it before deleting.`);
+         console.warn(`[OllamaService] Attempting to delete model '${modelName}' which appears to be currently loaded.`);
     } else if (loadedStatus === null) {
-        console.log(`[OllamaService] Model '${modelName}' confirmed not loaded. Proceeding with delete.`);
+        console.log(`[OllamaService] Model '${modelName}' confirmed not loaded.`);
     } else if (loadedStatus?.status === 'unavailable') {
-         // This shouldn't happen after ensureOllamaReady, but handle defensively
          throw new InternalServerError("Ollama service became unavailable after readiness check.");
     }
 
-    // 3. Execute the delete command via docker compose exec
+    // 3. Execute the delete command
     try {
         console.log(`[OllamaService] Executing delete command for '${modelName}'...`);
-        // Use -T to disable pseudo-tty, good for non-interactive exec
         const deleteOutput = await runOllamaComposeCommand(`exec -T ${OLLAMA_SERVICE_NAME} ollama rm ${modelName}`);
         console.log(`[OllamaService] Delete command output for '${modelName}':`, deleteOutput);
-
-        // Check output for success/failure messages (Ollama's output isn't always consistent)
         if (deleteOutput.toLowerCase().includes('deleted') || deleteOutput.toLowerCase().includes('removed')) {
              return `Model '${modelName}' deleted successfully.`;
         } else if (deleteOutput.toLowerCase().includes('not found')) {
-            // Model was likely already deleted or never existed
             console.warn(`[OllamaService] Model '${modelName}' not found during delete attempt.`);
             throw new NotFoundError(`Model '${modelName}' not found locally.`);
         } else {
-            // Assume failure if no clear success message
             console.error(`[OllamaService] Unknown response from 'ollama rm ${modelName}': ${deleteOutput}`);
             throw new InternalServerError(`Failed to delete model '${modelName}'. Output: ${deleteOutput}`);
         }
-
     } catch (error: any) {
         console.error(`[OllamaService] Error executing delete command for '${modelName}':`, error);
-        // Check stderr from compose command if available
         if (error.message?.toLowerCase().includes('not found')) {
              throw new NotFoundError(`Model '${modelName}' not found locally.`);
         }
-        // Re-throw other internal server errors or wrap unknown errors
         if (error instanceof ApiError) throw error;
         throw new InternalServerError(`Failed to execute delete command for model '${modelName}'.`, error instanceof Error ? error : new Error(String(error)));
     }
 };
-// --- END NEW ---
+// --- END DELETE ---
 
 // --- Check Model Status ---
 export const checkModelStatus = async (modelToCheck: string): Promise<OllamaModelInfo | null | { status: 'unavailable' }> => {
@@ -316,7 +305,14 @@ export const loadOllamaModel = async (modelName: string): Promise<void> => {
     catch (error) { throw error; }
     console.log(`[OllamaService] Triggering load for model '${modelName}' using a minimal chat request...`);
     try {
-        const response = await ollama.chat({ model: modelName, messages: [{ role: 'user', content: 'ping' }], stream: false, keep_alive: config.ollama.keepAlive, });
+        // --- Modified: Use keep_alive from config here ---
+        const response = await ollama.chat({
+            model: modelName,
+            messages: [{ role: 'user', content: 'ping' }],
+            stream: false,
+            keep_alive: config.ollama.keepAlive, // Use configured keep_alive
+        });
+        // --- End Modification ---
         console.log(`[OllamaService] Minimal chat request completed for '${modelName}'. Status: ${response.done}. Ollama should now be loading/have loaded it.`);
     } catch (error: any) {
         console.error(`[OllamaService] Error during load trigger chat request for '${modelName}':`, error);
@@ -326,6 +322,79 @@ export const loadOllamaModel = async (modelName: string): Promise<void> => {
         throw new InternalServerError(`Failed to trigger load for model '${modelName}' via chat request.`, error instanceof Error ? error : undefined);
     }
 };
+
+// --- NEW: Reload Active Model Context Function ---
+/**
+ * Attempts to force Ollama to reload the context for the currently active model
+ * by sending an unload request (keep_alive: 0) followed by a load request (keep_alive: configured duration).
+ */
+export const reloadActiveModelContext = async (): Promise<void> => {
+    const modelName = getActiveModel();
+    if (!modelName) {
+        console.warn("[OllamaService:reload] No active model set. Skipping reload.");
+        return;
+    }
+    console.log(`[OllamaService:reload] Attempting to reload context for active model: ${modelName}`);
+    try {
+        await ensureOllamaReady();
+    } catch (error) {
+        console.error(`[OllamaService:reload] Ollama not ready, cannot reload model ${modelName}:`, error);
+        throw error; // Propagate readiness error
+    }
+
+    // 1. Attempt Unload (keep_alive: 0)
+    try {
+        console.log(`[OllamaService:reload] Sending unload request (keep_alive: 0) for ${modelName}...`);
+        await ollama.chat({
+            model: modelName,
+            messages: [{ role: 'user', content: 'unload' }], // Minimal message
+            stream: false,
+            keep_alive: 0, // Explicitly unload
+        });
+        console.log(`[OllamaService:reload] Unload request sent successfully for ${modelName}.`);
+    } catch (unloadError: any) {
+        // Gracefully handle "model not found" during unload, as it might already be unloaded
+        const isModelNotFoundError = unloadError.status === 404 || (unloadError.message?.includes('model') && (unloadError.message?.includes('not found') || unloadError.message?.includes('missing')));
+        if (isModelNotFoundError) {
+            console.log(`[OllamaService:reload] Model ${modelName} not found during unload attempt (likely already unloaded). Proceeding to load.`);
+        } else if (unloadError.message?.includes('ECONNREFUSED')) {
+            // This shouldn't happen after ensureOllamaReady, but handle defensively
+            console.error(`[OllamaService:reload] Connection refused during unload for ${modelName}.`);
+            throw new InternalServerError(`Connection refused during unload attempt for ${modelName}.`);
+        } else {
+            // Log other unload errors but proceed to load attempt
+            console.warn(`[OllamaService:reload] Error during unload request for ${modelName} (will still attempt load):`, unloadError);
+        }
+    }
+
+    // 2. Trigger Load (keep_alive: configured duration)
+    try {
+        console.log(`[OllamaService:reload] Sending load request (keep_alive: ${config.ollama.keepAlive}) for ${modelName}...`);
+        await ollama.chat({
+            model: modelName,
+            messages: [{ role: 'user', content: 'load' }], // Minimal message
+            stream: false,
+            keep_alive: config.ollama.keepAlive, // Use configured duration
+        });
+        console.log(`[OllamaService:reload] Load request sent successfully for ${modelName}.`);
+    } catch (loadError: any) {
+        console.error(`[OllamaService:reload] Error during load request for ${modelName}:`, loadError);
+        // Handle specific errors if needed (e.g., model not found after all)
+        const isModelNotFoundError = loadError.status === 404 || (loadError.message?.includes('model') && (loadError.message?.includes('not found') || loadError.message?.includes('missing')));
+         if (isModelNotFoundError) {
+             console.error(`[OllamaService:reload] Model '${modelName}' not found locally during load attempt.`);
+             throw new BadRequestError(`Model '${modelName}' not found locally. Cannot reload.`);
+         }
+         if (loadError.message?.includes('ECONNREFUSED')) {
+             throw new InternalServerError(`Connection refused during load attempt for ${modelName}.`);
+         }
+        // Throw a generic error if load fails for other reasons
+        throw new InternalServerError(`Failed to trigger reload for model '${modelName}' via chat request.`, loadError instanceof Error ? loadError : undefined);
+    }
+    console.log(`[OllamaService:reload] Context reload sequence completed for ${modelName}.`);
+};
+// --- END NEW ---
+
 
 // --- Generate Chat Response ---
 export const generateChatResponse = async ( contextTranscript: string, chatHistory: BackendChatMessage[], retryAttempt: boolean = false ): Promise<{ content: string; promptTokens?: number; completionTokens?: number }> => {

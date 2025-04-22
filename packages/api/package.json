@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
-    "dev": "concurrently --kill-others-on-fail \"tsc --watch --preserveWatchOutput\" \"nodemon --signal SIGTERM --delay 2.5 dist/server.js\"",
+    "dev": "concurrently --kill-others-on-fail \"tsc --watch --preserveWatchOutput\" \"nodemon\"",
     "test": "echo \"Error: no test specified\" && exit 1",
     "preload": "yarn build && node dist/preloadDb.js",
     "clean": "rm -rf dist *.tsbuildinfo"

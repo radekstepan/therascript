@@ -1,3 +1,4 @@
+/* packages/api/src/api/sessionHandler.ts */
 import { sessionRepository } from '../repositories/sessionRepository.js';
 import { chatRepository } from '../repositories/chatRepository.js';
 import {
@@ -5,6 +6,9 @@ import {
     saveTranscriptContent,
     calculateTokenCount, // <-- Import token calculation helper
 } from '../services/fileService.js';
+// --- NEW: Import reload function ---
+import { reloadActiveModelContext } from '../services/ollamaService.js';
+// --- END NEW ---
 import type { BackendSession, StructuredTranscript } from '../types/index.js';
 import { NotFoundError, BadRequestError, InternalServerError, ApiError } from '../errors.js';
 
@@ -158,7 +162,7 @@ export const getTranscript = async ({ sessionData, set }: any) => {
 };
 
 // PATCH /:sessionId/transcript - Update a specific paragraph
-// FIX: Recalculate and save token count after update
+// FIX: Recalculate and save token count, trigger model reload
 export const updateTranscriptParagraph = async ({ sessionData, body, set }: any) => {
     const sessionId = sessionData.id;
     const { paragraphIndex, newText } = body;
@@ -172,7 +176,7 @@ export const updateTranscriptParagraph = async ({ sessionData, body, set }: any)
         }
         const trimmedNewText = newText.trim();
         if (trimmedNewText === currentTranscript[paragraphIndex].text.trim()) {
-             console.log(`[API] No change needed for paragraph ${paragraphIndex}.`);
+             console.log(`[API updateTranscriptParagraph] No change needed for paragraph ${paragraphIndex}.`);
              set.status = 200;
              return currentTranscript;
         }
@@ -184,7 +188,19 @@ export const updateTranscriptParagraph = async ({ sessionData, body, set }: any)
         // Update the token count in the session metadata
         sessionRepository.updateMetadata(sessionId, { transcriptTokenCount: tokenCount });
 
-        console.log(`[API] Updated paragraph ${paragraphIndex} for session ${sessionId}. New token count: ${tokenCount ?? 'N/A'}`);
+        console.log(`[API updateTranscriptParagraph] Updated paragraph ${paragraphIndex} for session ${sessionId}. New token count: ${tokenCount ?? 'N/A'}`);
+
+        // --- NEW: Trigger model context reload ---
+        try {
+            console.log(`[API updateTranscriptParagraph] Triggering Ollama model context reload after transcript update...`);
+            await reloadActiveModelContext();
+            console.log(`[API updateTranscriptParagraph] Ollama model context reload triggered successfully.`);
+        } catch (reloadError) {
+            console.error(`[API updateTranscriptParagraph] WARNING: Failed to trigger Ollama model context reload after update (Chat might use stale context):`, reloadError);
+            // Do not fail the request if reload fails, just log the warning.
+        }
+        // --- END NEW ---
+
         set.status = 200;
         return updatedTranscript; // Return the updated transcript content
     } catch (error) {

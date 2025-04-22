@@ -19,7 +19,7 @@
 - [*] the star message icon is too small and not vertically aligned with the message itself
 - [*] think about the starred messages popover, the list/UI looks odd
 - [*] move env files to root dir
-- [ ] after you edit the transcript, the transcript is no longer included in the call to the API and you need to unload/reload the model
+- [x] after you edit the transcript, the transcript is no longer included in the call to the API and you need to unload/reload the model
 - [ ] is the token count actually accurate? the current "used" tokens, but also the tokens in the transcript. Do they update after edititing a paragraph?
 - [ ] Ctrl+C out of the running app (yarn dev) keeps Ollama Docker still up; same with Whisper. These need to be killed when the process that started them is killed
 - [ ] be able to delete the session mp3 file separate from the transcript and chats
@@ -32,6 +32,7 @@
 - [ ] autocomplete client name when typing in both the create new session and editing an existing one (select dropdown with a free form input too?)
 - [ ] for reasoning models, display the <think> section separately
 - [ ] in the user/theme dropdown click to see a list of running docker containers for this project
+- [ ] actually delete cached Ollama models
 
 ## Future
 
