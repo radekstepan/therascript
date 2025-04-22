@@ -23,11 +23,17 @@
 - [*] move env files to root dir
 - [ ] after you edit the transcript, the transcript is no longer included in the call to the API and you need to unload/reload the model
 - [ ] is the token count actually accurate? the current "used" tokens, but also the tokens in the transcript. Do they update after edititing a paragraph?
+- [ ] Ctrl+C out of the running app (yarn dev) keeps Ollama Docker still up; same with Whisper. These need to be killed when the process that started them is killed
+- [ ] be able to delete the session mp3 file separate from the transcript and chats
+- [ ] when anything is deleted, delete for good, do not just "hide" the files/data from the UI
+- [ ] when you fail to pull a model, putting a correct link won't start the pull (clear existing pull errors)
+- [ ] you should clear the input field when you send a message and be able to type your new message while the AI is responding
 
 ## Nice to have
 
 - [ ] autocomplete client name when typing in both the create new session and editing an existing one (select dropdown with a free form input too?)
 - [ ] for reasoning models, display the <think> section separately
+- [ ] in the user/theme dropdown click to see a list of running docker containers for this project
 
 ## Future
 
@@ -36,10 +42,13 @@
 
 ## Refactor
 
-- [ ] 4 spaces everywhere plus autoformat on save
+- [ ] 4 spaces everywhere plus autoformat on git commit
 - [ ] remove unused logic
+- [ ] split into smaller files
 - [ ] add comments, data-attrs (takes > 10 minutes)
 - [ ] reuse package dependencies
+- [ ] make sure READMEs are up to date, plus add screenshots
+- [ ] consistent error messages when we go offline
 
 ## Ideas
 

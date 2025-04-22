@@ -9,6 +9,7 @@ import type {
     OllamaStatus,
     AvailableModelsResponse,
     UIPullJobStatus,
+    OllamaModelInfo, // Ensure this is imported
 } from '../types';
 
 // Define the API base URL (ensure this matches your backend)
@@ -222,4 +223,12 @@ export const cancelPullOllamaModel = async (jobId: string): Promise<{ message: s
      const response = await axios.post<{ message: string }>(`/api/ollama/cancel-pull/${jobId}`);
      return response.data;
  };
- 
+
+// --- NEW: Delete Ollama Model ---
+export const deleteOllamaModel = async (modelName: string): Promise<{ message: string }> => {
+    console.log(`[API] Sending request to delete model: ${modelName}`);
+    // Assuming backend endpoint is POST /api/ollama/delete-model
+    const response = await axios.post<{ message: string }>('/api/ollama/delete-model', { modelName });
+    return response.data;
+};
+// --- END NEW ---
