@@ -5,6 +5,7 @@ import {
     loadTranscriptContent,
     saveTranscriptContent,
     calculateTokenCount, // <-- Import token calculation helper
+    deleteUploadedAudioFile, // <-- Import audio file delete helper
 } from '../services/fileService.js';
 // --- NEW: Import reload function ---
 import { reloadActiveModelContext } from '../services/ollamaService.js';
@@ -209,3 +210,38 @@ export const updateTranscriptParagraph = async ({ sessionData, body, set }: any)
         throw new InternalServerError('Failed to update transcript paragraph', error instanceof Error ? error : undefined);
     }
 };
+
+
+// --- NEW: DELETE /:sessionId/audio ---
+export const deleteSessionAudioHandler = async ({ sessionData, set }: any) => {
+    const sessionId = sessionData.id;
+    const audioIdentifier = sessionData.audioPath;
+
+    console.log(`[API Delete Audio] Request for session ${sessionId}. Current audio identifier: ${audioIdentifier}`);
+
+    if (!audioIdentifier) {
+        throw new NotFoundError(`No audio file associated with session ${sessionId} to delete.`);
+    }
+
+    try {
+        // 1. Delete the audio file from the filesystem
+        await deleteUploadedAudioFile(audioIdentifier);
+        console.log(`[API Delete Audio] Successfully deleted audio file for identifier: ${audioIdentifier}`);
+
+        // 2. Update the session record in the database to remove the reference
+        const updatedSession = sessionRepository.updateMetadata(sessionId, { audioPath: null });
+        if (!updatedSession) {
+            // This shouldn't happen if sessionData existed, but handle defensively
+            throw new InternalServerError(`Failed to update session ${sessionId} after deleting audio file.`);
+        }
+        console.log(`[API Delete Audio] Successfully removed audioPath reference from session ${sessionId} record.`);
+
+        set.status = 200;
+        return { message: `Original audio file for session ${sessionId} deleted successfully.` };
+    } catch (error) {
+        console.error(`[API Error] deleteSessionAudio (ID: ${sessionId}, Identifier: ${audioIdentifier}):`, error);
+        if (error instanceof ApiError) throw error; // Handle NotFoundError from file deletion etc.
+        throw new InternalServerError('Failed to delete session audio file', error instanceof Error ? error : undefined);
+    }
+};
+// --- END NEW ---

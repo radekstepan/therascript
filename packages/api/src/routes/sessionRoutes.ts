@@ -8,7 +8,8 @@ import { sessionRepository } from '../repositories/sessionRepository.js';
 import { chatRepository } from '../repositories/chatRepository.js';
 import {
     listSessions, getSessionDetails, updateSessionMetadata, // <-- Ensure these are imported
-    getTranscript, updateTranscriptParagraph                 // <-- Ensure these are imported
+    getTranscript, updateTranscriptParagraph,                 // <-- Ensure these are imported
+    deleteSessionAudioHandler // <-- Import new handler
 } from '../api/sessionHandler.js'; // <-- Import fixed
 import {
     saveTranscriptContent,
@@ -114,7 +115,11 @@ const TranscriptionStatusResponseSchema = t.Object({
     error: t.Optional(t.Union([t.String(), t.Null()])),
     duration: t.Optional(t.Union([t.Number(), t.Null()])),
 });
-
+// --- NEW: Schema for Delete Audio Response ---
+const DeleteAudioResponseSchema = t.Object({
+    message: t.String()
+});
+// --- END NEW ---
 
 // Helper to parse human-readable size string
 const parseSize = (sizeStr: string): number => {
@@ -139,6 +144,7 @@ const sessionRoutesInstance = new Elysia({ prefix: '/api' })
         sessionWithChatsMetadataResponse: SessionWithChatsMetadataResponseSchema,
         transcriptResponse: TranscriptResponseSchema,
         transcriptionStatusResponse: TranscriptionStatusResponseSchema,
+        deleteAudioResponse: DeleteAudioResponseSchema, // <-- Add new schema
     })
     // --- Transcription Status Endpoint ---
     .group('/transcription', { detail: { tags: ['Transcription'] } }, (app) => app
@@ -328,6 +334,9 @@ const sessionRoutesInstance = new Elysia({ prefix: '/api' })
                      // Add other context properties if needed by Elysia v1+
                      query: Record<string, string | undefined>,
                      body: unknown,
+                     cookie: Record<string, Cookie<any>>, // Add cookie type
+                     path: string, // Add path type
+                     store: ElysiaContext['store'] // Add store type
                  }
              ) => {
                 const { params, request, set, sessionData } = context;
@@ -472,6 +481,19 @@ const sessionRoutesInstance = new Elysia({ prefix: '/api' })
                  response: { 200: t.Object({ message: t.String() }), 404: t.Any(), 500: t.Any() },
                  detail: { summary: 'Delete a session, its transcript, associated audio, and chats' }
              })
+             // --- NEW: DELETE Audio Route ---
+             .delete('/:sessionId/audio', ({ sessionData, set }) => deleteSessionAudioHandler({ sessionData, set }), {
+                 response: {
+                     200: 'deleteAudioResponse', // Use the new schema
+                     404: t.Any(), // Session or audio not found
+                     500: t.Any()  // Internal error during file delete or DB update
+                 },
+                 detail: {
+                     summary: 'Delete the original audio file for a session',
+                     description: 'Deletes the audio file from storage and removes the reference from the session record in the database.'
+                 }
+             })
+             // --- END NEW ---
          ) // End session ID guard
     )
     .get('/api/schema', ({ set }) => {

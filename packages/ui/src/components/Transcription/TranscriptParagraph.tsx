@@ -38,6 +38,7 @@ interface TranscriptParagraphProps {
     // --- Add Playback Props ---
     onPlayToggle: (timestampMs: number, index: number) => void; // Callback to play/pause from a point
     isPlaying: boolean; // Is this paragraph currently the one playing?
+    isAudioAvailable: boolean; // <-- NEW: Is audio file present?
     // --- End Playback Props ---
 }
 
@@ -51,6 +52,7 @@ export function TranscriptParagraph({
     // --- Destructure Playback Props ---
     onPlayToggle,
     isPlaying,
+    isAudioAvailable, // <-- Destructure new prop
     // --- End Playback Props ---
 }: TranscriptParagraphProps) {
     const [editValue, setEditValue] = useState(paragraph.text);
@@ -103,6 +105,8 @@ export function TranscriptParagraph({
 
     // --- Modified Play/Pause Click Handler ---
     const handlePlayPauseClick = () => {
+        // Only allow if audio is available
+        if (!isAudioAvailable) return;
         console.log(`▶️ Play/Pause requested for paragraph index ${index} (ts: ${paragraph.timestamp})`);
         onPlayToggle(paragraph.timestamp, index); // Call the parent handler
     };
@@ -112,26 +116,36 @@ export function TranscriptParagraph({
         <Flex align="start" gap="2" className="group p-1" style={{ visibility: isVisible ? 'visible' : 'hidden' }}>
             {/* Timestamp and Play/Pause Button */}
              <Flex direction="column" align="center" className="flex-shrink-0 mt-px pt-px">
-                 {/* --- Use Play/Pause Button --- */}
-                 <Tooltip content={isPlaying ? `Pause playback (from ${formatParagraphTimestamp(paragraph.timestamp)})` : `Play from ${formatParagraphTimestamp(paragraph.timestamp)}`}>
-                    <IconButton
-                        variant="ghost"
-                        color={isPlaying ? "blue" : "gray"} // Highlight if playing
-                        size="1"
-                        className={cn(
-                            "transition-opacity p-0 h-5 w-5",
-                            // Always show if editing or playing this one, otherwise show on hover/focus
-                            isEditing || isPlaying || "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-                        )}
-                        onClick={handlePlayPauseClick} // Use combined handler
-                        title={isPlaying ? "Pause" : "Play"}
-                        aria-label={isPlaying ? "Pause paragraph playback" : "Play paragraph from timestamp"}
-                        disabled={isEditing} // Disable while editing this one
-                    >
-                        {isPlaying ? <PauseIcon /> : <PlayIcon />}
-                    </IconButton>
-                 </Tooltip>
-                {/* --- End Play/Pause Button --- */}
+                 {/* --- Conditionally render Play/Pause Button based on audio availability --- */}
+                 {isAudioAvailable && (
+                    <Tooltip content={isPlaying ? `Pause playback (from ${formatParagraphTimestamp(paragraph.timestamp)})` : `Play from ${formatParagraphTimestamp(paragraph.timestamp)}`}>
+                        <IconButton
+                            variant="ghost"
+                            color={isPlaying ? "blue" : "gray"} // Highlight if playing
+                            size="1"
+                            className={cn(
+                                "transition-opacity p-0 h-5 w-5",
+                                // Always show if editing or playing this one, otherwise show on hover/focus
+                                isEditing || isPlaying || "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                            )}
+                            onClick={handlePlayPauseClick} // Use combined handler
+                            title={isPlaying ? "Pause" : "Play"}
+                            aria-label={isPlaying ? "Pause paragraph playback" : "Play paragraph from timestamp"}
+                            disabled={isEditing} // Disable while editing this one
+                        >
+                            {isPlaying ? <PauseIcon /> : <PlayIcon />}
+                        </IconButton>
+                    </Tooltip>
+                 )}
+                 {/* --- Render timestamp even if audio is gone --- */}
+                 {!isAudioAvailable && (
+                     <Tooltip content={`Timestamp: ${formatParagraphTimestamp(paragraph.timestamp)} (Audio not available)`}>
+                         <Box className="h-5 w-5 flex items-center justify-center">
+                             <ClockIcon width="12" height="12" className="text-[--gray-a9]" />
+                         </Box>
+                     </Tooltip>
+                 )}
+                 {/* --- End Play/Pause Button --- */}
              </Flex>
 
             {/* Paragraph Text */}
@@ -162,7 +176,7 @@ export function TranscriptParagraph({
                 // Apply hover background only when NOT editing this specific paragraph
                 !isEditing && "hover:bg-[--gray-a3]",
                 // --- Highlight if playing ---
-                isPlaying && "bg-[--blue-a3]"
+                isPlaying && isAudioAvailable && "bg-[--blue-a3]" // Highlight only if audio is present
                 // --- End Highlight ---
              )}
             style={{ position: 'relative' }} // Positioning context for the editor overlay

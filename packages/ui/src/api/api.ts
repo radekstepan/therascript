@@ -107,6 +107,15 @@ export const updateTranscriptParagraph = async (
     return response.data;
 };
 
+// --- NEW: Delete Session Audio ---
+// DELETE /api/sessions/{sessionId}/audio
+export const deleteSessionAudio = async (sessionId: number): Promise<{ message: string }> => {
+    const response = await axios.delete(`/api/sessions/${sessionId}/audio`);
+    return response.data;
+};
+// --- END NEW ---
+
+
 // --- Chat Endpoints ---
 
 // POST /api/sessions/{sessionId}/chats/

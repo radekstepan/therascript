@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'; // Remo
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { Session, StructuredTranscript } from '../../../types'; // Removed TranscriptParagraphData
 import { TranscriptParagraph } from '../../Transcription/TranscriptParagraph';
-import { Box, ScrollArea, Text, Flex, Button, Badge, Spinner, Tooltip } from '@radix-ui/themes';
+import { Box, ScrollArea, Text, Flex, Button, Badge, Spinner, Tooltip, IconButton, DropdownMenu, AlertDialog } from '@radix-ui/themes'; // <-- Added IconButton, DropdownMenu, AlertDialog
 import {
     Pencil1Icon,
     BookmarkIcon,
@@ -11,13 +11,17 @@ import {
     BadgeIcon as SessionTypeIcon,
     LightningBoltIcon,
     // Removed Play/Pause imports from here, handled in paragraph
-    ArchiveIcon // <-- Use ArchiveIcon for token count
+    ArchiveIcon, // <-- Use ArchiveIcon for token count
+    DotsHorizontalIcon, // <-- Added Dots icon
+    TrashIcon, // <-- Added Trash icon
 } from '@radix-ui/react-icons';
 import { cn } from '../../../utils';
-import { updateTranscriptParagraph } from '../../../api/api';
+import { updateTranscriptParagraph, deleteSessionAudio } from '../../../api/api'; // <-- Added deleteSessionAudio
 import { sessionColorMap, therapyColorMap } from '../../../constants';
 import { debounce, formatIsoDateToYMD } from '../../../helpers';
 import axios from 'axios'; // Need axios for base URL
+import { useSetAtom } from 'jotai'; // <-- Added for toast
+import { toastMessageAtom } from '../../../store'; // <-- Added for toast
 
 // Base URL for audio requests
 const API_BASE_URL = axios.defaults.baseURL || 'http://localhost:3001';
@@ -98,6 +102,7 @@ export function Transcription({
     const restoreScrollRef = useRef(false);
     const queryClient = useQueryClient();
     const audioRef = useRef<HTMLAudioElement>(null); // Ref for the audio element
+    const setToast = useSetAtom(toastMessageAtom);
 
     // State for audio playback
     const [isPlaying, setIsPlaying] = useState(false);
@@ -106,18 +111,23 @@ export function Transcription({
     const [audioReady, setAudioReady] = useState(false);
     const [isAudioLoading, setIsAudioLoading] = useState(false); // Track initial load
 
+    // State for Delete Audio Confirmation Modal
+    const [isDeleteAudioConfirmOpen, setIsDeleteAudioConfirmOpen] = useState(false);
+
     // Token count now comes directly from the session prop
     const transcriptTokenCount = session?.transcriptTokenCount; // Use optional chaining
 
-    // ... (audio handlers, mutation, scroll handling remain the same) ...
-    const handleAudioCanPlay = useCallback(() => {
+    // Determine if audio is available based on session.audioPath
+    const isAudioAvailable = !!session?.audioPath;
+
+    // Audio Handlers (unchanged)
+    const handleAudioCanPlay = useCallback(() => { /* ... */
         console.log("[Audio] Ready to play");
         setAudioReady(true);
         setIsAudioLoading(false); // Loading finished
         setAudioError(null);
     }, []);
-
-    const handleAudioError = useCallback((e: React.SyntheticEvent<HTMLAudioElement>) => {
+    const handleAudioError = useCallback((e: React.SyntheticEvent<HTMLAudioElement>) => { /* ... */
         const error = (e.target as HTMLAudioElement).error;
         console.error("[Audio] Error:", error);
         let errorMessage = 'Unknown audio error';
@@ -135,15 +145,13 @@ export function Transcription({
         setPlayingParagraphIndex(null);
         setAudioReady(false);
         setIsAudioLoading(false);
-    }, []);
-
-    const handleAudioEnded = useCallback(() => {
+     }, []);
+    const handleAudioEnded = useCallback(() => { /* ... */
         console.log("[Audio] Playback ended");
         setIsPlaying(false);
         setPlayingParagraphIndex(null);
     }, []);
-
-    const handleAudioPause = useCallback(() => {
+    const handleAudioPause = useCallback(() => { /* ... */
         console.log("[Audio] Playback paused");
         // Only set isPlaying to false if the pause wasn't triggered by seeking
         // This requires tracking if a seek is in progress, maybe too complex.
@@ -152,28 +160,22 @@ export function Transcription({
              setIsPlaying(false);
         }
         // Keep playingParagraphIndex to potentially resume
-    }, []);
-
-    const handleAudioPlay = useCallback(() => {
+     }, []);
+    const handleAudioPlay = useCallback(() => { /* ... */
         console.log("[Audio] Playback started/resumed");
         setIsPlaying(true);
         setAudioError(null); // Clear error on successful play
         setIsAudioLoading(false); // No longer loading once playing starts
     }, []);
-
-    const handleAudioWaiting = useCallback(() => {
+    const handleAudioWaiting = useCallback(() => { /* ... */
         console.log("[Audio] Waiting for data (buffering)...");
         setIsAudioLoading(true); // Show loading indicator while buffering
-    }, []);
-
-    const handleAudioPlaying = useCallback(() => {
+     }, []);
+    const handleAudioPlaying = useCallback(() => { /* ... */
         console.log("[Audio] Buffering complete, playback continuing.");
         setIsAudioLoading(false); // Buffering finished
-    }, []);
-
-
-    // --- Audio Time Update Handler ---
-    const handleAudioTimeUpdate = useCallback(() => {
+     }, []);
+    const handleAudioTimeUpdate = useCallback(() => { /* ... */
         if (!audioRef.current || !transcriptContent || audioRef.current.seeking) return; // Ignore updates while seeking
         const currentTimeMs = audioRef.current.currentTime * 1000;
 
@@ -203,8 +205,8 @@ export function Transcription({
 
     const audioSrc = session?.audioPath ? `${API_BASE_URL}/api/sessions/${session.id}/audio` : null;
 
-    // --- Playback Control Functions ---
-    const playAudioFromTimestamp = useCallback((timestampMs: number, index: number) => {
+    // Playback Control Functions (unchanged)
+    const playAudioFromTimestamp = useCallback((timestampMs: number, index: number) => { /* ... */
         if (!audioRef.current || !audioSrc) {
             setAudioError("Audio element or source not available.");
             return;
@@ -268,25 +270,25 @@ export function Transcription({
                  // If audio was already loaded but paused, we might need to call play() after a delay or on canplay event.
             }
         }
-    }, [audioSrc, isPlaying, playingParagraphIndex]);
-
-    const pauseAudio = useCallback(() => {
+     }, [audioSrc, isPlaying, playingParagraphIndex]);
+    const pauseAudio = useCallback(() => { /* ... */
         if (audioRef.current) {
             audioRef.current.pause();
             // State update handled by 'onPause' event
         }
-    }, []);
-
-    const togglePlayback = useCallback((timestampMs: number, index: number) => {
+     }, []);
+    const togglePlayback = useCallback((timestampMs: number, index: number) => { /* ... */
+        // Only allow toggle if audio is available
+        if (!isAudioAvailable) return;
         if (playingParagraphIndex === index && isPlaying) {
             pauseAudio();
         } else {
             playAudioFromTimestamp(timestampMs, index);
         }
-    }, [isPlaying, playingParagraphIndex, pauseAudio, playAudioFromTimestamp]);
+    }, [isPlaying, playingParagraphIndex, pauseAudio, playAudioFromTimestamp, isAudioAvailable]); // Add isAudioAvailable
 
 
-    // Mutation for saving (no changes needed here, but note onSuccess invalidates sessionMeta)
+    // Mutation for saving paragraph
     const saveParagraphMutation = useMutation({
         mutationFn: ({ index, newText }: { index: number; newText: string }) => {
             return updateTranscriptParagraph(session.id, index, newText);
@@ -295,23 +297,56 @@ export function Transcription({
             queryClient.setQueryData(['transcript', session.id], updatedStructuredTranscript);
             queryClient.invalidateQueries({ queryKey: ['sessionMeta', session.id] });
             console.log(`[Transcription Save Success] Paragraph ${variables.index} saved. Invalidated sessionMeta query.`);
+            setToast("Paragraph saved successfully."); // Added toast
             setActiveEditIndex(null);
         },
         onError: (error, variables) => {
             console.error(`Error saving paragraph ${variables.index}:`, error);
-            // TODO: Add user feedback (Toast?)
+            setToast(`Error saving paragraph: ${error.message}`); // Added toast
             setActiveEditIndex(null); // Close edit mode even on error for now
         }
     });
 
-    // Scroll handling (no changes)
+    // Mutation for Deleting Audio
+    const deleteAudioMutation = useMutation({
+        mutationFn: () => {
+            if (!session?.id) throw new Error("Session ID is missing");
+            return deleteSessionAudio(session.id);
+        },
+        onSuccess: (data) => {
+            console.log(`[Delete Audio Success] ${data.message}`);
+            setToast(data.message || "Audio file deleted.");
+            // Invalidate session metadata queries to reflect the removed audioPath
+            queryClient.invalidateQueries({ queryKey: ['sessionMeta', session.id] });
+            queryClient.invalidateQueries({ queryKey: ['sessions'] });
+            // Reset audio player state as the source is gone
+            if (audioRef.current) {
+                audioRef.current.src = ''; // Clear source
+                audioRef.current.load(); // Attempt to reset fully
+            }
+            setIsPlaying(false);
+            setPlayingParagraphIndex(null);
+            setAudioReady(false);
+            setAudioError(null);
+            setIsAudioLoading(false);
+        },
+        onError: (error) => {
+            console.error(`Error deleting audio file for session ${session?.id}:`, error);
+            setToast(`Error deleting audio: ${error.message}`);
+        },
+        onSettled: () => {
+            setIsDeleteAudioConfirmOpen(false); // Close the modal regardless of outcome
+        }
+    });
+
+    // Scroll handling (unchanged)
     const debouncedScrollSave = useCallback( debounce((scrollTop: number) => { if (onScrollUpdate) { onScrollUpdate(scrollTop); } }, 150), [onScrollUpdate] );
     const handleScroll = (event: React.UIEvent<HTMLDivElement>) => { if (!restoreScrollRef.current && event.currentTarget) { debouncedScrollSave(event.currentTarget.scrollTop); } if (restoreScrollRef.current) { restoreScrollRef.current = false; } };
     useEffect(() => { if (isTabActive) { restoreScrollRef.current = true; } else { restoreScrollRef.current = false; } }, [isTabActive]);
     useEffect(() => { if (restoreScrollRef.current && viewportRef.current) { requestAnimationFrame(() => { if (restoreScrollRef.current && viewportRef.current) { if (viewportRef.current.scrollTop !== initialScrollTop) { viewportRef.current.scrollTop = initialScrollTop; } else { restoreScrollRef.current = false; } } }); } }, [isTabActive, initialScrollTop]);
 
 
-    // --- Effect to load audio source when component mounts or session/audioPath changes ---
+    // Effect to load audio source (unchanged)
     useEffect(() => {
         if (audioRef.current && audioSrc && audioRef.current.currentSrc !== audioSrc) {
             console.log("[Audio Effect] Setting audio source URL:", audioSrc);
@@ -343,106 +378,125 @@ export function Transcription({
         saveParagraphMutation.mutate({ index, newText });
     };
 
-    return (
-        <Flex direction="column" style={{ height: '100%', minHeight: 0, border: '1px solid var(--gray-a6)', borderRadius: 'var(--radius-3)' }}>
-             {/* --- Audio Element (Hidden) --- */}
-             {/* Render audio tag only if audioSrc exists */}
-             {audioSrc && (
-                <audio
-                    ref={audioRef}
-                    // src={audioSrc} // Set in useEffect
-                    preload="metadata" // Load metadata (duration etc.) but not full audio
-                    onCanPlay={handleAudioCanPlay}
-                    onError={handleAudioError}
-                    onEnded={handleAudioEnded}
-                    onPause={handleAudioPause}
-                    onPlay={handleAudioPlay}
-                    onTimeUpdate={handleAudioTimeUpdate} // Add time update handler
-                    onWaiting={handleAudioWaiting} // Handle buffering
-                    onPlaying={handleAudioPlaying} // Handle end of buffering
-                    controls={false} // Hide default controls
-                    style={{ display: 'none' }}
-                 />
-             )}
-            {/* --- End Audio Element --- */}
+    // --- Handlers for Dropdown and Delete Confirmation ---
+    const handleDeleteAudioClick = () => {
+        setIsDeleteAudioConfirmOpen(true);
+    };
 
-             <Flex align="baseline" justify="between" px="3" py="2" style={{ borderBottom: '1px solid var(--gray-a6)', flexShrink: 0 }} gap="3" wrap="wrap" >
-                {/* --- Update Metadata Header to include token count --- */}
-                <Flex align="center" gap="3" wrap="wrap" style={{ minWidth: 0, flexGrow: 1 }}>
-                    {renderHeaderDetail(PersonIcon, session.clientName, "Client")}
-                    {renderHeaderDetail(CalendarIcon, session.date, "Date", undefined, true)}
-                    {renderHeaderDetail(SessionTypeIcon, session.sessionType, "Session Type", 'session')}
-                    {renderHeaderDetail(BookmarkIcon, session.therapy, "Therapy Type", 'therapy')}
-                    {/* Display Token Count */}
-                    {(typeof transcriptTokenCount === 'number') && renderHeaderDetail(
-                        ArchiveIcon, // Use ArchiveIcon for tokens
-                        transcriptTokenCount,
-                        `Transcript Tokens`,
-                        undefined,
-                        false,
-                        true // Flag as token value
-                    )}
+    const confirmDeleteAudio = () => {
+        if (deleteAudioMutation.isPending) return;
+        deleteAudioMutation.mutate();
+    };
+    // --- End Handlers ---
+
+    return (
+        <> {/* Wrap in fragment for Modal */}
+            <Flex direction="column" style={{ height: '100%', minHeight: 0, border: '1px solid var(--gray-a6)', borderRadius: 'var(--radius-3)' }}>
+                 {/* --- Audio Element (Hidden) --- */}
+                 {/* Only render if audio is available */}
+                 {isAudioAvailable && (
+                    <audio
+                        ref={audioRef}
+                        preload="metadata"
+                        onCanPlay={handleAudioCanPlay}
+                        onError={handleAudioError}
+                        onEnded={handleAudioEnded}
+                        onPause={handleAudioPause}
+                        onPlay={handleAudioPlay}
+                        onTimeUpdate={handleAudioTimeUpdate}
+                        onWaiting={handleAudioWaiting}
+                        onPlaying={handleAudioPlaying}
+                        controls={false}
+                        style={{ display: 'none' }}
+                     />
+                 )}
+                {/* --- End Audio Element --- */}
+
+                 <Flex align="baseline" justify="between" px="3" py="2" style={{ borderBottom: '1px solid var(--gray-a6)', flexShrink: 0 }} gap="3" wrap="wrap" >
+                    {/* --- Metadata Header --- */}
+                    <Flex align="center" gap="3" wrap="wrap" style={{ minWidth: 0, flexGrow: 1 }}>
+                        {renderHeaderDetail(PersonIcon, session.clientName, "Client")}
+                        {renderHeaderDetail(CalendarIcon, session.date, "Date", undefined, true)}
+                        {renderHeaderDetail(SessionTypeIcon, session.sessionType, "Session Type", 'session')}
+                        {renderHeaderDetail(BookmarkIcon, session.therapy, "Therapy Type", 'therapy')}
+                        {(typeof transcriptTokenCount === 'number') && renderHeaderDetail(
+                            ArchiveIcon, transcriptTokenCount, `Transcript Tokens`, undefined, false, true
+                        )}
+                    </Flex>
+                    {/* --- End Metadata --- */}
+                    <Box flexShrink="0">
+                        {/* --- Hamburger Menu --- */}
+                        <DropdownMenu.Root>
+                            <DropdownMenu.Trigger>
+                                <IconButton variant="ghost" color="gray" size="1" title="More Options" aria-label="Transcription options">
+                                    <DotsHorizontalIcon />
+                                </IconButton>
+                            </DropdownMenu.Trigger>
+                            <DropdownMenu.Content align="end">
+                                <DropdownMenu.Item onSelect={onEditDetailsClick}>
+                                    <Pencil1Icon className="mr-2 h-4 w-4" /> Edit Session Details
+                                </DropdownMenu.Item>
+                                <DropdownMenu.Separator />
+                                <DropdownMenu.Item
+                                    color="red"
+                                    onSelect={handleDeleteAudioClick}
+                                    disabled={!isAudioAvailable || deleteAudioMutation.isPending} // Disable if no audio or deleting
+                                >
+                                    <TrashIcon className="mr-2 h-4 w-4" /> Delete Original Audio
+                                </DropdownMenu.Item>
+                            </DropdownMenu.Content>
+                        </DropdownMenu.Root>
+                        {/* --- End Hamburger Menu --- */}
+                    </Box>
                 </Flex>
-                 {/* --- End Update --- */}
-                <Box flexShrink="0">
-                    <Button variant="ghost" size="1" onClick={onEditDetailsClick} aria-label="Edit session details">
-                        <Pencil1Icon width="14" height="14" />
-                        <Text ml="1">Edit Details</Text>
-                    </Button>
-                </Box>
+
+                {/* Display Audio Status/Error (unchanged) */}
+                <Box px="3" py="1" style={{ backgroundColor: audioError ? 'var(--red-a3)' : (isAudioLoading ? 'var(--amber-a3)' : 'transparent'), borderBottom: audioError || isAudioLoading ? `1px solid ${audioError ? 'var(--red-a6)' : 'var(--amber-a6)'}` : 'none', display: audioError || isAudioLoading ? 'block' : 'none', transition: 'background-color 0.3s ease', }}> <Flex align="center" gap="2"> {isAudioLoading && <Spinner size="1" />} <Text size="1" color={audioError ? "red" : (isAudioLoading ? "amber" : "gray")}> {audioError || (isAudioLoading ? 'Loading audio...' : '')} </Text> </Flex> </Box>
+
+                <ScrollArea type="auto" scrollbars="vertical" ref={viewportRef} onScroll={handleScroll} style={{ flexGrow: 1, minHeight: 0 }} >
+                    {isLoadingTranscript && ( <Flex align="center" justify="center" style={{minHeight: '100px'}}><Spinner size="2" /><Text ml="2" color="gray">Loading transcript...</Text></Flex> )}
+                    {transcriptError && !isLoadingTranscript && ( <Flex align="center" justify="center" style={{minHeight: '100px'}}><Text color="red">Error loading transcript: {transcriptError.message}</Text></Flex> )}
+
+                    <Box p="3" className="space-y-3">
+                         {!isLoadingTranscript && !transcriptError && paragraphs.length > 0 && paragraphs.map((paragraph, index) => (
+                            <TranscriptParagraph
+                                key={paragraph.id ?? `p-${index}`}
+                                paragraph={paragraph}
+                                index={index}
+                                onSave={handleSaveParagraphInternal}
+                                activeEditIndex={activeEditIndex}
+                                setActiveEditIndex={setActiveEditIndex}
+                                isSaving={saveParagraphMutation.isPending && saveParagraphMutation.variables?.index === index}
+                                onPlayToggle={togglePlayback}
+                                isPlaying={isPlaying && playingParagraphIndex === index}
+                                isAudioAvailable={isAudioAvailable} // <-- Pass down availability
+                            />
+                        ))}
+                         {!isLoadingTranscript && !transcriptError && transcriptContent && paragraphs.length === 0 && ( <Flex align="center" justify="center" style={{minHeight: '100px'}}> <Text color="gray" style={{ fontStyle: 'italic' }}> {session.status === 'completed' ? 'Transcription is empty.' : 'Transcription not available yet.'} </Text> </Flex> )}
+                         {!isLoadingTranscript && !transcriptError && transcriptContent === undefined && ( <Flex align="center" justify="center" style={{minHeight: '100px'}}> <Text color="gray" style={{ fontStyle: 'italic' }}> No transcription content available. </Text> </Flex> )}
+                    </Box>
+                </ScrollArea>
             </Flex>
 
-            {/* Display Audio Status/Error */}
-            <Box px="3" py="1" style={{
-                backgroundColor: audioError ? 'var(--red-a3)' : (isAudioLoading ? 'var(--amber-a3)' : 'transparent'),
-                borderBottom: audioError || isAudioLoading ? `1px solid ${audioError ? 'var(--red-a6)' : 'var(--amber-a6)'}` : 'none',
-                display: audioError || isAudioLoading ? 'block' : 'none', // Only show if error or loading
-                transition: 'background-color 0.3s ease',
-            }}>
-                <Flex align="center" gap="2">
-                    {isAudioLoading && <Spinner size="1" />}
-                    <Text size="1" color={audioError ? "red" : (isAudioLoading ? "amber" : "gray")}>
-                        {audioError || (isAudioLoading ? 'Loading audio...' : '')}
-                    </Text>
-                </Flex>
-            </Box>
-
-            <ScrollArea type="auto" scrollbars="vertical" ref={viewportRef} onScroll={handleScroll} style={{ flexGrow: 1, minHeight: 0 }} >
-                {isLoadingTranscript && ( <Flex align="center" justify="center" style={{minHeight: '100px'}}><Spinner size="2" /><Text ml="2" color="gray">Loading transcript...</Text></Flex> )}
-                {transcriptError && !isLoadingTranscript && ( <Flex align="center" justify="center" style={{minHeight: '100px'}}><Text color="red">Error loading transcript: {transcriptError.message}</Text></Flex> )}
-
-                <Box p="3" className="space-y-3">
-                     {!isLoadingTranscript && !transcriptError && paragraphs.length > 0 && paragraphs.map((paragraph, index) => (
-                        <TranscriptParagraph
-                            key={paragraph.id ?? `p-${index}`}
-                            paragraph={paragraph}
-                            index={index}
-                            onSave={handleSaveParagraphInternal}
-                            activeEditIndex={activeEditIndex}
-                            setActiveEditIndex={setActiveEditIndex}
-                            isSaving={saveParagraphMutation.isPending && saveParagraphMutation.variables?.index === index}
-                            // --- Pass playback state and handler down ---
-                            onPlayToggle={togglePlayback} // Pass the combined play/pause handler
-                            isPlaying={isPlaying && playingParagraphIndex === index} // Is this specific paragraph playing?
-                            // --- End playback props ---
-                        />
-                    ))}
-                     {!isLoadingTranscript && !transcriptError && transcriptContent && paragraphs.length === 0 && (
-                        <Flex align="center" justify="center" style={{minHeight: '100px'}}>
-                            <Text color="gray" style={{ fontStyle: 'italic' }}>
-                                {session.status === 'completed' ? 'Transcription is empty.' : 'Transcription not available yet.'}
-                            </Text>
-                        </Flex>
-                    )}
-                     {!isLoadingTranscript && !transcriptError && transcriptContent === undefined && (
-                          <Flex align="center" justify="center" style={{minHeight: '100px'}}>
-                             <Text color="gray" style={{ fontStyle: 'italic' }}>
-                                 No transcription content available.
-                             </Text>
-                          </Flex>
-                     )}
-                </Box>
-            </ScrollArea>
-        </Flex>
+            {/* --- Delete Audio Confirmation Modal --- */}
+            <AlertDialog.Root open={isDeleteAudioConfirmOpen} onOpenChange={setIsDeleteAudioConfirmOpen}>
+                <AlertDialog.Content style={{ maxWidth: 450 }}>
+                    <AlertDialog.Title>Delete Audio File</AlertDialog.Title>
+                    <AlertDialog.Description size="2">
+                        Are you sure you want to permanently delete the original audio file ({session.audioPath || 'unknown name'}) for this session? This action cannot be undone.
+                        <br/><br/>
+                        The session transcript and chat history will remain.
+                    </AlertDialog.Description>
+                    <Flex gap="3" mt="4" justify="end">
+                        <Button variant="soft" color="gray" onClick={() => setIsDeleteAudioConfirmOpen(false)} disabled={deleteAudioMutation.isPending}> Cancel </Button>
+                        <Button color="red" onClick={confirmDeleteAudio} disabled={deleteAudioMutation.isPending}>
+                            {deleteAudioMutation.isPending ? <Spinner size="1"/> : <TrashIcon />}
+                            <Text ml="1">Delete Audio</Text>
+                        </Button>
+                    </Flex>
+                </AlertDialog.Content>
+            </AlertDialog.Root>
+            {/* --- End Delete Audio Modal --- */}
+        </>
     );
 }

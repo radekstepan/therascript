@@ -199,25 +199,18 @@ export const deleteTranscriptFile = async (sessionId: number): Promise<void> => 
     }
 };
 
-// --- FIX: deleteUploadedFile now accepts ABSOLUTE path for safety check ---
+// --- FIX: deleteUploadedFile now accepts RELATIVE audio identifier for safety ---
 // --- Changed function name to reflect it deletes audio ---
-export const deleteUploadedAudioFile = async (relativeFilename: string | null): Promise<void> => {
+export const deleteUploadedAudioFile = async (relativeAudioIdentifier: string | null): Promise<void> => {
     // Resolve the relative filename to an absolute path first
-    const absoluteFilePath = getAudioAbsolutePath(relativeFilename);
+    const absoluteFilePath = getAudioAbsolutePath(relativeAudioIdentifier);
 
     if (!absoluteFilePath) {
-        console.warn(`[FileService] deleteUploadedAudioFile called with null or invalid relative filename: ${relativeFilename}. Skipping deletion.`);
+        console.warn(`[FileService] deleteUploadedAudioFile called with null or invalid relative identifier: ${relativeAudioIdentifier}. Skipping deletion.`);
         return;
     }
 
-    // --- Safety Check Moved to getAudioAbsolutePath ---
-    // const resolvedUploadsDir = path.resolve(uploadsDir);
-    // if (!absoluteFilePath.startsWith(resolvedUploadsDir)) {
-    //     console.error(`[FileService] Attempted to delete unsafe path outside uploads directory: ${absoluteFilePath}`);
-    //     return; // Do not proceed if path seems unsafe
-    // }
-    // --- End Safety Check ---
-
+    // Safety Check moved to getAudioAbsolutePath
     console.log(`[FileService] Attempting to delete uploaded audio file: ${absoluteFilePath}`);
     try {
         await fs.unlink(absoluteFilePath);
@@ -228,10 +221,11 @@ export const deleteUploadedAudioFile = async (relativeFilename: string | null): 
         } else {
             console.error(`[FileService] Error deleting uploaded audio file ${absoluteFilePath}:`, error);
             // Decide whether to re-throw or just log
-            // throw new Error(`Could not delete uploaded audio file ${absoluteFilePath}.`);
+            throw new Error(`Could not delete uploaded audio file ${absoluteFilePath}.`);
         }
     }
 };
+
 
 // Expose the new function and the helper for resolving paths
 export { getAudioAbsolutePath };
