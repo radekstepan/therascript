@@ -1,133 +1,58 @@
+// packages/api/src/services/transcriptionService.ts
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import axios, { AxiosError } from 'axios';
 import FormData from 'form-data';
-import config from '../config/index.js'; // Import config
+import config from '../config/index.js';
 import { isNodeError } from '../utils/helpers.js';
-// --- FIX: Import NotFoundError ---
+// --- Keep Error Imports ---
 import { InternalServerError, ApiError, BadRequestError, NotFoundError } from '../errors.js';
-// --- END FIX ---
+// --- End Error Imports ---
 import type {
     StructuredTranscript,
     WhisperJobStatus,
     WhisperSegment
 } from '../types/index.js';
-import { exec as callbackExec } from 'node:child_process'; // <-- Import exec
-import * as util from 'node:util';
-import * as fsSync from 'node:fs'; // For checking compose file
-// --- FIX: Import fileURLToPath ---
-import { fileURLToPath } from 'node:url';
-// --- END FIX ---
-
-const exec = util.promisify(callbackExec); // <-- Promisify exec
-
+// --- Remove Docker related imports ---
+// import { exec as callbackExec } from 'node:child_process';
+// import * as util from 'node:util';
+// import * as fsSync from 'node:fs';
+// import { fileURLToPath } from 'node:url';
+// --- End Remove ---
 
 const WHISPER_API_URL = config.whisper.apiUrl;
-const WHISPER_MODEL_TO_USE = config.whisper.model; // Get model from config
+const WHISPER_MODEL_TO_USE = config.whisper.model;
 
-// --- Docker Management Logic for Whisper ---
-const ROOT_DIR = path.resolve(fileURLToPath(import.meta.url), '../../../..'); // Navigate up to project root
-const ROOT_COMPOSE_FILE = path.join(ROOT_DIR, 'docker-compose.yml');
-const WHISPER_SERVICE_NAME = 'whisper'; // Match service name in root compose file
+// --- REMOVE Docker Management Logic ---
+// const ROOT_DIR = ...;
+// const ROOT_COMPOSE_FILE = ...;
+// const WHISPER_SERVICE_NAME = ...;
+// async function runRootComposeCommand(...) { ... }
+// async function isWhisperContainerRunning(...) { ... }
+// async function isWhisperApiResponsive(...) { ... } // Keep this one for health check
+// export async function ensureWhisperReady(...) { ... } // Remove
+// export async function stopWhisperService(...) { ... } // Remove
+// --- END REMOVE ---
 
-// Helper to run docker compose commands for the root file
-async function runRootComposeCommand(command: string): Promise<string> {
-    if (!fsSync.existsSync(ROOT_COMPOSE_FILE)) {
-        console.error(`[Whisper Docker] Root compose file not found at: ${ROOT_COMPOSE_FILE}`);
-        throw new InternalServerError(`Root docker-compose.yml not found at ${ROOT_COMPOSE_FILE}`);
-    }
-    // Use -p <project_name> to avoid conflicts if other compose files are used
-    const projectName = path.basename(ROOT_DIR).replace(/[^a-z0-9]/gi, ''); // Simple project name from dir
-    const composeCommand = `docker compose -p ${projectName} -f "${ROOT_COMPOSE_FILE}" ${command}`;
-    console.log(`[Whisper Docker] Running: ${composeCommand}`);
+// --- Keep API Health Check Logic (can be simplified) ---
+async function checkWhisperApiHealth(): Promise<boolean> {
     try {
-        const { stdout, stderr } = await exec(composeCommand);
-        if (stderr && !stderr.toLowerCase().includes("warn") && !stderr.toLowerCase().includes("found orphan containers")) {
-            console.warn(`[Whisper Docker] Compose stderr: ${stderr}`);
-        }
-        return stdout.trim();
-    } catch (error: any) {
-        console.error(`[Whisper Docker] Error executing: ${composeCommand}`);
-        if (error.stderr) console.error(`[Whisper Docker] Stderr: ${error.stderr}`);
-        if (error.stdout) console.error(`[Whisper Docker] Stdout: ${error.stdout}`);
-        throw new InternalServerError(`Failed to run Whisper Docker Compose command: ${command}. Error: ${error.message}`);
-    }
-}
-
-// Check if the Whisper container is running
-async function isWhisperContainerRunning(): Promise<boolean> {
-    try {
-        const containerId = await runRootComposeCommand(`ps -q ${WHISPER_SERVICE_NAME}`);
-        return !!containerId;
-    } catch (error: any) {
-        console.warn(`[Whisper Docker] Error checking running status (likely not running): ${error.message}`);
-        return false;
-    }
-}
-
-// Check if the Whisper API is responsive
-async function isWhisperApiResponsive(): Promise<boolean> {
-    try {
+        console.log(`[TranscriptionService] Pinging Whisper health at ${WHISPER_API_URL}/health`);
         await axios.get(`${WHISPER_API_URL}/health`, { timeout: 3000 });
+        console.log(`[TranscriptionService] Whisper health check successful.`);
         return true;
     } catch (error) {
+        if (axios.isAxiosError(error) && error.code === 'ECONNREFUSED') {
+             console.warn(`[TranscriptionService] Whisper health check failed: Connection refused.`);
+        } else {
+             console.warn(`[TranscriptionService] Whisper health check failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
         return false;
     }
 }
+// --- End Health Check ---
 
-// Ensure Whisper service is running and healthy
-export async function ensureWhisperReady(timeoutMs = 90000): Promise<void> { // Increased timeout for model loading
-    console.log("[Whisper Docker] Ensuring Whisper service is ready...");
-    if (await isWhisperContainerRunning() && await isWhisperApiResponsive()) {
-        console.log("[Whisper Docker] ✅ Whisper container running and API responsive.");
-        return;
-    }
-
-    if (!(await isWhisperContainerRunning())) {
-        console.log("[Whisper Docker] 🅾️ Whisper container not running. Attempting to start...");
-        try {
-            // Use --remove-orphans to clean up potential stale containers
-            await runRootComposeCommand(`up -d --remove-orphans ${WHISPER_SERVICE_NAME}`);
-            console.log(`[Whisper Docker] 'docker compose up -d whisper' command issued.`);
-        } catch (startError: any) {
-            console.error("[Whisper Docker] ❌ Failed to issue start command for Whisper service:", startError);
-            throw new InternalServerError("Failed to start Whisper Docker service.", startError);
-        }
-    } else {
-        console.log("[Whisper Docker] Container process found, but API was not responsive. Waiting...");
-    }
-
-    // Wait for API to become responsive (health check)
-    const startTime = Date.now();
-    while (Date.now() - startTime < timeoutMs) {
-        console.log("[Whisper Docker] ⏳ Waiting for Whisper API (/health) to become responsive...");
-        if (await isWhisperApiResponsive()) {
-            console.log("[Whisper Docker] ✅ Whisper API is now responsive.");
-            return;
-        }
-        await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds before retrying
-    }
-
-    console.error(`[Whisper Docker] ❌ Whisper API did not become responsive within ${timeoutMs / 1000} seconds.`);
-    throw new InternalServerError(`Whisper service started but API did not respond within timeout.`);
-}
-
-// Function to stop the Whisper service (optional, could be called after jobs)
-export async function stopWhisperService(): Promise<void> {
-    console.log("[Whisper Docker] Attempting to stop Whisper service...");
-    try {
-        await runRootComposeCommand(`down`); // Use down to stop and remove
-        console.log("[Whisper Docker] ✅ Whisper service stopped.");
-    } catch (error: any) {
-        console.error("[Whisper Docker] ❌ Failed to stop Whisper service:", error);
-        // Decide if this should throw or just warn
-        // throw new InternalServerError("Failed to stop Whisper Docker service.", error);
-    }
-}
-// --- End Docker Management Logic ---
-
-
-// --- Helper Function: Group segments into paragraphs (Corrected) ---
+// --- Helper Function: Group segments into paragraphs (Keep) ---
 function groupSegmentsIntoParagraphs(segments: WhisperSegment[]): StructuredTranscript {
     if (!segments || segments.length === 0) {
         return [];
@@ -194,23 +119,23 @@ function groupSegmentsIntoParagraphs(segments: WhisperSegment[]): StructuredTran
 }
 // --- End Helper ---
 
-// --- Start Transcription Job ---
+// --- Start Transcription Job (Modified) ---
 export const startTranscriptionJob = async (filePath: string): Promise<string> => {
     const absoluteFilePath = path.resolve(filePath);
     const fileName = path.basename(absoluteFilePath);
 
-    // --- Ensure Whisper is Ready ---
-    try {
-         await ensureWhisperReady();
-         console.log(`[TranscriptionService] Whisper service is ready. Proceeding with job submission for: ${fileName}`);
-    } catch (error) {
-         console.error(`[TranscriptionService] Could not ensure Whisper service readiness before starting job.`, error);
-         // Propagate the error (already likely an InternalServerError)
-         throw error;
+    // --- Perform Health Check FIRST ---
+    console.log('[TranscriptionService] Checking Whisper service availability...');
+    const isHealthy = await checkWhisperApiHealth();
+    if (!isHealthy) {
+        console.error(`[TranscriptionService] Whisper service at ${WHISPER_API_URL} is not available.`);
+        // Use a 503 Service Unavailable error
+        throw new ApiError(503, `Transcription service is currently unavailable at ${WHISPER_API_URL}. Please ensure it is running.`);
     }
-    // --- End Ensure Whisper ---
+    console.log('[TranscriptionService] Whisper service is available. Proceeding with job submission.');
+    // --- End Health Check ---
 
-    console.log(`[TranscriptionService] Requesting transcription job for: ${fileName} via ${WHISPER_API_URL} using model '${WHISPER_MODEL_TO_USE}'`); // Log model
+    console.log(`[TranscriptionService] Requesting transcription job for: ${fileName} via ${WHISPER_API_URL} using model '${WHISPER_MODEL_TO_USE}'`);
 
     let fileHandle;
     try {
@@ -223,7 +148,6 @@ export const startTranscriptionJob = async (filePath: string): Promise<string> =
 
         const form = new FormData();
         form.append('file', fileHandle.createReadStream(), { filename: fileName });
-        // *** ADD model_name to the form data ***
         form.append('model_name', WHISPER_MODEL_TO_USE);
 
         console.log(`[TranscriptionService] Sending audio file and model name to ${WHISPER_API_URL}/transcribe ...`);
@@ -232,7 +156,7 @@ export const startTranscriptionJob = async (filePath: string): Promise<string> =
             form,
             {
                 headers: form.getHeaders(),
-                timeout: 60000, // 60 seconds for submission
+                timeout: 60000,
             }
         );
 
@@ -244,6 +168,7 @@ export const startTranscriptionJob = async (filePath: string): Promise<string> =
         return jobId;
 
     } catch (error: any) {
+        // Keep existing error handling, but remove references to Docker start/stop
         console.error('[TranscriptionService] Error submitting job to Whisper:', error);
         if (axios.isAxiosError(error)) {
              const axiosError = error as AxiosError;
@@ -264,51 +189,32 @@ export const startTranscriptionJob = async (filePath: string): Promise<string> =
     }
 };
 
-// --- Get Transcription Status (Fixed NotFoundError import) ---
+// --- getTranscriptionStatus (Keep as is) ---
 export const getTranscriptionStatus = async (jobId: string): Promise<WhisperJobStatus> => {
-    if (!jobId) throw new BadRequestError("Job ID is required to check status.");
+     if (!jobId) throw new BadRequestError("Job ID is required to check status.");
     console.log(`[TranscriptionService] Checking status for job ${jobId}...`);
     try {
-        const statusResponse = await axios.get<WhisperJobStatus>(`${WHISPER_API_URL}/status/${jobId}`, {
-            timeout: 10000, // 10 seconds timeout for status check
-        });
-        if (!statusResponse.data || !statusResponse.data.job_id || !statusResponse.data.status) {
-            throw new InternalServerError(`Invalid status response structure received for job ${jobId}`);
-        }
+        const statusResponse = await axios.get<WhisperJobStatus>(`${WHISPER_API_URL}/status/${jobId}`, { timeout: 10000 });
+        if (!statusResponse.data || !statusResponse.data.job_id || !statusResponse.data.status) { throw new InternalServerError(`Invalid status response structure received for job ${jobId}`); }
         return statusResponse.data;
     } catch (error: any) {
         console.error(`[TranscriptionService] Error polling status for job ${jobId}:`, error);
         if (axios.isAxiosError(error)) {
             const axiosError = error as AxiosError;
-            if (axiosError.response?.status === 404) {
-                 // Don't throw InternalServerError here, the job might just not exist
-                 console.warn(`[TranscriptionService] Job ID ${jobId} not found on Whisper service.`);
-                 throw new NotFoundError(`Job ID ${jobId} not found on Whisper service.`); // <-- Use imported NotFoundError
-                // throw new InternalServerError(`Job ID ${jobId} not found on Whisper service.`);
-            }
-             if (axiosError.code === 'ECONNREFUSED' || axiosError.code === 'ENOTFOUND') {
-                 throw new InternalServerError(`Could not connect to Whisper service at ${WHISPER_API_URL} to check status.`);
-             }
+            if (axiosError.response?.status === 404) { throw new NotFoundError(`Job ID ${jobId} not found on Whisper service.`); }
+             if (axiosError.code === 'ECONNREFUSED' || axiosError.code === 'ENOTFOUND') { throw new InternalServerError(`Could not connect to Whisper service at ${WHISPER_API_URL} to check status.`); }
               throw new InternalServerError('Network error checking transcription status.', error);
         }
          throw new InternalServerError('An unexpected error occurred while checking transcription status.', error instanceof Error ? error : undefined);
     }
 };
 
-// --- Get Structured Transcription Result (No change needed) ---
+// --- getStructuredTranscriptionResult (Keep as is) ---
 export const getStructuredTranscriptionResult = async (jobId: string): Promise<StructuredTranscript> => {
     console.log(`[TranscriptionService] Fetching and structuring result for completed job ${jobId}...`);
     const jobStatus = await getTranscriptionStatus(jobId);
-
-    if (jobStatus.status !== 'completed') {
-        throw new InternalServerError(`Cannot get result: Job ${jobId} status is '${jobStatus.status}' (error: ${jobStatus.error || 'none'}).`);
-    }
-
-    if (!jobStatus.result?.segments) {
-        console.warn(`[TranscriptionService] Job ${jobId} completed but result segments are missing.`);
-        throw new InternalServerError('Transcription completed but no segments were returned.');
-    }
-
+    if (jobStatus.status !== 'completed') { throw new InternalServerError(`Cannot get result: Job ${jobId} status is '${jobStatus.status}' (error: ${jobStatus.error || 'none'}).`); }
+    if (!jobStatus.result?.segments) { console.warn(`[TranscriptionService] Job ${jobId} completed but result segments are missing.`); throw new InternalServerError('Transcription completed but no segments were returned.'); }
     console.log(`[TranscriptionService] Got ${jobStatus.result.segments.length} segments for job ${jobId}. Grouping into paragraphs...`);
     const structuredTranscript = groupSegmentsIntoParagraphs(jobStatus.result.segments);
     console.log(`[TranscriptionService] Grouped into ${structuredTranscript.length} paragraphs for job ${jobId}.`);

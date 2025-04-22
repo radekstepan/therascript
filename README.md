@@ -16,14 +16,12 @@
 - [ ] toast should above modal
 - [ ] make sure the AI response "cursor" is less dark and is still blinking.The copy icon shouldn't show until after the whole response has been received.
 - [*] switching between the diffent chats the number of tokens stays the same for some reason
-- [x] play the original audio at a timestamp. Be able to pause/stop the audio as well
 - [*] starred messages don't show in the popover
 - [*] the star message icon is too small and not vertically aligned with the message itself
 - [*] think about the starred messages popover, the list/UI looks odd
 - [*] split the files again
 - [*] move env files to root dir
 - [ ] after you edit the transcript, the transcript is no longer included in the call to the API and you need to unload/reload the model
-- [x] even after unloading the model, the ollama docker container still has a model loaded, why not just kill the container when you unload the model?
 - [ ] is the token count actually accurate? the current "used" tokens, but also the tokens in the transcript. Do they update after edititing a paragraph?
 
 ## Nice to have
