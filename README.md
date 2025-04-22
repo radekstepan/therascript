@@ -20,7 +20,6 @@
 - [*] think about the starred messages popover, the list/UI looks odd
 - [*] move env files to root dir
 - [ ] is the token count actually accurate? the current "used" tokens, but also the tokens in the transcript. Do they update after edititing a paragraph?
-- [ ] Ctrl+C out of the running app (yarn dev) keeps Ollama Docker still up; same with Whisper. These need to be killed when the process that started them is killed
 - [ ] when you fail to pull a model, putting a correct link won't start the pull (clear existing pull errors)
 - [ ] you should clear the input field when you send a message and be able to type your new message while the AI is responding
 

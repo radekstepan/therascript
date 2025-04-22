@@ -9,5 +9,5 @@
   ],
   "delay": "1500ms",
   "exec": "node ./dist/server.js",
-  "signal": "SIGTERM"
+  "verbose": true
 }
