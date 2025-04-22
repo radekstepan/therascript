@@ -1,32 +1,147 @@
-import Database from 'better-sqlite3';
+import Database from 'better-sqlite3'; // <-- Keep Database import
 import path from 'node:path';
 import fs from 'node:fs/promises';
+import crypto from 'node:crypto'; // For schema hashing
 // --- Use fileURLToPath to get directory ---
 import { fileURLToPath } from 'node:url';
-// --- Don't rely on config for paths in preload, resolve directly ---
-import { initializeDatabase } from './db/sqliteService.js'; // Keep this import
-import { calculateTokenCount } from './services/fileService.js'; // <-- Import token calculator
+// --- REMOVE sqliteService import ---
+// import { initializeDatabase } from './db/sqliteService.js';
+import { calculateTokenCount } from './services/fileService.js'; // Keep this
 
 // --- Determine paths relative to *this file's* location within packages/api ---
 const __filename = fileURLToPath(import.meta.url);
 // Assuming build output is in 'dist', navigate up to the 'packages/api' root
-// dist/preloadDb.js -> dist/ -> packages/api/
-const packageApiDir = path.resolve(__filename, '../../'); // Go up two levels from dist/preloadDb.js
+// Example: /path/to/project/packages/api/dist/preloadDb.js -> /path/to/project/packages/api/
+const packageApiDir = path.resolve(__filename, '../../');
 
-// --- Construct paths *within* packages/api/data ---
-const dbDir = path.join(packageApiDir, 'data'); // Target packages/api/data
-const dbPath = path.join(dbDir, 'therapy-analyzer.sqlite'); // Target packages/api/data/therapy-analyzer.sqlite
-const transcriptsBaseDir = path.join(dbDir, 'transcripts'); // Target packages/api/data/transcripts
-// --- End Path Determination ---
+// --- Explicitly define target paths within packages/api ---
+const targetDataDir = path.join(packageApiDir, 'data'); // Target: /path/to/project/packages/api/data
+const targetDbPath = path.join(targetDataDir, 'therapy-analyzer.sqlite'); // Target DB file
+const targetTranscriptsDir = path.join(targetDataDir, 'transcripts'); // Target: /path/to/project/packages/api/data/transcripts
+// --- End Explicit Path Definition ---
 
 
+// --- Copy Schema Definition Directly Here ---
+const SCHEMA_HASH_KEY = 'schema_md5'; // Key for storing the hash
+const schema = `
+    -- Sessions Table
+    CREATE TABLE IF NOT EXISTS sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        fileName TEXT NOT NULL,
+        clientName TEXT NOT NULL,
+        sessionName TEXT NOT NULL,
+        date TEXT NOT NULL, -- ISO 8601 timestamp string
+        sessionType TEXT NOT NULL,
+        therapy TEXT NOT NULL,
+        transcriptPath TEXT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        whisperJobId TEXT NULL,
+        audioPath TEXT NULL, -- Added column for the path/identifier to the original audio file
+        transcriptTokenCount INTEGER NULL -- Added column for transcript token count
+    );
+    -- Chats Table
+    CREATE TABLE IF NOT EXISTS chats (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sessionId INTEGER NOT NULL,
+        timestamp INTEGER NOT NULL, -- UNIX Millis Timestamp for sorting/display
+        name TEXT,
+        -- Ensures that deleting a session automatically deletes its associated chats
+        FOREIGN KEY (sessionId) REFERENCES sessions (id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_chat_session ON chats (sessionId);
+    CREATE INDEX IF NOT EXISTS idx_chat_timestamp ON chats (timestamp); -- Added index for chat sorting
+
+    -- Messages Table (Updated)
+    CREATE TABLE IF NOT EXISTS messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        chatId INTEGER NOT NULL,
+        sender TEXT NOT NULL CHECK(sender IN ('user', 'ai')),
+        text TEXT NOT NULL,
+        timestamp INTEGER NOT NULL, -- UNIX Millis Timestamp for sorting/display
+        promptTokens INTEGER,
+        completionTokens INTEGER,
+        -- Ensures that deleting a chat automatically deletes its associated messages
+        FOREIGN KEY (chatId) REFERENCES chats (id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_message_chat ON messages (chatId);
+    CREATE INDEX IF NOT EXISTS idx_message_timestamp ON messages (timestamp);
+
+    -- Schema Metadata Table (New)
+    CREATE TABLE IF NOT EXISTS schema_metadata (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );
+`;
+
+// --- Copy Schema Verification Logic Directly Here ---
+function calculateSchemaHash(schemaString: string): string {
+    return crypto.createHash('md5').update(schemaString).digest('hex');
+}
+
+function verifySchemaVersion(dbInstance: Database.Database, currentSchemaDefinition: string) {
+    console.log('[Preload Schema Check]: Verifying schema version...');
+    const currentSchemaHash = calculateSchemaHash(currentSchemaDefinition);
+    console.log(`[Preload Schema Check]: Current schema definition hash: ${currentSchemaHash}`);
+
+    let storedSchemaHash: string | undefined;
+    try {
+        // Ensure schema_metadata table exists before querying it
+        dbInstance.exec(`
+            CREATE TABLE IF NOT EXISTS schema_metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+        `);
+        const row = dbInstance.prepare('SELECT value FROM schema_metadata WHERE key = ?').get(SCHEMA_HASH_KEY) as { value: string } | undefined;
+        storedSchemaHash = row?.value;
+    } catch (error) {
+        console.warn(`[Preload Schema Check]: Could not read stored schema hash:`, error);
+        storedSchemaHash = undefined;
+    }
+
+    if (storedSchemaHash) {
+        console.log(`[Preload Schema Check]: Stored schema hash found: ${storedSchemaHash}`);
+        if (currentSchemaHash === storedSchemaHash) {
+            console.log('[Preload Schema Check]: Schema version matches stored hash. OK.');
+        } else {
+            console.error('---------------------------------------------------------------------');
+            console.error('[Preload Schema Check]: FATAL ERROR: Schema definition mismatch!');
+            console.error(`  > Current schema hash in code : ${currentSchemaHash}`);
+            console.error(`  > Stored schema hash in DB    : ${storedSchemaHash}`);
+            console.error('  > The schema defined here (or in sqliteService.ts) has changed.');
+            console.error('  > To resolve:');
+            console.error('  >   1. Ensure all intended schema changes are reflected here.');
+            console.error(`  >   2. Backup your database file (${targetDbPath}).`);
+            console.error('  >   3. Delete the database file to allow re-initialization.');
+            console.error('---------------------------------------------------------------------');
+            dbInstance.close(); // Close the local connection before exiting
+            process.exit(1);
+        }
+    } else {
+        console.log('[Preload Schema Check]: No stored schema hash found. Storing current hash.');
+        try {
+            dbInstance.prepare('INSERT OR REPLACE INTO schema_metadata (key, value) VALUES (?, ?)')
+                      .run(SCHEMA_HASH_KEY, currentSchemaHash);
+            console.log(`[Preload Schema Check]: Stored current schema hash (${currentSchemaHash}) in database.`);
+        } catch (insertError) {
+            console.error(`[Preload Schema Check]: FATAL: Failed to store initial schema hash:`, insertError);
+            dbInstance.close(); // Close the local connection before exiting
+            process.exit(1);
+        }
+    }
+}
+// --- End Copied Logic ---
+
+
+// --- Restore Verification Interface ---
 interface SessionVerificationData {
     id: number;
     status: string;
     transcriptPath: string | null; // This will now be RELATIVE
     date: string; // Expect ISO string now
-    transcriptTokenCount: number | null; // <-- Added for verification
+    transcriptTokenCount: number | null;
 }
+// --- End Restore ---
 
 // Helper to create ISO timestamp slightly offset for sorting demo
 const createIsoTimestamp = (dateStr: string, offsetMinutes: number = 0): string => {
@@ -35,7 +150,7 @@ const createIsoTimestamp = (dateStr: string, offsetMinutes: number = 0): string 
     return baseDate.toISOString();
 };
 
-// Sample data - Use helper for dates
+// Sample data - Use helper for dates (Content unchanged)
 const sampleSessions = [
   {
     localIdRef: 1,
@@ -117,13 +232,13 @@ const sampleSessions = [
 
 async function preloadDatabase() {
     // --- Use paths resolved relative to this script ---
-    console.log(`[Preload] Database file target: ${dbPath}`);
-    console.log(`[Preload] Transcripts directory target: ${transcriptsBaseDir}`);
+    console.log(`[Preload] Database file target: ${targetDbPath}`);
+    console.log(`[Preload] Transcripts directory target: ${targetTranscriptsDir}`);
 
     // Ensure DB file is deleted before preloading for clean slate
-    console.log(`[Preload] Attempting to delete existing database file: ${dbPath}`);
+    console.log(`[Preload] Attempting to delete existing database file: ${targetDbPath}`);
     try {
-        await fs.unlink(dbPath);
+        await fs.unlink(targetDbPath);
         console.log(`[Preload] Deleted existing database file.`);
     } catch (err: any) {
         if (err.code === 'ENOENT') {
@@ -134,46 +249,80 @@ async function preloadDatabase() {
         }
     }
 
-    // --- Ensure the target directory exists ---
-    console.log(`[Preload] Ensuring database directory exists: ${dbDir}`);
+    // --- Ensure the target directories exists ---
+    console.log(`[Preload] Ensuring base data directory exists: ${targetDataDir}`);
     try {
-        await fs.mkdir(dbDir, { recursive: true });
-        console.log(`[Preload] Database directory confirmed/created: ${dbDir}`);
+        await fs.mkdir(targetDataDir, { recursive: true });
+        console.log(`[Preload] Base directory confirmed/created: ${targetDataDir}`);
     } catch (err) {
-         console.error(`[Preload] Failed to create database directory ${dbDir}:`, err);
+         console.error(`[Preload] Failed to create base directory ${targetDataDir}:`, err);
          process.exit(1); // Exit if we can't create the directory
+    }
+    console.log(`[Preload] Ensuring transcript directory exists: ${targetTranscriptsDir}`);
+    try {
+        await fs.mkdir(targetTranscriptsDir, { recursive: true });
+        console.log(`[Preload] Transcript directory confirmed/created.`);
+    } catch (err) {
+        console.error(`[Preload] Failed to create transcript directory ${targetTranscriptsDir}:`, err);
+        process.exit(1); // Exit if we can't create the directory
     }
     // --- End Directory Check ---
 
-    // --- Connect using the resolved path ---
-    console.log(`[Preload] Connecting to database at ${dbPath}`);
+    // --- Connect using the explicit target path ---
+    console.log(`[Preload] Connecting to database at ${targetDbPath}`);
     let db: Database.Database | null = null; // Initialize as null
     let success = false;
 
     const fileWritePromises: Promise<void>[] = [];
-    const sessionsToVerify: { name: string; expectedRelativePath: string; expectedDate: string; expectedTokenCount: number | null }[] = []; // <-- Renamed expectedPathEnding
+    const sessionsToVerify: { name: string; expectedRelativePath: string; expectedDate: string; expectedTokenCount: number | null }[] = [];
 
     try {
         // --- Initialize DB Connection Inside Try ---
-        db = new Database(dbPath, { verbose: console.log });
-        console.log(`[Preload] Database connection established: ${dbPath}`);
+        db = new Database(targetDbPath, { verbose: console.log }); // Use explicit path
+        console.log(`[Preload] Database connection established: ${targetDbPath}`);
         // --- End Initialization ---
 
-
-        console.log(`[Preload] Ensuring transcript directory exists: ${transcriptsBaseDir}`);
-        await fs.mkdir(transcriptsBaseDir, { recursive: true });
-        console.log(`[Preload] Transcript directory confirmed/created.`);
-
-        // Initialize the schema using the imported function
+        // --- Initialize Schema Directly Here ---
         console.log('[Preload] Initializing database schema...');
-        initializeDatabase(db); // This function needs the DB instance
-        console.log('[Preload] Database schema initialized.');
+        try {
+            db.pragma('journal_mode = WAL');
+            db.pragma('busy_timeout = 5000');
+            db.pragma('foreign_keys = ON');
+            console.log('[Preload Schema Init]: WAL mode and foreign keys enabled.');
+
+            db.exec(schema); // Execute the schema string defined above
+            console.log('[Preload Schema Init]: Database schema exec command executed.');
+
+            // --- Basic Migrations (Optional but recommended) ---
+            const sessionColumns = db.pragma("table_info(sessions)") as { name: string; type: string; }[];
+            const hasAudioPath = sessionColumns.some((col) => col.name === 'audioPath');
+            const hasTokenCount = sessionColumns.some((col) => col.name === 'transcriptTokenCount');
+            const messageColumns = db.pragma("table_info(messages)") as { name: string; type: string; }[];
+            const hasPromptTokens = messageColumns.some((col) => col.name === 'promptTokens');
+            const hasCompletionTokens = messageColumns.some((col) => col.name === 'completionTokens');
+
+            if (!hasAudioPath) { console.log('[Preload Schema Migration]: Adding "audioPath" column...'); db.exec("ALTER TABLE sessions ADD COLUMN audioPath TEXT NULL"); }
+            if (!hasTokenCount) { console.log('[Preload Schema Migration]: Adding "transcriptTokenCount" column...'); db.exec("ALTER TABLE sessions ADD COLUMN transcriptTokenCount INTEGER NULL"); }
+            if (!hasPromptTokens) { console.log('[Preload Schema Migration]: Adding "promptTokens" column to messages...'); db.exec("ALTER TABLE messages ADD COLUMN promptTokens INTEGER NULL"); }
+            if (!hasCompletionTokens) { console.log('[Preload Schema Migration]: Adding "completionTokens" column to messages...'); db.exec("ALTER TABLE messages ADD COLUMN completionTokens INTEGER NULL"); }
+
+            // --- Verify Schema Version ---
+             verifySchemaVersion(db, schema); // Verify the schema using the local function
+
+            console.log('[Preload Schema Init]: Schema initialization and verification complete.');
+
+        } catch (initError) {
+            console.error('[Preload Schema Init]: Error initializing database schema:', initError);
+            if (db && db.open) { try { db.close(); } catch (closeErr) {} }
+            throw initError; // Re-throw to stop the script
+        }
+        // --- End Schema Initialization ---
 
         // Prepare statements (now safe, tables exist)
         const insertSession = db.prepare(/* SQL */ `
           INSERT INTO sessions (fileName, clientName, sessionName, date, sessionType, therapy, transcriptPath, audioPath, status, whisperJobId, transcriptTokenCount)
           VALUES (@fileName, @clientName, @sessionName, @date, @sessionType, @therapy, NULL, NULL, @status, @whisperJobId, @transcriptTokenCount)
-        `); // <-- Added tokenCount placeholder
+        `);
         const updateSessionPathAndAudio = db.prepare(/* SQL */ `
           UPDATE sessions SET transcriptPath = ?, audioPath = ? WHERE id = ?
         `);
@@ -210,7 +359,7 @@ async function preloadDatabase() {
 
                 // *** Store RELATIVE path in DB ***
                 const relativeTranscriptPath = `${sessionId}.json`;
-                const absoluteTranscriptPath = path.join(transcriptsBaseDir, relativeTranscriptPath); // For writing file
+                const absoluteTranscriptPath = path.join(targetTranscriptsDir, relativeTranscriptPath); // For writing file
                 // *** End Change ***
 
                 // Simulate audio path being stored (use filename as identifier)
@@ -256,7 +405,7 @@ async function preloadDatabase() {
         // If the error is the Disk I/O error, provide more context
         if (error instanceof Error && error.message.includes('disk I/O error')) {
             console.error('[Preload Hint] Disk I/O errors often relate to permissions, file locking, or directory issues.');
-            console.error(`[Preload Hint] Check write permissions for the target directory: ${dbDir}`);
+            console.error(`[Preload Hint] Check write permissions for the target directory: ${targetDataDir}`); // Use explicit target path
             console.error('[Preload Hint] Ensure no other process is holding the database file open.');
         }
     } finally {
@@ -298,7 +447,8 @@ async function preloadDatabase() {
                         console.error(`[Preload Verification] FAILED: Session '${sessionToVerify.name}' (ID: ${dbSession.id}) relative path mismatch or missing. Found: '${dbSession.transcriptPath}', Expected: '${sessionToVerify.expectedRelativePath}'.`);
                         verificationPassed = false;
                     } else {
-                        const absolutePathToCheck = path.join(transcriptsBaseDir, dbSession.transcriptPath); // Reconstruct absolute path
+                        // Use explicit target path for checking
+                        const absolutePathToCheck = path.join(targetTranscriptsDir, dbSession.transcriptPath);
                         try {
                             await fs.access(absolutePathToCheck);
                             console.log(`[Preload Verification] File check PASSED for path '${absolutePathToCheck}'.`);
