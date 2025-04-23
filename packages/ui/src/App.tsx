@@ -9,7 +9,7 @@ import axios from 'axios';
 
 import { LandingPage } from './components/LandingPage/LandingPage';
 import { SessionView } from './components/SessionView/SessionView';
-import { StandaloneChatView } from './components/StandaloneChatView/StandaloneChatView'; // <-- Import new view
+import { StandaloneChatView } from './components/StandaloneChatView/StandaloneChatView'; // <-- Import updated view
 import { UploadModal } from './components/UploadModal/UploadModal';
 
 import {
@@ -43,7 +43,9 @@ function App() {
   return (
     <Toast.Provider swipeDirection="right">
       <Theme appearance={effectiveTheme} accentColor="teal" panelBackground="solid" radius="small" scaling="100%">
+        {/* Ensure root div allows Flex layout */}
         <div className="flex flex-col min-h-screen">
+          {/* Main content area should allow flex-grow */}
           <main className="flex-grow flex flex-col overflow-y-auto">
             <Routes>
               <Route path="/" element={<LandingPage />} />
@@ -84,3 +86,5 @@ function App() {
 }
 
 export default App;
+
+// TODO comments should not be removed
