@@ -3,7 +3,7 @@ import { chatRepository } from '../repositories/chatRepository.js';
 import {
     createStandaloneChat, listStandaloneChats, getStandaloneChatDetails,
     addStandaloneChatMessage, renameStandaloneChat, deleteStandaloneChat
-} from '../api/chatHandler.js'; // Import standalone handlers
+} from '../api/standaloneChatHandler.js'; // <-- Import standalone handlers
 import { NotFoundError, BadRequestError } from '../errors.js';
 import type { BackendChatSession, BackendChatMessage, ChatMetadata } from '../types/index.js'; // Import types
 

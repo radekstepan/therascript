@@ -38,6 +38,7 @@
 ## Refactor
 
 - [ ] centralize types into a separate package
+- [ ] detect similar code
 - [ ] 4 spaces everywhere plus autoformat on git commit
 - [ ] remove unused logic
 - [ ] split into smaller files

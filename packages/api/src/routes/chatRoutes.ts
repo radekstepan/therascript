@@ -3,8 +3,8 @@ import { Elysia, t } from 'elysia';
 import { chatRepository } from '../repositories/chatRepository.js';
 import { sessionRepository } from '../repositories/sessionRepository.js';
 import {
-    createSessionChat, addSessionChatMessage, renameSessionChat, deleteSessionChat, getSessionChatDetails // Use session-specific handlers
-} from '../api/chatHandler.js';
+    createSessionChat, addSessionChatMessage, renameSessionChat, deleteSessionChat, getSessionChatDetails
+} from '../api/sessionChatHandler.js'; // <-- Use session-specific handlers
 import { NotFoundError, BadRequestError } from '../errors.js';
 import type { BackendChatSession, BackendChatMessage, ChatMetadata } from '../types/index.js'; // Import types
 

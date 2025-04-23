@@ -253,6 +253,13 @@ function transaction<T>(fn: (...args: any[]) => T): (...args: any[]) => T {
     return db.transaction(fn);
 }
 
+// --- Moved from dbAccess.ts ---
+// TODO move to sqliteService
+// Simple wrapper to check database health
+export const checkDatabaseHealth = (): void => {
+  db.pragma('quick_check');
+};
+// --- End Moved ---
 
 // --- Process Event Listeners ---
 process.on('exit', closeDb);
