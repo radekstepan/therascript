@@ -1,3 +1,4 @@
+// Path: packages/api/src/preloadDb.ts
 import Database from 'better-sqlite3'; // <-- Keep Database import
 import path from 'node:path';
 import fs from 'node:fs/promises';
@@ -5,7 +6,6 @@ import crypto from 'node:crypto'; // For schema hashing
 // --- Use fileURLToPath to get directory ---
 import { fileURLToPath } from 'node:url';
 // --- REMOVE sqliteService import ---
-// import { initializeDatabase } from './db/sqliteService.js';
 import { calculateTokenCount } from './services/fileService.js'; // Keep this
 
 // --- Determine paths relative to *this file's* location within packages/api ---
@@ -21,8 +21,9 @@ const targetTranscriptsDir = path.join(targetDataDir, 'transcripts'); // Target:
 // --- End Explicit Path Definition ---
 
 
-// --- Copy Schema Definition Directly Here ---
+// --- Copy Schema Definition Directly Here (Ensure it matches sqliteService.ts) ---
 const SCHEMA_HASH_KEY = 'schema_md5'; // Key for storing the hash
+// *** THIS SCHEMA MUST MATCH the one in sqliteService.ts ***
 const schema = `
     -- Sessions Table
     CREATE TABLE IF NOT EXISTS sessions (
@@ -39,13 +40,14 @@ const schema = `
         audioPath TEXT NULL, -- Added column for the path/identifier to the original audio file
         transcriptTokenCount INTEGER NULL -- Added column for transcript token count
     );
-    -- Chats Table
+    -- Chats Table (sessionId is now NULLABLE)
     CREATE TABLE IF NOT EXISTS chats (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        sessionId INTEGER NOT NULL,
+        sessionId INTEGER NULL, -- Session ID is optional for standalone chats
         timestamp INTEGER NOT NULL, -- UNIX Millis Timestamp for sorting/display
         name TEXT,
-        -- Ensures that deleting a session automatically deletes its associated chats
+        -- Ensures that deleting a session automatically deletes its associated session chats
+        -- Standalone chats (sessionId IS NULL) are unaffected by session deletion.
         FOREIGN KEY (sessionId) REFERENCES sessions (id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_chat_session ON chats (sessionId);
@@ -72,6 +74,7 @@ const schema = `
         value TEXT NOT NULL
     );
 `;
+// *** END SCHEMA DEFINITION ***
 
 // --- Copy Schema Verification Logic Directly Here ---
 function calculateSchemaHash(schemaString: string): string {
@@ -160,7 +163,7 @@ const sampleSessions = [
     date: createIsoTimestamp('2025-04-01', 0), // Use full timestamp
     sessionType: 'Individual',
     therapy: 'CBT',
-    transcriptContent: [ /* ... transcript content ... */
+    transcriptContent: [
         { id: 0, timestamp: 0, text: "Therapist: Hi Jane, thanks for coming in today. Let's start by talking a little bit about what brought you here. How have you been feeling lately?" },
         { id: 1, timestamp: 6500, text: "Jane: Hi. Um, thanks for seeing me. Lately... not great, honestly. Work's been incredibly stressful, more than usual. I feel overwhelmed most days." },
         { id: 2, timestamp: 14200, text: "Therapist: Okay, overwhelmed and stressed due to work. Can you tell me a bit more about what's happening at work? What specific situations are feeling stressful?" },
@@ -191,7 +194,7 @@ const sampleSessions = [
     date: createIsoTimestamp('2025-04-02', 0), // Use full timestamp
     sessionType: 'Individual',
     therapy: 'Mindfulness',
-    transcriptContent: [ /* ... transcript content ... */
+    transcriptContent: [
         { id: 0, timestamp: 0, text: "Therapist: Hi John, welcome back. Last week we talked about incorporating some mindfulness practices to help manage anxiety. How has that been going over the past week?" },
         { id: 1, timestamp: 7100, text: "John: Hi. It's been... okay. I tried the breathing exercise you suggested a few times. It does seem to help a bit when I feel the anxiety start to ramp up, like before a meeting." },
         { id: 2, timestamp: 15800, text: "Therapist: That's great to hear that you tried it and noticed some benefit, especially in those moments before meetings. Can you describe what 'helping a bit' feels like? What changes did you notice?" },
@@ -231,7 +234,6 @@ const sampleSessions = [
 ];
 
 async function preloadDatabase() {
-    // --- Use paths resolved relative to this script ---
     console.log(`[Preload] Database file target: ${targetDbPath}`);
     console.log(`[Preload] Transcripts directory target: ${targetTranscriptsDir}`);
 
@@ -245,7 +247,6 @@ async function preloadDatabase() {
              console.log(`[Preload] Database file not found (ENOENT), proceeding.`);
         } else {
              console.error(`[Preload] Error deleting existing database file:`, err);
-             // Don't exit immediately, let directory creation handle it
         }
     }
 
@@ -294,6 +295,7 @@ async function preloadDatabase() {
             console.log('[Preload Schema Init]: Database schema exec command executed.');
 
             // --- Basic Migrations (Optional but recommended) ---
+            // Migrations are less critical if we always delete the DB first, but good practice
             const sessionColumns = db.pragma("table_info(sessions)") as { name: string; type: string; }[];
             const hasAudioPath = sessionColumns.some((col) => col.name === 'audioPath');
             const hasTokenCount = sessionColumns.some((col) => col.name === 'transcriptTokenCount');
@@ -381,6 +383,7 @@ async function preloadDatabase() {
 
                 for (const chat of session.chats) {
                     const timestamp = Date.now() + Math.floor(Math.random() * 1000); // Add small random offset for demo sorting
+                    // Insert chat with the correct sessionId
                     const chatResult = insertChat.run(sessionId, timestamp, chat.name === undefined ? null : chat.name);
                     const chatId = chatResult.lastInsertRowid;
                     for (const message of chat.messages) {
@@ -402,21 +405,21 @@ async function preloadDatabase() {
     } catch (error) {
         console.error('[Preload] Error during preloading process:', error);
         success = false; // Ensure success is false on error
-        // If the error is the Disk I/O error, provide more context
         if (error instanceof Error && error.message.includes('disk I/O error')) {
             console.error('[Preload Hint] Disk I/O errors often relate to permissions, file locking, or directory issues.');
-            console.error(`[Preload Hint] Check write permissions for the target directory: ${targetDataDir}`); // Use explicit target path
+            console.error(`[Preload Hint] Check write permissions for the target directory: ${targetDataDir}`);
             console.error('[Preload Hint] Ensure no other process is holding the database file open.');
         }
+         // Log specific constraint errors if they occur during preload itself
+         if (error instanceof Error && error.message.includes('SQLITE_CONSTRAINT')) {
+             console.error('[Preload Hint] SQLite constraint violation during data insertion. Check sample data against schema.');
+         }
     } finally {
         // --- Verification Step ---
-        // Check if db was successfully initialized before verifying
         if (success && db && db.open) {
             console.log('[Preload Verification] Checking database entries...');
             try {
-                // --- Update verification query ---
                 const verifyStmt = db.prepare('SELECT id, status, transcriptPath, date, transcriptTokenCount FROM sessions WHERE sessionName = ?');
-                // --- End update ---
                 let verificationPassed = true;
 
                 for (const sessionToVerify of sessionsToVerify) {
@@ -435,12 +438,10 @@ async function preloadDatabase() {
                         console.error(`[Preload Verification] FAILED: Session '${sessionToVerify.name}' (ID: ${dbSession.id}) has date '${dbSession.date}', expected '${sessionToVerify.expectedDate}'.`);
                          verificationPassed = false;
                     }
-                    // --- Verify token count ---
                     if (dbSession.transcriptTokenCount !== sessionToVerify.expectedTokenCount) {
                         console.error(`[Preload Verification] FAILED: Session '${sessionToVerify.name}' (ID: ${dbSession.id}) has token count '${dbSession.transcriptTokenCount}', expected '${sessionToVerify.expectedTokenCount}'.`);
                         verificationPassed = false;
                     }
-                    // --- End verification ---
 
                     // *** Check relative path and file existence ***
                     if (!dbSession.transcriptPath || dbSession.transcriptPath !== sessionToVerify.expectedRelativePath) {
@@ -467,7 +468,7 @@ async function preloadDatabase() {
             } catch(verifyError) { console.error('[Preload Verification] Error checking DB entries:', verifyError); success = false; }
         } else if (!db) {
              console.error('[Preload] Database connection was not established. Skipping verification.');
-             success = false; // Ensure success is false if DB connection failed
+             success = false;
         }
         // --- End Verification ---
 

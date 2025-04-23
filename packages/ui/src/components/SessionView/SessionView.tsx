@@ -11,7 +11,7 @@ import { SessionContent } from './SessionContent';
 import { EditDetailsModal } from './Modals/EditDetailsModal';
 import { LlmManagementModal } from './Modals/LlmManagementModal';
 import {
-    fetchSession, fetchTranscript, startNewChat, fetchChatDetails,
+    fetchSession, fetchTranscript, startSessionChat, fetchSessionChatDetails, // Updated API names
     fetchOllamaStatus,
 } from '../../api/api';
 import type { Session, SessionMetadata, ChatSession, StructuredTranscript, OllamaStatus } from '../../types';
@@ -59,28 +59,33 @@ export function SessionView() {
     // Fetch Ollama Status (Default model)
     const { data: ollamaStatus, isLoading: isLoadingOllamaStatus, error: ollamaError } = useQuery<OllamaStatus, Error>({
         queryKey: ['ollamaStatus'],
-        // --- FIX: Wrap API call to match useQuery signature ---
         queryFn: () => fetchOllamaStatus(), // Call without args for default status
-        // --- END FIX ---
         staleTime: 60 * 1000,
         refetchOnWindowFocus: true,
-        // Polling is handled manually in the modal now
         refetchInterval: false,
     });
 
 
      // Start Chat Mutation
-     const startChatMutation = useMutation({
-        mutationFn: () => { if (!sessionIdNum) throw new Error("Session ID is missing"); return startNewChat(sessionIdNum); },
-        onSuccess: (newChat) => {
+     const startChatMutation = useMutation<ChatSession, Error>({ // Explicit types
+        mutationFn: () => { if (!sessionIdNum) throw new Error("Session ID is missing"); return startSessionChat(sessionIdNum); }, // Use correct API
+        onSuccess: (newChat) => { // Type newChat
              queryClient.setQueryData<Session>(['sessionMeta', sessionIdNum], (oldData) => { if (!oldData) return oldData; const existingChats = Array.isArray(oldData.chats) ? oldData.chats : []; const newChatMetadata: ChatSession = { id: newChat.id, sessionId: newChat.sessionId, timestamp: newChat.timestamp, name: newChat.name, messages: [] }; return { ...oldData, chats: [...existingChats, newChatMetadata] }; });
-             queryClient.prefetchQuery({ queryKey: ['chat', sessionIdNum, newChat.id], queryFn: () => startNewChat(sessionIdNum!).then((chat: ChatSession) => fetchChatDetails(chat.sessionId, chat.id)), });
-             navigate(`/sessions/${sessionIdNum}/chats/${newChat.id}`);
+             // FIX: Ensure sessionIdNum is not null before using it
+             if (sessionIdNum !== null) {
+                 queryClient.prefetchQuery({
+                     queryKey: ['chat', sessionIdNum, newChat.id],
+                     queryFn: () => fetchSessionChatDetails(sessionIdNum!, newChat.id), // Assert non-null
+                 });
+                 navigate(`/sessions/${sessionIdNum}/chats/${newChat.id}`);
+             } else {
+                  console.error("Cannot prefetch or navigate: sessionIdNum is null");
+             }
          },
         onError: (error) => { console.error("Failed to start new chat:", error); /* TODO: add user feedback */ }
     });
 
-    // Resizing Logic
+    // Resizing Logic (unchanged)
     const handleMouseMove = useCallback((e: MouseEvent) => { if (!isResizing.current || !sidebarRef.current) return; const containerRect = sidebarRef.current.parentElement?.getBoundingClientRect(); if (!containerRect) return; let newWidth = e.clientX - containerRect.left; setSidebarWidth(newWidth); }, [setSidebarWidth]);
     const handleMouseUp = useCallback(() => { if (isResizing.current) { isResizing.current = false; document.body.style.cursor = ''; document.body.style.userSelect = ''; document.removeEventListener('mousemove', handleMouseMove); document.removeEventListener('mouseup', handleMouseUp); } }, [handleMouseMove]);
     const handleMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => { e.preventDefault(); isResizing.current = true; document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none'; document.addEventListener('mousemove', handleMouseMove); document.addEventListener('mouseup', handleMouseUp); }, [handleMouseMove, handleMouseUp]);
@@ -109,7 +114,7 @@ export function SessionView() {
      }, [sessionIdParam, chatIdParam, sessionMetadata, activeChatId, navigate, setActiveSessionId, setActiveChatId]);
 
 
-    // Cleanup Resizer Listeners
+    // Cleanup Resizer Listeners (unchanged)
     useEffect(() => { return () => { if (isResizing.current) { document.removeEventListener('mousemove', handleMouseMove); document.removeEventListener('mouseup', handleMouseUp); document.body.style.cursor = ''; document.body.style.userSelect = ''; isResizing.current = false; } }; }, [handleMouseMove, handleMouseUp]);
 
 
@@ -128,7 +133,8 @@ export function SessionView() {
 
     const displayTitle = sessionMetadata.sessionName || sessionMetadata.fileName;
     const hasChats = sessionMetadata.chats && sessionMetadata.chats.length > 0;
-    const currentActiveChatIdFromParam = chatIdParam ? parseInt(chatIdParam, 10) : null;
+    // Use the ID derived from URL param first, then fallback to atom value
+    const currentActiveChatId = chatIdParam ? parseInt(chatIdParam, 10) : (activeChatId ?? null);
 
     return (
         <Flex flexGrow="1" style={{ height: '100vh', overflow: 'hidden' }}>
@@ -161,7 +167,7 @@ export function SessionView() {
                         session={sessionMetadata}
                         transcriptContent={transcriptContent}
                         onEditDetailsClick={handleOpenEditMetadataModal}
-                        activeChatId={currentActiveChatIdFromParam ?? activeChatId}
+                        activeChatId={currentActiveChatId} // Pass derived activeChatId
                         hasChats={hasChats}
                         onStartFirstChat={handleStartFirstChat}
                         isLoadingSessionMeta={isLoadingSessionMeta || isFetchingSessionMeta}
@@ -169,7 +175,6 @@ export function SessionView() {
                         isLoadingTranscript={isLoadingTranscript}
                         transcriptError={transcriptError}
                         // --- Pass LLM props down ---
-                        // Pass the default status query result here
                         ollamaStatus={ollamaStatus}
                         isLoadingOllamaStatus={isLoadingOllamaStatus}
                         onOpenLlmModal={handleOpenLlmModal}

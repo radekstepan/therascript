@@ -1,10 +1,10 @@
+/* packages/ui/src/components/SessionView/Chat/StarredTemplates.tsx */
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Button, Box, Text, Flex, ScrollArea, Separator } from '@radix-ui/themes';
-// import { starredMessagesAtom } from '../../../store'; // Removed Jotai atom
 import { StarIcon, Cross1Icon } from '@radix-ui/react-icons';
 import { cn } from '../../../utils';
-import type { Session } from '../../../types'; // Need Session type
+import type { Session, ChatSession, ChatMessage } from '../../../types'; // Need Session type
 
 interface StarredTemplatesProps {
     onSelectTemplate: (text: string) => void;
@@ -12,28 +12,34 @@ interface StarredTemplatesProps {
 }
 
 export function StarredTemplatesList({ onSelectTemplate, onClose }: StarredTemplatesProps) {
-    // Fetch *all* sessions to find starred messages across them.
-    // This could be inefficient if there are many sessions/messages.
-    // A dedicated API endpoint for starred templates would be better.
-    const { data: sessions } = useQuery<Session[], Error>({ queryKey: ['sessions'] }); // Assumes sessions are cached
+    // TODO: This component is temporarily broken because fetchSessions no longer fetches
+    // full chat messages for performance reasons. A dedicated API endpoint is needed
+    // to fetch *only* starred messages/templates.
+    // const { data: sessions } = useQuery<Session[], Error>({ queryKey: ['sessions'] });
+    const sessions: Session[] = []; // Temporary empty data
 
     const starredMessages = React.useMemo(() => {
         const allStarred: { id: number; text: string; starredName?: string }[] = [];
         if (!sessions) return allStarred;
 
+        // This logic will not run correctly until sessions include full message data again
+        // or a new endpoint is used.
         sessions.forEach((session) => {
             (Array.isArray(session.chats) ? session.chats : []).forEach((chat) => {
-                (Array.isArray(chat.messages) ? chat.messages : []).forEach((msg) => {
-                    if (msg.starred && msg.sender === 'user') { // Only show user's starred messages
-                        // Ensure uniqueness just in case (shouldn't happen with unique IDs)
-                        if (!allStarred.some((starred) => starred.id === msg.id)) {
-                            allStarred.push({ id: msg.id, text: msg.text, starredName: msg.starredName });
+                 // We need the full ChatSession with messages here, but Session type only has metadata
+                 // This check will likely always fail now as chat.messages doesn't exist on the Pick<> type
+                 // The `as ChatSession` cast is a temporary workaround to satisfy TS, but the logic is flawed
+                 if (Array.isArray((chat as ChatSession).messages)) {
+                    (chat as ChatSession).messages!.forEach((msg: ChatMessage) => {
+                        if (msg.starred && msg.sender === 'user') {
+                            if (!allStarred.some((starred) => starred.id === msg.id)) {
+                                allStarred.push({ id: msg.id, text: msg.text, starredName: msg.starredName });
+                            }
                         }
-                    }
-                });
+                    });
+                 }
             });
         });
-        // Optional: Sort starred messages? e.g., alphabetically by name or text
         allStarred.sort((a, b) => (a.starredName || a.text).localeCompare(b.starredName || b.text));
         return allStarred;
     }, [sessions]);
@@ -59,7 +65,8 @@ export function StarredTemplatesList({ onSelectTemplate, onClose }: StarredTempl
                     {(!starredMessages || starredMessages.length === 0) ? (
                          <Flex align="center" justify="center" p="4" style={{ minHeight: 80 }}>
                              <Text size="2" color="gray" align="center">
-                                No starred messages yet. Star a user message to create a template.
+                                {/* TODO: Update this message or remove the feature until fixed */}
+                                Starred messages unavailable (needs API update).
                              </Text>
                          </Flex>
                     ) : (

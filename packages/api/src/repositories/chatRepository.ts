@@ -1,31 +1,34 @@
-import { get, all, run } from '../db/sqliteService.js'; // Use synchronous helpers
-import type { BackendChatSession, BackendChatMessage } from '../types/index.js';
+import { get, all, run } from '../db/sqliteService.js'; // Keep .js extension
+import type { BackendChatSession, BackendChatMessage, ChatMetadata } from '../types/index.js'; // Keep .js extension
 
 // --- SQL Statements ---
 const insertChatSql = 'INSERT INTO chats (sessionId, timestamp, name) VALUES (?, ?, ?)';
-// --- Modified INSERT statement for messages ---
 const insertMessageSql = `
     INSERT INTO messages (chatId, sender, text, timestamp, promptTokens, completionTokens)
     VALUES (?, ?, ?, ?, ?, ?)
 `;
-// --- End Modification ---
-const selectChatsBySessionIdSql = 'SELECT * FROM chats WHERE sessionId = ? ORDER BY timestamp DESC';
+const selectChatsBySessionIdSql = 'SELECT id, sessionId, timestamp, name FROM chats WHERE sessionId = ? ORDER BY timestamp DESC'; // Select only metadata
+const selectStandaloneChatsSql = 'SELECT id, sessionId, timestamp, name FROM chats WHERE sessionId IS NULL ORDER BY timestamp DESC'; // Select only metadata
 const selectMessagesByChatIdSql = 'SELECT * FROM messages WHERE chatId = ? ORDER BY id ASC'; // Keep sort by ID
-const selectChatByIdSql = 'SELECT * FROM chats WHERE id = ?';
+const selectChatByIdSql = 'SELECT * FROM chats WHERE id = ?'; // Fetch full row for single chat lookup
 const selectMessageByIdSql = 'SELECT * FROM messages WHERE id = ?';
 const updateChatNameSql = 'UPDATE chats SET name = ? WHERE id = ?';
-// SQL statement to delete a chat by ID. Foreign key constraints handle related messages.
 const deleteChatSql = 'DELETE FROM chats WHERE id = ?';
 
 // Helper to combine chat row with its messages (now synchronous)
 const findChatWithMessages = (chatId: number): BackendChatSession | null => {
     try {
-        const chatRow = get<Omit<BackendChatSession, 'messages'>>(selectChatByIdSql, chatId);
+        const chatRow = get<BackendChatSession>(selectChatByIdSql, chatId); // Fetch full chat row
         if (!chatRow) return null;
-        // Use the modified SQL query here
         const messages = all<BackendChatMessage>(selectMessagesByChatIdSql, chatId);
-        console.log(`[findChatWithMessages DEBUG] Fetched ${messages.length} messages for Chat ID ${chatId} using ORDER BY id ASC.`); // Add log
-        return { ...chatRow, messages };
+        console.log(`[findChatWithMessages DEBUG] Fetched ${messages.length} messages for Chat ID ${chatId} using ORDER BY id ASC.`);
+        // Ensure messages is always an array and sessionId can be null
+        return {
+            ...chatRow,
+            sessionId: chatRow.sessionId ?? null, // Ensure null if DB returns null
+            name: chatRow.name ?? null, // Ensure null if DB returns null
+            messages: messages ?? [] // Ensure array
+        };
     } catch (error) {
         console.error(`DB error fetching chat ${chatId}:`, error);
         throw new Error(`Database error fetching chat ${chatId}.`);
@@ -33,31 +36,38 @@ const findChatWithMessages = (chatId: number): BackendChatSession | null => {
 };
 
 export const chatRepository = {
-    createChat: (sessionId: number): BackendChatSession => {
+    // createChat returns the full BackendChatSession now
+    createChat: (sessionId: number | null): BackendChatSession => {
         const timestamp = Date.now();
         try {
             const info = run(insertChatSql, sessionId, timestamp, null);
             const newChatId = info.lastInsertRowid as number;
-            const newChat = findChatWithMessages(newChatId);
-            if (!newChat) throw new Error(`Failed retrieve chat ${newChatId} immediately after creation.`);
-            return newChat;
+            const newChatRow = get<BackendChatSession>(selectChatByIdSql, newChatId); // Fetch the full row
+            if (!newChatRow) throw new Error(`Failed retrieve chat ${newChatId} immediately after creation.`);
+            console.log(`[ChatRepo] Created ${sessionId ? 'session' : 'standalone'} chat ${newChatId}${sessionId ? ' in session ' + sessionId : ''}`);
+            // Return the full chat structure, ensuring messages is an empty array and sessionId nullability
+            return {
+                ...newChatRow,
+                sessionId: newChatRow.sessionId ?? null,
+                name: newChatRow.name ?? null,
+                messages: []
+            };
         } catch (error) {
-            console.error(`DB error creating chat for session ${sessionId}:`, error);
-            throw new Error(`Database error creating chat.`);
+            console.error(`DB error creating chat ${sessionId ? `for session ${sessionId}` : '(standalone)'}:`, error);
+            // Throw the original error to potentially catch constraint violations upstream
+            throw new Error(`Database error creating chat: ${error instanceof Error ? error.message : String(error)}`);
         }
     },
 
-    // --- Modified addMessage to include optional tokens ---
     addMessage: (
         chatId: number,
         sender: 'user' | 'ai',
         text: string,
-        promptTokens?: number | null, // Optional
-        completionTokens?: number | null // Optional
+        promptTokens?: number | null,
+        completionTokens?: number | null
     ): BackendChatMessage => {
-        const timestamp = Date.now(); // Keep timestamp for potential display or other uses
+        const timestamp = Date.now();
         try {
-            // Pass tokens (or null if undefined/null) to the SQL query
             const info = run(
                 insertMessageSql,
                 chatId,
@@ -70,63 +80,86 @@ export const chatRepository = {
             const newMessageId = info.lastInsertRowid as number;
             const newMessage = get<BackendChatMessage>(selectMessageByIdSql, newMessageId);
             if (!newMessage) throw new Error(`Failed retrieve message ${newMessageId} immediately after creation.`);
-            // Log the inserted message details including tokens
-            console.log(`[chatRepository.addMessage DEBUG] Inserted Msg ID: ${newMessage.id}, Sender: ${newMessage.sender}, Tokens: P${newMessage.promptTokens ?? '-'}/C${newMessage.completionTokens ?? '-'}`);
+            console.log(`[chatRepository.addMessage DEBUG] Inserted Msg ID: ${newMessage.id}, ChatID: ${chatId}, Sender: ${newMessage.sender}, Tokens: P${newMessage.promptTokens ?? '-'}/C${newMessage.completionTokens ?? '-'}`);
             return newMessage;
         } catch (error) {
             console.error(`DB error adding message to chat ${chatId}:`, error);
             throw new Error(`Database error adding message.`);
         }
     },
-    // --- End Modification ---
 
-    findChatsBySessionId: (sessionId: number): BackendChatSession[] => {
+    // Returns ChatMetadata for session chats (sessionId guaranteed to be number)
+    findChatsBySessionId: (sessionId: number): (ChatMetadata & { sessionId: number })[] => {
         try {
-            const chatRows = all<Omit<BackendChatSession, 'messages'>>(selectChatsBySessionIdSql, sessionId);
-            // This map will now use the helper findChatWithMessages which uses the corrected ORDER BY id
-            const chatsWithMessages = chatRows.map((chatRow) => {
-                return findChatWithMessages(chatRow.id);
-            }).filter((chat): chat is BackendChatSession => chat !== null); // Filter out nulls just in case find fails
-            return chatsWithMessages;
+            const chatRows = all<ChatMetadata>(selectChatsBySessionIdSql, sessionId);
+            // Ensure sessionId is typed as number and name is not undefined
+            // Add type annotation for map parameter 'chat'
+            return chatRows.map((chat: ChatMetadata) => ({
+                id: chat.id,
+                sessionId: chat.sessionId as number, // Assert non-null sessionId for session chats
+                timestamp: chat.timestamp,
+                name: chat.name ?? null // Ensure name is null if undefined
+            }));
         } catch (error) {
             console.error(`DB error fetching chats for session ${sessionId}:`, error);
             throw new Error(`Database error fetching chats.`);
         }
     },
 
+    // Returns ChatMetadata with sessionId guaranteed null for standalone chats
+    findStandaloneChats: (): (ChatMetadata & { sessionId: null })[] => {
+        try {
+            const chatRows = all<ChatMetadata>(selectStandaloneChatsSql);
+            console.log(`[ChatRepo] Found ${chatRows.length} standalone chats.`);
+            // Add type annotation for map parameter 'chat'
+            return chatRows.map((chat: ChatMetadata): ChatMetadata & { sessionId: null } => ({
+                id: chat.id,
+                sessionId: null, // Explicitly set to null
+                timestamp: chat.timestamp,
+                name: chat.name ?? null, // Ensure name is null if undefined
+            }));
+        } catch (error) {
+            console.error(`DB error fetching standalone chats:`, error);
+            throw new Error(`Database error fetching standalone chats.`);
+        }
+    },
+
+    // findChatById returns full BackendChatSession
     findChatById: (chatId: number): BackendChatSession | null => {
-        // This already uses findChatWithMessages, which now uses the corrected ORDER BY id
         return findChatWithMessages(chatId);
     },
 
     findMessagesByChatId: (chatId: number): BackendChatMessage[] => {
         try {
-             // Use the modified SQL query here too
             const messages = all<BackendChatMessage>(selectMessagesByChatIdSql, chatId);
-            console.log(`[findMessagesByChatId DEBUG] Fetched ${messages.length} messages for Chat ID ${chatId} using ORDER BY id ASC.`); // Add log
-            // Log timestamps and tokens for debugging if needed
-            messages.slice(-5).forEach(m => console.log(`[findMessagesByChatId DEBUG] Msg ID=${m.id}, Sender=${m.sender}, TS=${m.timestamp}, Tokens=P${m.promptTokens ?? '-'}/C${m.completionTokens ?? '-'}`));
-            return messages;
+            console.log(`[findMessagesByChatId DEBUG] Fetched ${messages.length} messages for Chat ID ${chatId} using ORDER BY id ASC.`);
+            return messages ?? []; // Ensure array return
         } catch (error) {
             console.error(`DB error fetching messages for chat ${chatId}:`, error);
             throw new Error(`Database error fetching messages.`);
         }
     },
 
-    // Explicitly accept null for name parameter
-    updateChatName: (chatId: number, name: string | null): BackendChatSession | null => {
+    // updateChatName now returns ChatMetadata
+    updateChatName: (chatId: number, name: string | null): ChatMetadata | null => {
         try {
-            // Pass name directly (which can be null)
              run(updateChatNameSql, name, chatId);
-            return findChatWithMessages(chatId);
+             const updatedChatRow = get<BackendChatSession>(selectChatByIdSql, chatId); // Fetch full row to get sessionId
+             if (!updatedChatRow) return null;
+             // Construct ChatMetadata, ensuring sessionId type is preserved
+             const finalMetadata: ChatMetadata = {
+                 id: updatedChatRow.id,
+                 sessionId: updatedChatRow.sessionId ?? null, // Preserve null for standalone
+                 timestamp: updatedChatRow.timestamp,
+                 name: updatedChatRow.name ?? null,
+             };
+             return finalMetadata;
         } catch (error) {
             console.error(`DB error updating name for chat ${chatId}:`, error);
             throw new Error(`Database error updating chat name.`);
         }
     },
 
-    // Performs a hard delete on the chat record.
-    // Related message records are deleted automatically due to `ON DELETE CASCADE`.
     deleteChatById: (chatId: number): boolean => {
         try {
             console.log(`[chatRepository:deleteChatById] Executing DELETE for chat ID: ${chatId}`);

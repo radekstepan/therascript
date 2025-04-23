@@ -1,27 +1,29 @@
 import React, { useState } from 'react';
 import { NavLink, useParams, useNavigate } from 'react-router-dom';
 import { useAtomValue } from 'jotai';
-import { useMutation, useQueryClient } from '@tanstack/react-query'; // Removed useQuery
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-    activeChatIdAtom, // Keep for knowing current selection
-    // activeSessionIdAtom, // Keep for knowing current selection - NO, rely on sessionId from props
-    toastMessageAtom, // <-- Added for toast feedback
+    activeChatIdAtom,
+    toastMessageAtom,
 } from '../../../store';
-// Removed fetchSession import
-// Added fetchChatDetails import
-import { deleteChat as deleteChatApi, renameChat as renameChatApi, startNewChat as startNewChatApi, fetchChatDetails } from '../../../api/api';
+import {
+    deleteSessionChat as deleteChatApi, // Use specific API
+    renameSessionChat as renameChatApi, // Use specific API
+    startSessionChat as startNewChatApi, // Use specific API
+    fetchSessionChatDetails, // Use specific API
+} from '../../../api/api';
 import {
     DotsHorizontalIcon,
     Pencil1Icon,
     TrashIcon,
     PlusCircledIcon,
-    Cross2Icon, // Added for Cancel buttons
-    CheckIcon, // Added for Save button
+    Cross2Icon,
+    CheckIcon,
 } from '@radix-ui/react-icons';
 import {
     Box,
     Flex,
-    Text, // Use Text component
+    Text,
     Heading,
     Button,
     IconButton,
@@ -31,97 +33,82 @@ import {
     ScrollArea,
     Spinner
 } from '@radix-ui/themes';
-import { useSetAtom } from 'jotai'; // <-- Added for toast
+import { useSetAtom } from 'jotai';
 import { formatTimestamp } from '../../../helpers';
 import type { ChatSession, Session } from '../../../types';
 import { cn } from '../../../utils';
 
 interface SessionSidebarProps {
-    session: Session | null; // Receive session data
-    isLoading: boolean;      // Receive loading state
-    error: Error | null;     // Receive error state
-    hideHeader?: boolean;    // New prop to hide the header
+    session: Session | null;
+    isLoading: boolean;
+    error: Error | null;
+    hideHeader?: boolean;
 }
 
-// Accept props
 export function SessionSidebar({ session, isLoading: isLoadingSession, error: sessionError, hideHeader = false }: SessionSidebarProps) {
-    const { chatId: chatIdParam } = useParams<{ sessionId: string; chatId?: string }>(); // Only need chatIdParam here
+    const { chatId: chatIdParam } = useParams<{ sessionId: string; chatId?: string }>();
     const navigate = useNavigate();
-    const setToast = useSetAtom(toastMessageAtom); // <-- For toast feedback
+    const setToast = useSetAtom(toastMessageAtom);
 
-    // Always call useAtomValue unconditionally to follow rules of hooks
     const activeChatIdFromAtom = useAtomValue(activeChatIdAtom);
-
-    // Determine current active chat ID from URL param, falling back to Jotai if needed (though URL should be canonical)
     const currentActiveChatId = chatIdParam ? parseInt(chatIdParam, 10) : activeChatIdFromAtom;
 
-    // const currentActiveSessionId = useAtomValue(activeSessionIdAtom); // Session ID comes from props now
     const queryClient = useQueryClient();
 
     const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
     const [renamingChat, setRenamingChat] = useState<ChatSession | null>(null);
     const [currentRenameValue, setCurrentRenameValue] = useState('');
-    // const [renameError, setRenameError] = useState<string | null>(null); // Handled by mutation state
 
     const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
     const [deletingChat, setDeletingChat] = useState<ChatSession | null>(null);
-    // const [deleteError, setDeleteError] = useState<string | null>(null); // Handled by mutation state
 
-    // Get session ID from the session prop
     const sessionId = session?.id ?? null;
 
-    // REMOVED the useQuery hook for sessionMeta here
-
     // Mutation: Start New Chat
-    const startNewChatMutation = useMutation({
+    const startNewChatMutation = useMutation<ChatSession, Error>({ // Explicit types
         mutationFn: () => {
             if (!sessionId) throw new Error("Session ID missing");
             return startNewChatApi(sessionId);
         },
-        onSuccess: (newChat) => {
-            setToast("New chat started."); // <-- Added toast
-            // Update session meta cache optimistically or invalidate
+        onSuccess: (newChat) => { // Type newChat
+            setToast("New chat started.");
             queryClient.setQueryData<Session>(['sessionMeta', sessionId], (oldData) => {
                  if (!oldData) return oldData;
                  const existingChats = Array.isArray(oldData.chats) ? oldData.chats : [];
-                 // Add only metadata of new chat
-                 // Ensure the object added conforms to ChatSession metadata part
                  const newChatMetadata: ChatSession = {
                     id: newChat.id,
-                    sessionId: newChat.sessionId, // Use sessionId from newChat response
+                    sessionId: newChat.sessionId, // Make sure sessionId is correct type
                     timestamp: newChat.timestamp,
                     name: newChat.name,
-                    messages: [] // Start with empty messages
+                    messages: []
                  };
                  return { ...oldData, chats: [...existingChats, newChatMetadata] };
             });
-            // OR invalidate: queryClient.invalidateQueries({ queryKey: ['sessionMeta', sessionId] });
-
-             // Pre-fetch the new chat's details
-            queryClient.prefetchQuery({
-                queryKey: ['chat', sessionId, newChat.id],
-                // Use fetchChatDetails with correct IDs from newChat response
-                queryFn: () => fetchChatDetails(newChat.sessionId, newChat.id),
-            });
-
-            // Navigate to the new chat immediately
-            navigate(`/sessions/${sessionId}/chats/${newChat.id}`);
+             // FIX: Ensure sessionId is not null before prefetching
+             if (sessionId !== null) {
+                queryClient.prefetchQuery({
+                    queryKey: ['chat', sessionId, newChat.id],
+                    queryFn: () => fetchSessionChatDetails(sessionId!, newChat.id), // Assert non-null
+                });
+                navigate(`/sessions/${sessionId}/chats/${newChat.id}`);
+             } else {
+                console.error("Cannot prefetch or navigate: sessionId is null");
+             }
         },
         onError: (error) => {
             console.error("Failed to start new chat:", error);
-            setToast(`Error starting chat: ${error.message}`); // <-- Added toast
+            setToast(`Error starting chat: ${error.message}`);
         }
     });
 
     // Mutation: Rename Chat
-    const renameChatMutation = useMutation({
+    const renameChatMutation = useMutation<ChatSession, Error, { chatId: number; newName: string | null }>({ // Explicit types
         mutationFn: (variables: { chatId: number; newName: string | null }) => {
             if (!sessionId) throw new Error("Session ID missing");
             return renameChatApi(sessionId, variables.chatId, variables.newName);
         },
-        onSuccess: (updatedChatMetadata) => {
-             setToast("Chat renamed successfully."); // <-- Added toast
-             // Update session meta cache optimistically
+        onSuccess: (updatedChatMetadata) => { // Type updatedChatMetadata
+             setToast("Chat renamed successfully.");
              queryClient.setQueryData<Session>(['sessionMeta', sessionId], (oldData) => {
                  if (!oldData) return oldData;
                  return {
@@ -131,44 +118,40 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
                      ),
                  };
              });
-             // OR invalidate: queryClient.invalidateQueries({ queryKey: ['sessionMeta', sessionId] });
-
-              // Also update the specific chat query cache if it exists
-              queryClient.setQueryData<ChatSession>(['chat', sessionId, updatedChatMetadata.id], (oldChatData) => {
-                   if (!oldChatData) return oldChatData;
-                   return { ...oldChatData, name: updatedChatMetadata.name };
-              });
-            cancelRename(); // Close modal on success
+              // FIX: Ensure sessionId is not null before setting chat data
+              if (sessionId !== null) {
+                 queryClient.setQueryData<ChatSession>(['chat', sessionId, updatedChatMetadata.id], (oldChatData) => {
+                      if (!oldChatData) return oldChatData;
+                      return { ...oldChatData, name: updatedChatMetadata.name };
+                 });
+              }
+            cancelRename();
         },
         onError: (error) => {
              console.error("Failed to rename chat:", error);
-             // Error message shown in modal via mutation state, but add toast
              setToast(`Error renaming chat: ${error.message}`);
         },
     });
 
     // Mutation: Delete Chat
-    // Performs a hard delete via the API
-    const deleteChatMutation = useMutation({
+    const deleteChatMutation = useMutation<{ message: string }, Error, number>({ // Explicit types
         mutationFn: (chatId: number) => {
             if (!sessionId) throw new Error("Session ID missing");
-            return deleteChatApi(sessionId, chatId); // This API performs the hard delete
+            return deleteChatApi(sessionId, chatId);
         },
         onSuccess: (data, deletedChatId) => {
-            setToast(`Chat deleted successfully.`); // <-- Added toast
+            setToast(`Chat deleted successfully.`);
             let nextChatId: number | null = null;
-            // Determine next navigation target *before* modifying cache
             const sessionDataBeforeDelete = queryClient.getQueryData<Session>(['sessionMeta', sessionId]);
             const remainingChats = sessionDataBeforeDelete?.chats?.filter(c => c.id !== deletedChatId) || [];
 
-            if (currentActiveChatId === deletedChatId) { // Only navigate if the *deleted* chat was active
+            if (currentActiveChatId === deletedChatId) {
                 if (remainingChats.length > 0) {
                     const newestChat = [...remainingChats].sort((a, b) => b.timestamp - a.timestamp)[0];
                     nextChatId = newestChat.id;
                 }
             }
 
-            // Update session meta cache optimistically
             queryClient.setQueryData<Session>(['sessionMeta', sessionId], (oldData) => {
                  if (!oldData) return oldData;
                  return {
@@ -176,12 +159,9 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
                      chats: oldData.chats?.filter(c => c.id !== deletedChatId) || [],
                  };
             });
-            // OR invalidate: queryClient.invalidateQueries({ queryKey: ['sessionMeta', sessionId] });
 
-            // Remove the specific chat query from cache
             queryClient.removeQueries({ queryKey: ['chat', sessionId, deletedChatId] });
 
-            // Perform navigation if needed
             if (currentActiveChatId === deletedChatId) {
                 if (nextChatId !== null) {
                     navigate(`/sessions/${sessionId}/chats/${nextChatId}`, { replace: true });
@@ -189,11 +169,10 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
                     navigate(`/sessions/${sessionId}`, { replace: true });
                 }
             }
-             cancelDelete(); // Close modal on success
+             cancelDelete();
         },
         onError: (error) => {
              console.error("Failed to delete chat:", error);
-             // Error message shown in modal via mutation state, but add toast
              setToast(`Error deleting chat: ${error.message}`);
         },
     });
@@ -214,6 +193,7 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
         );
     }
 
+    // Ensure chats is an array before sorting/mapping
     const chatsDefinedAndIsArray = Array.isArray(session?.chats);
     const sortedChats = chatsDefinedAndIsArray
         ? [...session.chats].sort((a, b) => b.timestamp - a.timestamp)
@@ -229,7 +209,6 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
     const handleSaveRename = () => {
         if (!renamingChat || renameChatMutation.isPending) return;
         renameChatMutation.mutate({ chatId: renamingChat.id, newName: currentRenameValue.trim() || null });
-        // Don't close modal here, onSuccess will handle it
     };
     const cancelRename = () => { setIsRenameModalOpen(false); setRenamingChat(null); setCurrentRenameValue(''); renameChatMutation.reset(); };
 
@@ -237,7 +216,6 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
     const confirmDelete = () => {
         if (!deletingChat || deleteChatMutation.isPending) return;
         deleteChatMutation.mutate(deletingChat.id);
-         // Don't close modal here, onSuccess will handle it
     };
     const cancelDelete = () => { setIsDeleteConfirmOpen(false); setDeletingChat(null); deleteChatMutation.reset(); };
 
@@ -250,9 +228,7 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
 
     return (
         <>
-            {/* Apply padding based on whether header is shown */}
             <Box p={hideHeader ? "1" : "4"} className="flex flex-col h-full w-full overflow-hidden" style={{ backgroundColor: 'var(--color-panel-solid)' }}>
-                {/* Conditionally render the header */}
                 {!hideHeader && (
                     <Flex justify="between" align="center" flexShrink="0" mb="2">
                         <Heading as="h3" size="2" color="gray" trim="start" weight="medium">Chats</Heading>
@@ -267,7 +243,6 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
                     </Flex>
                  )}
 
-                 {/* Always render the new chat button if header is hidden (for tab view) */}
                  {hideHeader && (
                      <Flex justify="end" align="center" flexShrink="0" mb="2">
                         <Button
@@ -358,11 +333,9 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
                         {renameChatMutation.isError && <Text color="red" size="1">Error: {renameChatMutation.error.message}</Text>}
                     </Flex>
                     <Flex gap="3" mt="4" justify="end">
-                        {/* Use Button with onClick for Cancel, not AlertDialog.Cancel to prevent closing while pending */}
                          <Button variant="soft" color="gray" onClick={cancelRename} disabled={renameChatMutation.isPending}>
                             <Cross2Icon /> Cancel
                          </Button>
-                         {/* Use Button with onClick for Action */}
                          <Button onClick={handleSaveRename} disabled={renameChatMutation.isPending}>
                             {renameChatMutation.isPending ? (
                                 <> <Spinner size="2"/> <Text ml="1">Saving...</Text> </>
@@ -381,11 +354,9 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
                     {deletingChat && <AlertDialog.Description size="2" color="gray" mt="1" mb="4">Are you sure you want to delete "{getChatDisplayTitle(deletingChat)}"? This action cannot be undone.</AlertDialog.Description>}
                     {deleteChatMutation.isError && <Text color="red" size="1" mb="3">Error: {deleteChatMutation.error.message}</Text>}
                     <Flex gap="3" mt="4" justify="end">
-                        {/* Use Button with onClick for Cancel */}
                          <Button variant="soft" color="gray" onClick={cancelDelete} disabled={deleteChatMutation.isPending}>
                             <Cross2Icon /> Cancel
                          </Button>
-                         {/* Use Button with onClick for Action */}
                          <Button color="red" onClick={confirmDelete} disabled={deleteChatMutation.isPending}>
                             {deleteChatMutation.isPending ? (
                                 <> <Spinner size="2"/> <Text ml="1">Deleting...</Text> </>

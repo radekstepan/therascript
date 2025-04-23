@@ -1,5 +1,5 @@
 // packages/api/src/routes/sessionRoutes.ts
-import { Elysia, t, type Static, type Context as ElysiaContext, type Cookie } from 'elysia'; // Ensure Cookie and ElysiaContext are imported
+import { Elysia, t, type Static, type Context as ElysiaContext, type Cookie } from 'elysia';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs'; // Sync version for stat check
@@ -7,37 +7,37 @@ import { Readable } from 'node:stream';
 import { sessionRepository } from '../repositories/sessionRepository.js';
 import { chatRepository } from '../repositories/chatRepository.js';
 import {
-    listSessions, getSessionDetails, updateSessionMetadata, // <-- Ensure these are imported
-    getTranscript, updateTranscriptParagraph,                 // <-- Ensure these are imported
-    deleteSessionAudioHandler // <-- Import new handler
-} from '../api/sessionHandler.js'; // <-- Import fixed
+    listSessions, getSessionDetails, updateSessionMetadata,
+    getTranscript, updateTranscriptParagraph,
+    deleteSessionAudioHandler
+} from '../api/sessionHandler.js';
 import {
     saveTranscriptContent,
     deleteTranscriptFile,
-    // *** Import renamed function ***
     deleteUploadedAudioFile,
-    saveUploadedAudio, // *** Import save function ***
-    getAudioAbsolutePath, // *** Import helper ***
-    calculateTokenCount, // <-- Import token calculation helper
+    saveUploadedAudio,
+    getAudioAbsolutePath,
+    calculateTokenCount,
 } from '../services/fileService.js';
 import {
-    startTranscriptionJob, // Keep this
+    startTranscriptionJob,
     getTranscriptionStatus,
     getStructuredTranscriptionResult,
-    // ensureWhisperReady, // <-- Remove this import
-    // stopWhisperService // <-- Remove this import
 } from '../services/transcriptionService.js';
 import type {
     BackendSession,
     BackendSessionMetadata,
     StructuredTranscript,
     TranscriptParagraphData,
-    WhisperJobStatus
+    WhisperJobStatus,
+    ChatMetadata, // Import ChatMetadata
 } from '../types/index.js';
 import { NotFoundError, InternalServerError, ApiError, BadRequestError, ConflictError } from '../errors.js';
 import config from '../config/index.js';
+// --- Removed Response import ---
 
-// --- Schemas (add transcriptTokenCount to responses) ---
+
+// --- Schemas ---
 const SessionIdParamSchema = t.Object({
     sessionId: t.String({ pattern: '^[0-9]+$', error: "Session ID must be a positive number" })
 });
@@ -57,8 +57,8 @@ const SessionMetadataUpdateBodySchema = t.Partial(t.Object({
     fileName: t.Optional(t.String()),
     status: t.Optional(t.Union([ t.Literal('pending'), t.Literal('transcribing'), t.Literal('completed'), t.Literal('failed') ])),
     whisperJobId: t.Optional(t.Union([t.String(), t.Null()])),
-    audioPath: t.Optional(t.Union([t.String(), t.Null()])), // audioPath can be updated/set to null
-    transcriptTokenCount: t.Optional(t.Union([t.Number(), t.Null()])), // <-- Added transcriptTokenCount
+    audioPath: t.Optional(t.Union([t.String(), t.Null()])),
+    transcriptTokenCount: t.Optional(t.Union([t.Number(), t.Null()])),
 }));
 const SessionMetadataResponseSchema = t.Object({
     id: t.Number(),
@@ -69,25 +69,38 @@ const SessionMetadataResponseSchema = t.Object({
     sessionType: t.String(),
     therapy: t.String(),
     transcriptPath: t.Union([t.String(), t.Null()]),
-    audioPath: t.Union([t.String(), t.Null()]), // Added audioPath
+    audioPath: t.Union([t.String(), t.Null()]),
     status: t.String(),
     whisperJobId: t.Union([t.String(), t.Null()]),
-    transcriptTokenCount: t.Optional(t.Union([t.Number(), t.Null()])), // <-- Added transcriptTokenCount
+    transcriptTokenCount: t.Optional(t.Union([t.Number(), t.Null()])),
 });
 const SessionListResponseItemSchema = SessionMetadataResponseSchema;
 
-const ChatMetadataResponseSchema = t.Object({
+// Schema for Chat Metadata (used within SessionWithChats)
+const ChatMetadataSchema = t.Object({
     id: t.Number(),
-    sessionId: t.Number(),
+    sessionId: t.Number(), // Must be a number for session chats
     timestamp: t.Number(),
     name: t.Optional(t.Union([t.String(), t.Null()]))
 });
-const SessionWithChatsMetadataResponseSchema = t.Intersect([
-    SessionMetadataResponseSchema,
-    t.Object({
-        chats: t.Array(ChatMetadataResponseSchema)
-    })
-]);
+
+const SessionWithChatsMetadataResponseSchema = t.Object({
+    id: t.Number(),
+    fileName: t.String(),
+    clientName: t.String(),
+    sessionName: t.String(),
+    date: t.String(),
+    sessionType: t.String(),
+    therapy: t.String(),
+    transcriptPath: t.Union([t.String(), t.Null()]),
+    audioPath: t.Union([t.String(), t.Null()]),
+    status: t.String(),
+    whisperJobId: t.Union([t.String(), t.Null()]),
+    transcriptTokenCount: t.Optional(t.Union([t.Number(), t.Null()])),
+    // Define chats array using ChatMetadataSchema
+    chats: t.Array(ChatMetadataSchema)
+});
+
 
 const TranscriptParagraphSchema = t.Object({
     id: t.Number(),
@@ -196,7 +209,6 @@ const sessionRoutesInstance = new Elysia({ prefix: '/api' })
 
                 // 2. Save the audio file using the session ID
                 const audioBuffer = await audioFile.arrayBuffer();
-                // saveUploadedAudio returns the relative filename (e.g., '123-timestamp.mp3')
                 console.log(`[API Upload] Saving audio file for session ${sessionId}...`);
                 savedAudioIdentifier = await saveUploadedAudio(sessionId, audioFile.name, Buffer.from(audioBuffer));
                 console.log(`[API Upload] Audio saved successfully. Identifier: ${savedAudioIdentifier}`);
@@ -212,7 +224,6 @@ const sessionRoutesInstance = new Elysia({ prefix: '/api' })
                 // 4. Resolve the absolute path *only* for sending to Whisper
                 tempSavedAudioPathForTranscription = getAudioAbsolutePath(savedAudioIdentifier);
                 if (!tempSavedAudioPathForTranscription) {
-                    // This indicates an issue with resolving the path we just saved, serious problem
                     throw new InternalServerError(`Could not resolve absolute path for saved audio identifier: ${savedAudioIdentifier}`);
                 }
                 console.log(`[API Upload] Resolved absolute path for transcription: ${tempSavedAudioPathForTranscription}`);
@@ -236,9 +247,7 @@ const sessionRoutesInstance = new Elysia({ prefix: '/api' })
             } catch (error) {
                  const originalError = error instanceof Error ? error : new Error(String(error));
                  console.error('[API Error] Error during session upload processing:', originalError.message);
-                 if (!(error instanceof ApiError)) { // Log stack for unexpected errors
-                    console.error(originalError.stack);
-                 }
+                 if (!(error instanceof ApiError)) { console.error(originalError.stack); }
 
                  // --- Refined Cleanup Logic for Hard Delete on Failure ---
                  if (newSession?.id) {
@@ -247,14 +256,12 @@ const sessionRoutesInstance = new Elysia({ prefix: '/api' })
                      try {
                          const currentSessionState = sessionRepository.findById(sessionIdForCleanup);
                          if (currentSessionState) {
-                             // Attempt to delete audio file if it was saved
                              if (savedAudioIdentifier) {
                                  console.log(`[API Upload Cleanup] Attempting to delete potentially saved audio file: ${savedAudioIdentifier}`);
                                  try { await deleteUploadedAudioFile(savedAudioIdentifier); } catch (audioDelErr) { console.error(`[API Upload Cleanup] Failed to delete audio file ${savedAudioIdentifier} during cleanup:`, audioDelErr); }
                              } else {
                                 console.log(`[API Upload Cleanup] No audio file identifier recorded, skipping audio delete.`);
                              }
-                             // Delete the database record (this should cascade to chats/messages)
                              console.log(`[API Upload Cleanup] Deleting incomplete/failed DB record for session ${sessionIdForCleanup}.`);
                              sessionRepository.deleteById(sessionIdForCleanup);
                          } else {
@@ -268,7 +275,6 @@ const sessionRoutesInstance = new Elysia({ prefix: '/api' })
                  }
                  // --- End Hard Delete Cleanup Logic ---
 
-                 // Re-throw the original error to be handled by the global error handler
                  if (error instanceof ApiError) throw error;
                  const errorMessage = error instanceof Error ? error.message : 'Unknown error during upload';
                  throw new InternalServerError(`Session upload failed: ${errorMessage}`, error instanceof Error ? error : undefined);
@@ -284,7 +290,6 @@ const sessionRoutesInstance = new Elysia({ prefix: '/api' })
             body: 'uploadBody',
             response: {
                 202: t.Object({ sessionId: t.Number(), jobId: t.String(), message: t.String() }),
-                // Add specific error schemas
                 400: t.Object({ error: t.String(), message: t.String(), details: t.Optional(t.Any()) }), // BadRequestError
                 500: t.Object({ error: t.String(), message: t.String(), details: t.Optional(t.Any()) }), // InternalServerError
                 503: t.Object({ error: t.String(), message: t.String(), details: t.Optional(t.Any()) })  // ServiceUnavailableError
@@ -302,7 +307,7 @@ const sessionRoutesInstance = new Elysia({ prefix: '/api' })
                  return { sessionData: session };
               })
              .get('/:sessionId', ({ sessionData, set }) => getSessionDetails({ sessionData, set }), {
-                 response: { 200: 'sessionWithChatsMetadataResponse' },
+                 response: { 200: 'sessionWithChatsMetadataResponse' }, // Uses corrected schema
                  detail: { summary: 'Get session metadata & chat list' }
              })
              .put('/:sessionId/metadata', ({ sessionData, body, set }) => updateSessionMetadata({ sessionData, body, set }), {
@@ -326,23 +331,21 @@ const sessionRoutesInstance = new Elysia({ prefix: '/api' })
                      params: Static<typeof SessionIdParamSchema>,
                      request: Request,
                      set: ElysiaContext['set'],
-                     sessionData: BackendSession // Use derived session data
-                     // Add other context properties if needed by Elysia v1+
+                     sessionData: BackendSession
+                     // Explicitly add missing context properties for Elysia v1+
                      query: Record<string, string | undefined>,
                      body: unknown,
-                     cookie: Record<string, Cookie<any>>, // Add cookie type
-                     path: string, // Add path type
-                     store: ElysiaContext['store'] // Add store type
+                     cookie: Record<string, Cookie<any>>,
+                     path: string,
+                     store: ElysiaContext['store']
                  }
              ) => {
-                const { params, request, set, sessionData } = context;
+                const { request, set, sessionData } = context;
                 const sessionId = sessionData.id;
-                // Use the helper service function with the relative path from DB
                 const absoluteAudioPath = getAudioAbsolutePath(sessionData.audioPath);
 
                 console.log(`[API Audio] Request for audio for session ${sessionId}. Stored Identifier: ${sessionData.audioPath}, Resolved Path: ${absoluteAudioPath}`);
 
-                // Check existence using the resolved absolute path
                 if (!absoluteAudioPath || !fsSync.existsSync(absoluteAudioPath)) {
                     console.error(`[API Audio] Audio file not found for session ${sessionId} at resolved path: ${absoluteAudioPath}`);
                     throw new NotFoundError(`Audio file for session ${sessionId}`);
@@ -353,48 +356,44 @@ const sessionRoutesInstance = new Elysia({ prefix: '/api' })
                     const fileSize = stats.size;
                     const range = request.headers.get('range');
 
+                    const ext = path.extname(absoluteAudioPath).toLowerCase();
+                    const mimeTypes: Record<string, string> = { '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', };
+                    const contentType = mimeTypes[ext] || 'application/octet-stream';
+
                     if (range) {
-                        // Handle range requests (partial content)
                         const parts = range.replace(/bytes=/, "").split("-");
                         const start = parseInt(parts[0], 10);
-                        // End might be missing for requests like "bytes=100-"
                         const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
                         const chunksize = (end - start) + 1;
 
-                        // Validate range
                         if (start >= fileSize || end >= fileSize || start > end) {
-                            set.status = 416; // Range Not Satisfiable
+                            set.status = 416;
                             set.headers['Content-Range'] = `bytes */${fileSize}`;
                             return "Range Not Satisfiable";
                         }
 
                         const fileStream = fsSync.createReadStream(absoluteAudioPath, { start, end });
-                        set.status = 206; // Partial Content
+                        set.status = 206;
                         set.headers['Content-Range'] = `bytes ${start}-${end}/${fileSize}`;
                         set.headers['Accept-Ranges'] = 'bytes';
                         set.headers['Content-Length'] = chunksize.toString();
-                        // Determine Content-Type based on file extension
-                        const ext = path.extname(absoluteAudioPath).toLowerCase();
-                        const mimeTypes: Record<string, string> = { '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', };
-                        set.headers['Content-Type'] = mimeTypes[ext] || 'application/octet-stream';
+                        set.headers['Content-Type'] = contentType;
 
                         console.log(`[API Audio] Serving range ${start}-${end}/${fileSize}`);
-                        // Use Response with ReadableStream for Elysia v1+
-                        return new Response(Readable.toWeb(fileStream) as ReadableStream<Uint8Array>);
+                        // Use Response with ReadableStream
+                        // Cast stream if needed due to potential Node vs standard stream type conflicts
+                        return new Response(Readable.toWeb(fileStream) as any); // Cast stream
 
                     } else {
-                        // Serve the whole file
-                        set.status = 200; // OK
+                        set.status = 200;
                         set.headers['Content-Length'] = fileSize.toString();
-                         // Determine Content-Type based on file extension
-                         const ext = path.extname(absoluteAudioPath).toLowerCase();
-                         const mimeTypes: Record<string, string> = { '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', };
-                        set.headers['Content-Type'] = mimeTypes[ext] || 'application/octet-stream';
+                        set.headers['Content-Type'] = contentType;
                         set.headers['Accept-Ranges'] = 'bytes';
 
                         console.log(`[API Audio] Serving full file (${fileSize} bytes)`);
-                        // Use Response with ReadableStream for Elysia v1+
-                        return new Response(Readable.toWeb(fsSync.createReadStream(absoluteAudioPath)) as ReadableStream<Uint8Array>);
+                        // Use Response with ReadableStream
+                        // Cast stream if needed
+                        return new Response(Readable.toWeb(fsSync.createReadStream(absoluteAudioPath)) as any); // Cast stream
                     }
                 } catch (error) {
                      console.error(`[API Audio] Error streaming audio file for session ${sessionId}:`, error);
@@ -416,24 +415,34 @@ const sessionRoutesInstance = new Elysia({ prefix: '/api' })
 
                   try {
                       const structuredTranscript = await getStructuredTranscriptionResult(jobId);
-                      // Save transcript and get token count
                       const { relativePath: relativeTranscriptPath, tokenCount } = await saveTranscriptContent(sessionId, structuredTranscript);
                       const finalizedSession = sessionRepository.updateMetadata(sessionId, {
                           status: 'completed',
-                          transcriptPath: relativeTranscriptPath, // Store relative path
-                          transcriptTokenCount: tokenCount, // <-- Store token count
+                          transcriptPath: relativeTranscriptPath,
+                          transcriptTokenCount: tokenCount,
                       });
                       if (!finalizedSession) throw new InternalServerError(`Failed to update session ${sessionId} status to completed.`);
                       const finalSessionState = sessionRepository.findById(sessionId);
                       if (!finalSessionState) throw new InternalServerError(`Failed to retrieve session ${sessionId} after finalizing.`);
-                      const existingChats = chatRepository.findChatsBySessionId(sessionId);
-                      let initialChat = existingChats.sort((a, b) => a.timestamp - b.timestamp)[0];
-                      if (!initialChat) { initialChat = chatRepository.createChat(sessionId); chatRepository.addMessage(initialChat.id, 'ai', `Session "${finalizedSession.sessionName}" uploaded on ${finalizedSession.date.split('T')[0]} has been transcribed...`); console.log(`[API Finalize] Initial chat created (ID: ${initialChat.id}) for session ${sessionId}.`); }
-                      const chatsRaw = chatRepository.findChatsBySessionId(sessionId);
-                      const chatsMetadata = chatsRaw.map(c => ({id: c.id, sessionId: c.sessionId, timestamp: c.timestamp, name: c.name}));
+                      // Fetch chat metadata using the correct repo function
+                      const chatsMetadata = chatRepository.findChatsBySessionId(sessionId);
+
+                      // Check if initial chat needs creation
+                      if (!chatsMetadata || chatsMetadata.length === 0) {
+                          const newFullChat = chatRepository.createChat(sessionId);
+                           chatRepository.addMessage(newFullChat.id, 'ai', `Session "${finalizedSession.sessionName}" uploaded on ${finalizedSession.date.split('T')[0]} has been transcribed...`);
+                           console.log(`[API Finalize] Initial chat created (ID: ${newFullChat.id}) for session ${sessionId}.`);
+                           // Re-fetch metadata list after creation
+                           const updatedChatsMetadata = chatRepository.findChatsBySessionId(sessionId);
+                           finalSessionState.chats = updatedChatsMetadata; // Update the session object being returned
+                       } else {
+                            finalSessionState.chats = chatsMetadata; // Assign fetched metadata
+                       }
+
                       console.log(`[API Finalize] Session ${sessionId} finalized successfully.`);
                       set.status = 200;
-                      return { ...finalSessionState, audioPath: finalSessionState.audioPath, chats: chatsMetadata };
+                      // Return the full session state including the updated chats metadata list
+                      return finalSessionState; // This should now match the response schema
                   } catch (error) {
                       console.error(`[API Error] Finalize Session ${sessionId}:`, error);
                       try { sessionRepository.updateMetadata(sessionId, { status: 'failed' }); console.log(`[API Finalize] Marked session ${sessionId} as 'failed'.`); } catch (updateError) { console.error(`[API Finalize] CRITICAL: Failed to mark session ${sessionId} as failed:`, updateError); }
@@ -467,7 +476,6 @@ const sessionRoutesInstance = new Elysia({ prefix: '/api' })
                      // Delete the DB record (this will cascade to chats/messages due to schema constraints)
                      const deleted = sessionRepository.deleteById(sessionId);
                      if (!deleted) {
-                        // If DB record wasn't found after attempting file deletion, log warning but return success
                         console.warn(`[API Delete Session] Session DB record ${sessionId} not found during deletion attempt (may have been deleted already?).`);
                      } else {
                         console.log(`[API Delete Session] Successfully deleted session DB record ${sessionId}.`);
@@ -485,7 +493,6 @@ const sessionRoutesInstance = new Elysia({ prefix: '/api' })
                  detail: { summary: 'Delete a session, its transcript, associated audio, and chats' }
              })
              // --- DELETE Audio Route ---
-             // Performs a hard delete of ONLY the audio file and its DB reference.
              .delete('/:sessionId/audio', ({ sessionData, set }) => deleteSessionAudioHandler({ sessionData, set }), {
                  response: {
                      200: 'deleteResponse', // Use general delete response

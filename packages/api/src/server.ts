@@ -7,7 +7,8 @@ import { swagger } from '@elysiajs/swagger';
 import ollama from 'ollama';
 import config from './config/index.js';
 import { sessionRoutes } from './routes/sessionRoutes.js';
-import { chatRoutes } from './routes/chatRoutes.js';
+import { chatRoutes } from './routes/chatRoutes.js'; // Routes for session chats
+import { standaloneChatRoutes } from './routes/standaloneChatRoutes.js'; // Routes for standalone chats
 import { ApiError, InternalServerError, ConflictError, BadRequestError, NotFoundError } from './errors.js';
 import {
     checkModelStatus, listModels, loadOllamaModel,
@@ -16,18 +17,15 @@ import {
     OllamaPullJobStatus,
 } from './services/ollamaService.js';
 import { setActiveModelAndContext, getActiveModel, getConfiguredContextSize } from './services/activeModelService.js';
-// --- Import new Docker service ---
 import { getProjectContainerStatus } from './services/dockerManagementService.js';
-// --- End Import ---
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import axios from 'axios';
 import type { OllamaModelInfo, DockerContainerStatus } from './types/index.js'; // <-- Added DockerContainerStatus
 import { closeDb } from './db/sqliteService.js'; // Import closeDb
-// REMOVED: import { stopManagedContainers } from './services/dockerService.js'; // Docker cleanup handled externally
 
-// --- Initial setup, version reading, CORS, request logging (unchanged) ---
+// --- Initial setup, version reading, CORS, request logging ---
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 let appVersion = '0.0.0';
@@ -49,7 +47,7 @@ const getErrorMessage = (error: unknown): string => { if (error instanceof Error
 const getErrorStack = (error: unknown): string | undefined => { if (error instanceof Error) return error.stack; return undefined; };
 console.log(`[CORS Config] Allowing origin: ${config.server.corsOrigin}`);
 
-// --- Ollama Response/Request Schemas (unchanged) ---
+// --- Ollama Response/Request Schemas ---
 const OllamaModelDetailSchema = t.Object({ format: t.String(), family: t.String(), families: t.Union([t.Array(t.String()), t.Null()]), parameter_size: t.String(), quantization_level: t.String(), });
 const OllamaModelInfoSchema = t.Object({ name: t.String(), modified_at: t.String(), size: t.Number(), digest: t.String(), details: OllamaModelDetailSchema, size_vram: t.Optional(t.Number()), expires_at: t.Optional(t.String()), size_total: t.Optional(t.Number()), });
 const AvailableModelsResponseSchema = t.Object({ models: t.Array(OllamaModelInfoSchema), });
@@ -64,24 +62,9 @@ const DeleteModelBodySchema = t.Object({ modelName: t.String({ minLength: 1, err
 const DeleteModelResponseSchema = t.Object({ message: t.String() });
 
 // --- Docker Status Schemas ---
-const DockerPortSchema = t.Object({
-    PrivatePort: t.Number(),
-    PublicPort: t.Optional(t.Number()),
-    Type: t.String(),
-    IP: t.Optional(t.String()),
-});
-const DockerContainerStatusSchema = t.Object({
-    id: t.String(),
-    name: t.String(),
-    image: t.String(),
-    state: t.String(),
-    status: t.String(),
-    ports: t.Array(DockerPortSchema),
-});
-const DockerStatusResponseSchema = t.Object({
-    containers: t.Array(DockerContainerStatusSchema),
-});
-// --- End Docker Schemas ---
+const DockerPortSchema = t.Object({ PrivatePort: t.Number(), PublicPort: t.Optional(t.Number()), Type: t.String(), IP: t.Optional(t.String()), });
+const DockerContainerStatusSchema = t.Object({ id: t.String(), name: t.String(), image: t.String(), state: t.String(), status: t.String(), ports: t.Array(DockerPortSchema), });
+const DockerStatusResponseSchema = t.Object({ containers: t.Array(DockerContainerStatusSchema), });
 
 const app = new Elysia()
     .model({
@@ -97,7 +80,6 @@ const app = new Elysia()
         cancelPullResponse: CancelPullResponseSchema,
         deleteModelBody: DeleteModelBodySchema,
         deleteModelResponse: DeleteModelResponseSchema,
-        // Add Docker models
         dockerContainerStatus: DockerContainerStatusSchema,
         dockerStatusResponse: DockerStatusResponseSchema,
     })
@@ -120,12 +102,11 @@ const app = new Elysia()
             info: { title: 'Therascript API (Elysia)', version: appVersion },
             tags: [
                 { name: 'Session', description: 'Session and Transcript Endpoints' },
-                { name: 'Chat', description: 'Chat Interaction Endpoints' },
+                { name: 'Chat', description: 'Chat Interaction Endpoints (within a session)' },
+                { name: 'Standalone Chat', description: 'Chat Interaction Endpoints (not tied to a session)' }, // New Tag
                 { name: 'Transcription', description: 'Transcription Job Management' },
                 { name: 'Ollama', description: 'Ollama LLM Management Endpoints' },
-                // --- Add Docker Tag ---
                 { name: 'Docker', description: 'Docker Container Management' },
-                // --- End Add ---
                 { name: 'Meta', description: 'API Metadata and Health' },
             ]
         }
@@ -140,8 +121,7 @@ const app = new Elysia()
          if (!config.server.isProduction) { const stack = getErrorStack(error); if (stack) console.error("Stack:", stack); if (!(error instanceof Error)) console.error("Full Error Object:", error); }
 
          if (error instanceof ApiError) { set.status = error.status; return { error: error.name, message: error.message, details: error.details }; }
-         if (error instanceof NotFoundError) { set.status = 404; return { error: error.name, message: error.message, details: error.details }; }
-         if (error instanceof ConflictError) { set.status = 409; return { error: error.name, message: error.message, details: error.details }; }
+         // Removed specific NotFoundError/ConflictError handling here, use ApiError base
 
          switch (code) {
              case 'NOT_FOUND': set.status = 404; return { error: 'NotFound', message: `Route ${method} ${path} not found.` };
@@ -160,9 +140,8 @@ const app = new Elysia()
 
          console.error("[Error Handler] Unhandled Error Type:", error); const fallbackError = new InternalServerError('An unexpected server error occurred.', error instanceof Error ? error : undefined); set.status = fallbackError.status; return { error: fallbackError.name, message: fallbackError.message, details: fallbackError.details };
     })
-    // --- Ollama Management Routes (unchanged logic) ---
+    // --- Ollama Management Routes ---
     .group('/api/ollama', { detail: { tags: ['Ollama'] } }, (app) => app
-        // ... (keep existing ollama routes) ...
         .get('/available-models', async ({ set }) => {
             console.log(`[API Models] Requesting available models`);
             try { const models = await listModels(); set.status = 200; return { models }; }
@@ -215,7 +194,7 @@ const app = new Elysia()
         }, { query: t.Optional(t.Object({ modelName: t.Optional(t.String()) })), response: { 200: 'ollamaStatusResponse', 500: t.Any() }, detail: { summary: 'Check loaded status & configured context size for active/specific model' } })
     ) // End /api/ollama group
 
-    // --- NEW Docker Status Route ---
+    // --- Docker Status Route ---
     .group('/api/docker', { detail: { tags: ['Docker'] } }, (app) => app
         .get('/status', async ({ set }) => {
             console.log('[API Docker] Requesting project container status...');
@@ -229,34 +208,30 @@ const app = new Elysia()
                 throw new InternalServerError('Failed to fetch Docker container status.', error);
             }
         }, {
-            response: {
-                200: 'dockerStatusResponse',
-                500: t.Any() // For InternalServerError
-            },
-            detail: {
-                summary: 'Get status of project-related Docker containers'
-            }
+            response: { 200: 'dockerStatusResponse', 500: t.Any() },
+            detail: { summary: 'Get status of project-related Docker containers' }
         })
     ) // End /api/docker group
-    // --- END NEW Docker Route ---
 
-    // --- Existing API Routes (unchanged) ---
+    // --- Meta Endpoints ---
     .get('/api/health', ({ set }) => { try { set.status = 200; return { status: 'OK', database: 'connected', timestamp: new Date().toISOString() }; } catch (dbError) { console.error("[Health Check] Database error:", dbError); throw new InternalServerError('Database connection failed', dbError instanceof Error ? dbError : undefined); } }, { detail: { tags: ['Meta'] } })
     .get('/api/schema', ({ set }) => { set.status = 501; return { message: "API schema definition is not available here. Use /api/docs for Swagger UI." }; }, { detail: { tags: ['Meta'] } })
-    .use(sessionRoutes)
-    .use(chatRoutes);
 
-// --- Server Startup Check (unchanged) ---
+    // --- Core Application Routes ---
+    .use(sessionRoutes)       // Handles /api/sessions/*
+    .use(chatRoutes)          // Handles /api/sessions/:sessionId/chats/*
+    .use(standaloneChatRoutes); // Handles /api/chats/*
+
+// --- Server Startup Check ---
 async function checkOllamaConnectionOnStartup() {
     console.log(`[Server Startup] Checking Ollama connection at ${config.ollama.baseURL}...`);
     try { await axios.get(config.ollama.baseURL, { timeout: 2000 }); console.log("[Server Startup] ✅ Ollama connection successful."); return true; }
     catch (error: any) { console.warn("-------------------------------------------------------"); console.warn(`[Server Startup] ⚠️ Ollama service NOT DETECTED at ${config.ollama.baseURL}`); if (axios.isAxiosError(error)) { if (error.code === 'ECONNREFUSED') { console.warn("   Reason: Connection refused. (This is expected if not started yet)."); } else { console.warn(`   Reason: ${error.message}`); } } else { console.warn(`   Reason: An unexpected error occurred: ${error.message}`); } console.warn("   Ollama service will be started on demand when needed (e.g., loading a model)."); console.warn("-------------------------------------------------------"); return false; }
 }
 
-// --- Server Creation & Start (unchanged) ---
+// --- Server Creation & Start ---
 console.log(`[Server] Creating Node.js HTTP server wrapper on port ${config.server.port}...`);
 const server = http.createServer((req, res) => {
-    // This complex setup might be simplified if not strictly needed, but keeping it for now
     const host = req.headers.host || `localhost:${config.server.port}`; const pathAndQuery = req.url && req.url.startsWith('/') ? req.url : '/'; const url = `http://${host}${pathAndQuery}`;
     let bodyChunks: Buffer[] = [];
     req.on('data', chunk => { bodyChunks.push(chunk); })
@@ -279,7 +254,7 @@ checkOllamaConnectionOnStartup().then(() => {
     });
 });
 
-// --- Graceful Shutdown (Simplified for External Cleanup) ---
+// --- Graceful Shutdown ---
 let isShuttingDown = false;
 async function shutdown(signal: string) {
     console.log(`[API Server Shutdown] Received signal: ${signal}. Checking shutdown status.`);
@@ -288,60 +263,27 @@ async function shutdown(signal: string) {
         return;
     }
     isShuttingDown = true;
-    // Log that Docker cleanup is handled externally now
     console.log(`[API Server Shutdown] Initiating graceful shutdown (Docker cleanup handled externally)...`);
-
-    // 1. Stop HTTP server from accepting new connections
     console.log("[API Server Shutdown] Closing HTTP server...");
-    server.close((err) => { // Removed async here, no await needed
-        if (err) {
-            console.error("[API Server Shutdown] Error closing HTTP server:", err);
-        } else {
-            console.log("[API Server Shutdown] HTTP server closed successfully.");
-        }
-
-        // 2. Close Database connection ONLY
+    server.close((err) => {
+        if (err) console.error("[API Server Shutdown] Error closing HTTP server:", err);
+        else console.log("[API Server Shutdown] HTTP server closed successfully.");
         console.log("[API Server Shutdown] Closing database connection...");
         closeDb();
-
-        // 3. Exit process
         console.log("🚪 [API Server Shutdown] Shutdown sequence complete. Exiting process.");
         process.exitCode = err ? 1 : 0;
-        // Give a very short time for logs to flush before exit
         setTimeout(() => process.exit(process.exitCode), 100);
     });
-
-    // Force exit after a timeout
     setTimeout(() => {
         console.error("🛑 [API Server Shutdown] Shutdown timed out after 10 seconds. Forcing exit.");
         try { closeDb(); } catch { /* ignore */ }
         process.exit(1);
     }, 10000);
 }
-
-// Listen for SIGINT (Ctrl+C) and SIGTERM (standard termination)
-process.on('SIGINT', () => {
-    console.log("[API Server Process] SIGINT received.");
-    shutdown('SIGINT').catch(e => console.error("[API Server Process] Error during SIGINT shutdown:", e));
-});
-process.on('SIGTERM', () => {
-    console.log("[API Server Process] SIGTERM received.");
-    shutdown('SIGTERM').catch(e => console.error("[API Server Process] Error during SIGTERM shutdown:", e));
-});
-
-process.on('uncaughtException', (error, origin) => {
-    console.error(`[API Server FATAL] Uncaught Exception at: ${origin}`, error);
-    if (!isShuttingDown) { try { closeDb(); } catch {} }
-    // Exit immediately on fatal error
-    process.exit(1);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-    console.error('[API Server FATAL] Unhandled Rejection at:', promise, 'reason:', reason);
-    if (!isShuttingDown) { try { closeDb(); } catch {} }
-    process.exit(1); // Exit immediately
-});
-// --- End Graceful Shutdown ---
+process.on('SIGINT', () => { console.log("[API Server Process] SIGINT received."); shutdown('SIGINT').catch(e => console.error("[API Server Process] Error during SIGINT shutdown:", e)); });
+process.on('SIGTERM', () => { console.log("[API Server Process] SIGTERM received."); shutdown('SIGTERM').catch(e => console.error("[API Server Process] Error during SIGTERM shutdown:", e)); });
+process.on('uncaughtException', (error, origin) => { console.error(`[API Server FATAL] Uncaught Exception at: ${origin}`, error); if (!isShuttingDown) { try { closeDb(); } catch {} } process.exit(1); });
+process.on('unhandledRejection', (reason, promise) => { console.error('[API Server FATAL] Unhandled Rejection at:', promise, 'reason:', reason); if (!isShuttingDown) { try { closeDb(); } catch {} } process.exit(1); });
 
 export default app;
 export type App = typeof app;

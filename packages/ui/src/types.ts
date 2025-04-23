@@ -20,7 +20,7 @@ export interface ChatMessage {
 
 export interface ChatSession {
     id: number;
-    sessionId: number;
+    sessionId: number | null; // Session ID can be null for standalone chats
     timestamp: number;
     name?: string;
     messages?: ChatMessage[];
@@ -42,13 +42,31 @@ export interface Session extends SessionMetadata {
     status: 'pending' | 'transcribing' | 'completed' | 'failed';
     whisperJobId: string | null;
     date: string; // ISO string from backend
-    transcriptTokenCount?: number | null; // <-- Added optional token count
-    chats: ChatSession[];
+    transcriptTokenCount?: number | null;
+    // Revert to Pick<> for chats array - StarredTemplates needs dedicated API
+    chats: Pick<ChatSession, 'id' | 'sessionId' | 'timestamp' | 'name'>[]; // List only metadata for sessions
+}
+
+// --- Standalone Chat Type (potentially reused BackendChatSession metadata type) ---
+export interface BackendChatSession {
+  id: number;
+  sessionId: number | null; // Important: can be null
+  timestamp: number;
+  name?: string;
+  messages?: BackendChatMessage[];
+}
+
+export interface BackendChatMessage {
+  id: number;
+  chatId: number;
+  sender: 'user' | 'ai';
+  text: string;
+  timestamp: number;
+  promptTokens?: number;
+  completionTokens?: number;
 }
 
 // --- LLM Management Types ---
-// ... (rest of the types remain the same) ...
-
 export interface OllamaModelInfo {
     name: string;
     modified_at: string;

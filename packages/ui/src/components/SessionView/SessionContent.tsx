@@ -1,3 +1,4 @@
+// Path: packages/ui/src/components/SessionView/SessionContent.tsx
 import React, { useState, useCallback } from 'react';
 import { Box, Flex, Text, Tabs, ScrollArea } from '@radix-ui/themes';
 import type { Session, StructuredTranscript, OllamaStatus } from '../../types'; // Add OllamaStatus
@@ -17,11 +18,9 @@ interface SessionContentProps {
     sessionMetaError: Error | null;
     isLoadingTranscript: boolean;
     transcriptError?: Error | null;
-    // --- New Props ---
     ollamaStatus: OllamaStatus | undefined;
     isLoadingOllamaStatus: boolean;
     onOpenLlmModal: () => void;
-    // --- End New Props ---
 }
 
 export function SessionContent({
@@ -35,11 +34,9 @@ export function SessionContent({
     sessionMetaError,
     isLoadingTranscript,
     transcriptError,
-    // --- Destructure New Props ---
     ollamaStatus,
     isLoadingOllamaStatus,
     onOpenLlmModal,
-    // --- End New Props ---
  }: SessionContentProps) {
     const [activeTab, setActiveTab] = useState<'chats' | 'chat' | 'transcription'>(
         activeChatId === null ? 'chats' : 'chat'
@@ -67,14 +64,13 @@ export function SessionContent({
                 <Flex direction="column" className="w-1/2 h-full" style={{ minHeight: 0 }}>
                     {activeChatId !== null ? (
                         <ChatInterface
-                            session={session}
+                            session={session} // Pass session
                             activeChatId={activeChatId}
+                            isStandalone={false} // Set to false
                             isLoadingSessionMeta={isLoadingSessionMeta}
-                            // --- Pass LLM props ---
                             ollamaStatus={ollamaStatus}
                             isLoadingOllamaStatus={isLoadingOllamaStatus}
                             onOpenLlmModal={onOpenLlmModal}
-                            // --- End LLM props ---
                         />
                     ) : hasChats ? (
                         <Box className="flex flex-grow items-center justify-center h-full" style={{ border: '1px dashed var(--gray-a6)', borderRadius: 'var(--radius-3)' }}>
@@ -109,14 +105,13 @@ export function SessionContent({
                             <Tabs.Content value="chat" className="h-full" style={{ outline: 'none' }}>
                                 {activeChatId !== null ? (
                                     <ChatInterface
-                                        session={session}
+                                        session={session} // Pass session
                                         activeChatId={activeChatId}
+                                        isStandalone={false} // Set to false
                                         isLoadingSessionMeta={isLoadingSessionMeta}
-                                        // --- Pass LLM props ---
                                         ollamaStatus={ollamaStatus}
                                         isLoadingOllamaStatus={isLoadingOllamaStatus}
                                         onOpenLlmModal={onOpenLlmModal}
-                                        // --- End LLM props ---
                                         isTabActive={activeTab === 'chat'}
                                         initialScrollTop={chatScrollPosition}
                                         onScrollUpdate={handleChatScroll}

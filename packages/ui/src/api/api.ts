@@ -9,8 +9,9 @@ import type {
     OllamaStatus,
     AvailableModelsResponse,
     UIPullJobStatus,
-    OllamaModelInfo, // Ensure this is imported
-    DockerContainerStatus, // <-- Import Docker type
+    OllamaModelInfo,
+    DockerContainerStatus,
+    BackendChatSession,
 } from '../types';
 
 // Define the API base URL (ensure this matches your backend)
@@ -25,16 +26,27 @@ export interface UITranscriptionStatus {
     duration?: number;
 }
 
+// Define type for standalone chat list item (metadata only) - Moved from LandingPage
+export interface StandaloneChatListItem {
+  id: number;
+  sessionId: null; // Should always be null
+  timestamp: number;
+  name?: string;
+}
+
+
 // --- Session and Transcript Endpoints ---
 
 // GET /api/sessions/
+// TODO: Revert this back to only fetch metadata once StarredTemplates uses a dedicated API
 export const fetchSessions = async (): Promise<Session[]> => {
     const response = await axios.get('/api/sessions/');
-    return response.data.map((item: any) => ({
-        ...item,
-        transcriptTokenCount: item.transcriptTokenCount, // <-- Ensure token count is mapped
-        chats: item.chats || [],
-    }));
+    // Temporary: Fetch full session details including full chats for StarredTemplates workaround
+    const sessionMetadatas: Pick<Session, 'id'>[] = response.data;
+    const fullSessions = await Promise.all(
+        sessionMetadatas.map(meta => fetchSession(meta.id)) // Fetch full details for each
+    );
+    return fullSessions;
 };
 
 // POST /api/sessions/upload
@@ -68,7 +80,6 @@ export const finalizeSession = async (sessionId: number): Promise<Session> => {
 // GET /api/sessions/{sessionId}
 export const fetchSession = async (sessionId: number): Promise<Session> => {
     const response = await axios.get(`/api/sessions/${sessionId}`);
-    // Ensure audioPath is included and chats array exists
     return {
         ...response.data,
         audioPath: response.data.audioPath || null,
@@ -84,7 +95,8 @@ export const fetchTranscript = async (sessionId: number): Promise<StructuredTran
 };
 
 // GET /api/sessions/{sessionId}/chats/{chatId}
-export const fetchChatDetails = async (sessionId: number, chatId: number): Promise<ChatSession> => {
+// Renamed for clarity: fetches details for a chat *within* a session
+export const fetchSessionChatDetails = async (sessionId: number, chatId: number): Promise<ChatSession> => {
     const response = await axios.get(`/api/sessions/${sessionId}/chats/${chatId}`);
     return response.data;
 };
@@ -114,19 +126,18 @@ export const deleteSessionAudio = async (sessionId: number): Promise<{ message: 
     return response.data;
 };
 
-// --- NEW: Delete Entire Session ---
 // DELETE /api/sessions/{sessionId}
 export const deleteSession = async (sessionId: number): Promise<{ message: string }> => {
     const response = await axios.delete(`/api/sessions/${sessionId}`);
     return response.data;
 };
-// --- END NEW ---
 
 
-// --- Chat Endpoints ---
+// --- Session Chat Endpoints ---
 
 // POST /api/sessions/{sessionId}/chats/
-export const startNewChat = async (sessionId: number): Promise<ChatSession> => {
+// Renamed for clarity: starts a chat *within* a session
+export const startSessionChat = async (sessionId: number): Promise<ChatSession> => {
     const response = await axios.post(`/api/sessions/${sessionId}/chats/`);
     const chatMetadata = response.data;
     return {
@@ -136,14 +147,15 @@ export const startNewChat = async (sessionId: number): Promise<ChatSession> => {
 };
 
 // POST /api/sessions/{sessionId}/chats/{chatId}/messages (Streaming - Uses Fetch)
-export const addChatMessageStream = async (
+// Renamed for clarity
+export const addSessionChatMessageStream = async (
     sessionId: number,
     chatId: number,
     text: string
 ): Promise<{ userMessageId: number; stream: ReadableStream<Uint8Array> }> => {
     let response: Response;
     const url = `${API_BASE_URL}/api/sessions/${sessionId}/chats/${chatId}/messages`;
-    console.log(`[addChatMessageStream] Fetching URL: ${url}`);
+    console.log(`[addSessionChatMessageStream] Fetching URL: ${url}`);
     try {
         response = await fetch(url, {
             method: 'POST',
@@ -151,7 +163,7 @@ export const addChatMessageStream = async (
             body: JSON.stringify({ text }),
         });
     } catch (networkError) {
-        console.error("[addChatMessageStream] Network error during fetch:", networkError);
+        console.error("[addSessionChatMessageStream] Network error during fetch:", networkError);
         throw new Error(`Network error sending message: ${networkError instanceof Error ? networkError.message : 'Unknown network error'}`);
     }
 
@@ -163,29 +175,95 @@ export const addChatMessageStream = async (
 
     const userMessageIdStr = response.headers.get('X-User-Message-Id');
     const userMessageId = userMessageIdStr ? parseInt(userMessageIdStr, 10) : -1;
-    if(userMessageId === -1) { console.warn("[addChatMessageStream] X-User-Message-Id header not found or invalid."); }
+    if(userMessageId === -1) { console.warn("[addSessionChatMessageStream] X-User-Message-Id header not found or invalid."); }
 
     return { userMessageId, stream: response.body };
 };
 
 // PATCH /api/sessions/{sessionId}/chats/{chatId}/name
-export const renameChat = async (sessionId: number, chatId: number, name: string | null): Promise<ChatSession> => {
+// Renamed for clarity
+export const renameSessionChat = async (sessionId: number, chatId: number, name: string | null): Promise<ChatSession> => {
     const response = await axios.patch(`/api/sessions/${sessionId}/chats/${chatId}/name`, { name });
     const chatMetadata = response.data;
     return {
         ...chatMetadata,
-        messages: undefined
+        messages: undefined // Return only metadata
     };
 };
 
 // DELETE /api/sessions/{sessionId}/chats/{chatId}
-export const deleteChat = async (sessionId: number, chatId: number): Promise<{ message: string }> => {
+// Renamed for clarity
+export const deleteSessionChat = async (sessionId: number, chatId: number): Promise<{ message: string }> => {
     const response = await axios.delete(`/api/sessions/${sessionId}/chats/${chatId}`);
     return response.data;
 };
 
 
-// --- Ollama Management Endpoints ---
+// --- Standalone Chat Endpoints ---
+
+// GET /api/chats
+export const fetchStandaloneChats = async (): Promise<StandaloneChatListItem[]> => {
+    const response = await axios.get<StandaloneChatListItem[]>('/api/chats');
+    return response.data;
+};
+
+// POST /api/chats
+export const createStandaloneChat = async (): Promise<StandaloneChatListItem> => {
+    const response = await axios.post<StandaloneChatListItem>('/api/chats');
+    return response.data; // Returns metadata of the created chat
+};
+
+// GET /api/chats/{chatId}
+export const fetchStandaloneChatDetails = async (chatId: number): Promise<ChatSession> => {
+    const response = await axios.get<ChatSession>(`/api/chats/${chatId}`);
+    return response.data; // Returns full chat session with messages
+};
+
+// POST /api/chats/{chatId}/messages (Streaming - Uses Fetch)
+export const addStandaloneChatMessageStream = async (
+    chatId: number,
+    text: string
+): Promise<{ userMessageId: number; stream: ReadableStream<Uint8Array> }> => {
+    let response: Response;
+    const url = `${API_BASE_URL}/api/chats/${chatId}/messages`;
+    console.log(`[addStandaloneChatMessageStream] Fetching URL: ${url}`);
+    try {
+        response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text }),
+        });
+    } catch (networkError) {
+        console.error("[addStandaloneChatMessageStream] Network error during fetch:", networkError);
+        throw new Error(`Network error sending message: ${networkError instanceof Error ? networkError.message : 'Unknown network error'}`);
+    }
+
+    if (!response.ok || !response.body) {
+        let errorBodyText = `HTTP error ${response.status}`;
+        try { const errorJson = await response.json(); errorBodyText = errorJson?.message || JSON.stringify(errorJson); } catch (e) { /* ignore json parse error */ }
+        throw new Error(`Failed to initiate stream: ${errorBodyText}`);
+    }
+
+    const userMessageIdStr = response.headers.get('X-User-Message-Id');
+    const userMessageId = userMessageIdStr ? parseInt(userMessageIdStr, 10) : -1;
+    if(userMessageId === -1) { console.warn("[addStandaloneChatMessageStream] X-User-Message-Id header not found or invalid."); }
+
+    return { userMessageId, stream: response.body };
+};
+
+// PATCH /api/chats/{chatId}/name
+export const renameStandaloneChat = async (chatId: number, name: string | null): Promise<StandaloneChatListItem> => {
+    const response = await axios.patch<StandaloneChatListItem>(`/api/chats/${chatId}/name`, { name });
+    return response.data; // Returns updated metadata
+};
+
+// DELETE /api/chats/{chatId}
+export const deleteStandaloneChat = async (chatId: number): Promise<{ message: string }> => {
+    const response = await axios.delete(`/api/chats/${chatId}`);
+    return response.data;
+};
+
+// --- Ollama Management Endpoints (Unchanged) ---
 
 // POST /api/ollama/unload
 export const unloadOllamaModel = async (): Promise<{ message: string }> => {
@@ -246,7 +324,6 @@ export const cancelPullOllamaModel = async (jobId: string): Promise<{ message: s
 // POST /api/ollama/delete-model
 export const deleteOllamaModel = async (modelName: string): Promise<{ message: string }> => {
     console.log(`[API] Sending request to delete model: ${modelName}`);
-    // Assuming backend endpoint is POST /api/ollama/delete-model
     const response = await axios.post<{ message: string }>('/api/ollama/delete-model', { modelName });
     return response.data;
 };

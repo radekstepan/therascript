@@ -1,3 +1,4 @@
+// File: packages/api/src/db/sqliteService.ts
 import crypto from 'node:crypto'; // <-- Import crypto
 import Database, { type Database as DB, type Statement, type RunResult } from 'better-sqlite3';
 import path from 'node:path';
@@ -17,6 +18,7 @@ if (!fs.existsSync(dbDir)) {
 
 // --- Schema Definition (Updated) ---
 // Defines tables and ensures cascading deletes using FOREIGN KEY constraints.
+// Changed chats.sessionId to be NULLABLE for standalone chats.
 const schema = `
     -- Sessions Table
     CREATE TABLE IF NOT EXISTS sessions (
@@ -33,13 +35,14 @@ const schema = `
         audioPath TEXT NULL, -- Added column for the path/identifier to the original audio file
         transcriptTokenCount INTEGER NULL -- Added column for transcript token count
     );
-    -- Chats Table
+    -- Chats Table (sessionId is now NULLABLE)
     CREATE TABLE IF NOT EXISTS chats (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        sessionId INTEGER NOT NULL,
+        sessionId INTEGER NULL, -- Session ID is optional for standalone chats
         timestamp INTEGER NOT NULL, -- UNIX Millis Timestamp for sorting/display
         name TEXT,
-        -- Ensures that deleting a session automatically deletes its associated chats
+        -- Ensures that deleting a session automatically deletes its associated session chats
+        -- Standalone chats (sessionId IS NULL) are unaffected by session deletion.
         FOREIGN KEY (sessionId) REFERENCES sessions (id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_chat_session ON chats (sessionId);
@@ -179,6 +182,7 @@ function initializeDatabase(dbInstance: DB) {
 
 
         // --- Chat Table Migrations ---
+        // No specific migration needed for making sessionId nullable if recreating DB
         const chatIndexes = dbInstance.pragma("index_list('chats')") as { name: string }[];
         if (!chatIndexes.some(idx => idx.name === 'idx_chat_timestamp')) { console.log('[db Init Func Migration]: Adding chat timestamp index...'); dbInstance.exec("CREATE INDEX IF NOT EXISTS idx_chat_timestamp ON chats (timestamp);"); console.log('[db Init Func Migration]: Chat timestamp index added.'); }
 

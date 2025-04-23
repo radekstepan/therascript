@@ -5,17 +5,22 @@ export interface BackendChatMessage {
   sender: 'user' | 'ai';
   text: string;
   timestamp: number;
-  promptTokens?: number;
-  completionTokens?: number;
+  promptTokens?: number | null;
+  completionTokens?: number | null;
 }
 
 export interface BackendChatSession {
   id: number;
-  sessionId: number;
+  sessionId: number | null; // Session ID can be null for standalone chats
   timestamp: number;
-  name?: string;
+  name?: string | null; // Allow null explicitly
   messages?: BackendChatMessage[]; // Optional, loaded on demand
 }
+
+// Specific type for Chat Metadata (excluding messages)
+// sessionId can be number or null here, handlers will specify
+export type ChatMetadata = Omit<BackendChatSession, 'messages'>;
+
 
 export interface TranscriptParagraphData {
   id: number;
@@ -68,7 +73,8 @@ export interface BackendSession {
   status: 'pending' | 'transcribing' | 'completed' | 'failed';
   whisperJobId: string | null;
   transcriptTokenCount?: number | null; // <-- Added optional token count
-  chats?: Pick<BackendChatSession, 'id' | 'sessionId' | 'timestamp' | 'name'>[];
+  // Use ChatMetadata type here - session chats always have a number sessionId
+  chats?: (ChatMetadata & { sessionId: number })[];
 }
 
 // Adjusted to include optional audioPath for creation/update scenarios

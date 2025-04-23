@@ -1,19 +1,21 @@
-import React, { useEffect, useState } from 'react'; // Import useEffect, useState
-import { useAtomValue, useSetAtom } from 'jotai'; // Import useSetAtom
+// Path: packages/ui/src/App.tsx
+import React, { useEffect, useState } from 'react';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { Theme, IconButton } from '@radix-ui/themes'; // Import IconButton
+import { Theme, IconButton } from '@radix-ui/themes';
 import * as Toast from '@radix-ui/react-toast';
-import { Cross2Icon } from '@radix-ui/react-icons'; // Import Cross2Icon
+import { Cross2Icon } from '@radix-ui/react-icons';
 import axios from 'axios';
 
 import { LandingPage } from './components/LandingPage/LandingPage';
 import { SessionView } from './components/SessionView/SessionView';
+import { StandaloneChatView } from './components/StandaloneChatView/StandaloneChatView'; // <-- Import new view
 import { UploadModal } from './components/UploadModal/UploadModal';
 
 import {
   isUploadModalOpenAtom,
   effectiveThemeAtom,
-  toastMessageAtom, // Import toastMessageAtom
+  toastMessageAtom,
 } from './store';
 
 const API_BASE_URL = 'http://localhost:3001';
@@ -23,23 +25,16 @@ console.log(`[App] Axios base URL set to: ${axios.defaults.baseURL}`);
 function App() {
   const isModalOpen = useAtomValue(isUploadModalOpenAtom);
   const effectiveTheme = useAtomValue(effectiveThemeAtom);
-  // Read the toast message content from the atom
   const toastMessageContent = useAtomValue(toastMessageAtom);
-  // Get the setter to clear the message when the toast closes
   const setToastMessageAtom = useSetAtom(toastMessageAtom);
-  // State to control the visibility of the Toast.Root
   const [isToastVisible, setIsToastVisible] = useState(false);
 
-  // Effect to synchronize toast visibility with the atom content
   useEffect(() => {
-    // Show the toast whenever there is content in the atom
     setIsToastVisible(!!toastMessageContent);
   }, [toastMessageContent]);
 
-  // Handler for when the toast's open state changes (e.g., dismissed by user or timeout)
   const handleToastOpenChange = (open: boolean) => {
     setIsToastVisible(open);
-    // If the toast is closing, clear the message from the atom
     if (!open) {
       setToastMessageAtom(null);
     }
@@ -52,24 +47,27 @@ function App() {
           <main className="flex-grow flex flex-col overflow-y-auto">
             <Routes>
               <Route path="/" element={<LandingPage />} />
+              {/* Session Routes */}
               <Route path="/sessions/:sessionId" element={<SessionView />} />
               <Route path="/sessions/:sessionId/chats/:chatId" element={<SessionView />} />
+              {/* Standalone Chat Routes */}
+              {/* Use the new component for standalone chats */}
+              <Route path="/chats/:chatId" element={<StandaloneChatView />} /> {/* <-- Use StandaloneChatView */}
+              {/* Fallback Route */}
               <Route path="*" element={<Navigate replace to="/" />} />
             </Routes>
           </main>
 
           <UploadModal isOpen={isModalOpen} />
 
-          {/* Render the Toast Root here, controlled by local state synced with the atom */}
           <Toast.Root
                 open={isToastVisible}
                 onOpenChange={handleToastOpenChange}
-                duration={5000} // Or adjust as needed
-                // Use the same styling as before
+                duration={5000}
                 className="bg-[--color-panel-solid] rounded-md shadow-[hsl(206_22%_7%_/_35%)_0px_10px_38px_-10px,_hsl(206_22%_7%_/_20%)_0px_10px_20px_-15px] p-[15px] grid [grid-template-areas:_'title_action'_'description_action'] grid-cols-[auto_max-content] gap-x-[15px] items-center data-[state=open]:animate-slideIn data-[state=closed]:animate-hide data-[swipe=move]:translate-x-[var(--radix-toast-swipe-move-x)] data-[swipe=cancel]:translate-x-0 data-[swipe=cancel]:transition-[transform_200ms_ease-out] data-[swipe=end]:animate-swipeOut"
             >
                 <Toast.Description className="[grid-area:_description] m-0 text-[--gray-a11] text-[13px] leading-[1.3]">
-                    {toastMessageContent} {/* Display the message from the atom */}
+                    {toastMessageContent}
                 </Toast.Description>
                 <Toast.Close className="[grid-area:_action]" asChild>
                     <IconButton variant="ghost" color="gray" size="1" aria-label="Close">

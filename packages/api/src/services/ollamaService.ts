@@ -1,5 +1,4 @@
 /* packages/api/src/services/ollamaService.ts */
-// packages/api/src/services/ollamaService.ts
 import ollama, { ChatResponse, Message, ListResponse, ShowResponse, GenerateResponse, Message as OllamaApiMessage, ProgressResponse, PullRequest } from 'ollama'; // Added PullRequest type
 import axios, { AxiosError } from 'axios';
 import crypto from 'node:crypto'; // Import crypto for job ID
@@ -95,6 +94,8 @@ export async function ensureOllamaReady(timeoutMs = 30000): Promise<void> {
 console.log(`[OllamaService] Using Ollama host: ${config.ollama.baseURL} (or OLLAMA_HOST env var)`);
 
 const SYSTEM_PROMPT = `You are an AI assistant analyzing a therapy session transcript. You will be provided with the transcript context and chat history. Answer user questions based *only* on the provided information. Be concise. If the answer isn't present, state that clearly. Do not invent information. Refer to participants as "Therapist" and "Patient" unless names are explicitly clear in the transcript.`;
+// Define a different prompt for standalone chats
+const STANDALONE_SYSTEM_PROMPT = `You are a helpful AI assistant. Answer the user's questions directly and concisely.`;
 
 // --- Interface and Store for Pull Job Status ---
 export type OllamaPullJobStatusState = 'queued' | 'parsing' | 'downloading' | 'verifying' | 'completed' | 'failed' | 'canceling' | 'canceled';
@@ -305,14 +306,12 @@ export const loadOllamaModel = async (modelName: string): Promise<void> => {
     catch (error) { throw error; }
     console.log(`[OllamaService] Triggering load for model '${modelName}' using a minimal chat request...`);
     try {
-        // --- Modified: Use keep_alive from config here ---
         const response = await ollama.chat({
             model: modelName,
             messages: [{ role: 'user', content: 'ping' }],
             stream: false,
             keep_alive: config.ollama.keepAlive, // Use configured keep_alive
         });
-        // --- End Modification ---
         console.log(`[OllamaService] Minimal chat request completed for '${modelName}'. Status: ${response.done}. Ollama should now be loading/have loaded it.`);
     } catch (error: any) {
         console.error(`[OllamaService] Error during load trigger chat request for '${modelName}':`, error);
@@ -353,16 +352,13 @@ export const reloadActiveModelContext = async (): Promise<void> => {
         });
         console.log(`[OllamaService:reload] Unload request sent successfully for ${modelName}.`);
     } catch (unloadError: any) {
-        // Gracefully handle "model not found" during unload, as it might already be unloaded
         const isModelNotFoundError = unloadError.status === 404 || (unloadError.message?.includes('model') && (unloadError.message?.includes('not found') || unloadError.message?.includes('missing')));
         if (isModelNotFoundError) {
             console.log(`[OllamaService:reload] Model ${modelName} not found during unload attempt (likely already unloaded). Proceeding to load.`);
         } else if (unloadError.message?.includes('ECONNREFUSED')) {
-            // This shouldn't happen after ensureOllamaReady, but handle defensively
             console.error(`[OllamaService:reload] Connection refused during unload for ${modelName}.`);
             throw new InternalServerError(`Connection refused during unload attempt for ${modelName}.`);
         } else {
-            // Log other unload errors but proceed to load attempt
             console.warn(`[OllamaService:reload] Error during unload request for ${modelName} (will still attempt load):`, unloadError);
         }
     }
@@ -379,7 +375,6 @@ export const reloadActiveModelContext = async (): Promise<void> => {
         console.log(`[OllamaService:reload] Load request sent successfully for ${modelName}.`);
     } catch (loadError: any) {
         console.error(`[OllamaService:reload] Error during load request for ${modelName}:`, loadError);
-        // Handle specific errors if needed (e.g., model not found after all)
         const isModelNotFoundError = loadError.status === 404 || (loadError.message?.includes('model') && (loadError.message?.includes('not found') || loadError.message?.includes('missing')));
          if (isModelNotFoundError) {
              console.error(`[OllamaService:reload] Model '${modelName}' not found locally during load attempt.`);
@@ -388,7 +383,6 @@ export const reloadActiveModelContext = async (): Promise<void> => {
          if (loadError.message?.includes('ECONNREFUSED')) {
              throw new InternalServerError(`Connection refused during load attempt for ${modelName}.`);
          }
-        // Throw a generic error if load fails for other reasons
         throw new InternalServerError(`Failed to trigger reload for model '${modelName}' via chat request.`, loadError instanceof Error ? loadError : undefined);
     }
     console.log(`[OllamaService:reload] Context reload sequence completed for ${modelName}.`);
@@ -396,18 +390,31 @@ export const reloadActiveModelContext = async (): Promise<void> => {
 // --- END NEW ---
 
 
-// --- Generate Chat Response ---
-export const generateChatResponse = async ( contextTranscript: string, chatHistory: BackendChatMessage[], retryAttempt: boolean = false ): Promise<{ content: string; promptTokens?: number; completionTokens?: number }> => {
+// --- Generate Chat Response (DEPRECATED - USE STREAM) ---
+// Kept for reference, but streamChatResponse should be used
+export const generateChatResponse = async ( contextTranscript: string | null, chatHistory: BackendChatMessage[], retryAttempt: boolean = false ): Promise<{ content: string; promptTokens?: number; completionTokens?: number }> => {
     const modelToUse = getActiveModel(); const contextSize = getConfiguredContextSize();
-    console.log(`[OllamaService:generateChatResponse] Attempting chat with ACTIVE model: ${modelToUse}, Context Size: ${contextSize ?? 'default'}`);
+    const isStandalone = contextTranscript === null;
+    console.log(`[OllamaService:generateChatResponse] Attempting chat (${isStandalone ? 'standalone' : 'session'}) with ACTIVE model: ${modelToUse}, Context Size: ${contextSize ?? 'default'}`);
     try { await ensureOllamaReady(); console.log(`[OllamaService:generateChatResponse] Ollama service is ready.`); }
     catch (error) { throw error; }
-    if (!contextTranscript) console.warn("[OllamaService] Generating response with empty or missing transcript context string."); else console.log(`[OllamaService] Transcript context string provided (length: ${contextTranscript.length}).`);
     if (!chatHistory || chatHistory.length === 0) throw new InternalServerError("Internal Error: Cannot generate response without chat history.");
     if (chatHistory[chatHistory.length - 1].sender !== 'user') throw new InternalServerError("Internal Error: Malformed chat history for LLM.");
     const latestUserMessage = chatHistory[chatHistory.length - 1]; const previousHistory = chatHistory.slice(0, -1);
-    const transcriptContextMessage: Message = { role: 'user', content: `CONTEXT TRANSCRIPT:\n"""\n${contextTranscript || 'No transcript available.'}\n"""` };
-    const messages: Message[] = [ { role: 'system', content: SYSTEM_PROMPT }, ...previousHistory.map((msg): Message => ({ role: msg.sender === 'ai' ? 'assistant' : 'user', content: msg.text })), transcriptContextMessage, { role: 'user', content: latestUserMessage.text } ];
+
+    const messages: Message[] = [
+        { role: 'system', content: isStandalone ? STANDALONE_SYSTEM_PROMPT : SYSTEM_PROMPT },
+        ...previousHistory.map((msg): Message => ({ role: msg.sender === 'ai' ? 'assistant' : 'user', content: msg.text })),
+    ];
+    if (!isStandalone) {
+        const transcriptContextMessage: Message = { role: 'user', content: `CONTEXT TRANSCRIPT:\n"""\n${contextTranscript || 'No transcript available.'}\n"""` };
+        messages.push(transcriptContextMessage);
+        console.log(`[OllamaService] Transcript context string provided (length: ${contextTranscript?.length ?? 0}).`);
+    } else {
+        console.log(`[OllamaService] Standalone chat, no transcript context provided.`);
+    }
+    messages.push({ role: 'user', content: latestUserMessage.text });
+
     console.log(`[OllamaService] Generating response (model: ${modelToUse})...`); console.log(`[OllamaService] Sending ${messages.length} messages to Ollama.`);
     try {
         const response: ChatResponse = await ollama.chat({ model: modelToUse, messages: messages, stream: false, keep_alive: config.ollama.keepAlive, options: { ...(contextSize !== null && { num_ctx: contextSize }), } });
@@ -424,17 +431,30 @@ export const generateChatResponse = async ( contextTranscript: string, chatHisto
 };
 
 // --- Stream Chat Response ---
-export const streamChatResponse = async ( contextTranscript: string, chatHistory: BackendChatMessage[], retryAttempt: boolean = false ): Promise<AsyncIterable<ChatResponse>> => {
+export const streamChatResponse = async ( contextTranscript: string | null, chatHistory: BackendChatMessage[], retryAttempt: boolean = false ): Promise<AsyncIterable<ChatResponse>> => {
     const modelToUse = getActiveModel(); const contextSize = getConfiguredContextSize();
-    console.log(`[OllamaService:streamChatResponse] Attempting streaming chat with ACTIVE model: ${modelToUse}, Context Size: ${contextSize ?? 'default'}`);
+    const isStandalone = contextTranscript === null;
+    console.log(`[OllamaService:streamChatResponse] Attempting streaming chat (${isStandalone ? 'standalone' : 'session'}) with ACTIVE model: ${modelToUse}, Context Size: ${contextSize ?? 'default'}`);
     try { await ensureOllamaReady(); console.log(`[OllamaService:streamChatResponse] Ollama service is ready.`); }
     catch (error) { throw error; }
-    if (!contextTranscript) console.warn("[OllamaService] Streaming response with empty or missing transcript context string."); else console.log(`[OllamaService] Transcript context string provided (length: ${contextTranscript.length}).`);
     if (!chatHistory || chatHistory.length === 0) throw new InternalServerError("Internal Error: Cannot stream response without chat history.");
     if (chatHistory[chatHistory.length - 1].sender !== 'user') throw new InternalServerError("Internal Error: Malformed chat history for LLM.");
     const latestUserMessage = chatHistory[chatHistory.length - 1]; const previousHistory = chatHistory.slice(0, -1);
-    const transcriptContextMessage: OllamaApiMessage = { role: 'user', content: `CONTEXT TRANSCRIPT:\n"""\n${contextTranscript || 'No transcript available.'}\n"""` };
-    const messages: OllamaApiMessage[] = [ { role: 'system', content: SYSTEM_PROMPT }, ...previousHistory.map((msg): OllamaApiMessage => ({ role: msg.sender === 'ai' ? 'assistant' : 'user', content: msg.text })), transcriptContextMessage, { role: 'user', content: latestUserMessage.text } ];
+
+    // Prepare messages based on whether it's standalone or session-based
+    const messages: OllamaApiMessage[] = [
+        { role: 'system', content: isStandalone ? STANDALONE_SYSTEM_PROMPT : SYSTEM_PROMPT },
+        ...previousHistory.map((msg): OllamaApiMessage => ({ role: msg.sender === 'ai' ? 'assistant' : 'user', content: msg.text })),
+    ];
+    if (!isStandalone) {
+        const transcriptContextMessage: OllamaApiMessage = { role: 'user', content: `CONTEXT TRANSCRIPT:\n"""\n${contextTranscript || 'No transcript available.'}\n"""` };
+        messages.push(transcriptContextMessage);
+        console.log(`[OllamaService] Transcript context string provided (length: ${contextTranscript?.length ?? 0}).`);
+    } else {
+         console.log(`[OllamaService] Standalone chat, no transcript context provided.`);
+    }
+    messages.push({ role: 'user', content: latestUserMessage.text });
+
     console.log(`[OllamaService] Streaming response (model: ${modelToUse})...`); console.log(`[OllamaService] Sending ${messages.length} messages to Ollama for streaming.`);
     try {
         const stream = await ollama.chat({ model: modelToUse, messages: messages, stream: true, keep_alive: config.ollama.keepAlive, options: { ...(contextSize !== null && { num_ctx: contextSize }), } });

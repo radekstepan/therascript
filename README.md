@@ -22,6 +22,7 @@
 - [ ] is the token count actually accurate? the current "used" tokens, but also the tokens in the transcript. Do they update after edititing a paragraph?
 - [ ] when you fail to pull a model, putting a correct link won't start the pull (clear existing pull errors)
 - [ ] you should clear the input field when you send a message and be able to type your new message while the AI is responding
+- [ ] issue with chats in loading state (ask Gemma about Jotai implementation)
 
 ## Nice to have
 
