@@ -15,14 +15,15 @@
 - [ ] when I click to Rename Chat, the input field that opens in the modal should be focused
 - [ ] toast should above modal
 - [ ] make sure the AI response "cursor" is less dark and is still blinking.The copy icon shouldn't show until after the whole response has been received.
-- [*] starred messages don't show in the popover
-- [*] the star message icon is too small and not vertically aligned with the message itself
-- [*] think about the starred messages popover, the list/UI looks odd
-- [*] move env files to root dir
+- [ ] starred messages don't show in the popover
+- [ ] the star message icon is too small and not vertically aligned with the message itself
+- [ ] think about the starred messages popover, the list/UI looks odd
+- [ ] move env files to root dir
 - [ ] is the token count actually accurate? the current "used" tokens, but also the tokens in the transcript. Do they update after edititing a paragraph?
 - [ ] when you fail to pull a model, putting a correct link won't start the pull (clear existing pull errors)
 - [ ] you should clear the input field when you send a message and be able to type your new message while the AI is responding
 - [ ] issue with chats in loading state (ask Gemma about Jotai implementation)
+- [ ] toast needs a bit of border else it fades with the background
 
 ## Nice to have
 
@@ -32,7 +33,6 @@
 
 ## Future
 
-- [ ] the homepage should have a chats section that has "free text" chats, displayed much like Session History. It lets you chat with the model without having a transcript to refer to
 - [ ] the topbar/header should have a search field. Clicking into it expands a panel that lets you search for chats or transcripts and has extra optional filters to drill down by different tags, client names, dates. Does this mean all paragraphs and chats are stored in a vector database in addition or instead of sqlite? Is that the best way to find a document through "free text"?
 
 ## Refactor

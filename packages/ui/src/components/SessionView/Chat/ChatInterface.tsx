@@ -1,9 +1,9 @@
-// Path: packages/ui/src/components/SessionView/Chat/ChatInterface.tsx
+/* packages/ui/src/components/SessionView/Chat/ChatInterface.tsx */
 import React, { useRef, useEffect, useCallback, useState, useMemo } from 'react';
 import { Box, Flex, ScrollArea, Spinner, Text } from '@radix-ui/themes';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChatInput } from './ChatInput';
-import { ChatMessages } from './ChatMessages';
+import { ChatMessages } from './ChatMessages'; // Corrected import name
 import { ChatPanelHeader } from './ChatPanelHeader';
 import {
     fetchSessionChatDetails, addSessionChatMessageStream, // Session APIs
@@ -15,9 +15,9 @@ import { currentQueryAtom } from '../../../store';
 import { useAtom } from 'jotai';
 
 interface ChatInterfaceProps {
-    session?: Session | null; // Re-add session prop, make it optional
+    session?: Session | null;
     activeChatId: number | null;
-    isStandalone: boolean; // Keep flag
+    isStandalone: boolean;
     isLoadingSessionMeta?: boolean;
     ollamaStatus: OllamaStatus | undefined;
     isLoadingOllamaStatus: boolean;
@@ -27,12 +27,10 @@ interface ChatInterfaceProps {
     onScrollUpdate?: (scrollTop: number) => void;
 }
 
-// Helper function to create temporary message IDs
-const createTemporaryId = (): number => -Math.floor(Math.random() * 1000000); // Negative for user
-const createTemporaryAiId = (): number => -Math.floor(Math.random() * 1000000) - 1000000; // Different range for AI
+const createTemporaryId = (): number => -Math.floor(Math.random() * 1000000);
 
 export function ChatInterface({
-    session, // Use the optional session prop
+    session,
     activeChatId,
     isStandalone,
     isLoadingSessionMeta,
@@ -43,7 +41,6 @@ export function ChatInterface({
     initialScrollTop = 0,
     onScrollUpdate,
 }: ChatInterfaceProps) {
-    // Derive session ID only if session exists
     const activeSessionId = session?.id ?? null;
 
     const restoreScrollRef = useRef(false);
@@ -54,8 +51,8 @@ export function ChatInterface({
 
     const [streamingAiPlaceholderId, setStreamingAiPlaceholderId] = useState<string | null>(null);
     const [streamingAiContent, setStreamingAiContent] = useState<string>('');
+    // --- REMOVED isCursorAnimating state ---
 
-    // Fetch chat details query
     const chatQueryKey = isStandalone ? ['standaloneChat', activeChatId] : ['chat', activeSessionId, activeChatId];
     const { data: chatData, isLoading: isLoadingMessages, error: chatError, isFetching } = useQuery<ChatSession | null, Error>({
         queryKey: chatQueryKey,
@@ -64,10 +61,9 @@ export function ChatInterface({
             if (isStandalone) {
                 return fetchStandaloneChatDetails(activeChatId);
             } else {
-                // Need session ID for session chats
                 if (!activeSessionId) {
                     console.warn("[ChatInterface] Attempting to fetch session chat without activeSessionId.");
-                    return Promise.resolve(null); // Return null if session ID isn't available yet
+                    return Promise.resolve(null);
                 }
                 return fetchSessionChatDetails(activeSessionId, activeChatId);
             }
@@ -75,10 +71,8 @@ export function ChatInterface({
         enabled: activeChatId !== null && (isStandalone || activeSessionId !== null),
         staleTime: 5 * 60 * 1000,
         refetchOnWindowFocus: true,
-        // onSuccess removed from useQuery options
     });
 
-    // --- Derive latest tokens from chatData ---
     const lastAiMessageWithTokens = useMemo(() => {
         if (!chatData?.messages || chatData.messages.length === 0) {
             return null;
@@ -88,7 +82,6 @@ export function ChatInterface({
 
     const latestPromptTokens = lastAiMessageWithTokens?.promptTokens ?? null;
     const latestCompletionTokens = lastAiMessageWithTokens?.completionTokens ?? null;
-    // --- End derivation ---
 
     // Process Stream Function
     const processStream = async (
@@ -100,10 +93,9 @@ export function ChatInterface({
         const reader = stream.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
-        let fullText = '';
-        let finalTokens: { prompt?: number, completion?: number } | null = null;
         let actualUserMessageId = receivedUserMsgId;
         const currentChatQueryKey = isStandalone ? ['standaloneChat', activeChatId] : ['chat', activeSessionId, activeChatId];
+        let streamErrored = false;
 
         try {
             setStreamingAiContent('');
@@ -124,68 +116,47 @@ export function ChatInterface({
                             if (data.userMessageId && actualUserMessageId === -1) {
                                 actualUserMessageId = data.userMessageId;
                                 console.log("Received user message ID via SSE:", actualUserMessageId);
-                                // Update cache using the correct query key
                                 if (tempUserMsgId && activeChatId && (isStandalone || activeSessionId)) {
                                      queryClient.setQueryData<ChatSession>(currentChatQueryKey, (oldData) => {
                                          if (!oldData) return oldData;
-                                         console.log(`[Stream] Optimistically replacing user msg ID ${tempUserMsgId} with ${actualUserMessageId}`);
-                                         // Ensure messages is always an array before mapping
                                          const currentMessages = oldData.messages ?? [];
                                          return { ...oldData, messages: currentMessages.map(msg => msg.id === tempUserMsgId ? { ...msg, id: actualUserMessageId } : msg) };
                                      });
                                 }
                             } else if (data.chunk) {
-                                fullText += data.chunk;
                                 setStreamingAiContent(prev => prev + data.chunk);
                             } else if (data.done) {
                                 console.log("Stream processing received done signal. Tokens:", data);
-                                finalTokens = { prompt: data.promptTokens, completion: data.completionTokens };
+                            } else if (data.error) {
+                                console.error("Received error event from backend stream:", data.error);
+                                streamErrored = true;
                             }
                         } catch (e) { console.error('SSE parse error', e); }
                     }
                 }
             }
-            console.log("Stream processing complete. Full text received.");
-
-            if (activeChatId && fullText.trim()) {
-                 const finalAiMessage: ChatMessage = {
-                     id: createTemporaryAiId(),
-                     sender: 'ai',
-                     text: fullText.trim(),
-                     promptTokens: finalTokens?.prompt,
-                     completionTokens: finalTokens?.completion,
-                 };
-                 queryClient.setQueryData<ChatSession>(currentChatQueryKey, (oldData) => {
-                     if (!oldData) return oldData;
-                     // Ensure messages is always an array
-                     const currentMessages = oldData.messages ?? [];
-                     let finalMessages = currentMessages.map(msg =>
-                         (tempUserMsgId && msg.id === tempUserMsgId && actualUserMessageId !== -1)
-                         ? { ...msg, id: actualUserMessageId }
-                         : msg
-                     );
-                     finalMessages.push(finalAiMessage);
-                     console.log(`[Stream Complete] Optimistically adding final AI message (temp ID: ${finalAiMessage.id})`);
-                     return { ...oldData, messages: finalMessages };
-                 });
-            }
-
-             setStreamingAiPlaceholderId(null);
-             setStreamingAiContent('');
-
-            if (activeChatId) {
-                console.log("[Stream Complete] Invalidating chat query to fetch final saved messages eventually.");
-                queryClient.invalidateQueries({ queryKey: currentChatQueryKey });
-            }
+            console.log("Stream processing loop complete.");
 
         } catch (error) {
             console.error("Error reading stream:", error);
-             setStreamingAiPlaceholderId(null);
-             setStreamingAiContent('');
-             throw error;
+            streamErrored = true;
+        } finally {
+            // --- Clear placeholder ID and content FIRST ---
+            console.log(`[Stream Finally] Clearing streaming placeholder ID: ${tempAiPlaceholderId}. Stream Errored: ${streamErrored}`);
+            setStreamingAiPlaceholderId(null);
+            setStreamingAiContent('');
+            // --- Removed isCursorAnimating set state ---
+
+            if (activeChatId && !streamErrored) {
+                console.log("[Stream Finally] Stream completed without error. Invalidating chat query.");
+                setTimeout(() => {
+                    queryClient.invalidateQueries({ queryKey: currentChatQueryKey });
+                }, 100);
+            } else if (streamErrored) {
+                 console.warn("[Stream Finally] Stream ended with an error. Skipping query invalidation.");
+            }
         }
     };
-
 
      // Add Message Mutation
      const addMessageMutation = useMutation({
@@ -207,13 +178,13 @@ export function ChatInterface({
 
             queryClient.setQueryData<ChatSession>(currentChatQueryKey, (oldData) => ({
                 ...(oldData ?? { id: activeChatId, sessionId: isStandalone ? null : activeSessionId, timestamp: Date.now(), name: 'Unknown Chat', messages: [] }),
-                // Ensure messages is always an array before spreading
                 messages: [...(oldData?.messages ?? []), temporaryUserMessage],
             }));
 
             const tempAiPlaceholderId = `ai-streaming-${Date.now()}`;
-            setStreamingAiPlaceholderId(tempAiPlaceholderId);
             setStreamingAiContent('');
+            setStreamingAiPlaceholderId(tempAiPlaceholderId);
+            // --- Removed isCursorAnimating set state ---
 
             console.log('[Optimistic ChatInterface] Added temporary user message ID:', temporaryUserMessage.id);
             console.log('[Optimistic ChatInterface] Added temporary AI placeholder ID:', tempAiPlaceholderId);
@@ -224,21 +195,26 @@ export function ChatInterface({
              console.log("Stream initiated successfully. Header User Msg ID:", data.userMessageId);
              if (!context?.tempAiPlaceholderId) {
                   console.error("Missing temporary AI placeholder ID in mutation context!");
+                  // --- Removed isCursorAnimating set state ---
                   throw new Error("Mutation context missing tempAiPlaceholderId");
              }
              processStream(data.stream, context.temporaryUserMessageId, data.userMessageId, context.tempAiPlaceholderId)
                  .catch(streamError => {
-                     console.error("Caught error from processStream in onSuccess, letting mutation handler take over:", streamError);
+                     console.error("Caught error from processStream in onSuccess:", streamError);
+                     // --- Removed isCursorAnimating set state ---
+                     setStreamingAiPlaceholderId(null);
+                     setStreamingAiContent('');
                      throw streamError;
                  });
         },
         onError: (error, newMessageText, context) => {
-            console.error("Mutation failed (Initiation or Stream):", error);
+            console.error("Mutation failed (Initiation or Stream Error):", error);
             const currentChatQueryKey = isStandalone ? ['standaloneChat', activeChatId] : ['chat', activeSessionId, activeChatId];
             if (context?.previousChatData && activeChatId && (isStandalone || activeSessionId)) {
                  queryClient.setQueryData(currentChatQueryKey, context.previousChatData);
                  console.log("[Mutation Error] Reverted optimistic user message.");
             }
+            // --- Removed isCursorAnimating set state ---
             setStreamingAiPlaceholderId(null);
             setStreamingAiContent('');
         },
@@ -249,15 +225,13 @@ export function ChatInterface({
              queryClient.invalidateQueries({ queryKey: ['ollamaStatus'] });
         },
     });
-    // --- End Mutation ---
 
 
     const chatMessages = chatData?.messages || [];
-    // Use isLoadingSessionMeta only if it's NOT a standalone chat
     const combinedIsLoading = (!isStandalone && isLoadingSessionMeta) || (isLoadingMessages && !chatData);
 
 
-     // Scroll logic (unchanged)
+     // Scroll logic
      const debouncedScrollSave = useCallback(
          debounce((scrollTop: number) => { if (onScrollUpdate) { onScrollUpdate(scrollTop); } }, 150),
          [onScrollUpdate]
@@ -287,10 +261,15 @@ export function ChatInterface({
                  }
              }
          }
-     }, [chatMessages.length, combinedIsLoading, isTabActive, streamingAiPlaceholderId]);
+     }, [chatMessages.length, combinedIsLoading, isTabActive, streamingAiPlaceholderId, streamingAiContent]);
 
 
     const isAiResponding = addMessageMutation.isPending || streamingAiPlaceholderId !== null;
+
+    // --- Generate dynamic key for ChatMessages ---
+    // Key changes when streaming starts (placeholder ID exists) and when it ends (placeholder ID is null)
+    const chatMessagesKey = `chat-messages-${activeChatId}-${streamingAiPlaceholderId ? 'streaming' : 'idle'}`;
+    // --- END ---
 
     return (
         <Flex direction="column" style={{ height: '100%', minHeight: 0, border: '1px solid var(--gray-a6)', borderRadius: 'var(--radius-3)', overflow: 'hidden' }}>
@@ -311,9 +290,13 @@ export function ChatInterface({
 
                 <Box p="4" ref={chatContentRef} style={{ opacity: combinedIsLoading ? 0.5 : 1, transition: 'opacity 0.2s ease-in-out' }}>
                     <ChatMessages
+                        // --- Apply dynamic key ---
+                        key={chatMessagesKey}
+                        // --- End ---
                         messages={chatMessages}
                         activeChatId={activeChatId}
                         streamingMessage={streamingAiPlaceholderId ? { id: streamingAiPlaceholderId, content: streamingAiContent } : null}
+                        // --- Removed isCursorAnimating prop ---
                     />
                 </Box>
             </ScrollArea>
@@ -329,4 +312,18 @@ export function ChatInterface({
             </Box>
         </Flex>
     );
+}
+
+// Define the props interface if it wasn't done above correctly
+interface ChatInterfaceProps {
+    session?: Session | null;
+    activeChatId: number | null;
+    isStandalone: boolean;
+    isLoadingSessionMeta?: boolean;
+    ollamaStatus: OllamaStatus | undefined;
+    isLoadingOllamaStatus: boolean;
+    onOpenLlmModal: () => void;
+    isTabActive?: boolean;
+    initialScrollTop?: number;
+    onScrollUpdate?: (scrollTop: number) => void;
 }

@@ -1,0 +1,9 @@
+# PyPI needed for these dependencies
+--extra-index-url https://pypi.org/simple/
+
+# Whisper and other dependencies
+openai-whisper
+fastapi
+uvicorn[standard]
+pydantic
+python-multipart
