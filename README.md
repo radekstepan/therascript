@@ -24,6 +24,7 @@
 - [ ] you should clear the input field when you send a message and be able to type your new message while the AI is responding
 - [ ] issue with chats in loading state (ask Gemma about Jotai implementation)
 - [ ] toast needs a bit of border else it fades with the background
+- [ ] starring standalone chat messages is not working at all
 
 ## Nice to have
 

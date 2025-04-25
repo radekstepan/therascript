@@ -215,7 +215,7 @@ export function ChatMessages({
             {namingError && ( <Callout.Root color="red" size="1" mt="1"> <Callout.Icon><InfoCircledIcon /></Callout.Icon> <Callout.Text>{namingError}</Callout.Text> </Callout.Root> )}
           </Flex>
           <Flex gap="3" mt="4" justify="end">
-            <Dialog.Close> <Button variant="soft" color="gray" onClick={handleCancelName}> <Cross2Icon /> Cancel </Button> </Dialog.Close>
+            <Button variant="soft" color="gray" onClick={handleCancelName}> <Cross2Icon /> Cancel </Button>
             <Button onClick={handleConfirmName}> <CheckIcon /> Save Template </Button>
           </Flex>
         </Dialog.Content>
