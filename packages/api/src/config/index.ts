@@ -1,3 +1,4 @@
+/* packages/api/src/config/index.ts */
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
@@ -18,6 +19,8 @@ console.log(`[Config] Determined API package directory: ${packageApiDir}`);
 // --- Load .env files relative to the *API package* directory ---
 const envPath = path.resolve(packageApiDir, '.env');
 const envEnvPath = path.resolve(packageApiDir, `.env.${nodeEnv}`);
+// --- Add path for .env.mock ---
+const envMockPath = path.resolve(packageApiDir, '.env.mock');
 // --- End .env file path calculation ---
 
 
@@ -42,13 +45,18 @@ function loadDotenv(filePath: string, override: boolean) {
     }
 }
 
-// Load environment-specific file first, with override
-loadDotenv(envEnvPath, true);
+// --- Load order adjusted: mock > env-specific > base ---
+// Load .env.mock if it exists, with override (highest priority if APP_MODE=mock)
+loadDotenv(envMockPath, true);
 
-// Load base .env file, no override
+// Load environment-specific file (.env.development/.env.production), no override if mock already set APP_MODE
+// Note: APP_MODE might already be set by .env.mock. This ensures specific env settings don't overwrite APP_MODE=mock.
+loadDotenv(envEnvPath, !process.env.APP_MODE || process.env.APP_MODE !== 'mock');
+
+// Load base .env file, no override (lowest priority)
 loadDotenv(envPath, false);
 
-// Helper function (keep as is)
+// --- Helper function (keep as is) ---
 const getEnvVar = (key: string, defaultValue?: string): string => {
   const value = process.env[key];
   if (value !== undefined) {
@@ -60,9 +68,14 @@ const getEnvVar = (key: string, defaultValue?: string): string => {
   throw new Error(`Missing required environment variable and no default provided: ${key}`);
 };
 
+// --- Determine appMode AFTER loading env files ---
+// Possible values: 'production', 'development', 'mock'
+const appMode = getEnvVar('APP_MODE', 'development'); // Default to development
+console.log(`[Config] Determined APP_MODE as: ${appMode}`);
+
 // --- Configuration Variables ---
 const port = parseInt(getEnvVar('PORT', '3001'), 10);
-const isProduction = nodeEnv === 'production';
+const isProduction = nodeEnv === 'production'; // Based on NODE_ENV
 const corsOrigin = getEnvVar('CORS_ORIGIN', 'http://localhost:3002');
 const ollamaBaseURL = getEnvVar('OLLAMA_BASE_URL', 'http://localhost:11434');
 const ollamaModel = getEnvVar('OLLAMA_MODEL', 'llama3');
@@ -85,10 +98,15 @@ const resolvedUploadsDir = path.resolve(packageApiDir, uploadsDirFromEnv);
 
 // Assemble the configuration object
 const config = {
-  server: { port: port, nodeEnv: nodeEnv, isProduction: isProduction, corsOrigin: corsOrigin },
+  server: {
+      port: port,
+      nodeEnv: nodeEnv,
+      isProduction: isProduction,
+      corsOrigin: corsOrigin,
+      appMode: appMode as 'production' | 'development' | 'mock', // Add appMode
+  },
   ollama: { baseURL: ollamaBaseURL, model: ollamaModel, keepAlive: ollamaKeepAlive },
   whisper: { apiUrl: whisperApiURL, model: whisperModel },
-  // --- Use the explicitly resolved paths ---
   db: { sqlitePath: resolvedDbPath, transcriptsDir: resolvedTranscriptsDir, uploadsDir: resolvedUploadsDir },
   upload: { allowedMimeTypes: allowedAudioMimeTypes, maxFileSize: maxUploadFileSize },
 };
@@ -109,8 +127,10 @@ ensureDirectoryExists(config.db.uploadsDir, 'uploads');
 
 // --- Log effective config ---
 console.log("[Config] Final check before exporting config object:");
+console.log(`  - Value of APP_MODE in process.env: ${process.env.APP_MODE}`); // Log raw env var
 console.log(`  - Value of OLLAMA_MODEL in process.env: ${process.env.OLLAMA_MODEL}`);
 console.log("[Config] Effective Configuration Loaded:");
+console.log(`  - APP_MODE: ${config.server.appMode}`); // Log effective mode
 console.log(`  - NODE_ENV: ${config.server.nodeEnv}`);
 console.log(`  - Port: ${config.server.port}`);
 console.log(`  - CORS Origin: ${config.server.corsOrigin}`);

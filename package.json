@@ -12,19 +12,17 @@
     "build:ui": "lerna run build --scope=ui",
     "build:ollama": "lerna run build --scope=ollama",
     "build:whisper": "lerna run build --scope=whisper",
-
     "dev": "node ./scripts/run-dev.js",
     "dev:api": "NODE_ENV=development lerna run dev --scope=api",
     "dev:ui": "lerna run dev --scope=ui",
-
+    "dev:mock:api": "dotenv -e ./packages/api/.env.mock -- yarn dev:api",
+    "dev:mock": "concurrently --kill-others-on-fail --names API,UI,WHISPER \"yarn dev:mock:api\" \"yarn dev:ui\" \"echo [MOCK MODE] Whisper process not needed\"",
     "start": "yarn build && NODE_ENV=production node packages/api/dist/server.js",
     "start:api": "yarn build:api && NODE_ENV=production node packages/api/dist/server.js",
     "start:ollama": "lerna run start --scope=ollama",
     "start:whisper": "yarn build:whisper && node packages/whisper/dist/index.js",
-
     "lint": "lerna run lint --parallel",
     "format": "yarn prettier --write .",
-
     "preload:db": "yarn build:api && node packages/api/dist/preloadDb.js",
     "clean": "lerna run clean --parallel && rm -rf node_modules",
     "clean:dist": "lerna run clean --parallel"
@@ -34,6 +32,7 @@
   "license": "MIT",
   "devDependencies": {
     "concurrently": "^8.2.2",
+    "dotenv-cli": "^8.0.0",
     "lerna": "^8.1.7",
     "prettier": "^3.3.3",
     "ts-node": "^10.9.2",

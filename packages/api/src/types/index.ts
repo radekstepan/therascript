@@ -1,3 +1,4 @@
+/* packages/api/src/types/index.ts */
 // packages/api/src/types/index.ts
 export interface BackendChatMessage {
   id: number;
@@ -99,7 +100,8 @@ export interface ApiErrorResponse {
 
 export interface OllamaModelInfo {
     name: string;
-    modified_at: string;
+    // --- Ensure Date object type ---
+    modified_at: Date;
     size: number;
     digest: string;
     details: {
@@ -110,17 +112,37 @@ export interface OllamaModelInfo {
         quantization_level: string;
     };
     size_vram?: number;
-    expires_at?: string;
-    size_total?: number;
+    // --- Ensure Date object type or undefined ---
+    expires_at?: Date;
+    // size_total removed
 }
+
+// --- Add Pull Job Status Types ---
+export type OllamaPullJobStatusState = 'queued' | 'parsing' | 'downloading' | 'verifying' | 'completed' | 'failed' | 'canceling' | 'canceled';
+export interface OllamaPullJobStatus {
+    jobId: string;
+    modelName: string;
+    status: OllamaPullJobStatusState;
+    message: string;
+    progress?: number;
+    completedBytes?: number;
+    totalBytes?: number;
+    currentLayer?: string;
+    startTime: number; // Keep as number (timestamp)
+    endTime?: number; // Keep as number (timestamp)
+    error?: string;
+}
+// --- End Add ---
 
 // --- Docker Container Status Type ---
 export interface DockerContainerStatus {
     id: string;
     name: string;
     image: string;
-    state: string; // e.g., 'running', 'stopped', 'exited'
-    status: string; // e.g., 'Up 2 hours', 'Exited (0) 5 minutes ago'
+    state: string; // e.g., 'running', 'stopped', 'exited', 'not_found'
+    status: string; // e.g., 'Up 2 hours', 'Exited (0) 5 minutes ago', 'Container not found'
     ports: { PrivatePort: number; PublicPort?: number; Type: string; IP?: string }[];
 }
 // --- END Docker Container Status Type ---
+
+// TODO comments should not be removed
