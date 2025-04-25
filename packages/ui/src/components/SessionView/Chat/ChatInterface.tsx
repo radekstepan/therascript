@@ -127,6 +127,17 @@ export function ChatInterface({
                                 setStreamingAiContent(prev => prev + data.chunk);
                             } else if (data.done) {
                                 console.log("Stream processing received done signal. Tokens:", data);
+                                // TODO need to call the finally here.
+                                setStreamingAiPlaceholderId(null);
+                                setStreamingAiContent('');
+                                // --- Removed isCursorAnimating set state ---
+                    
+                                if (activeChatId && !streamErrored) {
+                                    console.log("[Stream Finally] Stream completed without error. Invalidating chat query.");
+                                    setTimeout(() => {
+                                        queryClient.invalidateQueries({ queryKey: currentChatQueryKey });
+                                    }, 100);
+                                }
                             } else if (data.error) {
                                 console.error("Received error event from backend stream:", data.error);
                                 streamErrored = true;
@@ -141,6 +152,8 @@ export function ChatInterface({
             console.error("Error reading stream:", error);
             streamErrored = true;
         } finally {
+            // TODO is this ever called?
+
             // --- Clear placeholder ID and content FIRST ---
             console.log(`[Stream Finally] Clearing streaming placeholder ID: ${tempAiPlaceholderId}. Stream Errored: ${streamErrored}`);
             setStreamingAiPlaceholderId(null);
