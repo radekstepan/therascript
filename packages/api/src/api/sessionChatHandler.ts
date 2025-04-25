@@ -125,6 +125,8 @@ export const addSessionChatMessage = async ({ sessionData, chatData, body, set }
     }
 };
 
+// TODO need to expose an endpoint to star/unstar a message.
+
 // GET /api/sessions/:sessionId/chats/:chatId - Get details of a specific session chat
 export const getSessionChatDetails = ({ chatData, sessionData, set }: any): FullSessionChatResponse => { // Return type corrected
     if (!chatData) throw new NotFoundError(`Chat details not found in context.`);

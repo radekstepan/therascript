@@ -72,6 +72,7 @@ export function ChatMessages({
     const finalName = templateNameInput.trim();
     if (!finalName) { setNamingError("Please enter a name for the starred template."); return; }
     const queryKey = ['chat', activeSessionId, activeChatId];
+    // TODO we need to actually make a request to star the message
     queryClient.setQueryData<ChatSession>(queryKey, (oldData) => {
       if (!oldData) return oldData;
       return { ...oldData, messages: (oldData.messages || []).map(msg => msg.id === messageToName.id ? { ...msg, starred: true, starredName: finalName } : msg), };

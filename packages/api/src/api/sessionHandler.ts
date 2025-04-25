@@ -14,6 +14,7 @@ import type { BackendSession, StructuredTranscript } from '../types/index.js';
 import { NotFoundError, BadRequestError, InternalServerError, ApiError } from '../errors.js';
 
 // Helper to convert YYYY-MM-DD to ISO 8601 using Noon UTC
+// TODO move to helpers or utils
 const dateToIsoString = (dateString: string): string | null => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
         console.warn(`[dateToIsoString] Invalid date format received: ${dateString}`);

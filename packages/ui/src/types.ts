@@ -30,7 +30,7 @@ export interface SessionMetadata {
     clientName: string;
     sessionName: string;
     date: string; // Expects YYYY-MM-DD format for input, backend stores ISO
-    sessionType: string;
+    sessionType: string; // TODO this is an enum
     therapy: string;
 }
 

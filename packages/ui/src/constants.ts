@@ -4,8 +4,8 @@ import type { Badge } from '@radix-ui/themes';
 
 // TODO we should be fetching these from the API
 export const SESSION_TYPES = [
-  "individual", "phone", "skills group", "family session",
-  "family skills", "couples", "couples individual"
+  "Individual", "Phone", "Skills Group", "Family Session",
+  "Family Skills", "Couples", "Couples Individual"
 ];
 
 export const THERAPY_TYPES = [
