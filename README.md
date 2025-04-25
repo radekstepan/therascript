@@ -3,7 +3,6 @@
 - [ ] make the chat paragraph icons larger, add a gap between them AND/OR move the play icon to the left of the paragraph
 - [ ] fix vertical align of transcript header, items too close to the top; `align-items: flex-end`
 - [ ] reduce the left and right padding on the chat/transcript section and be consistent with the chats section
-- [ ] in the sessions sidebar the session link active onclick outline is being cutoff (top and left)
 - [ ] the formatting of date fields is not consistent when rendered as an `input type="date"` and text field
 - [ ] show progress bar when transcribing a chat session and be able to abort the process
 - [ ] if you can't find chat data, show the same message when we fail to load the session
@@ -31,6 +30,8 @@
 - [ ] autocomplete client name when typing in both the create new session and editing an existing one (select dropdown with a free form input too?)
 - [ ] for reasoning models, display the <think> section separately
 - [ ] actually delete cached Ollama models
+- [ ] when you render markdown, the output is usually a paragraph tag which means the cursor will always be on the newline.
+- [ ] when a message has finished streaming we refetch the messages which causes a flash of content
 
 ## Future
 

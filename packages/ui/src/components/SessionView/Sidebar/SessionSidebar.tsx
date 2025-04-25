@@ -269,10 +269,10 @@ export function SessionSidebar({ session, isLoading: isLoadingSession, error: se
                     </Flex>
                 ) : (
                     <ScrollArea type="auto" scrollbars="vertical" style={{ flexGrow: 1 }}>
-                        <Flex direction="column" gap="1" asChild>
+                        <Flex direction="column" gap="1" asChild className="mt-1 mb-1">
                             <nav>
                                 {sortedChats.map((chat) => (
-                                    <Box key={chat.id} className="relative">
+                                    <Box key={chat.id} className="relative mx-1">
                                         <NavLink
                                             to={`/sessions/${session.id}/chats/${chat.id}`}
                                             className={getNavLinkClass}
