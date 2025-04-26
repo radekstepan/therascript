@@ -1,7 +1,12 @@
-// File: packages/ui/src/components/StandaloneChatView/StandaloneChatSidebar.tsx
-import React, { useState, useMemo } from 'react'; // <-- Import useMemo
+/*
+ * packages/ui/src/components/StandaloneChatView/StandaloneChatSidebar.tsx
+ *
+ * This file contains the StandaloneChatSidebar component, which displays
+ * a list of standalone chats and allows creating new ones.
+ */
+import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAtom, useAtomValue, useSetAtom } from 'jotai'; // <-- Import useAtom
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
     Box,
@@ -12,12 +17,12 @@ import {
     ScrollArea,
     Spinner,
     AlertDialog,
-    TextField, // <-- Import TextField
+    // TextField removed as search is being removed
 } from '@radix-ui/themes';
 import {
     PlusCircledIcon,
     TrashIcon,
-    MagnifyingGlassIcon, // <-- Add search icon
+    // MagnifyingGlassIcon removed as search is being removed
 } from '@radix-ui/react-icons';
 import { StandaloneChatSidebarList } from './StandaloneChatSidebarList';
 import { EditStandaloneChatModal } from './EditStandaloneChatModal';
@@ -31,7 +36,7 @@ import {
 import {
     activeChatIdAtom,
     toastMessageAtom,
-    standaloneSearchTermAtom // <-- Import search atom
+    // standaloneSearchTermAtom removed as search is being removed
 } from '../../store';
 import type { ChatSession } from '../../types';
 import { formatTimestamp } from '../../helpers';
@@ -47,12 +52,12 @@ export function StandaloneChatSidebar({ isLoading: isLoadingParent, error: paren
     const activeChatId = useAtomValue(activeChatIdAtom);
     const queryClient = useQueryClient();
 
-    // --- Add state for search term ---
-    const [standaloneSearch, setStandaloneSearch] = useAtom(standaloneSearchTermAtom);
-    // --- End state ---
+    // --- Remove state for search term ---
+    // const [standaloneSearch, setStandaloneSearch] = useAtom(standaloneSearchTermAtom);
+    // --- End remove state ---
 
     // Modal State
-    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+    const [isEditModalOpen, setIsEditModalOpen] = useState(false); // Correct state setter name
     const [chatToEdit, setChatToEdit] = useState<StandaloneChatListItem | null>(null);
     const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
     const [chatToDelete, setChatToDelete] = useState<StandaloneChatListItem | null>(null);
@@ -61,7 +66,8 @@ export function StandaloneChatSidebar({ isLoading: isLoadingParent, error: paren
     // --- Queries & Mutations (Unchanged) ---
     const { data: standaloneChats, isLoading: isLoadingChatsQuery, error: chatsError } = useQuery<StandaloneChatListItem[], Error>({ queryKey: ['standaloneChats'], queryFn: fetchStandaloneChats, staleTime: 5*60*1000 });
     const createStandaloneChatMutation = useMutation<StandaloneChatListItem, Error>({ mutationFn: createStandaloneChatApi, onSuccess: (d)=>{setToast("New chat created."); queryClient.invalidateQueries({queryKey:['standaloneChats']}); navigate(`/chats/${d.id}`);}, onError:(e)=>{setToast(`Error creating chat: ${e.message}`);} });
-    const editChatMutation = useMutation<StandaloneChatListItem, Error, { chatId: number; newName: string | null; tags: string[] }>({ mutationFn: (v)=>editStandaloneChatApi(v.chatId,v.newName,v.tags), onSuccess: (d)=>{setToast("Chat details updated."); queryClient.setQueryData<StandaloneChatListItem[]>(['standaloneChats'],(old)=>old?.map(c=>c.id===d.id?{...c,name:d.name,tags:d.tags}:c)); queryClient.setQueryData<ChatSession>(['standaloneChat',d.id],(old)=>old?{...old,name:d.name??undefined, tags:d.tags??null}:old); setIsEditModalOpen(false); setChatToEdit(null);}, onError:(e)=>{setToast(`Error updating chat: ${e.message}`);} });
+    // Corrected onSuccess in editChatMutation
+    const editChatMutation = useMutation<StandaloneChatListItem, Error, { chatId: number; newName: string | null; tags: string[] }>({ mutationFn: (v)=>editStandaloneChatApi(v.chatId,v.newName,v.tags), onSuccess: (d)=>{setToast("Chat details updated."); queryClient.setQueryData<StandaloneChatListItem[]>(['standaloneChats'],(old)=>old?.map(c=>c.id===d.id?{...c,name:d.name,tags:d.tags}:c)); queryClient.setQueryData<ChatSession>(['standaloneChat',d.id],(old)=>old?{...old,name:d.name??undefined, tags:d.tags??null}:old); setIsEditModalOpen(false); setChatToEdit(null);}, onError:(e)=>{setToast(`Error updating chat: ${e.message}`);} }); // FIX: Used setIsEditModalOpen
     const deleteChatMutation = useMutation<{ message: string }, Error, number>({ mutationFn: deleteStandaloneChatApi, onSuccess: (d, delId)=>{ setToast(d.message||`Chat deleted.`); let nextId:number|null=null; const before=queryClient.getQueryData<StandaloneChatListItem[]>(['standaloneChats']); const remaining=before?.filter(c=>c.id!==delId)||[]; queryClient.setQueryData<StandaloneChatListItem[]>(['standaloneChats'],remaining); if(activeChatId===delId){ if(remaining.length>0){nextId=[...remaining].sort((a,b)=>b.timestamp-a.timestamp)[0].id; navigate(`/chats/${nextId}`,{replace:true});} else {navigate('/',{replace:true});} } queryClient.removeQueries({queryKey:['standaloneChat',delId]}); }, onError:(e,id)=>{setToast(`Error deleting chat ${id}: ${e.message}`);}, onSettled:()=>{setIsDeleteConfirmOpen(false);setChatToDelete(null);} });
 
     // --- Handlers ---
@@ -76,20 +82,10 @@ export function StandaloneChatSidebar({ isLoading: isLoadingParent, error: paren
     const isLoading = isLoadingParent || isLoadingChatsQuery;
     const error = parentError || chatsError;
 
-     // --- Filter Standalone Chats ---
-     const filteredStandaloneChats = useMemo(() => {
-        if (!standaloneChats) return [];
-        const searchTermLower = standaloneSearch.toLowerCase().trim();
-        if (!searchTermLower) return standaloneChats; // No search term, return all
-
-        return standaloneChats.filter(chat => {
-            const nameMatch = chat.name?.toLowerCase().includes(searchTermLower);
-            const dateMatch = formatTimestamp(chat.timestamp).toLowerCase().includes(searchTermLower);
-            const tagMatch = chat.tags?.some(tag => tag.toLowerCase().includes(searchTermLower));
-            return !!(nameMatch || dateMatch || tagMatch);
-        });
-    }, [standaloneChats, standaloneSearch]);
-    // --- End Filter ---
+     // --- Remove Filtering Logic ---
+     // Directly use standaloneChats from the query
+     const chatsToShow = standaloneChats || [];
+     // --- End Removal ---
 
     // --- Render ---
     return (
@@ -104,10 +100,11 @@ export function StandaloneChatSidebar({ isLoading: isLoadingParent, error: paren
                  </Flex>
                  {/* End Header Section */}
 
-                 {/* --- Add Search Input --- */}
-                 <Box mb="2" px="1"> {/* Added padding to align with list items */}
+                 {/* --- Remove Search Input --- */}
+                 {/*
+                 <Box mb="2" px="1">
                      <TextField.Root
-                         size="1" // Smaller size for sidebar
+                         size="1"
                          placeholder="Search chats..."
                          value={standaloneSearch}
                          onChange={(e) => setStandaloneSearch(e.target.value)}
@@ -117,24 +114,26 @@ export function StandaloneChatSidebar({ isLoading: isLoadingParent, error: paren
                          </TextField.Slot>
                      </TextField.Root>
                  </Box>
-                 {/* --- End Search Input --- */}
+                 */}
+                 {/* --- End Removal --- */}
 
                 {isLoading ? (
                     <Flex flexGrow="1" align="center" justify="center"> <Spinner size="2"/> <Text color="gray" size="1" ml="2">Loading chats...</Text> </Flex>
                 ) : error ? (
                      <Flex flexGrow="1" align="center" justify="center" p="4"> <Text color="red" size="1">Error loading chats: {error.message}</Text> </Flex>
-                 ) : filteredStandaloneChats.length === 0 ? ( // Check filtered list length
+                 ) : chatsToShow.length === 0 ? ( // Use chatsToShow directly
                     <Flex flexGrow="1" align="center" justify="center">
                         <Text color="gray" size="1" style={{ fontStyle: 'italic' }}>
-                             {standaloneSearch ? 'No matching chats.' : 'No chats yet.'} {/* Different message if searching */}
+                             {/* Remove check for standaloneSearch */}
+                             'No chats yet.'
                          </Text>
                     </Flex>
                  ) : (
                     <ScrollArea type="auto" scrollbars="vertical" style={{ flexGrow: 1, marginLeft: '-4px', marginRight: '-4px' }}>
-                        {/* --- Pass filtered chats to list --- */}
+                        {/* --- Pass chatsToShow to list --- */}
                         <StandaloneChatSidebarList
-                            chats={filteredStandaloneChats} // Use filtered list
-                            onRenameChatRequest={handleEditDetailsRequest} // Pass edit handler
+                            chats={chatsToShow} // Use unfiltered list
+                            onRenameChatRequest={handleEditDetailsRequest}
                             onDeleteChatRequest={handleDeleteRequest}
                             activeChatId={activeChatId}
                         />

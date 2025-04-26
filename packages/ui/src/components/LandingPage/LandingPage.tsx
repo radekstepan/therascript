@@ -1,18 +1,23 @@
+/*
+ * packages/ui/src/components/LandingPage/LandingPage.tsx
+ *
+ * Main landing page component, displaying session history and standalone chats.
+ */
 import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAtom, useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai'; // Removed useAtom
 import {
     CounterClockwiseClockIcon, PlusCircledIcon, TrashIcon,
     Pencil1Icon,
     ChatBubbleIcon,
-    MagnifyingGlassIcon,
+    // MagnifyingGlassIcon removed as search is being removed
 } from '@radix-ui/react-icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { SessionListTable } from './SessionListTable';
 import { StandaloneChatListTable } from './StandaloneChatListTable';
 import {
     Button, Card, Flex, Heading, Text, Box, Container, Spinner, AlertDialog,
-    TextField
+    // TextField removed as search is being removed
 } from '@radix-ui/themes';
 import { UserThemeDropdown } from '../User/UserThemeDropdown';
 import { EditDetailsModal } from '../SessionView/Modals/EditDetailsModal';
@@ -33,13 +38,13 @@ import {
     setSessionSortAtom,
     SessionSortCriteria,
     // Standalone Chat Sort
-    standaloneChatSortCriteriaAtom, // <-- Import standalone sort state
-    standaloneChatSortDirectionAtom, // <-- Import standalone sort state
-    setStandaloneChatSortAtom, // <-- Import standalone sort setter
-    StandaloneChatSortCriteria, // <-- Import standalone sort type
+    standaloneChatSortCriteriaAtom,
+    standaloneChatSortDirectionAtom,
+    setStandaloneChatSortAtom,
+    StandaloneChatSortCriteria,
     // Others
     toastMessageAtom,
-    standaloneSearchTermAtom
+    // standaloneSearchTermAtom removed as search is being removed
 } from '../../store';
 import type { Session, SessionMetadata, ChatSession } from '../../types';
 import { formatTimestamp } from '../../helpers';
@@ -49,7 +54,8 @@ export function LandingPage() {
     const setToast = useSetAtom(toastMessageAtom);
     const queryClient = useQueryClient();
     const navigate = useNavigate();
-    const [standaloneSearch, setStandaloneSearch] = useAtom(standaloneSearchTermAtom);
+    // Remove search state
+    // const [standaloneSearch, setStandaloneSearch] = useAtom(standaloneSearchTermAtom);
 
     // Session Sort State
     const currentSessionSortCriteria = useAtomValue(sessionSortCriteriaAtom);
@@ -92,49 +98,38 @@ export function LandingPage() {
         return [...sessions].sort((a, b) => { let compareResult = 0; try { switch (criteria) { case 'sessionName': const nameA = getString(a.sessionName) || getString(a.fileName); const nameB = getString(b.sessionName) || getString(b.fileName); compareResult = nameA.localeCompare(nameB, undefined, { sensitivity: 'base', usage: 'sort' }); break; case 'clientName': compareResult = getString(a.clientName).localeCompare(getString(b.clientName), undefined, { sensitivity: 'base', usage: 'sort' }); break; case 'sessionType': compareResult = getString(a.sessionType).localeCompare(getString(b.sessionType), undefined, { sensitivity: 'base', usage: 'sort' }); break; case 'therapy': compareResult = getString(a.therapy).localeCompare(getString(b.therapy), undefined, { sensitivity: 'base', usage: 'sort' }); break; case 'date': compareResult = getString(b.date).localeCompare(getString(a.date)); break; case 'id': compareResult = (a.id ?? 0) - (b.id ?? 0); break; default: const _exhaustiveCheck: never = criteria; console.warn(`[sortedSessions] Unknown sort criteria: ${criteria}`); return 0; } } catch (e) { console.error(`Error during localeCompare for criteria "${criteria}":`, e); console.error("Comparing A:", a); console.error("Comparing B:", b); return 0; } if (direction === 'desc' && criteria !== 'date') { compareResult *= -1; } else if (direction === 'asc' && criteria === 'date') { compareResult *= -1; } return compareResult; });
      }, [sessions, currentSessionSortCriteria, currentSessionSortDirection]);
 
-     // Standalone Chat Filtering and Sorting
-     const sortedAndFilteredStandaloneChats = useMemo(() => {
+     // Standalone Chat Sorting (Removed filtering)
+     const sortedStandaloneChats = useMemo(() => {
         if (!standaloneChats) return [];
-        const searchTermLower = standaloneSearch.toLowerCase().trim();
+        // Remove filtering logic based on standaloneSearch
         const criteria = currentStandaloneChatSortCriteria;
         const direction = currentStandaloneChatSortDirection;
 
-        // 1. Filter
-        const filtered = searchTermLower
-            ? standaloneChats.filter(chat =>
-                (chat.name?.toLowerCase().includes(searchTermLower)) ||
-                (formatTimestamp(chat.timestamp).toLowerCase().includes(searchTermLower)) ||
-                (chat.tags?.some(tag => tag.toLowerCase().includes(searchTermLower)))
-              )
-            : standaloneChats;
+        // Use standaloneChats directly
+        const chatsToSort = standaloneChats;
 
-        // 2. Sort
+        // Sorting logic remains the same
         const getString = (value: string | null | undefined): string => value ?? '';
-        const getTagsString = (tags: string[] | null | undefined): string => (tags ?? []).join(', '); // Use joined tags for basic sort
+        const getTagsString = (tags: string[] | null | undefined): string => (tags ?? []).join(', ');
 
-        return [...filtered].sort((a, b) => {
+        return [...chatsToSort].sort((a, b) => {
             let compareResult = 0;
             try {
                 switch (criteria) {
                     case 'name':
-                        // Use name, fallback to formatted timestamp if name is null/undefined
-                        // --- FIX: Use backticks for template literal ---
                         const nameA = getString(a.name) || `Chat (${formatTimestamp(a.timestamp)})`;
                         const nameB = getString(b.name) || `Chat (${formatTimestamp(b.timestamp)})`;
-                        // --- END FIX ---
                         compareResult = nameA.localeCompare(nameB, undefined, { sensitivity: 'base', usage: 'sort' });
                         break;
                     case 'date':
-                        // --- FIX: Add missing semicolon ---
-                        compareResult = b.timestamp - a.timestamp; // Descending by default
+                        compareResult = b.timestamp - a.timestamp;
                         break;
-                        // --- END FIX ---
                     case 'tags':
                         compareResult = getTagsString(a.tags).localeCompare(getTagsString(b.tags), undefined, { sensitivity: 'base', usage: 'sort' });
                         break;
                     default:
                         const _exhaustiveCheck: never = criteria;
-                        console.warn(`[sortedAndFilteredStandaloneChats] Unknown sort criteria: ${criteria}`);
+                        console.warn(`[sortedStandaloneChats] Unknown sort criteria: ${criteria}`);
                         return 0;
                 }
             } catch (e) {
@@ -142,15 +137,14 @@ export function LandingPage() {
                 return 0;
             }
 
-            // Adjust direction (Date is handled by initial compare direction)
             if (direction === 'desc' && criteria !== 'date') {
                 compareResult *= -1;
             } else if (direction === 'asc' && criteria === 'date') {
-                compareResult *= -1; // Reverse date sort for ascending
+                compareResult *= -1;
             }
             return compareResult;
         });
-     }, [standaloneChats, standaloneSearch, currentStandaloneChatSortCriteria, currentStandaloneChatSortDirection]);
+     }, [standaloneChats, currentStandaloneChatSortCriteria, currentStandaloneChatSortDirection]); // Removed standaloneSearch dependency
 
 
      // Handlers
@@ -189,17 +183,20 @@ export function LandingPage() {
                         <Card size="3" className="flex flex-col overflow-hidden mb-6">
                             <Flex justify="between" align="center" px="4" pt="4" pb="3" style={{ borderBottom: '1px solid var(--gray-a6)' }}>
                                 <Heading as="h2" size="5" weight="medium"><Flex align="center" gap="2"><ChatBubbleIcon />Standalone Chats</Flex></Heading>
+                                {/* Remove Search Input Box */}
+                                {/*
                                 <Box style={{ maxWidth: '250px', width: '100%' }}>
                                     <TextField.Root size="2" placeholder="Search chats (name, date, tag)..." value={standaloneSearch} onChange={(e) => setStandaloneSearch(e.target.value)} >
                                         <TextField.Slot> <MagnifyingGlassIcon height="16" width="16" /> </TextField.Slot>
                                     </TextField.Root>
                                 </Box>
+                                */}
                             </Flex>
                             <Box className="flex-grow flex flex-col overflow-hidden" style={{ minHeight: '200px' }}>
-                                {/* Pass sorted/filtered data and sort props */}
-                                {sortedAndFilteredStandaloneChats && sortedAndFilteredStandaloneChats.length > 0 ? (
+                                {/* Use sortedStandaloneChats */}
+                                {sortedStandaloneChats && sortedStandaloneChats.length > 0 ? (
                                     <StandaloneChatListTable
-                                        chats={sortedAndFilteredStandaloneChats}
+                                        chats={sortedStandaloneChats}
                                         sortCriteria={currentStandaloneChatSortCriteria}
                                         sortDirection={currentStandaloneChatSortDirection}
                                         onSort={handleStandaloneChatSort}
@@ -207,7 +204,12 @@ export function LandingPage() {
                                         onDeleteChatRequest={handleDeleteChatRequest}
                                     />
                                 ) : (
-                                    <Flex flexGrow="1" align="center" justify="center" p="6"> <Text color="gray"> {standaloneSearch ? 'No matching chats found.' : 'No standalone chats yet. Click "New Chat".'} </Text> </Flex>
+                                    <Flex flexGrow="1" align="center" justify="center" p="6">
+                                        <Text color="gray">
+                                            {/* Remove check for standaloneSearch */}
+                                            'No standalone chats yet. Click "New Chat".'
+                                        </Text>
+                                     </Flex>
                                 )}
                              </Box>
                         </Card>
