@@ -11,7 +11,7 @@ import { chatRoutes } from './routes/chatRoutes.js'; // Routes for session chats
 import { standaloneChatRoutes } from './routes/standaloneChatRoutes.js'; // Routes for standalone chats
 import { ollamaRoutes } from './routes/ollamaRoutes.js'; // <-- Import Ollama routes
 import { dockerRoutes } from './routes/dockerRoutes.js'; // <-- Import Docker routes
-import { metaRoutes } from './routes/metaRoutes.js'; // <-- Import Meta routes
+import { metaRoutes } from './routes/metaRoutes.js'; // <-- Import Meta routes (now includes starred messages)
 import { ApiError, InternalServerError, ConflictError, BadRequestError, NotFoundError } from './errors.js';
 import { getActiveModel, getConfiguredContextSize } from './services/activeModelService.js';
 import fs from 'node:fs';
@@ -63,7 +63,7 @@ const app = new Elysia()
             info: { title: 'Therascript API (Elysia)', version: appVersion },
             tags: [
                 { name: 'Session', description: 'Session and Transcript Endpoints' },
-                { name: 'Chat', description: 'Chat Interaction Endpoints (within a session)' },
+                { name: 'Chat', description: 'Chat Interaction Endpoints (within a session or global)' }, // Combined Chat Tag
                 { name: 'Standalone Chat', description: 'Chat Interaction Endpoints (not tied to a session)' }, // New Tag
                 { name: 'Transcription', description: 'Transcription Job Management' },
                 { name: 'Ollama', description: 'Ollama LLM Management Endpoints' },
@@ -103,7 +103,7 @@ const app = new Elysia()
     })
 
     // --- Core Application Routes ---
-    .use(metaRoutes)          // Handles /api/health, /api/schema
+    .use(metaRoutes)          // Handles /api/health, /api/schema, /api/starred-messages
     .use(ollamaRoutes)        // Handles /api/ollama/*
     .use(dockerRoutes)        // Handles /api/docker/*
     .use(sessionRoutes)       // Handles /api/sessions/* and /api/transcription/*

@@ -1,5 +1,4 @@
 /* packages/api/src/types/index.ts */
-// packages/api/src/types/index.ts
 export interface BackendChatMessage {
   id: number;
   chatId: number;
@@ -8,6 +7,8 @@ export interface BackendChatMessage {
   timestamp: number;
   promptTokens?: number | null;
   completionTokens?: number | null;
+  starred?: number; // 0 or 1 from DB - Keep as number internally
+  starredName?: string | null;
 }
 
 export interface BackendChatSession {

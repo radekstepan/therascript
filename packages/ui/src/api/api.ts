@@ -12,6 +12,7 @@ import type {
     OllamaModelInfo,
     DockerContainerStatus,
     BackendChatSession,
+    BackendChatMessage, // Import backend type
 } from '../types';
 
 // Define the API base URL (ensure this matches your backend)
@@ -38,16 +39,17 @@ export interface StandaloneChatListItem {
 // --- Session and Transcript Endpoints ---
 
 // GET /api/sessions/
-// TODO: Revert this back to only fetch metadata once StarredTemplates uses a dedicated API
+// Fetch only metadata for list view
 export const fetchSessions = async (): Promise<Session[]> => {
     const response = await axios.get('/api/sessions/');
-    // Temporary: Fetch full session details including full chats for StarredTemplates workaround
-    const sessionMetadatas: Pick<Session, 'id'>[] = response.data;
-    const fullSessions = await Promise.all(
-        sessionMetadatas.map(meta => fetchSession(meta.id)) // Fetch full details for each
-    );
-    return fullSessions;
+    // API now returns only metadata, map it to the Session type for UI consistency for now
+    // although the 'chats' array will be empty/not populated
+    return response.data.map((sessionMeta: any) => ({
+        ...sessionMeta,
+        chats: [], // Indicate no chat details fetched here
+    }));
 };
+
 
 // POST /api/sessions/upload
 export const uploadSession = async (file: File, metadata: SessionMetadata): Promise<{ sessionId: number; jobId: string; message: string }> => {
@@ -96,10 +98,19 @@ export const fetchTranscript = async (sessionId: number): Promise<StructuredTran
 
 // GET /api/sessions/{sessionId}/chats/{chatId}
 // Renamed for clarity: fetches details for a chat *within* a session
+// Map BackendChatMessage to UI ChatMessage
 export const fetchSessionChatDetails = async (sessionId: number, chatId: number): Promise<ChatSession> => {
-    const response = await axios.get(`/api/sessions/${sessionId}/chats/${chatId}`);
-    return response.data;
+    const response = await axios.get<BackendChatSession>(`/api/sessions/${sessionId}/chats/${chatId}`);
+    return {
+         ...response.data,
+         messages: (response.data.messages || []).map(msg => ({
+             ...msg,
+             starred: !!msg.starred, // Map 0/1 to boolean
+             starredName: msg.starredName ?? undefined, // Map null to undefined
+         })),
+     };
 };
+
 
 // PUT /api/sessions/{sessionId}/metadata
 export const updateSessionMetadata = async (
@@ -214,10 +225,19 @@ export const createStandaloneChat = async (): Promise<StandaloneChatListItem> =>
 };
 
 // GET /api/chats/{chatId}
+// Map BackendChatMessage to UI ChatMessage
 export const fetchStandaloneChatDetails = async (chatId: number): Promise<ChatSession> => {
-    const response = await axios.get<ChatSession>(`/api/chats/${chatId}`);
-    return response.data; // Returns full chat session with messages
+    const response = await axios.get<BackendChatSession>(`/api/chats/${chatId}`);
+    return {
+         ...response.data,
+         messages: (response.data.messages || []).map(msg => ({
+             ...msg,
+             starred: !!msg.starred, // Map 0/1 to boolean
+             starredName: msg.starredName ?? undefined, // Map null to undefined
+         })),
+     };
 };
+
 
 // POST /api/chats/{chatId}/messages (Streaming - Uses Fetch)
 export const addStandaloneChatMessageStream = async (
@@ -262,6 +282,50 @@ export const deleteStandaloneChat = async (chatId: number): Promise<{ message: s
     const response = await axios.delete(`/api/chats/${chatId}`);
     return response.data;
 };
+
+// --- Message Star Endpoint ---
+// PATCH /api/sessions/{sessionId}/chats/{chatId}/messages/{messageId} OR /api/chats/{chatId}/messages/{messageId}
+export const updateMessageStarStatus = async (
+    messageId: number,
+    starred: boolean,
+    starredName?: string | null,
+    chatId?: number, // Required if standalone or for clarity
+    sessionId?: number | null // Required if session-based
+): Promise<ChatMessage> => {
+    const payload = { starred, starredName: starred ? starredName : null };
+    let url: string;
+
+    if (sessionId !== undefined && sessionId !== null && chatId !== undefined) {
+        url = `/api/sessions/${sessionId}/chats/${chatId}/messages/${messageId}`;
+        console.log(`[API] Updating star (session): ${url}`);
+    } else if (chatId !== undefined) {
+        url = `/api/chats/${chatId}/messages/${messageId}`;
+        console.log(`[API] Updating star (standalone): ${url}`);
+    } else {
+        throw new Error("Either sessionId/chatId or just chatId must be provided to update star status.");
+    }
+
+    const response = await axios.patch<BackendChatMessage>(url, payload);
+    // Map BackendChatMessage to UI ChatMessage
+    return {
+        ...response.data,
+        starred: !!response.data.starred,
+        starredName: response.data.starredName ?? undefined,
+    };
+};
+
+// GET /api/starred-messages
+export const fetchStarredMessages = async (): Promise<ChatMessage[]> => {
+    console.log(`[API] Fetching starred messages`);
+    const response = await axios.get<BackendChatMessage[]>('/api/starred-messages');
+    // Map BackendChatMessage to UI ChatMessage
+    return (response.data || []).map(msg => ({
+        ...msg,
+        starred: !!msg.starred,
+        starredName: msg.starredName ?? undefined,
+    }));
+};
+
 
 // --- Ollama Management Endpoints (Unchanged) ---
 

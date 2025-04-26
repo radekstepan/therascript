@@ -1,4 +1,4 @@
-// File: packages/api/src/db/sqliteService.ts
+// packages/api/src/db/sqliteService.ts
 import crypto from 'node:crypto'; // <-- Import crypto
 import Database, { type Database as DB, type Statement, type RunResult } from 'better-sqlite3';
 import path from 'node:path';
@@ -19,6 +19,7 @@ if (!fs.existsSync(dbDir)) {
 // --- Schema Definition (Updated) ---
 // Defines tables and ensures cascading deletes using FOREIGN KEY constraints.
 // Changed chats.sessionId to be NULLABLE for standalone chats.
+// Added starred and starredName to messages table.
 const schema = `
     -- Sessions Table
     CREATE TABLE IF NOT EXISTS sessions (
@@ -48,7 +49,7 @@ const schema = `
     CREATE INDEX IF NOT EXISTS idx_chat_session ON chats (sessionId);
     CREATE INDEX IF NOT EXISTS idx_chat_timestamp ON chats (timestamp); -- Added index for chat sorting
 
-    -- Messages Table (Updated)
+    -- Messages Table (Updated with Starred Fields)
     CREATE TABLE IF NOT EXISTS messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         chatId INTEGER NOT NULL,
@@ -57,11 +58,15 @@ const schema = `
         timestamp INTEGER NOT NULL, -- UNIX Millis Timestamp for sorting/display
         promptTokens INTEGER,
         completionTokens INTEGER,
+        starred INTEGER DEFAULT 0, -- 0 = false, 1 = true
+        starredName TEXT NULL,
         -- Ensures that deleting a chat automatically deletes its associated messages
         FOREIGN KEY (chatId) REFERENCES chats (id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_message_chat ON messages (chatId);
     CREATE INDEX IF NOT EXISTS idx_message_timestamp ON messages (timestamp);
+    -- Optional index for starred messages if performance becomes an issue
+    -- CREATE INDEX IF NOT EXISTS idx_message_starred ON messages (starred);
 
     -- Schema Metadata Table (New)
     CREATE TABLE IF NOT EXISTS schema_metadata (
@@ -173,9 +178,7 @@ function initializeDatabase(dbInstance: DB) {
         if (!hasStatus) { console.log('[db Init Func Migration]: Adding "status" column...'); dbInstance.exec("ALTER TABLE sessions ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'"); console.log('[db Init Func Migration]: "status" column added.'); }
         if (!hasWhisperJobId) { console.log('[db Init Func Migration]: Adding "whisperJobId" column...'); dbInstance.exec("ALTER TABLE sessions ADD COLUMN whisperJobId TEXT NULL"); console.log('[db Init Func Migration]: "whisperJobId" column added.'); }
         if (!hasAudioPath) { console.log('[db Init Func Migration]: Adding "audioPath" column...'); dbInstance.exec("ALTER TABLE sessions ADD COLUMN audioPath TEXT NULL"); console.log('[db Init Func Migration]: "audioPath" column added.'); }
-        // *** ADD Migration for transcriptTokenCount ***
         if (!hasTokenCount) { console.log('[db Init Func Migration]: Adding "transcriptTokenCount" column...'); dbInstance.exec("ALTER TABLE sessions ADD COLUMN transcriptTokenCount INTEGER NULL"); console.log('[db Init Func Migration]: "transcriptTokenCount" column added.'); }
-        // *** END Migration ***
 
         const dateColumn = sessionColumns.find(col => col.name === 'date');
         if (dateColumn && dateColumn.type.toUpperCase() !== 'TEXT') { console.warn(`[db Init Func Migration]: 'date' column type mismatch...`); }
@@ -186,11 +189,16 @@ function initializeDatabase(dbInstance: DB) {
         const chatIndexes = dbInstance.pragma("index_list('chats')") as { name: string }[];
         if (!chatIndexes.some(idx => idx.name === 'idx_chat_timestamp')) { console.log('[db Init Func Migration]: Adding chat timestamp index...'); dbInstance.exec("CREATE INDEX IF NOT EXISTS idx_chat_timestamp ON chats (timestamp);"); console.log('[db Init Func Migration]: Chat timestamp index added.'); }
 
-        // --- Message Table Migrations (Added Token Columns) ---
+        // --- Message Table Migrations (Added Token & Starred Columns) ---
         const hasPromptTokens = messageColumns.some((col) => col.name === 'promptTokens');
         const hasCompletionTokens = messageColumns.some((col) => col.name === 'completionTokens');
+        const hasStarred = messageColumns.some((col) => col.name === 'starred'); // Check for starred
+        const hasStarredName = messageColumns.some((col) => col.name === 'starredName'); // Check for starredName
+
         if (!hasPromptTokens) { console.log('[db Init Func Migration]: Adding "promptTokens" column to messages...'); dbInstance.exec("ALTER TABLE messages ADD COLUMN promptTokens INTEGER NULL"); console.log('[db Init Func Migration]: "promptTokens" column added.'); }
         if (!hasCompletionTokens) { console.log('[db Init Func Migration]: Adding "completionTokens" column to messages...'); dbInstance.exec("ALTER TABLE messages ADD COLUMN completionTokens INTEGER NULL"); console.log('[db Init Func Migration]: "completionTokens" column added.'); }
+        if (!hasStarred) { console.log('[db Init Func Migration]: Adding "starred" column to messages...'); dbInstance.exec("ALTER TABLE messages ADD COLUMN starred INTEGER DEFAULT 0"); console.log('[db Init Func Migration]: "starred" column added.'); }
+        if (!hasStarredName) { console.log('[db Init Func Migration]: Adding "starredName" column to messages...'); dbInstance.exec("ALTER TABLE messages ADD COLUMN starredName TEXT NULL"); console.log('[db Init Func Migration]: "starredName" column added.'); }
 
         // --- Message Timestamp Index ---
         const messageIndexes = dbInstance.pragma("index_list('messages')") as { name: string }[];

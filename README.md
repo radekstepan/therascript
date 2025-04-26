@@ -1,5 +1,9 @@
 # TODO
 
+- [ ] shutdown and autostart scripts
+    - https://aistudio.google.com/prompts/12ixBihqRs-Vn7qgPVNv8EzoqszjTg1Pl
+    - https://grok.com/chat/d53dbfa2-fdf7-4d5c-83fb-1e900f113ae2
+
 - [ ] make the chat paragraph icons larger, add a gap between them AND/OR move the play icon to the left of the paragraph
 - [ ] fix vertical align of transcript header, items too close to the top; `align-items: flex-end`
 - [ ] reduce the left and right padding on the chat/transcript section and be consistent with the chats section
@@ -13,8 +17,8 @@
 - [ ] when you upload/transcribe a file, you should reset the New Session modal
 - [ ] when I click to Rename Chat, the input field that opens in the modal should be focused
 - [ ] toast should above modal
-- [ ] make sure the AI response "cursor" is less dark and is still blinking.The copy icon shouldn't show until after the whole response has been received.
-- [ ] starred messages don't show in the popover
+- [x] make sure the AI response "cursor" is less dark and is still blinking.The copy icon shouldn't show until after the whole response has been received.
+- [x] starred messages don't show in the popover
 - [ ] the star message icon is too small and not vertically aligned with the message itself
 - [ ] think about the starred messages popover, the list/UI looks odd
 - [ ] move env files to root dir
@@ -23,7 +27,7 @@
 - [ ] you should clear the input field when you send a message and be able to type your new message while the AI is responding
 - [ ] issue with chats in loading state (ask Gemma about Jotai implementation)
 - [ ] toast needs a bit of border else it fades with the background
-- [ ] starring standalone chat messages is not working at all
+- [x] starring standalone chat messages is not working at all
 
 ## Nice to have
 

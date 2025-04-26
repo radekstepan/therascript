@@ -1,7 +1,7 @@
 /* packages/ui/src/components/SessionView/Chat/ChatMessages.tsx */
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react'; // <-- Added useMemo import
 import { useAtomValue } from 'jotai';
-import { useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query'; // <-- Import useMutation
 import {
     StarIcon,
     StarFilledIcon,
@@ -13,10 +13,11 @@ import {
 } from '@radix-ui/react-icons';
 import { Button, TextField, Flex, Box, Text, IconButton, Dialog, Spinner, Callout, Tooltip } from '@radix-ui/themes';
 import ReactMarkdown from 'react-markdown';
-import { activeSessionIdAtom, renderMarkdownAtom, toastMessageAtom } from '../../../store';
+import { activeSessionIdAtom, activeChatIdAtom, renderMarkdownAtom, toastMessageAtom } from '../../../store'; // <-- Add activeChatIdAtom
 import { useSetAtom } from 'jotai';
 import type { ChatMessage, ChatSession } from '../../../types';
 import { cn } from '../../../utils';
+import { updateMessageStarStatus } from '../../../api/api'; // <-- Import API function
 
 // Define type for the streaming message prop
 interface StreamingMessage {
@@ -26,6 +27,7 @@ interface StreamingMessage {
 
 interface ChatMessagesProps {
   activeChatId: number | null;
+  isStandalone: boolean; // <-- Add prop to know if it's standalone
   messages: ChatMessage[];
   streamingMessage: StreamingMessage | null;
   // --- REMOVED isCursorAnimating prop ---
@@ -33,11 +35,13 @@ interface ChatMessagesProps {
 
 export function ChatMessages({
     activeChatId,
+    isStandalone, // <-- Destructure prop
     messages: chatMessages,
     streamingMessage,
     // --- REMOVED isCursorAnimating prop ---
 }: ChatMessagesProps) {
   const activeSessionId = useAtomValue(activeSessionIdAtom);
+  const currentActiveChatId = useAtomValue(activeChatIdAtom); // Use the atom value directly
   const shouldRenderMarkdown = useAtomValue(renderMarkdownAtom);
   const setToastMessage = useSetAtom(toastMessageAtom);
 
@@ -49,35 +53,79 @@ export function ChatMessages({
 
   const [copiedMessageId, setCopiedMessageId] = useState<number | string | null>(null);
 
+  // --- Determine query key based on context ---
+  const chatQueryKey = useMemo(() => {
+      if (isStandalone) {
+          return ['standaloneChat', currentActiveChatId];
+      } else {
+          return ['chat', activeSessionId, currentActiveChatId];
+      }
+  }, [isStandalone, activeSessionId, currentActiveChatId]);
+
+  // --- Mutation for Updating Star Status ---
+  const updateStarMutation = useMutation({
+      mutationFn: (variables: { messageId: number; starred: boolean; starredName?: string | null }) => {
+          const { messageId, starred, starredName } = variables;
+          // Pass correct IDs based on whether it's standalone or session
+          const sessionId = isStandalone ? undefined : activeSessionId;
+          const chatId = currentActiveChatId;
+          if (!chatId) throw new Error("Cannot update star status without active chatId");
+          return updateMessageStarStatus(messageId, starred, starredName, chatId, sessionId);
+      },
+      onSuccess: (updatedMessage) => {
+          // Optimistically update the chat data in the cache
+          queryClient.setQueryData<ChatSession>(chatQueryKey, (oldData) => {
+              if (!oldData) return oldData;
+              return {
+                  ...oldData,
+                  messages: (oldData.messages || []).map(msg =>
+                      msg.id === updatedMessage.id
+                          ? { ...msg, starred: updatedMessage.starred, starredName: updatedMessage.starredName }
+                          : msg
+                  ),
+              };
+          });
+          // Invalidate starred messages query to update the popover
+          queryClient.invalidateQueries({ queryKey: ['starredMessages'] });
+          setToastMessage(updatedMessage.starred ? 'Message starred!' : 'Message unstarred.');
+      },
+      onError: (error: Error, variables) => {
+          console.error(`Error updating star status for message ${variables.messageId}:`, error);
+          setToastMessage(`Error: ${error.message}`);
+      },
+      onSettled: () => {
+          // Close naming dialog if it was open
+          if (isNamingDialogOpen) {
+               handleCancelName();
+          }
+      }
+  });
+
   const handleStarClick = (message: ChatMessage) => {
-    if (activeChatId === null || !activeSessionId) return;
-    const queryKey = ['chat', activeSessionId, activeChatId];
-    if (message.starred) {
-      queryClient.setQueryData<ChatSession>(queryKey, (oldData) => {
-        if (!oldData) return oldData;
-        return { ...oldData, messages: (oldData.messages || []).map(msg => msg.id === message.id ? { ...msg, starred: false, starredName: undefined } : msg), };
-      });
+    if (currentActiveChatId === null || !message.id) return;
+    const shouldStar = !message.starred;
+
+    if (shouldStar) {
+        // Open dialog to name the template
+        setMessageToName(message);
+        setTemplateNameInput(message.starredName || message.text.substring(0, 50) + (message.text.length > 50 ? '...' : ''));
+        setNamingError(null);
+        setIsNamingDialogOpen(true);
     } else {
-      setMessageToName(message);
-      setTemplateNameInput(message.starredName || message.text.substring(0, 50) + (message.text.length > 50 ? '...' : ''));
-      setNamingError(null);
-      setIsNamingDialogOpen(true);
+        // Unstar directly
+        updateStarMutation.mutate({ messageId: message.id, starred: false });
     }
   };
 
   const handleCancelName = () => { setIsNamingDialogOpen(false); setMessageToName(null); setTemplateNameInput(''); setNamingError(null); };
 
   const handleConfirmName = () => {
-    if (!messageToName || activeChatId === null || !activeSessionId) return;
+    if (!messageToName || updateStarMutation.isPending) return;
     const finalName = templateNameInput.trim();
     if (!finalName) { setNamingError("Please enter a name for the starred template."); return; }
-    const queryKey = ['chat', activeSessionId, activeChatId];
-    // TODO we need to actually make a request to star the message
-    queryClient.setQueryData<ChatSession>(queryKey, (oldData) => {
-      if (!oldData) return oldData;
-      return { ...oldData, messages: (oldData.messages || []).map(msg => msg.id === messageToName.id ? { ...msg, starred: true, starredName: finalName } : msg), };
-    });
-    handleCancelName();
+    // Star the message with the provided name
+    updateStarMutation.mutate({ messageId: messageToName.id, starred: true, starredName: finalName });
+    // Dialog will close via onSettled
   };
 
   const handleCopyClick = (messageId: number | string, textToCopy: string) => {
@@ -140,12 +188,24 @@ export function ChatMessages({
               <>
                 <Box className="flex-shrink-0 self-center mt-px">
                    {msg.starred ? (
-                     <IconButton variant="ghost" color="yellow" size="1" className="p-0 text-yellow-500" onClick={() => handleStarClick(msg)} title="Unstar message" aria-label="Unstar message" >
-                       <StarFilledIcon width="16" height="16" />
+                     <IconButton
+                         variant="ghost" color="yellow" size="1" className="p-0 text-yellow-500"
+                         onClick={() => handleStarClick(msg)}
+                         title={msg.starredName ? `Unstar "${msg.starredName}"` : "Unstar message"}
+                         aria-label="Unstar message"
+                         disabled={updateStarMutation.isPending && updateStarMutation.variables?.messageId === msg.id}
+                     >
+                       {updateStarMutation.isPending && updateStarMutation.variables?.messageId === msg.id ? <Spinner size="1"/> : <StarFilledIcon width="16" height="16" />}
                      </IconButton>
                    ) : (
-                     <IconButton variant="ghost" color="gray" size="1" className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity p-0" onClick={() => handleStarClick(msg)} title="Star message as template" aria-label="Star message" >
-                       <StarIcon width="14" height="14" />
+                     <IconButton
+                         variant="ghost" color="gray" size="1"
+                         className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity p-0"
+                         onClick={() => handleStarClick(msg)}
+                         title="Star message as template" aria-label="Star message"
+                         disabled={updateStarMutation.isPending && updateStarMutation.variables?.messageId === msg.id}
+                     >
+                         {updateStarMutation.isPending && updateStarMutation.variables?.messageId === msg.id ? <Spinner size="1"/> : <StarIcon width="14" height="14" />}
                      </IconButton>
                    )}
                 </Box>
@@ -214,21 +274,16 @@ export function ChatMessages({
             </label>
             <Text size="1" color="gray" mt="1"> Original: "<Text truncate>{messageToName?.text}</Text>" </Text>
             {namingError && ( <Callout.Root color="red" size="1" mt="1"> <Callout.Icon><InfoCircledIcon /></Callout.Icon> <Callout.Text>{namingError}</Callout.Text> </Callout.Root> )}
+            {updateStarMutation.isError && isNamingDialogOpen && <Callout.Root color="red" size="1" mt="1"> <Callout.Icon><InfoCircledIcon /></Callout.Icon> <Callout.Text>Error: {updateStarMutation.error.message}</Callout.Text> </Callout.Root> }
           </Flex>
           <Flex gap="3" mt="4" justify="end">
-            <Button variant="soft" color="gray" onClick={handleCancelName}> <Cross2Icon /> Cancel </Button>
-            <Button onClick={handleConfirmName}> <CheckIcon /> Save Template </Button>
+            <Button variant="soft" color="gray" onClick={handleCancelName} disabled={updateStarMutation.isPending}> <Cross2Icon /> Cancel </Button>
+            <Button onClick={handleConfirmName} disabled={updateStarMutation.isPending || !templateNameInput.trim()}>
+                 {updateStarMutation.isPending ? <Spinner size="1"/> : <CheckIcon />} Save Template
+             </Button>
           </Flex>
         </Dialog.Content>
       </Dialog.Root>
     </>
   );
-}
-
-// Define props interface if it wasn't done above correctly
-interface ChatMessagesProps {
-  activeChatId: number | null;
-  messages: ChatMessage[];
-  streamingMessage: StreamingMessage | null;
-  // isCursorAnimating prop removed
 }

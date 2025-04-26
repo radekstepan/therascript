@@ -1,7 +1,7 @@
 /* packages/api/src/api/standaloneChatHandler.ts */
 import { chatRepository } from '../repositories/chatRepository.js';
 import { streamChatResponse } from '../services/ollamaService.js';
-import { NotFoundError, InternalServerError, ApiError } from '../errors.js';
+import { NotFoundError, InternalServerError, ApiError, BadRequestError } from '../errors.js';
 import type { BackendChatMessage, ChatMetadata } from '../types/index.js';
 import { TransformStream } from 'node:stream/web';
 import { TextEncoder } from 'node:util';
@@ -9,7 +9,9 @@ import { TextEncoder } from 'node:util';
 
 // Define precise return types matching the schemas where needed
 type StandaloneChatMetadataResponse = ChatMetadata & { sessionId: null };
-type FullStandaloneChatResponse = StandaloneChatMetadataResponse & { messages: BackendChatMessage[] };
+// Define response type with boolean starred
+type ApiChatMessageResponse = Omit<BackendChatMessage, 'starred'> & { starred: boolean };
+type FullStandaloneChatApiResponse = StandaloneChatMetadataResponse & { messages: ApiChatMessageResponse[] };
 
 // --- Standalone Chat Handlers (used by standaloneChatRoutes) ---
 
@@ -41,14 +43,18 @@ export const listStandaloneChats = ({ set }: any): StandaloneChatMetadataRespons
 
 
 // GET /api/chats/:chatId - Get details of a specific standalone chat
-export const getStandaloneChatDetails = ({ chatData, set }: any): FullStandaloneChatResponse => { // Return type corrected
+export const getStandaloneChatDetails = ({ chatData, set }: any): FullStandaloneChatApiResponse => { // Corrected return type
     if (!chatData) throw new NotFoundError(`Standalone chat not found in context.`);
     if (chatData.sessionId !== null) {
          console.error(`[API Error] getStandaloneChatDetails: Chat ${chatData.id} has sessionId ${chatData.sessionId}, expected null.`);
          throw new InternalServerError(`Chat ${chatData.id} is not a standalone chat.`);
     }
     set.status = 200;
-    const messages = chatData.messages ?? [];
+    const messages = (chatData.messages ?? []).map((m: BackendChatMessage) => ({ // Map starred to boolean
+        ...m,
+        starred: !!m.starred, // Correctly map here
+        starredName: m.starredName === undefined ? undefined : m.starredName, // Preserve undefined
+    }));
     const { messages: _m, ...metadata } = chatData;
     // Ensure the returned object matches the expected schema structure
     return { ...metadata, sessionId: null, messages: messages };
@@ -147,6 +153,43 @@ export const addStandaloneChatMessage = async ({ chatData, body, set }: any): Pr
     }
 };
 
+// PATCH /api/chats/:chatId/messages/:messageId - Update message star status
+export const updateStandaloneChatMessageStarStatus = ({ chatData, messageData, body, set }: any): ApiChatMessageResponse => {
+    const { starred, starredName } = body;
+    if (typeof starred !== 'boolean') {
+        throw new BadRequestError("Missing or invalid 'starred' field (must be boolean).");
+    }
+    if (starred && typeof starredName !== 'string') {
+        // Allow null or undefined if unstarring, but require string if starring
+        throw new BadRequestError("Missing or invalid 'starredName' field (must be string when starring).");
+    }
+    if (!starred && starredName !== undefined) {
+        console.warn("[API Star] 'starredName' provided but 'starred' is false. Name will be ignored/nulled.");
+    }
+    if (messageData.sender !== 'user') {
+        throw new BadRequestError("Only user messages can be starred.");
+    }
+
+    try {
+        console.log(`[API Star] Updating star status for message ${messageData.id} in standalone chat ${chatData.id} to starred=${starred}, name=${starredName}`);
+        const updatedMessage = chatRepository.updateMessageStarStatus(messageData.id, starred, starredName);
+        if (!updatedMessage) {
+            throw new NotFoundError(`Message ${messageData.id} not found during update.`);
+        }
+        set.status = 200;
+        // Map starred to boolean before returning
+        const { starred: starredNum, ...rest } = updatedMessage;
+        return {
+            ...rest,
+            starred: !!starredNum, // Map number (0/1) to boolean
+            starredName: rest.starredName === undefined ? undefined : rest.starredName, // Preserve undefined
+        };
+    } catch (error) {
+        console.error(`[API Error] updateStandaloneChatMessageStarStatus (Message ID: ${messageData?.id}):`, error);
+        if (error instanceof ApiError) throw error;
+        throw new InternalServerError('Failed to update message star status', error instanceof Error ? error : undefined);
+    }
+};
 
 // PATCH /api/chats/:chatId/name - Rename a standalone chat
 export const renameStandaloneChat = ({ chatData, body, set }: any): StandaloneChatMetadataResponse => { // Correct return type

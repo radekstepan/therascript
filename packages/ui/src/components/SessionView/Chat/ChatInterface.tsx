@@ -53,7 +53,8 @@ export function ChatInterface({
     const [streamingAiContent, setStreamingAiContent] = useState<string>('');
     // --- REMOVED isCursorAnimating state ---
 
-    const chatQueryKey = isStandalone ? ['standaloneChat', activeChatId] : ['chat', activeSessionId, activeChatId];
+    const chatQueryKey = useMemo(() => isStandalone ? ['standaloneChat', activeChatId] : ['chat', activeSessionId, activeChatId], [isStandalone, activeChatId, activeSessionId]);
+
     const { data: chatData, isLoading: isLoadingMessages, error: chatError, isFetching } = useQuery<ChatSession | null, Error>({
         queryKey: chatQueryKey,
         queryFn: () => {
@@ -131,7 +132,7 @@ export function ChatInterface({
                                 setStreamingAiPlaceholderId(null);
                                 setStreamingAiContent('');
                                 // --- Removed isCursorAnimating set state ---
-                    
+
                                 if (activeChatId && !streamErrored) {
                                     console.log("[Stream Finally] Stream completed without error. Invalidating chat query.");
                                     setTimeout(() => {
@@ -184,10 +185,19 @@ export function ChatInterface({
         },
         onMutate: async (newMessageText) => {
             if (!activeChatId) return;
-            const currentChatQueryKey = isStandalone ? ['standaloneChat', activeChatId] : ['chat', activeSessionId, activeChatId];
+            const currentChatQueryKey = chatQueryKey; // Use memoized key
             await queryClient.cancelQueries({ queryKey: currentChatQueryKey });
             const previousChatData = queryClient.getQueryData<ChatSession>(currentChatQueryKey);
-            const temporaryUserMessage: ChatMessage = { id: createTemporaryId(), sender: 'user', text: newMessageText };
+            // --- FIX: Add missing properties ---
+            const temporaryUserMessage: ChatMessage = {
+                id: createTemporaryId(),
+                chatId: activeChatId, // Add chatId
+                sender: 'user',
+                text: newMessageText,
+                timestamp: Date.now(), // Add timestamp
+                starred: false, // Default starred status
+            };
+            // --- END FIX ---
 
             queryClient.setQueryData<ChatSession>(currentChatQueryKey, (oldData) => ({
                 ...(oldData ?? { id: activeChatId, sessionId: isStandalone ? null : activeSessionId, timestamp: Date.now(), name: 'Unknown Chat', messages: [] }),
@@ -222,7 +232,7 @@ export function ChatInterface({
         },
         onError: (error, newMessageText, context) => {
             console.error("Mutation failed (Initiation or Stream Error):", error);
-            const currentChatQueryKey = isStandalone ? ['standaloneChat', activeChatId] : ['chat', activeSessionId, activeChatId];
+            const currentChatQueryKey = chatQueryKey; // Use memoized key
             if (context?.previousChatData && activeChatId && (isStandalone || activeSessionId)) {
                  queryClient.setQueryData(currentChatQueryKey, context.previousChatData);
                  console.log("[Mutation Error] Reverted optimistic user message.");
@@ -308,6 +318,7 @@ export function ChatInterface({
                         // --- End ---
                         messages={chatMessages}
                         activeChatId={activeChatId}
+                        isStandalone={isStandalone} // <-- Pass prop
                         streamingMessage={streamingAiPlaceholderId ? { id: streamingAiPlaceholderId, content: streamingAiContent } : null}
                         // --- Removed isCursorAnimating prop ---
                     />
@@ -325,18 +336,4 @@ export function ChatInterface({
             </Box>
         </Flex>
     );
-}
-
-// Define the props interface if it wasn't done above correctly
-interface ChatInterfaceProps {
-    session?: Session | null;
-    activeChatId: number | null;
-    isStandalone: boolean;
-    isLoadingSessionMeta?: boolean;
-    ollamaStatus: OllamaStatus | undefined;
-    isLoadingOllamaStatus: boolean;
-    onOpenLlmModal: () => void;
-    isTabActive?: boolean;
-    initialScrollTop?: number;
-    onScrollUpdate?: (scrollTop: number) => void;
 }

@@ -2,7 +2,7 @@
 import { chatRepository } from '../repositories/chatRepository.js';
 import { loadTranscriptContent } from '../services/fileService.js';
 import { streamChatResponse } from '../services/ollamaService.js';
-import { NotFoundError, InternalServerError, ApiError } from '../errors.js';
+import { NotFoundError, InternalServerError, ApiError, BadRequestError } from '../errors.js';
 import type { StructuredTranscript, BackendChatMessage, BackendChatSession, ChatMetadata } from '../types/index.js';
 import { TransformStream } from 'node:stream/web';
 import { TextEncoder } from 'node:util';
@@ -10,7 +10,10 @@ import { TextEncoder } from 'node:util';
 
 // Define precise return types matching the schemas where needed
 type SessionChatMetadataResponse = ChatMetadata & { sessionId: number };
-type FullSessionChatResponse = SessionChatMetadataResponse & { messages: BackendChatMessage[] };
+// Define response type with boolean starred
+type ApiChatMessageResponse = Omit<BackendChatMessage, 'starred'> & { starred: boolean };
+type FullSessionChatApiResponse = SessionChatMetadataResponse & { messages: ApiChatMessageResponse[] };
+
 
 // --- Session Chat Handlers (used by sessionRoutes) ---
 
@@ -125,10 +128,47 @@ export const addSessionChatMessage = async ({ sessionData, chatData, body, set }
     }
 };
 
-// TODO need to expose an endpoint to star/unstar a message.
+// PATCH /api/sessions/:sessionId/chats/:chatId/messages/:messageId - Update message star status
+export const updateSessionChatMessageStarStatus = ({ sessionData, chatData, messageData, body, set }: any): ApiChatMessageResponse => {
+    const { starred, starredName } = body;
+    if (typeof starred !== 'boolean') {
+        throw new BadRequestError("Missing or invalid 'starred' field (must be boolean).");
+    }
+    if (starred && typeof starredName !== 'string') {
+        // Allow null or undefined if unstarring, but require string if starring
+        throw new BadRequestError("Missing or invalid 'starredName' field (must be string when starring).");
+    }
+    if (!starred && starredName !== undefined) {
+        console.warn("[API Star] 'starredName' provided but 'starred' is false. Name will be ignored/nulled.");
+    }
+     if (messageData.sender !== 'user') {
+         throw new BadRequestError("Only user messages can be starred.");
+     }
+
+    try {
+        console.log(`[API Star] Updating star status for message ${messageData.id} in chat ${chatData.id} (session ${sessionData.id}) to starred=${starred}, name=${starredName}`);
+        const updatedMessage = chatRepository.updateMessageStarStatus(messageData.id, starred, starredName);
+        if (!updatedMessage) {
+            throw new NotFoundError(`Message ${messageData.id} not found during update.`);
+        }
+        set.status = 200;
+        // Map starred to boolean before returning
+        const { starred: starredNum, ...rest } = updatedMessage;
+        return {
+            ...rest,
+            starred: !!starredNum, // Map number (0/1) to boolean
+            starredName: rest.starredName === undefined ? undefined : rest.starredName, // Preserve undefined
+        };
+    } catch (error) {
+        console.error(`[API Error] updateSessionChatMessageStarStatus (Message ID: ${messageData?.id}):`, error);
+        if (error instanceof ApiError) throw error;
+        throw new InternalServerError('Failed to update message star status', error instanceof Error ? error : undefined);
+    }
+};
+
 
 // GET /api/sessions/:sessionId/chats/:chatId - Get details of a specific session chat
-export const getSessionChatDetails = ({ chatData, sessionData, set }: any): FullSessionChatResponse => { // Return type corrected
+export const getSessionChatDetails = ({ chatData, sessionData, set }: any): FullSessionChatApiResponse => { // Corrected return type
     if (!chatData) throw new NotFoundError(`Chat details not found in context.`);
     if (chatData.sessionId !== sessionData.id) throw new ApiError(403, `Chat ${chatData.id} does not belong to session ${sessionData.id}.`);
     set.status = 200;
@@ -138,7 +178,11 @@ export const getSessionChatDetails = ({ chatData, sessionData, set }: any): Full
     return {
         ...metadata,
         sessionId: metadata.sessionId as number, // Assert sessionId is number
-        messages: messages // Ensure messages array is present
+        messages: messages.map((m: BackendChatMessage) => ({ // Map starred to boolean
+             ...m,
+             starred: !!m.starred, // Correctly map here
+             starredName: m.starredName === undefined ? undefined : m.starredName, // Preserve undefined
+         })) // Ensure messages array is present
     };
 };
 

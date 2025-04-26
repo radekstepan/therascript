@@ -10,9 +10,11 @@ export type StructuredTranscript = TranscriptParagraphData[];
 
 export interface ChatMessage {
     id: number;
+    chatId: number; // Added chatId for consistency
     sender: 'user' | 'ai';
     text: string;
-    starred?: boolean;
+    timestamp: number; // Added timestamp
+    starred?: boolean; // Changed from optional 0/1 to optional boolean
     starredName?: string;
     promptTokens?: number;
     completionTokens?: number;
@@ -43,8 +45,8 @@ export interface Session extends SessionMetadata {
     whisperJobId: string | null;
     date: string; // ISO string from backend
     transcriptTokenCount?: number | null;
-    // Revert to Pick<> for chats array - StarredTemplates needs dedicated API
-    chats: Pick<ChatSession, 'id' | 'sessionId' | 'timestamp' | 'name'>[]; // List only metadata for sessions
+    // Changed chats to use ChatSession metadata, sessionId must be number here
+    chats: Pick<ChatSession, 'id' | 'sessionId' | 'timestamp' | 'name'>[];
 }
 
 // --- Standalone Chat Type (potentially reused BackendChatSession metadata type) ---
@@ -64,6 +66,8 @@ export interface BackendChatMessage {
   timestamp: number;
   promptTokens?: number;
   completionTokens?: number;
+  starred?: number; // 0 or 1 from DB
+  starredName?: string | null;
 }
 
 // --- LLM Management Types ---

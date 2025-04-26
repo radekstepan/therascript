@@ -53,7 +53,7 @@ const schema = `
     CREATE INDEX IF NOT EXISTS idx_chat_session ON chats (sessionId);
     CREATE INDEX IF NOT EXISTS idx_chat_timestamp ON chats (timestamp); -- Added index for chat sorting
 
-    -- Messages Table (Updated)
+    -- Messages Table (Updated with Starred Fields)
     CREATE TABLE IF NOT EXISTS messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         chatId INTEGER NOT NULL,
@@ -62,11 +62,15 @@ const schema = `
         timestamp INTEGER NOT NULL, -- UNIX Millis Timestamp for sorting/display
         promptTokens INTEGER,
         completionTokens INTEGER,
+        starred INTEGER DEFAULT 0, -- 0 = false, 1 = true
+        starredName TEXT NULL,
         -- Ensures that deleting a chat automatically deletes its associated messages
         FOREIGN KEY (chatId) REFERENCES chats (id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_message_chat ON messages (chatId);
     CREATE INDEX IF NOT EXISTS idx_message_timestamp ON messages (timestamp);
+    -- Optional index for starred messages if performance becomes an issue
+    -- CREATE INDEX IF NOT EXISTS idx_message_starred ON messages (starred);
 
     -- Schema Metadata Table (New)
     CREATE TABLE IF NOT EXISTS schema_metadata (
@@ -153,7 +157,15 @@ const createIsoTimestamp = (dateStr: string, offsetMinutes: number = 0): string 
     return baseDate.toISOString();
 };
 
-// Sample data - Use helper for dates (Content unchanged)
+// Define type for sample message structure (including optional starred fields)
+interface SampleChatMessage {
+    sender: 'user' | 'ai';
+    text: string;
+    starred?: boolean;
+    starredName?: string;
+}
+
+// Sample data - Use helper for dates and ensure message structure matches SampleChatMessage
 const sampleSessions = [
   {
     localIdRef: 1,
@@ -182,9 +194,9 @@ const sampleSessions = [
     status: 'completed',
     whisperJobId: null,
     chats: [
-      { name: 'Work Stress Discussion', messages: [ { sender: 'user', text: 'What did Jane say about work?' }, { sender: 'ai', text: 'Jane mentioned that work has been incredibly stressful due to a major project deadline, feeling like she carries most of the weight, and her manager adding more tasks while colleagues seem unsupportive. She\'s working late frequently.' }, ] },
-      { name: 'CBT Concepts Introduced', messages: [ { sender: 'user', text: 'Did the therapist explain CBT?' }, { sender: 'ai', text: 'Yes, the therapist briefly introduced Cognitive Behavioral Therapy (CBT) by explaining its focus on the connection between situations, thoughts, feelings, and behaviors, using Jane\'s example of receiving an urgent task.' }, ] },
-    ],
+      { name: 'Work Stress Discussion', messages: [ { sender: 'user', text: 'What did Jane say about work?', starred: true, starredName: 'Jane Work Stress Quote' } as SampleChatMessage, { sender: 'ai', text: 'Jane mentioned that work has been incredibly stressful due to a major project deadline, feeling like she carries most of the weight, and her manager adding more tasks while colleagues seem unsupportive. She\'s working late frequently.' } as SampleChatMessage ] },
+      { name: 'CBT Concepts Introduced', messages: [ { sender: 'user', text: 'Did the therapist explain CBT?' } as SampleChatMessage, { sender: 'ai', text: 'Yes, the therapist briefly introduced Cognitive Behavioral Therapy (CBT) by explaining its focus on the connection between situations, thoughts, feelings, and behaviors, using Jane\'s example of receiving an urgent task.' } as SampleChatMessage ] },
+    ] as { name?: string; messages: SampleChatMessage[] }[],
   },
   {
     localIdRef: 2,
@@ -212,10 +224,10 @@ const sampleSessions = [
     status: 'completed',
     whisperJobId: null,
     chats: [
-      { name: 'Mindfulness Check-in', messages: [ { sender: 'user', text: 'How’s John doing with anxiety?' }, { sender: 'ai', text: 'John reported that the breathing exercises helped reduce the intensity of physical anxiety symptoms before meetings. However, he struggled to practice consistently, especially in the evenings, and forgot to use the techniques when triggered by critical feedback at work.' }, ] },
-      { name: undefined, messages: [ { sender: 'user', text: 'What triggers John\'s anxiety according to the session?' }, { sender: 'ai', text: 'The session identified specific triggers for John\'s anxiety, including upcoming meetings and receiving critical feedback on his work.' }, ] },
-      { name: 'Therapist Techniques', messages: [ { sender: 'user', text: 'What techniques did the therapist suggest or reinforce?' }, { sender: 'ai', text: 'The therapist reinforced the use of breathing exercises and the 5-minute body scan. They also reframed mindfulness practice as "checking in" rather than a chore and suggested simply noticing the initial anxious feeling and urge to spiral in triggering situations as a first step.' }, ] },
-    ],
+      { name: 'Mindfulness Check-in', messages: [ { sender: 'user', text: 'How’s John doing with anxiety?' } as SampleChatMessage, { sender: 'ai', text: 'John reported that the breathing exercises helped reduce the intensity of physical anxiety symptoms before meetings. However, he struggled to practice consistently, especially in the evenings, and forgot to use the techniques when triggered by critical feedback at work.' } as SampleChatMessage ] },
+      { name: undefined, messages: [ { sender: 'user', text: 'What triggers John\'s anxiety according to the session?', starred: true, starredName: 'John Triggers' } as SampleChatMessage, { sender: 'ai', text: 'The session identified specific triggers for John\'s anxiety, including upcoming meetings and receiving critical feedback on his work.' } as SampleChatMessage ] },
+      { name: 'Therapist Techniques', messages: [ { sender: 'user', text: 'What techniques did the therapist suggest or reinforce?' } as SampleChatMessage, { sender: 'ai', text: 'The therapist reinforced the use of breathing exercises and the 5-minute body scan. They also reframed mindfulness practice as "checking in" rather than a chore and suggested simply noticing the initial anxious feeling and urge to spiral in triggering situations as a first step.' } as SampleChatMessage ] },
+    ] as { name?: string; messages: SampleChatMessage[] }[],
   },
    // Add another session on the same day for sorting check
   {
@@ -229,7 +241,7 @@ const sampleSessions = [
     transcriptContent: [ { id: 0, timestamp: 0, text: "Therapist: Welcome back, Jane. How was your week?" }, { id: 1, timestamp: 3000, text: "Jane: Better, I think. I tried noticing those automatic thoughts we talked about." } ],
     status: 'completed',
     whisperJobId: null,
-    chats: [], // No chats initially
+    chats: [] as { name?: string; messages: SampleChatMessage[] }[], // No chats initially
   },
 ];
 
@@ -302,11 +314,17 @@ async function preloadDatabase() {
             const messageColumns = db.pragma("table_info(messages)") as { name: string; type: string; }[];
             const hasPromptTokens = messageColumns.some((col) => col.name === 'promptTokens');
             const hasCompletionTokens = messageColumns.some((col) => col.name === 'completionTokens');
+            const hasStarred = messageColumns.some((col) => col.name === 'starred'); // Check for starred
+            const hasStarredName = messageColumns.some((col) => col.name === 'starredName'); // Check for starredName
 
             if (!hasAudioPath) { console.log('[Preload Schema Migration]: Adding "audioPath" column...'); db.exec("ALTER TABLE sessions ADD COLUMN audioPath TEXT NULL"); }
             if (!hasTokenCount) { console.log('[Preload Schema Migration]: Adding "transcriptTokenCount" column...'); db.exec("ALTER TABLE sessions ADD COLUMN transcriptTokenCount INTEGER NULL"); }
             if (!hasPromptTokens) { console.log('[Preload Schema Migration]: Adding "promptTokens" column to messages...'); db.exec("ALTER TABLE messages ADD COLUMN promptTokens INTEGER NULL"); }
             if (!hasCompletionTokens) { console.log('[Preload Schema Migration]: Adding "completionTokens" column to messages...'); db.exec("ALTER TABLE messages ADD COLUMN completionTokens INTEGER NULL"); }
+             // Ensure migrations run correctly
+            if (!hasStarred) { console.log('[Preload Schema Migration]: Adding "starred" column to messages...'); db.exec("ALTER TABLE messages ADD COLUMN starred INTEGER DEFAULT 0"); }
+            if (!hasStarredName) { console.log('[Preload Schema Migration]: Adding "starredName" column to messages...'); db.exec("ALTER TABLE messages ADD COLUMN starredName TEXT NULL"); }
+
 
             // --- Verify Schema Version ---
              verifySchemaVersion(db, schema); // Verify the schema using the local function
@@ -332,9 +350,10 @@ async function preloadDatabase() {
           INSERT INTO chats (sessionId, timestamp, name)
           VALUES (?, ?, ?)
         `);
+        // Updated insert message to include starred status
         const insertMessage = db.prepare(/* SQL */ `
-          INSERT INTO messages (chatId, sender, text, timestamp, promptTokens, completionTokens)
-          VALUES (?, ?, ?, ?, ?, ?)
+          INSERT INTO messages (chatId, sender, text, timestamp, promptTokens, completionTokens, starred, starredName)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
         console.log('[Preload] Starting DB transaction for data insertion...');
@@ -389,7 +408,17 @@ async function preloadDatabase() {
                     for (const message of chat.messages) {
                         // Use timestamp slightly offset from chat timestamp for realism
                         const messageTimestamp = timestamp + Math.floor(Math.random() * 100);
-                        insertMessage.run(chatId, message.sender, message.text, messageTimestamp, null, null);
+                        // Insert message including starred status and name
+                        insertMessage.run(
+                            chatId,
+                            message.sender,
+                            message.text,
+                            messageTimestamp,
+                            null, // promptTokens
+                            null, // completionTokens
+                            message.starred ? 1 : 0, // starred
+                            message.starredName || null // starredName
+                        );
                     }
                 }
             }
