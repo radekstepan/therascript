@@ -1,23 +1,44 @@
 // packages/ui/src/components/User/UserThemeDropdown.tsx
-import React, { useState } from 'react'; // <-- Import useState
+import React, { useState } from 'react';
 import { useAtom } from 'jotai';
-import { Button, DropdownMenu, Text, Flex, Switch } from '@radix-ui/themes'; // Import Flex and Switch
+import { Button, DropdownMenu, Text, Flex, Switch, AlertDialog, Spinner } from '@radix-ui/themes'; // Import AlertDialog, Spinner
 import {
     SunIcon, MoonIcon, DesktopIcon, ExitIcon, PersonIcon,
     ChatBubbleIcon, // Optional: Use a different icon for markdown setting
     CubeIcon, // <-- Added icon for Docker status
+    ExclamationTriangleIcon, // For delete warning
 } from '@radix-ui/react-icons';
-import { themeAtom, renderMarkdownAtom, Theme as ThemeType } from '../../store'; // Import renderMarkdownAtom
-import { DockerStatusModal } from './DockerStatusModal'; // <-- Import the new modal
+import { themeAtom, renderMarkdownAtom, Theme as ThemeType, toastMessageAtom } from '../../store'; // Import renderMarkdownAtom, toastMessageAtom
+import { DockerStatusModal } from './DockerStatusModal';
+import { triggerShutdown } from '../../api/api'; // Import the new API call
+import { useSetAtom } from 'jotai'; // Import useSetAtom for toast
 
 export function UserThemeDropdown() {
     const [theme, setTheme] = useAtom(themeAtom);
-    const [renderMarkdown, setRenderMarkdown] = useAtom(renderMarkdownAtom); // Use the atom
-    const [isDockerModalOpen, setIsDockerModalOpen] = useState(false); // <-- State for Docker modal
+    const [renderMarkdown, setRenderMarkdown] = useAtom(renderMarkdownAtom);
+    const [isDockerModalOpen, setIsDockerModalOpen] = useState(false);
+    const [isShutdownConfirmOpen, setIsShutdownConfirmOpen] = useState(false); // State for shutdown confirm
+    const [isShuttingDown, setIsShuttingDown] = useState(false); // Loading state for shutdown
+    const setToast = useSetAtom(toastMessageAtom);
 
-    const handleSignOut = () => {
-        console.log("Sign Out clicked (Placeholder)");
-        // TODO Add actual sign-out logic here
+    const handleShutdownRequest = () => {
+        setIsShutdownConfirmOpen(true); // Open confirmation dialog
+    };
+
+    const handleConfirmShutdown = async () => {
+        setIsShuttingDown(true);
+        try {
+            const result = await triggerShutdown();
+            setToast(result.message || "Shutdown initiated.");
+            // Optionally disable UI further or show a persistent "Shutting down..." message
+            // The system should shut down shortly after this.
+            setIsShutdownConfirmOpen(false); // Close confirm dialog
+            // No need to setIsShuttingDown(false) as the app/system will likely terminate
+        } catch (error: any) {
+            setToast(`Error: ${error.message || 'Failed to initiate shutdown.'}`);
+            setIsShuttingDown(false); // Allow retry if it failed
+            setIsShutdownConfirmOpen(false);
+        }
     };
 
     // Prevent dropdown from closing when clicking the switch
@@ -27,7 +48,7 @@ export function UserThemeDropdown() {
     };
 
     return (
-        <> {/* Fragment to hold dropdown and modal */}
+        <> {/* Fragment to hold dropdown and modals */}
             <DropdownMenu.Root>
                 <DropdownMenu.Trigger>
                     <Button variant="soft" size="2" highContrast aria-label="User options">
@@ -54,7 +75,6 @@ export function UserThemeDropdown() {
 
                     {/* Render Markdown Toggle */}
                     <DropdownMenu.Item onSelect={(e) => e.preventDefault()} className="cursor-default">
-                        {/* --- Remove align="center" from Flex --- */}
                         <Flex justify="between" width="100%" gap="2">
                             <ChatBubbleIcon width="16" height="16" />
                             <Text size="2" style={{ flexGrow: 1 }}>
@@ -67,21 +87,19 @@ export function UserThemeDropdown() {
                                 aria-label="Toggle Markdown rendering for AI responses"
                              />
                         </Flex>
-                         {/* --- End Change --- */}
                     </DropdownMenu.Item>
 
-                    {/* --- Docker Status Item --- */}
+                    {/* Docker Status Item */}
                     <DropdownMenu.Separator />
                     <DropdownMenu.Item onSelect={() => setIsDockerModalOpen(true)}>
                         <CubeIcon width="16" height="16" style={{ marginRight: 'var(--space-2)' }} /> Docker Status
                     </DropdownMenu.Item>
-                    {/* --- End Docker Status Item --- */}
 
                     <DropdownMenu.Separator />
 
-                    {/* Sign Out */}
-                    <DropdownMenu.Item color="red" onSelect={handleSignOut}>
-                        <ExitIcon width="16" height="16" style={{ marginRight: 'var(--space-2)' }}/> Sign Out
+                    {/* Shutdown PC */}
+                    <DropdownMenu.Item color="red" onSelect={handleShutdownRequest}>
+                        <ExitIcon width="16" height="16" style={{ marginRight: 'var(--space-2)' }}/> Shutdown PC...
                     </DropdownMenu.Item>
                 </DropdownMenu.Content>
             </DropdownMenu.Root>
@@ -91,6 +109,29 @@ export function UserThemeDropdown() {
                 isOpen={isDockerModalOpen}
                 onOpenChange={setIsDockerModalOpen}
             />
+
+            {/* Shutdown Confirmation Modal */}
+            <AlertDialog.Root open={isShutdownConfirmOpen} onOpenChange={setIsShutdownConfirmOpen}>
+                <AlertDialog.Content style={{ maxWidth: 450 }}>
+                    <AlertDialog.Title>Confirm Shutdown</AlertDialog.Title>
+                    <AlertDialog.Description size="2">
+                        Are you sure you want to shut down the entire computer?
+                        <br/><br/>
+                        <Text weight="bold" color="red">
+                           <ExclamationTriangleIcon style={{ verticalAlign: 'middle', marginRight: '4px' }}/> Unsaved work in other applications will be lost.
+                        </Text>
+                    </AlertDialog.Description>
+                    <Flex gap="3" mt="4" justify="end">
+                        <Button variant="soft" color="gray" onClick={() => setIsShutdownConfirmOpen(false)} disabled={isShuttingDown}>
+                            Cancel
+                        </Button>
+                        <Button color="red" onClick={handleConfirmShutdown} disabled={isShuttingDown}>
+                            {isShuttingDown ? <Spinner size="1"/> : <ExitIcon />}
+                            <Text ml="1">{isShuttingDown ? 'Shutting Down...' : 'Shutdown Now'}</Text>
+                        </Button>
+                    </Flex>
+                </AlertDialog.Content>
+            </AlertDialog.Root>
         </>
     );
 }

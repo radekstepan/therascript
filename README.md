@@ -28,6 +28,7 @@
 - [ ] issue with chats in loading state (ask Gemma about Jotai implementation)
 - [ ] toast needs a bit of border else it fades with the background
 - [x] starring standalone chat messages is not working at all
+- [ ] sidebar chats should be sorted the same way they are sorted on the homepage; on session chats they should be by date
 
 ## Nice to have
 

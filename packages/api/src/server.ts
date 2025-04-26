@@ -9,9 +9,10 @@ import config from './config/index.js';
 import { sessionRoutes } from './routes/sessionRoutes.js';
 import { chatRoutes } from './routes/chatRoutes.js'; // Routes for session chats
 import { standaloneChatRoutes } from './routes/standaloneChatRoutes.js'; // Routes for standalone chats
-import { ollamaRoutes } from './routes/ollamaRoutes.js'; // <-- Import Ollama routes
-import { dockerRoutes } from './routes/dockerRoutes.js'; // <-- Import Docker routes
-import { metaRoutes } from './routes/metaRoutes.js'; // <-- Import Meta routes (now includes starred messages)
+import { ollamaRoutes } from './routes/ollamaRoutes.js';
+import { dockerRoutes } from './routes/dockerRoutes.js';
+import { metaRoutes } from './routes/metaRoutes.js';
+import { systemRoutes } from './routes/systemRoutes.js'; // <-- Import System routes
 import { ApiError, InternalServerError, ConflictError, BadRequestError, NotFoundError } from './errors.js';
 import { getActiveModel, getConfiguredContextSize } from './services/activeModelService.js';
 import fs from 'node:fs';
@@ -68,6 +69,7 @@ const app = new Elysia()
                 { name: 'Transcription', description: 'Transcription Job Management' },
                 { name: 'Ollama', description: 'Ollama LLM Management Endpoints' },
                 { name: 'Docker', description: 'Docker Container Management' },
+                { name: 'System', description: 'System-level Actions (Shutdown, etc.)' }, // <-- Added System tag
                 { name: 'Meta', description: 'API Metadata and Health' },
             ]
         }
@@ -106,6 +108,7 @@ const app = new Elysia()
     .use(metaRoutes)          // Handles /api/health, /api/schema, /api/starred-messages
     .use(ollamaRoutes)        // Handles /api/ollama/*
     .use(dockerRoutes)        // Handles /api/docker/*
+    .use(systemRoutes)        // Handles /api/system/* <-- Added System routes
     .use(sessionRoutes)       // Handles /api/sessions/* and /api/transcription/*
     .use(chatRoutes)          // Handles /api/sessions/:sessionId/chats/*
     .use(standaloneChatRoutes); // Handles /api/chats/*

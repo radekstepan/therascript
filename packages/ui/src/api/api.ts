@@ -426,4 +426,26 @@ export const fetchDockerStatus = async (): Promise<DockerContainerStatus[]> => {
 };
 // --- END Docker ---
 
+// --- System Endpoints ---
+
+/**
+ * Sends a request to the backend API to initiate a system shutdown.
+ * @returns Promise resolving to the API response message.
+ * @throws {Error} If the API call fails.
+ */
+export const triggerShutdown = async (): Promise<{ message: string }> => {
+    console.log("[UI API] Sending shutdown request to backend...");
+    try {
+        const response = await axios.post<{ message: string }>('/api/system/shutdown');
+        console.log("[UI API] Shutdown request response:", response.data);
+        return response.data;
+    } catch (error: any) {
+        console.error("[UI API] Error triggering shutdown:", error);
+        const message = error.response?.data?.message || error.message || "Unknown error triggering shutdown";
+        throw new Error(message);
+    }
+};
+
+// --- END System ---
+
 // TODO comments should not be removed
