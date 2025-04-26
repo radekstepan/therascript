@@ -1,28 +1,31 @@
 import React, { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom'; // Import useNavigate
+import { useNavigate } from 'react-router-dom';
 import { useAtomValue, useSetAtom } from 'jotai';
 import {
     CounterClockwiseClockIcon, PlusCircledIcon, TrashIcon,
-    Pencil1Icon, // Added for Rename Modal
-    ChatBubbleIcon, // Added for Standalone Chats
-    Cross2Icon, CheckIcon, // Added for Modals
+    Pencil1Icon,
+    ChatBubbleIcon,
+    // Cross2Icon, CheckIcon, // Moved to EditStandaloneChatModal
 } from '@radix-ui/react-icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { SessionListTable } from './SessionListTable';
-import { StandaloneChatListTable } from './StandaloneChatListTable'; // Import new table
+import { StandaloneChatListTable } from './StandaloneChatListTable';
 import {
     Button, Card, Flex, Heading, Text, Box, Container, Spinner, AlertDialog,
-    Dialog, TextField, // Added Dialog, TextField for Rename Modal
+    // Dialog, TextField, // Moved to EditStandaloneChatModal
 } from '@radix-ui/themes';
 import { UserThemeDropdown } from '../User/UserThemeDropdown';
 import { EditDetailsModal } from '../SessionView/Modals/EditDetailsModal';
+// --- Import new Edit Standalone Chat Modal ---
+import { EditStandaloneChatModal } from '../StandaloneChatView/EditStandaloneChatModal';
+// --- End Import ---
 import {
     fetchSessions, deleteSession as deleteSessionApi,
-    fetchStandaloneChats, // Import API for standalone chats
+    fetchStandaloneChats,
     createStandaloneChat as createStandaloneChatApi,
-    renameStandaloneChat as renameStandaloneChatApi,
+    renameStandaloneChat as editStandaloneChatApi, // Rename conceptual import
     deleteStandaloneChat as deleteStandaloneChatApi,
-    StandaloneChatListItem, // Import type
+    StandaloneChatListItem,
 } from '../../api/api';
 import {
     openUploadModalAtom,
@@ -32,9 +35,8 @@ import {
     SessionSortCriteria,
     toastMessageAtom
 } from '../../store';
-import type { Session, SessionMetadata } from '../../types';
-// Removed unused import: import type { StandaloneChatListItem } from '../../api/api';
-import { formatTimestamp } from '../../helpers'; // Import helper for timestamp
+import type { Session, SessionMetadata, ChatSession } from '../../types'; // Added ChatSession type
+import { formatTimestamp } from '../../helpers';
 
 export function LandingPage() {
     const openUploadModal = useSetAtom(openUploadModalAtom);
@@ -43,22 +45,25 @@ export function LandingPage() {
     const currentSortDirection = useAtomValue(sessionSortDirectionAtom);
     const setSort = useSetAtom(setSessionSortAtom);
     const queryClient = useQueryClient();
-    const navigate = useNavigate(); // Get navigate function
+    const navigate = useNavigate();
 
-    // Session Modal State
+    // --- Session Modal State (unchanged) ---
     const [isEditingModalOpen, setIsEditingModalOpen] = useState(false);
     const [sessionToEdit, setSessionToEdit] = useState<Session | null>(null);
     const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
     const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null);
 
-    // Standalone Chat Modal State
-    const [isRenameChatModalOpen, setIsRenameChatModalOpen] = useState(false);
-    const [chatToRename, setChatToRename] = useState<StandaloneChatListItem | null>(null);
-    const [currentChatRenameValue, setCurrentChatRenameValue] = useState('');
+    // --- Standalone Chat Modal State ---
+    // Replace rename modal state with edit details modal state
+    const [isEditChatModalOpen, setIsEditChatModalOpen] = useState(false);
+    const [chatToEdit, setChatToEdit] = useState<StandaloneChatListItem | null>(null);
+    // Delete modal state remains
     const [isDeleteChatConfirmOpen, setIsDeleteChatConfirmOpen] = useState(false);
     const [chatToDelete, setChatToDelete] = useState<StandaloneChatListItem | null>(null);
+    // --- End Standalone Chat Modal State ---
 
-    // --- Tanstack Queries ---
+
+    // --- Tanstack Queries (unchanged) ---
     const { data: sessions, isLoading: isLoadingSessions, error: sessionsError, refetch: refetchSessions } = useQuery<Session[], Error>({
         queryKey: ['sessions'],
         queryFn: fetchSessions,
@@ -71,8 +76,8 @@ export function LandingPage() {
 
     // --- Mutations ---
 
-    // Session Delete Mutation
-    const deleteSessionMutation = useMutation<{ message: string }, Error, number>({ // Explicit types
+    // Session Delete Mutation (unchanged)
+    const deleteSessionMutation = useMutation<{ message: string }, Error, number>({
         mutationFn: (sessionId: number) => deleteSessionApi(sessionId),
         onSuccess: (data, deletedSessionId) => {
             setToast(data.message || `Session ${deletedSessionId} deleted successfully.`);
@@ -88,13 +93,12 @@ export function LandingPage() {
         }
      });
 
-    // Standalone Chat Create Mutation
-    const createStandaloneChatMutation = useMutation<StandaloneChatListItem, Error>({ // Explicit types
+    // Standalone Chat Create Mutation (unchanged)
+    const createStandaloneChatMutation = useMutation<StandaloneChatListItem, Error>({
         mutationFn: () => createStandaloneChatApi(),
-        onSuccess: (newChat) => { // Type newChat explicitly
+        onSuccess: (newChat) => {
             setToast("New standalone chat created.");
             queryClient.invalidateQueries({ queryKey: ['standaloneChats'] });
-            // Navigate to the new chat view
             navigate(`/chats/${newChat.id}`);
         },
         onError: (error: Error) => {
@@ -102,24 +106,35 @@ export function LandingPage() {
         }
     });
 
-    // Standalone Chat Rename Mutation
-    const renameChatMutation = useMutation<StandaloneChatListItem, Error, { chatId: number; newName: string | null }>({ // Explicit types
-        mutationFn: (variables: { chatId: number; newName: string | null }) =>
-            renameStandaloneChatApi(variables.chatId, variables.newName),
-        onSuccess: () => {
-            setToast("Standalone chat renamed.");
-            queryClient.invalidateQueries({ queryKey: ['standaloneChats'] });
-            setIsRenameChatModalOpen(false);
-            setChatToRename(null);
+    // Standalone Chat Edit (Rename + Tags) Mutation
+    // Updated mutation
+    const editChatMutation = useMutation<
+        StandaloneChatListItem, Error, { chatId: number; newName: string | null; tags: string[] }
+    >({
+        mutationFn: (variables) =>
+            editStandaloneChatApi(variables.chatId, variables.newName, variables.tags),
+        onSuccess: (updatedChat) => {
+            setToast("Chat details updated.");
+            // Optimistically update list and details
+            queryClient.setQueryData<StandaloneChatListItem[]>(['standaloneChats'], (oldData) =>
+                oldData?.map(chat => chat.id === updatedChat.id ? { ...chat, name: updatedChat.name, tags: updatedChat.tags } : chat)
+            );
+            queryClient.setQueryData<ChatSession>(['standaloneChat', updatedChat.id], (oldChatData) => {
+                 if (!oldChatData) return oldChatData;
+                 return { ...oldChatData, name: updatedChat.name ?? undefined, tags: updatedChat.tags ?? null };
+            });
+            setIsEditChatModalOpen(false); // Close modal on success
+            setChatToEdit(null);
         },
         onError: (error: Error) => {
-             setToast(`Error renaming chat: ${error.message}`);
-             // Keep modal open to show error if needed
+             setToast(`Error updating chat details: ${error.message}`);
+             // Optionally keep modal open: setIsEditChatModalOpen(false);
         }
     });
 
-    // Standalone Chat Delete Mutation
-    const deleteChatMutation = useMutation<{ message: string }, Error, number>({ // Explicit types
+
+    // Standalone Chat Delete Mutation (unchanged)
+    const deleteChatMutation = useMutation<{ message: string }, Error, number>({
          mutationFn: (chatId: number) => deleteStandaloneChatApi(chatId),
          onSuccess: (data, deletedChatId) => {
              setToast(data.message || `Standalone chat ${deletedChatId} deleted.`);
@@ -139,7 +154,7 @@ export function LandingPage() {
         if (!sessions) return [];
         const criteria = currentSortCriteria;
         const direction = currentSortDirection;
-        console.log(`[LandingPage] Sorting ${sessions.length} sessions by ${criteria} (${direction})`);
+        // console.log(`[LandingPage] Sorting ${sessions.length} sessions by ${criteria} (${direction})`); // Reduce logging noise
         const sorted = [...sessions].sort((a, b) => {
             let compareResult = 0;
             switch (criteria) {
@@ -188,7 +203,7 @@ export function LandingPage() {
 
      // --- Handlers ---
 
-    // Session Handlers
+    // Session Handlers (unchanged)
     const handleSort = (criteria: SessionSortCriteria) => setSort(criteria);
     const handleEditSession = (session: Session) => { setSessionToEdit(session); setIsEditingModalOpen(true); };
     const handleEditSaveSuccess = () => { setIsEditingModalOpen(false); setSessionToEdit(null); };
@@ -197,12 +212,21 @@ export function LandingPage() {
 
     // Standalone Chat Handlers
     const handleNewStandaloneChat = () => { createStandaloneChatMutation.mutate(); };
-    const handleRenameChatRequest = (chat: StandaloneChatListItem) => { setChatToRename(chat); setCurrentChatRenameValue(chat.name || ''); setIsRenameChatModalOpen(true); };
-    const handleConfirmRenameChat = () => { if (!chatToRename || renameChatMutation.isPending) return; renameChatMutation.mutate({ chatId: chatToRename.id, newName: currentChatRenameValue.trim() || null }); };
+    // Rename handler to reflect edit details
+    const handleEditChatRequest = (chat: StandaloneChatListItem) => {
+        setChatToEdit(chat);
+        setIsEditChatModalOpen(true);
+    };
+    // Update handler to use edit mutation
+    const handleConfirmEditChat = (chatId: number, newName: string | null, newTags: string[]) => {
+        if (editChatMutation.isPending) return;
+        editChatMutation.mutate({ chatId, newName, tags: newTags });
+    };
+    // Delete handlers remain
     const handleDeleteChatRequest = (chat: StandaloneChatListItem) => { setChatToDelete(chat); setIsDeleteChatConfirmOpen(true); };
     const handleConfirmDeleteChat = () => { if (!chatToDelete || deleteChatMutation.isPending) return; deleteChatMutation.mutate(chatToDelete.id); };
 
-    // --- Loading and Error States ---
+    // --- Loading and Error States (unchanged) ---
     const isLoading = isLoadingSessions || isLoadingStandaloneChats;
     const error = sessionsError || standaloneChatsError;
 
@@ -226,10 +250,9 @@ export function LandingPage() {
     return (
         <> {/* Fragment for content + modals */}
             <Box className="w-full flex-grow flex flex-col">
-                {/* Header Bar */}
+                {/* Header Bar (unchanged) */}
                 <Box py="2" px={{ initial: '4', md: '6', lg: '8' }} flexShrink="0" style={{ backgroundColor: 'var(--color-panel-solid)', borderBottom: '1px solid var(--gray-a6)' }} >
                     <Flex justify="between">
-                        {/* Placeholder for potential logo or title */}
                         <Box></Box>
                         <Flex gap="3" align="center">
                              <Button variant="outline" size="2" onClick={handleNewStandaloneChat} title="Start a new standalone chat" aria-label="Start new chat" disabled={createStandaloneChatMutation.isPending}>
@@ -254,13 +277,13 @@ export function LandingPage() {
                                 <Heading as="h2" size="5" weight="medium">
                                     <Flex align="center" gap="2"><ChatBubbleIcon />Standalone Chats</Flex>
                                 </Heading>
-                                {/* Button moved to top bar */}
                             </Flex>
-                            <Box className="flex-grow flex flex-col overflow-hidden" style={{ minHeight: '200px' }}> {/* Ensure min height */}
+                            <Box className="flex-grow flex flex-col overflow-hidden" style={{ minHeight: '200px' }}>
                                 {standaloneChats && standaloneChats.length > 0 ? (
+                                    // Pass the updated edit handler
                                     <StandaloneChatListTable
                                         chats={standaloneChats}
-                                        onRenameChatRequest={handleRenameChatRequest}
+                                        onEditChatRequest={handleEditChatRequest}
                                         onDeleteChatRequest={handleDeleteChatRequest}
                                     />
                                 ) : (
@@ -272,13 +295,12 @@ export function LandingPage() {
                         </Card>
                         {/* --- End Standalone Chats Section --- */}
 
-                        {/* --- Session History Section --- */}
+                        {/* --- Session History Section (unchanged) --- */}
                         <Card size="3" className="flex-grow flex flex-col overflow-hidden h-full">
                             <Flex justify="between" align="center" px="4" pt="4" pb="3" style={{ borderBottom: '1px solid var(--gray-a6)' }}>
                                 <Heading as="h2" size="5" weight="medium">
                                     <Flex align="center" gap="2"><CounterClockwiseClockIcon />Session History</Flex>
                                 </Heading>
-                                {/* Button moved to top bar */}
                             </Flex>
                             <Box className="flex-grow flex flex-col overflow-hidden">
                                 {sortedSessions.length === 0 ? (
@@ -301,7 +323,7 @@ export function LandingPage() {
                 </Box>
             </Box>
 
-            {/* Session Edit Modal */}
+            {/* Session Edit Modal (unchanged) */}
             <EditDetailsModal
                 isOpen={isEditingModalOpen}
                 onOpenChange={(open) => { setIsEditingModalOpen(open); if (!open) setSessionToEdit(null); }}
@@ -309,7 +331,7 @@ export function LandingPage() {
                 onSaveSuccess={handleEditSaveSuccess}
             />
 
-            {/* Session Delete Confirmation Modal */}
+            {/* Session Delete Confirmation Modal (unchanged) */}
             <AlertDialog.Root open={isDeleteConfirmOpen} onOpenChange={setIsDeleteConfirmOpen}>
                  <AlertDialog.Content style={{ maxWidth: 450 }}>
                      <AlertDialog.Title>Delete Session</AlertDialog.Title>
@@ -334,28 +356,18 @@ export function LandingPage() {
                   </AlertDialog.Content>
             </AlertDialog.Root>
 
-            {/* Standalone Chat Rename Modal */}
-            <Dialog.Root open={isRenameChatModalOpen} onOpenChange={(open) => { if (!open) { setIsRenameChatModalOpen(false); setChatToRename(null); renameChatMutation.reset(); } else { setIsRenameChatModalOpen(true); } }}>
-                 <Dialog.Content style={{ maxWidth: 450 }}>
-                    <Dialog.Title>Rename Chat</Dialog.Title>
-                    <Dialog.Description size="2" mb="4"> Enter a new name for this chat. Leave empty to remove the name. </Dialog.Description>
-                    <TextField.Root
-                        placeholder="Enter chat name (optional)"
-                        value={currentChatRenameValue}
-                        onChange={(e) => setCurrentChatRenameValue(e.target.value)}
-                        disabled={renameChatMutation.isPending}
-                        onKeyDown={(e) => { if (e.key === 'Enter') handleConfirmRenameChat(); }}
-                        autoFocus
-                    />
-                    {renameChatMutation.isError && <Text color="red" size="1" mt="2">Error: {renameChatMutation.error.message}</Text>}
-                    <Flex gap="3" mt="4" justify="end">
-                        <Button variant="soft" color="gray" onClick={() => setIsRenameChatModalOpen(false)} disabled={renameChatMutation.isPending}> <Cross2Icon /> Cancel </Button>
-                        <Button onClick={handleConfirmRenameChat} disabled={renameChatMutation.isPending}> {renameChatMutation.isPending ? <Spinner size="1"/> : <CheckIcon />} Save Name </Button>
-                    </Flex>
-                 </Dialog.Content>
-            </Dialog.Root>
+            {/* --- Standalone Chat Edit Modal --- */}
+            <EditStandaloneChatModal
+                isOpen={isEditChatModalOpen}
+                onOpenChange={setIsEditChatModalOpen}
+                chat={chatToEdit}
+                onSave={handleConfirmEditChat}
+                isSaving={editChatMutation.isPending}
+                saveError={editChatMutation.error?.message}
+            />
+            {/* --- End Standalone Chat Edit Modal --- */}
 
-            {/* Standalone Chat Delete Confirmation Modal */}
+            {/* Standalone Chat Delete Confirmation Modal (unchanged) */}
             <AlertDialog.Root open={isDeleteChatConfirmOpen} onOpenChange={setIsDeleteChatConfirmOpen}>
                  <AlertDialog.Content style={{ maxWidth: 450 }}>
                     <AlertDialog.Title>Delete Chat</AlertDialog.Title>

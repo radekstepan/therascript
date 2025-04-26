@@ -1,21 +1,18 @@
-/* packages/api/src/api/sessionChatHandler.ts */
 import { chatRepository } from '../repositories/chatRepository.js';
 import { loadTranscriptContent } from '../services/fileService.js';
 import { streamChatResponse } from '../services/ollamaService.js';
 import { NotFoundError, InternalServerError, ApiError, BadRequestError } from '../errors.js';
-import type { StructuredTranscript, BackendChatMessage, BackendChatSession, ChatMetadata } from '../types/index.js';
+import type { StructuredTranscript, BackendChatMessage, ChatMetadata } from '../types/index.js';
 import { TransformStream } from 'node:stream/web';
 import { TextEncoder } from 'node:util';
-// --- Removed explicit Response import ---
 
 // Define precise return types matching the schemas where needed
-type SessionChatMetadataResponse = ChatMetadata & { sessionId: number };
-// Define response type with boolean starred
+// Session chat metadata does NOT include tags currently
+type SessionChatMetadataResponse = Omit<ChatMetadata, 'tags'> & { sessionId: number };
 type ApiChatMessageResponse = Omit<BackendChatMessage, 'starred'> & { starred: boolean };
+// Full Session Chat Response does NOT include tags currently
 type FullSessionChatApiResponse = SessionChatMetadataResponse & { messages: ApiChatMessageResponse[] };
 
-
-// --- Session Chat Handlers (used by sessionRoutes) ---
 
 // POST /api/sessions/:sessionId/chats - Create a new chat associated with a session
 export const createSessionChat = ({ sessionData, set }: any): SessionChatMetadataResponse => {
@@ -23,10 +20,14 @@ export const createSessionChat = ({ sessionData, set }: any): SessionChatMetadat
     try {
         const newChat = chatRepository.createChat(sessionId);
         console.log(`[API] Created new chat ${newChat.id} in session ${sessionId}`);
+        // --- FIX: Remove 'tags' from destructuring as it's not expected in the response type ---
         const { messages, ...chatMetadata } = newChat;
+        // --- END FIX ---
         set.status = 201;
         if(chatMetadata.sessionId === null) throw new InternalServerError("Created session chat has null sessionId");
-        return chatMetadata as SessionChatMetadataResponse; // Assert sessionId is number
+        // Ensure tags are explicitly excluded if they somehow exist on chatMetadata
+        const { tags, ...responseMetadata } = chatMetadata;
+        return responseMetadata as SessionChatMetadataResponse; // Assert sessionId is number, tags excluded
     } catch (error) {
         console.error(`[API Error] createSessionChat (Session ID: ${sessionId}):`, error);
         throw new InternalServerError('Failed to create session chat', error instanceof Error ? error : undefined);
@@ -34,6 +35,7 @@ export const createSessionChat = ({ sessionData, set }: any): SessionChatMetadat
 };
 
 // POST /api/sessions/:sessionId/chats/:chatId/messages - Add message to session chat (Streaming)
+// (No changes needed here regarding types)
 export const addSessionChatMessage = async ({ sessionData, chatData, body, set }: any): Promise<Response> => {
     const { text } = body;
     const trimmedText = text.trim();
@@ -51,74 +53,33 @@ export const addSessionChatMessage = async ({ sessionData, chatData, body, set }
 
         const ollamaStream = await streamChatResponse(transcriptString, currentMessages);
 
-        const headers = new Headers();
-        headers.set('Content-Type', 'text/event-stream; charset=utf-8');
-        headers.set('Cache-Control', 'no-cache');
-        headers.set('Connection', 'keep-alive');
-        headers.set('X-User-Message-Id', String(userMessage.id));
-
+        const headers = new Headers({ 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-User-Message-Id': String(userMessage.id) });
         const passthrough = new TransformStream<Uint8Array, Uint8Array>();
         const writer = passthrough.writable.getWriter();
         const encoder = new TextEncoder();
 
-        const writeSseEvent = async (data: object) => {
-             try {
-                 const jsonData = JSON.stringify(data);
-                 await writer.write(encoder.encode(`data: ${jsonData}\n\n`));
-             } catch (e) {
-                 console.error("SSE Write Error:", e);
-                 throw e;
-             }
-        };
+        const writeSseEvent = async (data: object) => { try { await writer.write(encoder.encode(`data: ${JSON.stringify(data)}\n\n`)); } catch (e) { console.error("SSE Write Error:", e); throw e; } };
 
         const processStream = async () => {
              let fullAiText = '';
              let finalPromptTokens: number | undefined;
              let finalCompletionTokens: number | undefined;
-             try {
+             try { /* ... stream processing logic ... */
                  for await (const chunk of ollamaStream) {
-                     if (chunk.message?.content) {
-                         const textChunk = chunk.message.content;
-                         fullAiText += textChunk;
-                         await writeSseEvent({ chunk: textChunk });
-                     }
-                     if (chunk.done) {
-                         finalPromptTokens = chunk.prompt_eval_count;
-                         finalCompletionTokens = chunk.eval_count;
-                         await writeSseEvent({
-                             done: true,
-                             promptTokens: finalPromptTokens,
-                             completionTokens: finalCompletionTokens
-                         });
-                     }
+                     if (chunk.message?.content) { const textChunk = chunk.message.content; fullAiText += textChunk; await writeSseEvent({ chunk: textChunk }); }
+                     if (chunk.done) { finalPromptTokens = chunk.prompt_eval_count; finalCompletionTokens = chunk.eval_count; await writeSseEvent({ done: true, promptTokens: finalPromptTokens, completionTokens: finalCompletionTokens }); }
                  }
-                 console.log("[API addSessionChatMessage] Stream finished successfully.");
-             } catch (streamError) {
-                 console.error("[API addSessionChatMessage] Error processing Ollama stream:", streamError);
-                 try { await writeSseEvent({ error: 'Stream processing failed on server.' }); } catch {}
-                 await writer.abort(streamError);
-                 console.error("Aborted writer due to stream error.");
-             } finally {
-                  if (!writer.closed && writer.desiredSize !== null) {
-                       try { await writer.close(); } catch {}
-                  }
+             } catch (streamError) { console.error("[API addSessionChatMessage] Error processing Ollama stream:", streamError); try { await writeSseEvent({ error: 'Stream processing failed on server.' }); } catch {} await writer.abort(streamError); }
+             finally {
+                  if (!writer.closed && writer.desiredSize !== null) { try { await writer.close(); } catch {} }
                   if (fullAiText.trim()) {
-                      chatRepository.addMessage(
-                          chatData.id, 'ai', fullAiText.trim(),
-                          finalPromptTokens, finalCompletionTokens
-                      );
+                      chatRepository.addMessage(chatData.id, 'ai', fullAiText.trim(), finalPromptTokens, finalCompletionTokens);
                       console.log(`[API addSessionChatMessage] Saved complete AI message after stream end/error.`);
-                  } else {
-                       console.warn("[API addSessionChatMessage] Stream finished or errored, AI response empty.");
-                  }
+                  } else { console.warn("[API addSessionChatMessage] Stream finished or errored, AI response empty."); }
              }
         };
-        processStream().catch(err => {
-            console.error("[API addSessionChatMessage] Uncaught background stream processing error:", err);
-        });
+        processStream().catch(err => { console.error("[API addSessionChatMessage] Uncaught background stream processing error:", err); });
 
-        // Use global Response, cast stream if needed
-        // The 'as any' cast might be needed if TS still complains about stream compatibility
         return new Response(passthrough.readable as any, { status: 200, headers });
 
     } catch (error) {
@@ -129,36 +90,21 @@ export const addSessionChatMessage = async ({ sessionData, chatData, body, set }
 };
 
 // PATCH /api/sessions/:sessionId/chats/:chatId/messages/:messageId - Update message star status
+// (No changes needed here regarding types)
 export const updateSessionChatMessageStarStatus = ({ sessionData, chatData, messageData, body, set }: any): ApiChatMessageResponse => {
     const { starred, starredName } = body;
-    if (typeof starred !== 'boolean') {
-        throw new BadRequestError("Missing or invalid 'starred' field (must be boolean).");
-    }
-    if (starred && typeof starredName !== 'string') {
-        // Allow null or undefined if unstarring, but require string if starring
-        throw new BadRequestError("Missing or invalid 'starredName' field (must be string when starring).");
-    }
-    if (!starred && starredName !== undefined) {
-        console.warn("[API Star] 'starredName' provided but 'starred' is false. Name will be ignored/nulled.");
-    }
-     if (messageData.sender !== 'user') {
-         throw new BadRequestError("Only user messages can be starred.");
-     }
+    if (typeof starred !== 'boolean') throw new BadRequestError("Missing or invalid 'starred' field (boolean).");
+    if (starred && typeof starredName !== 'string') throw new BadRequestError("Missing or invalid 'starredName' field (string when starring).");
+    if (!starred && starredName !== undefined) console.warn("[API Star] 'starredName' provided but 'starred' is false. Name will be ignored/nulled.");
+     if (messageData.sender !== 'user') throw new BadRequestError("Only user messages can be starred.");
 
     try {
         console.log(`[API Star] Updating star status for message ${messageData.id} in chat ${chatData.id} (session ${sessionData.id}) to starred=${starred}, name=${starredName}`);
         const updatedMessage = chatRepository.updateMessageStarStatus(messageData.id, starred, starredName);
-        if (!updatedMessage) {
-            throw new NotFoundError(`Message ${messageData.id} not found during update.`);
-        }
+        if (!updatedMessage) throw new NotFoundError(`Message ${messageData.id} not found during update.`);
         set.status = 200;
-        // Map starred to boolean before returning
         const { starred: starredNum, ...rest } = updatedMessage;
-        return {
-            ...rest,
-            starred: !!starredNum, // Map number (0/1) to boolean
-            starredName: rest.starredName === undefined ? undefined : rest.starredName, // Preserve undefined
-        };
+        return { ...rest, starred: !!starredNum, starredName: rest.starredName === undefined ? undefined : rest.starredName };
     } catch (error) {
         console.error(`[API Error] updateSessionChatMessageStarStatus (Message ID: ${messageData?.id}):`, error);
         if (error instanceof ApiError) throw error;
@@ -168,40 +114,39 @@ export const updateSessionChatMessageStarStatus = ({ sessionData, chatData, mess
 
 
 // GET /api/sessions/:sessionId/chats/:chatId - Get details of a specific session chat
-export const getSessionChatDetails = ({ chatData, sessionData, set }: any): FullSessionChatApiResponse => { // Corrected return type
+export const getSessionChatDetails = ({ chatData, sessionData, set }: any): FullSessionChatApiResponse => {
     if (!chatData) throw new NotFoundError(`Chat details not found in context.`);
     if (chatData.sessionId !== sessionData.id) throw new ApiError(403, `Chat ${chatData.id} does not belong to session ${sessionData.id}.`);
     set.status = 200;
-    // Ensure the returned object matches the expected schema structure
-    const messages = chatData.messages ?? [];
-    const { messages: _m, ...metadata } = chatData;
+    const messages = (chatData.messages ?? []).map((m: BackendChatMessage) => ({ ...m, starred: !!m.starred, starredName: m.starredName === undefined ? undefined : m.starredName }));
+    // --- FIX: Exclude tags from the response ---
+    const { messages: _m, tags, ...metadata } = chatData;
+    // --- END FIX ---
     return {
         ...metadata,
         sessionId: metadata.sessionId as number, // Assert sessionId is number
-        messages: messages.map((m: BackendChatMessage) => ({ // Map starred to boolean
-             ...m,
-             starred: !!m.starred, // Correctly map here
-             starredName: m.starredName === undefined ? undefined : m.starredName, // Preserve undefined
-         })) // Ensure messages array is present
+        messages: messages
     };
 };
 
 // PATCH /api/sessions/:sessionId/chats/:chatId/name - Rename a session chat
-export const renameSessionChat = ({ chatData, sessionData, body, set }: any): SessionChatMetadataResponse => { // Correct return type
-    const { name } = body;
+export const renameSessionChat = ({ chatData, sessionData, body, set }: any): SessionChatMetadataResponse => {
+    const { name } = body; // Session chats don't have tags currently
     const nameToSave = (typeof name === 'string' && name.trim() !== '') ? name.trim() : null;
     if (!chatData) throw new NotFoundError(`Chat not found in context for rename.`);
     if (chatData.sessionId !== sessionData.id) throw new ApiError(403, `Chat ${chatData.id} does not belong to session ${sessionData.id}.`);
     try {
-        const updatedChatMetadata = chatRepository.updateChatName(chatData.id, nameToSave);
+        // --- FIX: Use updated repo function, passing null for tags ---
+        const updatedChatMetadata = chatRepository.updateChatDetails(chatData.id, nameToSave, null);
+        // --- END FIX ---
         if (!updatedChatMetadata) throw new NotFoundError(`Chat with ID ${chatData.id} not found during update.`);
         console.log(`[API] Renamed session chat ${chatData.id} to "${updatedChatMetadata.name || '(no name)'}"`);
         set.status = 200;
-        if(updatedChatMetadata.sessionId === null) {
-            console.error(`[API Error] Renamed session chat ${chatData.id} resulted in null sessionId!`);
-            throw new InternalServerError("Failed to rename session chat correctly.");
-        }
-        return updatedChatMetadata as SessionChatMetadataResponse; // Assert sessionId is number
+        if(updatedChatMetadata.sessionId === null) { console.error(`[API Error] Renamed session chat ${chatData.id} resulted in null sessionId!`); throw new InternalServerError("Failed to rename session chat correctly."); }
+        // --- FIX: Exclude tags from response ---
+        const { tags: _t, ...responseMetadata } = updatedChatMetadata;
+        // --- END FIX ---
+        return responseMetadata as SessionChatMetadataResponse; // Assert sessionId is number, tags excluded
     } catch (error) {
         console.error(`[API Error] renameSessionChat (Chat ID: ${chatData?.id}):`, error);
         if (error instanceof ApiError) throw error;
@@ -210,6 +155,7 @@ export const renameSessionChat = ({ chatData, sessionData, body, set }: any): Se
 };
 
 // DELETE /api/sessions/:sessionId/chats/:chatId - Delete a session chat
+// (Unchanged)
 export const deleteSessionChat = ({ chatData, sessionData, set }: any): { message: string } => {
     if (!chatData) throw new NotFoundError(`Chat not found in context for delete.`);
     if (chatData.sessionId !== sessionData.id) throw new ApiError(403, `Chat ${chatData.id} does not belong to session ${sessionData.id}.`);

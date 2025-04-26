@@ -26,6 +26,7 @@ export interface ChatSession {
     timestamp: number;
     name?: string;
     messages?: ChatMessage[];
+    tags?: string[] | null; // <-- Added tags for standalone chats
 }
 
 export interface SessionMetadata {
@@ -56,6 +57,7 @@ export interface BackendChatSession {
   timestamp: number;
   name?: string;
   messages?: BackendChatMessage[];
+  tags?: string[] | null; // <-- Added tags
 }
 
 export interface BackendChatMessage {

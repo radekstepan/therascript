@@ -27,12 +27,13 @@ export interface UITranscriptionStatus {
     duration?: number;
 }
 
-// Define type for standalone chat list item (metadata only) - Moved from LandingPage
+// Define type for standalone chat list item (metadata only)
 export interface StandaloneChatListItem {
   id: number;
   sessionId: null; // Should always be null
   timestamp: number;
   name?: string;
+  tags?: string[] | null; // <-- Added tags
 }
 
 
@@ -191,13 +192,23 @@ export const addSessionChatMessageStream = async (
     return { userMessageId, stream: response.body };
 };
 
-// PATCH /api/sessions/{sessionId}/chats/{chatId}/name
-// Renamed for clarity
-export const renameSessionChat = async (sessionId: number, chatId: number, name: string | null): Promise<ChatSession> => {
-    const response = await axios.patch(`/api/sessions/${sessionId}/chats/${chatId}/name`, { name });
+// PATCH /api/sessions/{sessionId}/chats/{chatId}/name (Should be /details if adding tags)
+// Renamed for clarity - NOTE: Backend needs update for tags
+export const renameSessionChat = async (
+    sessionId: number,
+    chatId: number,
+    name: string | null,
+    tags?: string[] // <-- Add tags parameter conceptually
+): Promise<ChatSession> => {
+    // TODO: Update backend to accept tags
+    // Note: Backend currently only handles name for session chats
+    const payload = { name };
+    console.log(`[API Placeholder] Renaming session chat ${chatId} with payload:`, payload);
+    const response = await axios.patch(`/api/sessions/${sessionId}/chats/${chatId}/name`, payload);
     const chatMetadata = response.data;
     return {
         ...chatMetadata,
+        tags: chatMetadata.tags ?? null, // <-- Include tags in response conceptually
         messages: undefined // Return only metadata
     };
 };
@@ -213,23 +224,27 @@ export const deleteSessionChat = async (sessionId: number, chatId: number): Prom
 // --- Standalone Chat Endpoints ---
 
 // GET /api/chats
+// Update return type to include tags
 export const fetchStandaloneChats = async (): Promise<StandaloneChatListItem[]> => {
     const response = await axios.get<StandaloneChatListItem[]>('/api/chats');
-    return response.data;
+    // Ensure tags is an array or null
+    return response.data.map(chat => ({ ...chat, tags: chat.tags ?? null }));
 };
 
 // POST /api/chats
+// Update return type to include tags
 export const createStandaloneChat = async (): Promise<StandaloneChatListItem> => {
     const response = await axios.post<StandaloneChatListItem>('/api/chats');
-    return response.data; // Returns metadata of the created chat
+    return { ...response.data, tags: response.data.tags ?? null }; // Returns metadata of the created chat
 };
 
 // GET /api/chats/{chatId}
-// Map BackendChatMessage to UI ChatMessage
+// Map BackendChatMessage to UI ChatMessage, include tags
 export const fetchStandaloneChatDetails = async (chatId: number): Promise<ChatSession> => {
     const response = await axios.get<BackendChatSession>(`/api/chats/${chatId}`);
     return {
          ...response.data,
+         tags: response.data.tags ?? null, // <-- Include tags
          messages: (response.data.messages || []).map(msg => ({
              ...msg,
              starred: !!msg.starred, // Map 0/1 to boolean
@@ -271,10 +286,19 @@ export const addStandaloneChatMessageStream = async (
     return { userMessageId, stream: response.body };
 };
 
-// PATCH /api/chats/{chatId}/name
-export const renameStandaloneChat = async (chatId: number, name: string | null): Promise<StandaloneChatListItem> => {
-    const response = await axios.patch<StandaloneChatListItem>(`/api/chats/${chatId}/name`, { name });
-    return response.data; // Returns updated metadata
+// PATCH /api/chats/{chatId}/details - Handles name AND tags
+// Updated function signature and payload
+export const renameStandaloneChat = async ( // Function name kept for simplicity, but it edits details now
+    chatId: number,
+    name: string | null,
+    tags: string[] | null // <-- Added tags parameter
+): Promise<StandaloneChatListItem> => {
+    // TODO: Update backend to accept { name, tags }
+    const payload = { name, tags };
+    // Use the corrected path: /api/chats/:chatId/details
+    console.log(`[API] Editing standalone chat ${chatId} at /details with payload:`, payload);
+    const response = await axios.patch<StandaloneChatListItem>(`/api/chats/${chatId}/details`, payload);
+    return { ...response.data, tags: response.data.tags ?? null }; // Returns updated metadata
 };
 
 // DELETE /api/chats/{chatId}
@@ -327,7 +351,7 @@ export const fetchStarredMessages = async (): Promise<ChatMessage[]> => {
 };
 
 
-// --- Ollama Management Endpoints (Unchanged) ---
+// --- Ollama Management Endpoints ---
 
 // POST /api/ollama/unload
 export const unloadOllamaModel = async (): Promise<{ message: string }> => {
