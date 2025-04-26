@@ -1,11 +1,12 @@
-import Database from 'better-sqlite3'; // <-- Keep Database import
+/* packages/api/src/preloadDb.ts */
+import Database from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import crypto from 'node:crypto'; // For schema hashing
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { calculateTokenCount } from './services/fileService.js'; // Keep this
+import { calculateTokenCount } from './services/fileService.js';
 
-// --- Determine paths relative to *this file's* location within packages/api ---
+// Determine paths relative to *this file's* location
 const __filename = fileURLToPath(import.meta.url);
 const packageApiDir = path.resolve(__filename, '../../');
 const targetDataDir = path.join(packageApiDir, 'data');
@@ -41,90 +42,31 @@ const schema = `
 // --- End Schema Definition ---
 
 // --- Schema Verification Logic (Copied - ensure it matches sqliteService) ---
-function calculateSchemaHash(schemaString: string): string {
-    return crypto.createHash('md5').update(schemaString).digest('hex');
-}
-function verifySchemaVersion(dbInstance: Database.Database, currentSchemaDefinition: string) {
-    console.log('[Preload Schema Check]: Verifying schema version...');
-    const currentSchemaHash = calculateSchemaHash(currentSchemaDefinition);
-    console.log(`[Preload Schema Check]: Current schema definition hash: ${currentSchemaHash}`);
-    let storedSchemaHash: string | undefined;
-    try {
-        dbInstance.exec(`CREATE TABLE IF NOT EXISTS schema_metadata ( key TEXT PRIMARY KEY, value TEXT NOT NULL );`);
-        const row = dbInstance.prepare('SELECT value FROM schema_metadata WHERE key = ?').get(SCHEMA_HASH_KEY) as { value: string } | undefined;
-        storedSchemaHash = row?.value;
-    } catch (error) { console.warn(`[Preload Schema Check]: Could not read stored schema hash:`, error); storedSchemaHash = undefined; }
-
-    if (storedSchemaHash) {
-        console.log(`[Preload Schema Check]: Stored schema hash found: ${storedSchemaHash}`);
-        if (currentSchemaHash === storedSchemaHash) { console.log('[Preload Schema Check]: Schema version matches stored hash. OK.'); }
-        else {
-            console.error('---------------------------------------------------------------------');
-            console.error('[Preload Schema Check]: FATAL ERROR: Schema definition mismatch!');
-            console.error(`  > Current schema hash in code : ${currentSchemaHash}`);
-            console.error(`  > Stored schema hash in DB    : ${storedSchemaHash}`);
-            console.error('  > The schema defined here has changed.');
-            console.error('  > To resolve: Backup DB, delete DB file, restart API.');
-            console.error('---------------------------------------------------------------------');
-            dbInstance.close(); process.exit(1);
-        }
-    } else {
-        console.log('[Preload Schema Check]: No stored schema hash found. Storing current hash.');
-        try {
-            dbInstance.prepare('INSERT OR REPLACE INTO schema_metadata (key, value) VALUES (?, ?)') .run(SCHEMA_HASH_KEY, currentSchemaHash);
-            console.log(`[Preload Schema Check]: Stored current schema hash (${currentSchemaHash}) in database.`);
-        } catch (insertError) {
-            console.error(`[Preload Schema Check]: FATAL: Failed to store initial schema hash:`, insertError);
-            dbInstance.close(); process.exit(1);
-        }
-    }
-}
+function calculateSchemaHash(schemaString: string): string { return crypto.createHash('md5').update(schemaString).digest('hex'); }
+function verifySchemaVersion(dbInstance: Database.Database, currentSchemaDefinition: string) { const currentHash=calculateSchemaHash(currentSchemaDefinition); let storedHash: string|undefined; try { dbInstance.exec(`CREATE TABLE IF NOT EXISTS schema_metadata ( key TEXT PRIMARY KEY, value TEXT NOT NULL );`); const row = dbInstance.prepare('SELECT value FROM schema_metadata WHERE key = ?').get(SCHEMA_HASH_KEY) as { value: string } | undefined; storedHash = row?.value; } catch (e){ console.warn("Could not read stored hash", e); } if(storedHash){ if(currentHash === storedHash){ console.log("[Preload Schema Check]: OK"); } else { console.error("FATAL SCHEMA MISMATCH!"); console.error(` Code: ${currentHash}`); console.error(` DB:   ${storedHash}`); console.error("Backup DB, delete file, restart API."); dbInstance.close(); process.exit(1); } } else { console.log("[Preload Schema Check]: Storing initial hash."); try { dbInstance.prepare('INSERT OR REPLACE INTO schema_metadata (key, value) VALUES (?, ?)').run(SCHEMA_HASH_KEY, currentHash); } catch(e){ console.error("FATAL: Failed store hash",e); dbInstance.close(); process.exit(1); } } }
 // --- End Copied Logic ---
 
-// --- FIX: Define initializeDatabase function ---
+// --- Initialize Database function ---
 function initializeDatabase(dbInstance: Database.Database) {
-    console.log('[Preload Init Func]: Attempting to initialize schema...'); // Log entry
+    console.log('[Preload Init Func]: Initializing schema...');
     try {
-        dbInstance.pragma('journal_mode = WAL');
-        dbInstance.pragma('busy_timeout = 5000');
-        dbInstance.pragma('foreign_keys = ON');
-        console.log('[Preload Init Func]: WAL mode and foreign keys enabled.');
-
-        dbInstance.exec(schema); // Execute the schema string defined above
-        console.log('[Preload Init Func]: Database schema exec command executed.');
-
-        // --- Basic Migrations (Optional but recommended) ---
-        const sessionColumns = dbInstance.pragma("table_info(sessions)") as { name: string; type: string; }[];
-        const chatColumns = dbInstance.pragma("table_info(chats)") as { name: string; type: string; }[];
-        const messageColumns = dbInstance.pragma("table_info(messages)") as { name: string; type: string; }[];
-
-        // Session Table Migrations
-        if (!sessionColumns.some((col) => col.name === 'audioPath')) { console.log('[P Mig]: Add sessions.audioPath'); dbInstance.exec("ALTER TABLE sessions ADD COLUMN audioPath TEXT NULL"); }
-        if (!sessionColumns.some((col) => col.name === 'transcriptTokenCount')) { console.log('[P Mig]: Add sessions.transcriptTokenCount'); dbInstance.exec("ALTER TABLE sessions ADD COLUMN transcriptTokenCount INTEGER NULL"); }
-
-        // Chat Table Migrations
-        if (!chatColumns.some((col) => col.name === 'tags')) { console.log('[P Mig]: Add chats.tags'); dbInstance.exec("ALTER TABLE chats ADD COLUMN tags TEXT NULL"); }
-        const chatIndexes = dbInstance.pragma("index_list('chats')") as { name: string }[];
-        if (!chatIndexes.some(idx => idx.name === 'idx_chat_timestamp')) { console.log('[P Mig]: Add chat timestamp index'); dbInstance.exec("CREATE INDEX IF NOT EXISTS idx_chat_timestamp ON chats (timestamp);"); }
-
-        // Message Table Migrations
-        if (!messageColumns.some((col) => col.name === 'promptTokens')) { console.log('[P Mig]: Add messages.promptTokens'); dbInstance.exec("ALTER TABLE messages ADD COLUMN promptTokens INTEGER NULL"); }
-        if (!messageColumns.some((col) => col.name === 'completionTokens')) { console.log('[P Mig]: Add messages.completionTokens'); dbInstance.exec("ALTER TABLE messages ADD COLUMN completionTokens INTEGER NULL"); }
-        if (!messageColumns.some((col) => col.name === 'starred')) { console.log('[P Mig]: Add messages.starred'); dbInstance.exec("ALTER TABLE messages ADD COLUMN starred INTEGER DEFAULT 0"); }
-        if (!messageColumns.some((col) => col.name === 'starredName')) { console.log('[P Mig]: Add messages.starredName'); dbInstance.exec("ALTER TABLE messages ADD COLUMN starredName TEXT NULL"); }
-        const messageIndexes = dbInstance.pragma("index_list('messages')") as { name: string }[];
-        if (!messageIndexes.some(idx => idx.name === 'idx_message_timestamp')) { console.log('[P Mig]: Add message timestamp index'); dbInstance.exec("CREATE INDEX IF NOT EXISTS idx_message_timestamp ON messages (timestamp);"); }
-
-        // --- Verify Schema Version ---
-         verifySchemaVersion(dbInstance, schema); // Verify the schema using the local function
-
-        console.log('[Preload Init Func]: Schema initialization and verification complete.');
-
-    } catch (initError) {
-        console.error('[Preload Init Func]: Error initializing database schema:', initError);
-        if (dbInstance && dbInstance.open) { try { dbInstance.close(); } catch (closeErr) {} }
-        throw initError; // Re-throw to stop the script
-    }
+        dbInstance.pragma('journal_mode = WAL'); dbInstance.pragma('busy_timeout = 5000'); dbInstance.pragma('foreign_keys = ON');
+        dbInstance.exec(schema); console.log('[Preload Init Func]: Schema exec command executed.');
+        const sessionCols = dbInstance.pragma("table_info(sessions)") as { name: string }[];
+        const chatCols = dbInstance.pragma("table_info(chats)") as { name: string }[];
+        const msgCols = dbInstance.pragma("table_info(messages)") as { name: string }[];
+        if (!sessionCols.some(c=>c.name==='audioPath')) {dbInstance.exec("ALTER TABLE sessions ADD COLUMN audioPath TEXT NULL"); console.log('[P Mig]: Add sessions.audioPath');}
+        if (!sessionCols.some(c=>c.name==='transcriptTokenCount')) {dbInstance.exec("ALTER TABLE sessions ADD COLUMN transcriptTokenCount INTEGER NULL"); console.log('[P Mig]: Add sessions.transcriptTokenCount');}
+        if (!chatCols.some(c=>c.name==='tags')) {dbInstance.exec("ALTER TABLE chats ADD COLUMN tags TEXT NULL"); console.log('[P Mig]: Add chats.tags');}
+        if (!(dbInstance.pragma("index_list('chats')") as {name:string}[]).some(i=>i.name==='idx_chat_timestamp')) {dbInstance.exec("CREATE INDEX IF NOT EXISTS idx_chat_timestamp ON chats (timestamp);"); console.log('[P Mig]: Add chat timestamp index');}
+        if (!msgCols.some(c=>c.name==='promptTokens')) {dbInstance.exec("ALTER TABLE messages ADD COLUMN promptTokens INTEGER NULL"); console.log('[P Mig]: Add messages.promptTokens');}
+        if (!msgCols.some(c=>c.name==='completionTokens')) {dbInstance.exec("ALTER TABLE messages ADD COLUMN completionTokens INTEGER NULL"); console.log('[P Mig]: Add messages.completionTokens');}
+        if (!msgCols.some(c=>c.name==='starred')) {dbInstance.exec("ALTER TABLE messages ADD COLUMN starred INTEGER DEFAULT 0"); console.log('[P Mig]: Add messages.starred');}
+        if (!msgCols.some(c=>c.name==='starredName')) {dbInstance.exec("ALTER TABLE messages ADD COLUMN starredName TEXT NULL"); console.log('[P Mig]: Add messages.starredName');}
+        if (!(dbInstance.pragma("index_list('messages')") as {name:string}[]).some(i=>i.name==='idx_message_timestamp')) {dbInstance.exec("CREATE INDEX IF NOT EXISTS idx_message_timestamp ON messages (timestamp);"); console.log('[P Mig]: Add message timestamp index');}
+        verifySchemaVersion(dbInstance, schema);
+        console.log('[Preload Init Func]: Schema init/verify complete.');
+    } catch (initError) { console.error('[Preload Init Func]: Error:', initError); if(dbInstance?.open){try{dbInstance.close();}catch{}} throw initError; }
 }
 // --- END initializeDatabase definition ---
 
@@ -132,12 +74,13 @@ function initializeDatabase(dbInstance: Database.Database) {
 interface SessionVerificationData { id: number; status: string; transcriptPath: string | null; date: string; transcriptTokenCount: number | null; }
 const createIsoTimestamp = (dateStr: string, offsetMinutes: number = 0): string => { const d=new Date(`${dateStr}T12:00:00Z`); d.setMinutes(d.getMinutes()+offsetMinutes); return d.toISOString(); };
 interface SampleChatMessage { sender: 'user' | 'ai'; text: string; starred?: boolean; starredName?: string; }
-// Sample data (ensure structure is correct)
-const sampleSessions = [ /* ... (same sample data as before, now including tags) ... */
-  { localIdRef: 1, fileName: 'session1.mp3', clientName: 'Jane Doe', sessionName: 'Initial Consultation', date: createIsoTimestamp('2025-04-01', 0), sessionType: 'Individual', therapy: 'CBT', transcriptContent: [ { id: 0, timestamp: 0, text: "T: ..." }, { id: 1, timestamp: 6500, text: "J: ..." }, ], status: 'completed', whisperJobId: null, chats: [ { name: 'Work Stress Discussion', tags: ['work', 'stress'], messages: [ { sender: 'user', text: 'What did Jane say about work?', starred: true, starredName: 'Jane Work Stress Quote' }, { sender: 'ai', text: 'Jane mentioned...' } ] as SampleChatMessage[] }, { name: 'CBT Concepts Introduced', tags: ['cbt', 'introduction'], messages: [ { sender: 'user', text: 'Did the therapist explain CBT?' }, { sender: 'ai', text: 'Yes, the therapist...' } ] as SampleChatMessage[] }, ] as { name?: string; tags?: string[]; messages: SampleChatMessage[] }[], },
-  { localIdRef: 2, fileName: 'session2.mp3', clientName: 'John Smith', sessionName: 'Follow-up Session', date: createIsoTimestamp('2025-04-02', 0), sessionType: 'Individual', therapy: 'Mindfulness', transcriptContent: [ { id: 0, timestamp: 0, text: "T: ..." }, { id: 1, timestamp: 7100, text: "J: ..." }, ], status: 'completed', whisperJobId: null, chats: [ { name: 'Mindfulness Check-in', tags: ['mindfulness', 'anxiety', 'check-in'], messages: [ { sender: 'user', text: 'How’s John doing with anxiety?' }, { sender: 'ai', text: 'John reported...' } ] as SampleChatMessage[] }, { name: undefined, tags: ['trigger', 'anxiety'], messages: [ { sender: 'user', text: 'What triggers John\'s anxiety?', starred: true, starredName: 'John Triggers' }, { sender: 'ai', text: 'The session identified...' } ] as SampleChatMessage[] }, { name: 'Therapist Techniques', tags: ['mindfulness', 'technique', 'reframing'], messages: [ { sender: 'user', text: 'What techniques did the therapist suggest?' }, { sender: 'ai', text: 'The therapist reinforced...' } ] as SampleChatMessage[] }, ] as { name?: string; tags?: string[]; messages: SampleChatMessage[] }[], },
+// --- Updated Sample Data with Alphabetically Sorted Tags ---
+const sampleSessions = [
+  { localIdRef: 1, fileName: 'session1.mp3', clientName: 'Jane Doe', sessionName: 'Initial Consultation', date: createIsoTimestamp('2025-04-01', 0), sessionType: 'Individual', therapy: 'CBT', transcriptContent: [ { id: 0, timestamp: 0, text: "T: ..." }, { id: 1, timestamp: 6500, text: "J: ..." }, ], status: 'completed', whisperJobId: null, chats: [ { name: 'Work Stress Discussion', tags: ['stress', 'work'], messages: [ { sender: 'user', text: 'What did Jane say about work?', starred: true, starredName: 'Jane Work Stress Quote' }, { sender: 'ai', text: 'Jane mentioned...' } ] as SampleChatMessage[] }, { name: 'CBT Concepts Introduced', tags: ['cbt', 'introduction'], messages: [ { sender: 'user', text: 'Did the therapist explain CBT?' }, { sender: 'ai', text: 'Yes, the therapist...' } ] as SampleChatMessage[] }, ] as { name?: string; tags?: string[]; messages: SampleChatMessage[] }[], },
+  { localIdRef: 2, fileName: 'session2.mp3', clientName: 'John Smith', sessionName: 'Follow-up Session', date: createIsoTimestamp('2025-04-02', 0), sessionType: 'Individual', therapy: 'Mindfulness', transcriptContent: [ { id: 0, timestamp: 0, text: "T: ..." }, { id: 1, timestamp: 7100, text: "J: ..." }, ], status: 'completed', whisperJobId: null, chats: [ { name: 'Mindfulness Check-in', tags: ['anxiety', 'check-in', 'mindfulness'], messages: [ { sender: 'user', text: 'How’s John doing with anxiety?' }, { sender: 'ai', text: 'John reported...' } ] as SampleChatMessage[] }, { name: undefined, tags: ['anxiety', 'trigger'], messages: [ { sender: 'user', text: 'What triggers John\'s anxiety?', starred: true, starredName: 'John Triggers' }, { sender: 'ai', text: 'The session identified...' } ] as SampleChatMessage[] }, { name: 'Therapist Techniques', tags: ['mindfulness', 'reframing', 'technique'], messages: [ { sender: 'user', text: 'What techniques did the therapist suggest?' }, { sender: 'ai', text: 'The therapist reinforced...' } ] as SampleChatMessage[] }, ] as { name?: string; tags?: string[]; messages: SampleChatMessage[] }[], },
   { localIdRef: 3, fileName: 'session3.mp3', clientName: 'Jane Doe', sessionName: 'Follow-up CBT', date: createIsoTimestamp('2025-04-01', 60), sessionType: 'Individual', therapy: 'CBT', transcriptContent: [ { id: 0, timestamp: 0, text: "T: ..." }, { id: 1, timestamp: 3000, text: "J: ..." } ], status: 'completed', whisperJobId: null, chats: [] as { name?: string; tags?: string[]; messages: SampleChatMessage[] }[], },
 ];
+// --- End Sample Data Update ---
 
 async function preloadDatabase() {
     console.log(`[Preload] Database file target: ${targetDbPath}`);
@@ -155,10 +98,9 @@ async function preloadDatabase() {
         db = new Database(targetDbPath, { verbose: console.log });
         initializeDatabase(db); // Initialize and verify schema FIRST
 
-        // Prepare statements (include tags)
         const insertSession = db.prepare(/* SQL */ `INSERT INTO sessions (fileName, clientName, sessionName, date, sessionType, therapy, transcriptPath, audioPath, status, whisperJobId, transcriptTokenCount) VALUES (@fileName, @clientName, @sessionName, @date, @sessionType, @therapy, NULL, NULL, @status, @whisperJobId, @transcriptTokenCount)`);
         const updateSessionPathAndAudio = db.prepare(/* SQL */ `UPDATE sessions SET transcriptPath = ?, audioPath = ? WHERE id = ?`);
-        const insertChat = db.prepare(/* SQL */ `INSERT INTO chats (sessionId, timestamp, name, tags) VALUES (?, ?, ?, ?)`); // Added tags placeholder
+        const insertChat = db.prepare(/* SQL */ `INSERT INTO chats (sessionId, timestamp, name, tags) VALUES (?, ?, ?, ?)`);
         const insertMessage = db.prepare(/* SQL */ `INSERT INTO messages (chatId, sender, text, timestamp, promptTokens, completionTokens, starred, starredName) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
 
         console.log('[Preload] Starting DB transaction...');
@@ -178,8 +120,10 @@ async function preloadDatabase() {
 
                 for (const chat of session.chats) {
                     const timestamp = Date.now() + Math.floor(Math.random() * 1000);
-                    const tagsJson = (chat.tags && chat.tags.length > 0) ? JSON.stringify(chat.tags) : null;
-                    const chatResult = insertChat.run(sessionId, timestamp, chat.name === undefined ? null : chat.name, tagsJson);
+                    // Ensure tags are sorted before stringifying (sample data is already sorted)
+                    const sortedTags = chat.tags ? [...chat.tags].sort((a, b) => a.localeCompare(b)) : null;
+                    const tagsJson = (sortedTags && sortedTags.length > 0) ? JSON.stringify(sortedTags) : null;
+                    const chatResult = insertChat.run(sessionId, timestamp, chat.name === undefined ? null : chat.name, tagsJson); // Insert tagsJson
                     const chatId = chatResult.lastInsertRowid;
                     for (const message of chat.messages) {
                         const messageTimestamp = timestamp + Math.floor(Math.random() * 100);
@@ -197,8 +141,8 @@ async function preloadDatabase() {
     } catch (error) { console.error('[Preload] Error:', error); success = false; }
     finally {
         if (success && db && db.open) {
-            console.log('[Preload Verification] Checking database entries...');
-            try {
+             console.log('[Preload Verification] Checking database entries...');
+            try { /* ... Verification Logic ... */
                 const verifyStmt = db.prepare('SELECT id, status, transcriptPath, date, transcriptTokenCount FROM sessions WHERE sessionName = ?');
                 let verificationPassed = true;
                 for (const sessionToVerify of sessionsToVerify) {
