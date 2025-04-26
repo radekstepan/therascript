@@ -20,7 +20,7 @@
 - [x] make sure the AI response "cursor" is less dark and is still blinking.The copy icon shouldn't show until after the whole response has been received.
 - [x] starred messages don't show in the popover
 - [ ] the star message icon is too small and not vertically aligned with the message itself
-- [ ] think about the starred messages popover, the list/UI looks odd
+- [x] think about the starred messages popover, the list/UI looks odd
 - [ ] move env files to root dir
 - [ ] is the token count actually accurate? the current "used" tokens, but also the tokens in the transcript. Do they update after edititing a paragraph?
 - [ ] when you fail to pull a model, putting a correct link won't start the pull (clear existing pull errors)

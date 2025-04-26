@@ -1,9 +1,8 @@
-/* packages/ui/src/components/SessionView/Chat/ChatInterface.tsx */
 import React, { useRef, useEffect, useCallback, useState, useMemo } from 'react';
 import { Box, Flex, ScrollArea, Spinner, Text } from '@radix-ui/themes';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChatInput } from './ChatInput';
-import { ChatMessages } from './ChatMessages'; // Corrected import name
+import { ChatMessages } from './ChatMessages';
 import { ChatPanelHeader } from './ChatPanelHeader';
 import {
     fetchSessionChatDetails, addSessionChatMessageStream, // Session APIs
@@ -49,9 +48,7 @@ export function ChatInterface({
     const queryClient = useQueryClient();
     const [currentQuery, setCurrentQuery] = useAtom(currentQueryAtom);
 
-    const [streamingAiPlaceholderId, setStreamingAiPlaceholderId] = useState<string | null>(null);
-    const [streamingAiContent, setStreamingAiContent] = useState<string>('');
-    // --- REMOVED isCursorAnimating state ---
+    const [streamingAiMessageId, setStreamingAiMessageId] = useState<number | null>(null);
 
     const chatQueryKey = useMemo(() => isStandalone ? ['standaloneChat', activeChatId] : ['chat', activeSessionId, activeChatId], [isStandalone, activeChatId, activeSessionId]);
 
@@ -89,7 +86,7 @@ export function ChatInterface({
         stream: ReadableStream<Uint8Array>,
         tempUserMsgId: number | undefined,
         receivedUserMsgId: number,
-        tempAiPlaceholderId: string
+        tempAiMessageId: number
     ) => {
         const reader = stream.getReader();
         const decoder = new TextDecoder();
@@ -99,8 +96,6 @@ export function ChatInterface({
         let streamErrored = false;
 
         try {
-            setStreamingAiContent('');
-
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
@@ -125,13 +120,21 @@ export function ChatInterface({
                                      });
                                 }
                             } else if (data.chunk) {
-                                setStreamingAiContent(prev => prev + data.chunk);
+                                // Update the temporary AI message in the query cache
+                                queryClient.setQueryData<ChatSession>(currentChatQueryKey, (oldData) => {
+                                    if (!oldData) return oldData;
+                                    const currentMessages = oldData.messages ?? [];
+                                    return {
+                                        ...oldData,
+                                        messages: currentMessages.map(msg =>
+                                            msg.id === tempAiMessageId ? { ...msg, text: msg.text + data.chunk } : msg
+                                        ),
+                                    };
+                                });
                             } else if (data.done) {
                                 console.log("Stream processing received done signal. Tokens:", data);
                                 // TODO need to call the finally here.
-                                setStreamingAiPlaceholderId(null);
-                                setStreamingAiContent('');
-                                // --- Removed isCursorAnimating set state ---
+                                setStreamingAiMessageId(null);
 
                                 if (activeChatId && !streamErrored) {
                                     console.log("[Stream Finally] Stream completed without error. Invalidating chat query.");
@@ -155,11 +158,9 @@ export function ChatInterface({
         } finally {
             // TODO is this ever called?
 
-            // --- Clear placeholder ID and content FIRST ---
-            console.log(`[Stream Finally] Clearing streaming placeholder ID: ${tempAiPlaceholderId}. Stream Errored: ${streamErrored}`);
-            setStreamingAiPlaceholderId(null);
-            setStreamingAiContent('');
-            // --- Removed isCursorAnimating set state ---
+            // --- Clear streaming state ---
+            console.log(`[Stream Finally] Clearing streaming message ID: ${tempAiMessageId}. Stream Errored: ${streamErrored}`);
+            setStreamingAiMessageId(null);
 
             if (activeChatId && !streamErrored) {
                 console.log("[Stream Finally] Stream completed without error. Invalidating chat query.");
@@ -185,61 +186,60 @@ export function ChatInterface({
         },
         onMutate: async (newMessageText) => {
             if (!activeChatId) return;
-            const currentChatQueryKey = chatQueryKey; // Use memoized key
+            const currentChatQueryKey = chatQueryKey;
             await queryClient.cancelQueries({ queryKey: currentChatQueryKey });
             const previousChatData = queryClient.getQueryData<ChatSession>(currentChatQueryKey);
-            // --- FIX: Add missing properties ---
             const temporaryUserMessage: ChatMessage = {
                 id: createTemporaryId(),
-                chatId: activeChatId, // Add chatId
+                chatId: activeChatId,
                 sender: 'user',
                 text: newMessageText,
-                timestamp: Date.now(), // Add timestamp
-                starred: false, // Default starred status
+                timestamp: Date.now(),
+                starred: false,
             };
-            // --- END FIX ---
+            const tempAiMessageId = createTemporaryId();
+            const temporaryAiMessage: ChatMessage = {
+                id: tempAiMessageId,
+                chatId: activeChatId,
+                sender: 'ai',
+                text: '',
+                timestamp: Date.now(),
+                starred: false,
+            };
 
             queryClient.setQueryData<ChatSession>(currentChatQueryKey, (oldData) => ({
                 ...(oldData ?? { id: activeChatId, sessionId: isStandalone ? null : activeSessionId, timestamp: Date.now(), name: 'Unknown Chat', messages: [] }),
-                messages: [...(oldData?.messages ?? []), temporaryUserMessage],
+                messages: [...(oldData?.messages ?? []), temporaryUserMessage, temporaryAiMessage],
             }));
 
-            const tempAiPlaceholderId = `ai-streaming-${Date.now()}`;
-            setStreamingAiContent('');
-            setStreamingAiPlaceholderId(tempAiPlaceholderId);
-            // --- Removed isCursorAnimating set state ---
+            setStreamingAiMessageId(tempAiMessageId);
 
             console.log('[Optimistic ChatInterface] Added temporary user message ID:', temporaryUserMessage.id);
-            console.log('[Optimistic ChatInterface] Added temporary AI placeholder ID:', tempAiPlaceholderId);
+            console.log('[Optimistic ChatInterface] Added temporary AI message ID:', tempAiMessageId);
 
-            return { previousChatData, temporaryUserMessageId: temporaryUserMessage.id, tempAiPlaceholderId };
+            return { previousChatData, temporaryUserMessageId: temporaryUserMessage.id, tempAiMessageId };
         },
         onSuccess: (data, variables, context) => {
              console.log("Stream initiated successfully. Header User Msg ID:", data.userMessageId);
-             if (!context?.tempAiPlaceholderId) {
-                  console.error("Missing temporary AI placeholder ID in mutation context!");
-                  // --- Removed isCursorAnimating set state ---
-                  throw new Error("Mutation context missing tempAiPlaceholderId");
+             if (!context?.tempAiMessageId) {
+                  console.error("Missing temporary AI message ID in mutation context!");
+                  throw new Error("Mutation context missing tempAiMessageId");
              }
-             processStream(data.stream, context.temporaryUserMessageId, data.userMessageId, context.tempAiPlaceholderId)
+             processStream(data.stream, context.temporaryUserMessageId, data.userMessageId, context.tempAiMessageId)
                  .catch(streamError => {
                      console.error("Caught error from processStream in onSuccess:", streamError);
-                     // --- Removed isCursorAnimating set state ---
-                     setStreamingAiPlaceholderId(null);
-                     setStreamingAiContent('');
+                     setStreamingAiMessageId(null);
                      throw streamError;
                  });
         },
         onError: (error, newMessageText, context) => {
             console.error("Mutation failed (Initiation or Stream Error):", error);
-            const currentChatQueryKey = chatQueryKey; // Use memoized key
+            const currentChatQueryKey = chatQueryKey;
             if (context?.previousChatData && activeChatId && (isStandalone || activeSessionId)) {
                  queryClient.setQueryData(currentChatQueryKey, context.previousChatData);
                  console.log("[Mutation Error] Reverted optimistic user message.");
             }
-            // --- Removed isCursorAnimating set state ---
-            setStreamingAiPlaceholderId(null);
-            setStreamingAiContent('');
+            setStreamingAiMessageId(null);
         },
         onSettled: () => {
             console.log("[Mutation Settled] Clearing input.");
@@ -249,10 +249,8 @@ export function ChatInterface({
         },
     });
 
-
     const chatMessages = chatData?.messages || [];
     const combinedIsLoading = (!isStandalone && isLoadingSessionMeta) || (isLoadingMessages && !chatData);
-
 
      // Scroll logic
      const debouncedScrollSave = useCallback(
@@ -275,7 +273,7 @@ export function ChatInterface({
      useEffect(() => {
         if ((isTabActive === undefined || isTabActive) && !restoreScrollRef.current && !combinedIsLoading) {
              if (chatContentRef.current) {
-                 const shouldScroll = chatMessages.length > 0 || streamingAiPlaceholderId !== null;
+                 const shouldScroll = chatMessages.length > 0 || streamingAiMessageId !== null;
                  if (shouldScroll) {
                      const lastElement = chatContentRef.current.lastElementChild;
                      if (lastElement) {
@@ -284,15 +282,9 @@ export function ChatInterface({
                  }
              }
          }
-     }, [chatMessages.length, combinedIsLoading, isTabActive, streamingAiPlaceholderId, streamingAiContent]);
+     }, [chatMessages.length, combinedIsLoading, isTabActive, streamingAiMessageId]);
 
-
-    const isAiResponding = addMessageMutation.isPending || streamingAiPlaceholderId !== null;
-
-    // --- Generate dynamic key for ChatMessages ---
-    // Key changes when streaming starts (placeholder ID exists) and when it ends (placeholder ID is null)
-    const chatMessagesKey = `chat-messages-${activeChatId}-${streamingAiPlaceholderId ? 'streaming' : 'idle'}`;
-    // --- END ---
+    const isAiResponding = addMessageMutation.isPending || streamingAiMessageId !== null;
 
     return (
         <Flex direction="column" style={{ height: '100%', minHeight: 0, border: '1px solid var(--gray-a6)', borderRadius: 'var(--radius-3)', overflow: 'hidden' }}>
@@ -313,14 +305,10 @@ export function ChatInterface({
 
                 <Box p="4" ref={chatContentRef} style={{ opacity: combinedIsLoading ? 0.5 : 1, transition: 'opacity 0.2s ease-in-out' }}>
                     <ChatMessages
-                        // --- Apply dynamic key ---
-                        key={chatMessagesKey}
-                        // --- End ---
                         messages={chatMessages}
                         activeChatId={activeChatId}
-                        isStandalone={isStandalone} // <-- Pass prop
-                        streamingMessage={streamingAiPlaceholderId ? { id: streamingAiPlaceholderId, content: streamingAiContent } : null}
-                        // --- Removed isCursorAnimating prop ---
+                        isStandalone={isStandalone}
+                        streamingMessageId={streamingAiMessageId}
                     />
                 </Box>
             </ScrollArea>
