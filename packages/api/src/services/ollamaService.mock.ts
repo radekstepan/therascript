@@ -1,4 +1,3 @@
-/* packages/api/src/services/ollamaService.mock.ts */
 import type { ChatResponse, ListResponse, ProgressResponse } from 'ollama'; // Keep ChatResponse
 // --- Use imported types from central location ---
 import type { BackendChatMessage, OllamaModelInfo, OllamaPullJobStatus, OllamaPullJobStatusState } from '../types/index.js';
@@ -61,6 +60,25 @@ export const loadOllamaModel = async (modelName: string): Promise<void> => {
     mockLoadedModel = modelName;
     console.log(`[Mock Ollama] Successfully loaded model '${modelName}' (mock).`);
 };
+
+// --- NEW: Mock Unload Function ---
+export const unloadActiveModel = async (): Promise<string> => {
+    const modelToUnload = getActiveModel();
+    console.log(`[Mock Ollama] Request to unload active model: ${modelToUnload}`);
+    await new Promise(resolve => setTimeout(resolve, MOCK_DELAY_MS / 4));
+    if (mockLoadedModel === modelToUnload) {
+        mockLoadedModel = null;
+        console.log(`[Mock Ollama] Successfully unloaded model '${modelToUnload}'.`);
+        return `Mock model '${modelToUnload}' unloaded successfully.`;
+    } else if (modelToUnload === null) {
+        console.log(`[Mock Ollama] No model was active to unload.`);
+        return 'No active mock model to unload.';
+    } else {
+        console.log(`[Mock Ollama] Model '${modelToUnload}' was not the loaded model ('${mockLoadedModel}'). No action taken.`);
+        return `Mock model '${modelToUnload}' was not loaded.`;
+    }
+};
+// --- END NEW ---
 
 export const ensureOllamaReady = async (timeoutMs = 30000): Promise<void> => {
     console.log("[Mock Ollama] Ensuring Ollama service is ready (mock)... always ready.");

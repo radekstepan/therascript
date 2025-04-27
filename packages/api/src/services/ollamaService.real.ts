@@ -1,4 +1,3 @@
-/* packages/api/src/services/ollamaService.real.ts */
 // Contains the original, real implementation of ollamaService.ts
 
 // --- Keep original imports for ollama, axios, crypto, etc. ---
@@ -253,6 +252,14 @@ export const deleteOllamaModel = async (modelName: string): Promise<string> => {
     const loadedStatus = await checkModelStatus(modelName);
     if (loadedStatus && typeof loadedStatus === 'object' && 'name' in loadedStatus) {
          console.warn(`[Real OllamaService] Attempting to delete model '${modelName}' which appears to be currently loaded.`);
+         // --- FIX: Unload before deleting ---
+         console.log(`[Real OllamaService] Attempting to unload model '${modelName}' before deletion...`);
+         try {
+            await unloadActiveModel(modelName); // Attempt to unload it first
+         } catch(unloadError) {
+            console.warn(`[Real OllamaService] Failed to explicitly unload model '${modelName}' before delete (will proceed anyway):`, unloadError);
+         }
+         // --- END FIX ---
     } else if (loadedStatus === null) {
         console.log(`[Real OllamaService] Model '${modelName}' confirmed not loaded.`);
     } else if (loadedStatus?.status === 'unavailable') {
@@ -287,6 +294,7 @@ export const deleteOllamaModel = async (modelName: string): Promise<string> => {
 export const checkModelStatus = async (modelToCheck: string): Promise<OllamaModelInfo | null | { status: 'unavailable' }> => {
     console.log(`[Real OllamaService] Checking if specific model '${modelToCheck}' is loaded...`);
     try {
+        await ensureOllamaReady(); // Check readiness before checking status
         const response = await ollama.ps();
         const loadedModel = response.models.find((model: any) => model.name === modelToCheck); // Use any if type is uncertain
 
@@ -344,6 +352,48 @@ export const loadOllamaModel = async (modelName: string): Promise<void> => {
     }
 };
 
+// --- NEW: Real Unload Function ---
+/**
+ * Sends a request to Ollama to unload the specified model (or the currently active one if none specified).
+ * @param modelToUnload Optional specific model name to unload. Defaults to the active model.
+ * @returns A promise resolving to a success message.
+ * @throws {ApiError} If the unload request fails.
+ */
+export const unloadActiveModel = async (modelToUnloadOverride?: string): Promise<string> => {
+    const modelToUnload = modelToUnloadOverride || getActiveModel();
+    console.log(`[Real OllamaService:unload] Sending unload request (keep_alive: 0) for model ${modelToUnload}...`);
+
+    try {
+        await ensureOllamaReady(); // Ensure service is reachable
+        await ollama.chat({
+            model: modelToUnload,
+            messages: [{ role: 'user', content: 'unload request' }],
+            keep_alive: 0, // Explicitly unload
+            stream: false,
+        });
+        console.log(`[Real OllamaService:unload] Unload request sent successfully for ${modelToUnload}.`);
+        return `Unload request sent for model ${modelToUnload}. It will be unloaded shortly if idle.`;
+    } catch (error: any) {
+        console.error(`[Real OllamaService:unload] Error sending unload request for ${modelToUnload}:`, error);
+        // Specific error handling
+        const isModelNotFoundError = error.status === 404 || (error.message?.includes('model') && (error.message?.includes('not found') || error.message?.includes('missing')));
+        if (isModelNotFoundError) {
+            console.log(`[Real OllamaService:unload] Model ${modelToUnload} not found by Ollama (likely already unloaded).`);
+            // Consider this a success from the user's perspective
+            return `Model ${modelToUnload} was not found (likely already unloaded).`;
+        }
+        const isConnectionError = (error as NodeJS.ErrnoException)?.code === 'ECONNREFUSED' || error.message?.includes('ECONNREFUSED');
+        if (isConnectionError) {
+            console.warn(`[Real OllamaService:unload] Connection refused when trying to unload ${modelToUnload}. Assuming stopped/unloaded.`);
+            // Treat as success? Or maybe a 503? Let's go with success for now.
+            return `Could not connect to Ollama to explicitly unload ${modelToUnload}. It might already be stopped or unloaded.`;
+        }
+        // Default to InternalServerError for other errors
+        throw new InternalServerError(`Failed to send unload request to Ollama service for model ${modelToUnload}.`, error instanceof Error ? error : undefined);
+    }
+};
+// --- END NEW ---
+
 // --- Keep original Reload Active Model Context Function ---
 export const reloadActiveModelContext = async (): Promise<void> => {
     const modelName = getActiveModel();
@@ -359,25 +409,19 @@ export const reloadActiveModelContext = async (): Promise<void> => {
         throw error; // Propagate readiness error
     }
 
-    // 1. Attempt Unload (keep_alive: 0)
+    // 1. Attempt Unload (keep_alive: 0) - Use the new unload function
     try {
-        console.log(`[Real OllamaService:reload] Sending unload request (keep_alive: 0) for ${modelName}...`);
-        await ollama.chat({
-            model: modelName,
-            messages: [{ role: 'user', content: 'unload' }], // Minimal message
-            stream: false,
-            keep_alive: 0, // Explicitly unload
-        });
-        console.log(`[Real OllamaService:reload] Unload request sent successfully for ${modelName}.`);
+        await unloadActiveModel(modelName); // Call the specific unload function
     } catch (unloadError: any) {
-        const isModelNotFoundError = unloadError.status === 404 || (unloadError.message?.includes('model') && (unloadError.message?.includes('not found') || unloadError.message?.includes('missing')));
-        if (isModelNotFoundError) {
-            console.log(`[Real OllamaService:reload] Model ${modelName} not found during unload attempt (likely already unloaded). Proceeding to load.`);
-        } else if (unloadError.message?.includes('ECONNREFUSED')) {
+        // Check if the error message indicates it was already unloaded
+        if (unloadError instanceof ApiError && unloadError.message.includes('already unloaded')) {
+            console.log(`[Real OllamaService:reload] Model ${modelName} reported as already unloaded. Proceeding to load.`);
+        } else if (unloadError instanceof InternalServerError && unloadError.message.includes('Connection refused')) {
             console.error(`[Real OllamaService:reload] Connection refused during unload for ${modelName}.`);
-            throw new InternalServerError(`Connection refused during unload attempt for ${modelName}.`);
+            throw unloadError; // Re-throw connection error
         } else {
             console.warn(`[Real OllamaService:reload] Error during unload request for ${modelName} (will still attempt load):`, unloadError);
+            // Don't throw other unload errors, proceed to load attempt
         }
     }
 

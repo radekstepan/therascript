@@ -1,6 +1,5 @@
-/* packages/api/src/services/ollamaService.ts */
 import config from '../config/index.js';
-import type { BackendChatMessage, OllamaModelInfo } from '../types/index.js';
+import type { BackendChatMessage, OllamaModelInfo, OllamaPullJobStatus } from '../types/index.js'; // Added OllamaPullJobStatus
 import type { ChatResponse, ListResponse, ProgressResponse } from 'ollama';
 import type * as RealService from './ollamaService.real.js'; // Use .real suffix
 import type * as MockService from './ollamaService.mock.js';
@@ -11,11 +10,12 @@ interface OllamaServiceInterface {
     listModels: () => Promise<OllamaModelInfo[]>;
     checkModelStatus: (modelToCheck: string) => Promise<OllamaModelInfo | null | { status: 'unavailable' }>;
     loadOllamaModel: (modelName: string) => Promise<void>;
+    unloadActiveModel: () => Promise<string>; // <-- Added unloadActiveModel
     ensureOllamaReady: (timeoutMs?: number) => Promise<void>;
     reloadActiveModelContext: () => Promise<void>;
     streamChatResponse: (contextTranscript: string | null, chatHistory: BackendChatMessage[], retryAttempt?: boolean) => Promise<AsyncIterable<ChatResponse>>;
     startPullModelJob: (modelName: string) => string;
-    getPullModelJobStatus: (jobId: string) => any | null; // Consider defining a stricter PullJobStatus type here
+    getPullModelJobStatus: (jobId: string) => OllamaPullJobStatus | null; // <-- Defined return type
     cancelPullModelJob: (jobId: string) => boolean;
     deleteOllamaModel: (modelName: string) => Promise<string>;
     // Deprecated non-streaming function (optional to include if mock needs it for some reason)
@@ -39,6 +39,7 @@ if (config.server.appMode === 'mock') {
 export const listModels = service.listModels;
 export const checkModelStatus = service.checkModelStatus;
 export const loadOllamaModel = service.loadOllamaModel;
+export const unloadActiveModel = service.unloadActiveModel; // <-- Export the new function
 export const ensureOllamaReady = service.ensureOllamaReady;
 export const reloadActiveModelContext = service.reloadActiveModelContext;
 export const streamChatResponse = service.streamChatResponse;

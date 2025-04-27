@@ -1,17 +1,19 @@
-/* packages/api/src/routes/ollamaRoutes.ts */
 import { Elysia, t } from 'elysia';
-import ollama from 'ollama';
+// --- REMOVED ollama import, use service layer instead ---
+// import ollama from 'ollama';
+// --- END REMOVAL ---
 import config from '../config/index.js';
 import { ApiError, InternalServerError, ConflictError, BadRequestError, NotFoundError } from '../errors.js';
 import {
     checkModelStatus, listModels, loadOllamaModel,
     startPullModelJob, getPullModelJobStatus, cancelPullModelJob,
     deleteOllamaModel as deleteOllamaModelService,
+    unloadActiveModel, // <-- Import the new service function
 } from '../services/ollamaService.js';
 import { setActiveModelAndContext, getActiveModel, getConfiguredContextSize } from '../services/activeModelService.js';
 import type { OllamaModelInfo, OllamaPullJobStatus, OllamaPullJobStatusState } from '../types/index.js';
 
-// --- Ollama Response/Request Schemas ---
+// --- Ollama Response/Request Schemas (Unchanged) ---
 const OllamaModelDetailSchema = t.Object({ format: t.String(), family: t.String(), families: t.Union([t.Array(t.String()), t.Null()]), parameter_size: t.String(), quantization_level: t.String(), });
 const OllamaModelInfoSchema = t.Object({ // This schema defines the API output (strings for dates)
     name: t.String(),
@@ -95,12 +97,25 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
             try { setActiveModelAndContext(modelName, contextSize); await loadOllamaModel(modelName); set.status = 200; return { message: `Active model set to ${modelName} (context: ${getConfiguredContextSize() ?? 'default'}). Load initiated. Check status.` }; }
             catch (error: any) { console.error(`[API SetModel] Error setting/loading model ${modelName} (context: ${sizeLog}):`, error); if (error instanceof ApiError) throw error; throw new InternalServerError(`Failed to set active model or initiate load for ${modelName}.`, error); }
         }, { body: 'setModelBody', response: { 200: t.Object({ message: t.String() }), 400: t.Any(), 500: t.Any() }, detail: { summary: 'Set the active Ollama model and context size, trigger load' } })
+        // --- FIX: Use service layer function ---
         .post('/unload', async ({ set }) => {
             const modelToUnload = getActiveModel();
             console.log(`[API Unload] Received request to unload active model: ${modelToUnload}`);
-            try { await ollama.chat({ model: modelToUnload, messages: [{ role: 'user', content: 'unload request' }], keep_alive: 0, stream: false, }); console.log(`[API Unload] Sent unload request (keep_alive: 0) for active model ${modelToUnload}`); set.status = 200; return { message: `Unload request sent for model ${modelToUnload}. It will be unloaded shortly if idle.` }; }
-            catch (error: any) { console.error(`[API Unload] Error sending unload request for ${modelToUnload}:`, error); if (error.message?.includes('model') && error.message?.includes('not found')) { console.log(`[API Unload] Model ${modelToUnload} was not found by Ollama (likely already unloaded).`); set.status = 200; return { message: `Model ${modelToUnload} was not found (likely already unloaded).` }; } const isConnectionError = (error as NodeJS.ErrnoException)?.code === 'ECONNREFUSED' || error.message?.includes('ECONNREFUSED'); if (isConnectionError) { console.warn(`[API Unload] Connection refused when trying to unload ${modelToUnload}. Assuming stopped/unloaded.`); set.status = 200; return { message: `Could not connect to Ollama to explicitly unload ${modelToUnload}. It might already be stopped or unloaded.`}; } throw new InternalServerError(`Failed to send unload request to Ollama service for model ${modelToUnload}.`); }
-        }, { response: { 200: t.Object({ message: t.String() }), 500: t.Any() }, detail: { summary: 'Request Ollama to unload the currently active model from memory' } })
+            try {
+                const resultMessage = await unloadActiveModel(); // Call service function
+                set.status = 200;
+                return { message: resultMessage };
+            } catch (error: any) {
+                console.error(`[API Unload] Error during unload for ${modelToUnload}:`, error);
+                // Re-throw specific errors or default to InternalServerError
+                if (error instanceof ApiError) throw error;
+                throw new InternalServerError(`Failed to unload model ${modelToUnload}.`, error);
+            }
+        }, {
+            response: { 200: t.Object({ message: t.String() }), 404: t.Any(), 500: t.Any(), 503: t.Any() }, // Add potential error codes
+            detail: { summary: 'Request Ollama to unload the currently active model from memory' }
+        })
+        // --- END FIX ---
         .post('/pull-model', ({ body, set }) => {
             const { modelName } = body;
             console.log(`[API PullModel] Received request to START pull model job: ${modelName}`);
