@@ -1,91 +1,73 @@
-/* packages/api/src/preloadDb.ts */
 import Database from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { calculateTokenCount } from './services/fileService.js';
+// *** Import schema and init/verify functions from sqliteService ***
+import {
+    schema, // Import the schema string
+    initializeDatabase, // Import the initialization logic
+    // No need to import verifySchemaVersion or calculateSchemaHash directly
+    // as they are called by the imported initializeDatabase
+} from './db/sqliteService.js';
 
 // Determine paths relative to *this file's* location
 const __filename = fileURLToPath(import.meta.url);
+// Adjust path based on build output location (e.g., 'dist/')
+// If preloadDb.js is in `dist/`, navigate up twice to get to `packages/api`
 const packageApiDir = path.resolve(__filename, '../../');
 const targetDataDir = path.join(packageApiDir, 'data');
 const targetDbPath = path.join(targetDataDir, 'therapy-analyzer.sqlite');
 const targetTranscriptsDir = path.join(targetDataDir, 'transcripts');
 
-// --- Updated Schema Definition (Must match sqliteService.ts) ---
-const SCHEMA_HASH_KEY = 'schema_md5';
-const schema = `
-    CREATE TABLE IF NOT EXISTS sessions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, fileName TEXT NOT NULL, clientName TEXT NOT NULL,
-        sessionName TEXT NOT NULL, date TEXT NOT NULL, sessionType TEXT NOT NULL, therapy TEXT NOT NULL,
-        transcriptPath TEXT NULL, status TEXT NOT NULL DEFAULT 'pending', whisperJobId TEXT NULL,
-        audioPath TEXT NULL, transcriptTokenCount INTEGER NULL
-    );
-    CREATE TABLE IF NOT EXISTS chats (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, sessionId INTEGER NULL, timestamp INTEGER NOT NULL,
-        name TEXT, tags TEXT NULL, -- Added tags column
-        FOREIGN KEY (sessionId) REFERENCES sessions (id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_chat_session ON chats (sessionId);
-    CREATE INDEX IF NOT EXISTS idx_chat_timestamp ON chats (timestamp);
-    CREATE TABLE IF NOT EXISTS messages (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, chatId INTEGER NOT NULL, sender TEXT NOT NULL CHECK(sender IN ('user', 'ai')),
-        text TEXT NOT NULL, timestamp INTEGER NOT NULL, promptTokens INTEGER, completionTokens INTEGER,
-        starred INTEGER DEFAULT 0, starredName TEXT NULL,
-        FOREIGN KEY (chatId) REFERENCES chats (id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_message_chat ON messages (chatId);
-    CREATE INDEX IF NOT EXISTS idx_message_timestamp ON messages (timestamp);
-    CREATE TABLE IF NOT EXISTS schema_metadata ( key TEXT PRIMARY KEY, value TEXT NOT NULL );
-`;
-// --- End Schema Definition ---
-
-// --- Schema Verification Logic (Copied - ensure it matches sqliteService) ---
-function calculateSchemaHash(schemaString: string): string { return crypto.createHash('md5').update(schemaString).digest('hex'); }
-function verifySchemaVersion(dbInstance: Database.Database, currentSchemaDefinition: string) { const currentHash=calculateSchemaHash(currentSchemaDefinition); let storedHash: string|undefined; try { dbInstance.exec(`CREATE TABLE IF NOT EXISTS schema_metadata ( key TEXT PRIMARY KEY, value TEXT NOT NULL );`); const row = dbInstance.prepare('SELECT value FROM schema_metadata WHERE key = ?').get(SCHEMA_HASH_KEY) as { value: string } | undefined; storedHash = row?.value; } catch (e){ console.warn("Could not read stored hash", e); } if(storedHash){ if(currentHash === storedHash){ console.log("[Preload Schema Check]: OK"); } else { console.error("FATAL SCHEMA MISMATCH!"); console.error(` Code: ${currentHash}`); console.error(` DB:   ${storedHash}`); console.error("Backup DB, delete file, restart API."); dbInstance.close(); process.exit(1); } } else { console.log("[Preload Schema Check]: Storing initial hash."); try { dbInstance.prepare('INSERT OR REPLACE INTO schema_metadata (key, value) VALUES (?, ?)').run(SCHEMA_HASH_KEY, currentHash); } catch(e){ console.error("FATAL: Failed store hash",e); dbInstance.close(); process.exit(1); } } }
-// --- End Copied Logic ---
-
-// --- Initialize Database function ---
-function initializeDatabase(dbInstance: Database.Database) {
-    console.log('[Preload Init Func]: Initializing schema...');
-    try {
-        dbInstance.pragma('journal_mode = WAL'); dbInstance.pragma('busy_timeout = 5000'); dbInstance.pragma('foreign_keys = ON');
-        dbInstance.exec(schema); console.log('[Preload Init Func]: Schema exec command executed.');
-        const sessionCols = dbInstance.pragma("table_info(sessions)") as { name: string }[];
-        const chatCols = dbInstance.pragma("table_info(chats)") as { name: string }[];
-        const msgCols = dbInstance.pragma("table_info(messages)") as { name: string }[];
-        if (!sessionCols.some(c=>c.name==='audioPath')) {dbInstance.exec("ALTER TABLE sessions ADD COLUMN audioPath TEXT NULL"); console.log('[P Mig]: Add sessions.audioPath');}
-        if (!sessionCols.some(c=>c.name==='transcriptTokenCount')) {dbInstance.exec("ALTER TABLE sessions ADD COLUMN transcriptTokenCount INTEGER NULL"); console.log('[P Mig]: Add sessions.transcriptTokenCount');}
-        if (!chatCols.some(c=>c.name==='tags')) {dbInstance.exec("ALTER TABLE chats ADD COLUMN tags TEXT NULL"); console.log('[P Mig]: Add chats.tags');}
-        if (!(dbInstance.pragma("index_list('chats')") as {name:string}[]).some(i=>i.name==='idx_chat_timestamp')) {dbInstance.exec("CREATE INDEX IF NOT EXISTS idx_chat_timestamp ON chats (timestamp);"); console.log('[P Mig]: Add chat timestamp index');}
-        if (!msgCols.some(c=>c.name==='promptTokens')) {dbInstance.exec("ALTER TABLE messages ADD COLUMN promptTokens INTEGER NULL"); console.log('[P Mig]: Add messages.promptTokens');}
-        if (!msgCols.some(c=>c.name==='completionTokens')) {dbInstance.exec("ALTER TABLE messages ADD COLUMN completionTokens INTEGER NULL"); console.log('[P Mig]: Add messages.completionTokens');}
-        if (!msgCols.some(c=>c.name==='starred')) {dbInstance.exec("ALTER TABLE messages ADD COLUMN starred INTEGER DEFAULT 0"); console.log('[P Mig]: Add messages.starred');}
-        if (!msgCols.some(c=>c.name==='starredName')) {dbInstance.exec("ALTER TABLE messages ADD COLUMN starredName TEXT NULL"); console.log('[P Mig]: Add messages.starredName');}
-        if (!(dbInstance.pragma("index_list('messages')") as {name:string}[]).some(i=>i.name==='idx_message_timestamp')) {dbInstance.exec("CREATE INDEX IF NOT EXISTS idx_message_timestamp ON messages (timestamp);"); console.log('[P Mig]: Add message timestamp index');}
-        verifySchemaVersion(dbInstance, schema);
-        console.log('[Preload Init Func]: Schema init/verify complete.');
-    } catch (initError) { console.error('[Preload Init Func]: Error:', initError); if(dbInstance?.open){try{dbInstance.close();}catch{}} throw initError; }
-}
-// --- END initializeDatabase definition ---
+// --- REMOVED local schema definition ---
+// --- REMOVED local initializeDatabase definition ---
+// --- REMOVED local verifySchemaVersion/calculateSchemaHash definitions ---
 
 
+// Sample data remains the same
 interface SessionVerificationData { id: number; status: string; transcriptPath: string | null; date: string; transcriptTokenCount: number | null; }
 const createIsoTimestamp = (dateStr: string, offsetMinutes: number = 0): string => { const d=new Date(`${dateStr}T12:00:00Z`); d.setMinutes(d.getMinutes()+offsetMinutes); return d.toISOString(); };
 interface SampleChatMessage { sender: 'user' | 'ai'; text: string; starred?: boolean; starredName?: string; }
-// --- Updated Sample Data with Alphabetically Sorted Tags ---
 const sampleSessions = [
-  { localIdRef: 1, fileName: 'session1.mp3', clientName: 'Jane Doe', sessionName: 'Initial Consultation', date: createIsoTimestamp('2025-04-01', 0), sessionType: 'Individual', therapy: 'CBT', transcriptContent: [ { id: 0, timestamp: 0, text: "T: ..." }, { id: 1, timestamp: 6500, text: "J: ..." }, ], status: 'completed', whisperJobId: null, chats: [ { name: 'Work Stress Discussion', tags: ['stress', 'work'], messages: [ { sender: 'user', text: 'What did Jane say about work?', starred: true, starredName: 'Jane Work Stress Quote' }, { sender: 'ai', text: 'Jane mentioned...' } ] as SampleChatMessage[] }, { name: 'CBT Concepts Introduced', tags: ['cbt', 'introduction'], messages: [ { sender: 'user', text: 'Did the therapist explain CBT?' }, { sender: 'ai', text: 'Yes, the therapist...' } ] as SampleChatMessage[] }, ] as { name?: string; tags?: string[]; messages: SampleChatMessage[] }[], },
-  { localIdRef: 2, fileName: 'session2.mp3', clientName: 'John Smith', sessionName: 'Follow-up Session', date: createIsoTimestamp('2025-04-02', 0), sessionType: 'Individual', therapy: 'Mindfulness', transcriptContent: [ { id: 0, timestamp: 0, text: "T: ..." }, { id: 1, timestamp: 7100, text: "J: ..." }, ], status: 'completed', whisperJobId: null, chats: [ { name: 'Mindfulness Check-in', tags: ['anxiety', 'check-in', 'mindfulness'], messages: [ { sender: 'user', text: 'How’s John doing with anxiety?' }, { sender: 'ai', text: 'John reported...' } ] as SampleChatMessage[] }, { name: undefined, tags: ['anxiety', 'trigger'], messages: [ { sender: 'user', text: 'What triggers John\'s anxiety?', starred: true, starredName: 'John Triggers' }, { sender: 'ai', text: 'The session identified...' } ] as SampleChatMessage[] }, { name: 'Therapist Techniques', tags: ['mindfulness', 'reframing', 'technique'], messages: [ { sender: 'user', text: 'What techniques did the therapist suggest?' }, { sender: 'ai', text: 'The therapist reinforced...' } ] as SampleChatMessage[] }, ] as { name?: string; tags?: string[]; messages: SampleChatMessage[] }[], },
-  { localIdRef: 3, fileName: 'session3.mp3', clientName: 'Jane Doe', sessionName: 'Follow-up CBT', date: createIsoTimestamp('2025-04-01', 60), sessionType: 'Individual', therapy: 'CBT', transcriptContent: [ { id: 0, timestamp: 0, text: "T: ..." }, { id: 1, timestamp: 3000, text: "J: ..." } ], status: 'completed', whisperJobId: null, chats: [] as { name?: string; tags?: string[]; messages: SampleChatMessage[] }[], },
+  { localIdRef: 1, fileName: 'session1.mp3', clientName: 'Jane Doe', sessionName: 'Initial Consultation', date: createIsoTimestamp('2025-04-01', 0), sessionType: 'Individual', therapy: 'CBT', transcriptContent: [ { id: 0, timestamp: 0, text: "T: Let's start by discussing what brought you in today." }, { id: 1, timestamp: 6500, text: "J: Well, I've been feeling really overwhelmed with work lately. It's constant pressure." }, { id: 2, timestamp: 12300, text: "T: Tell me more about that pressure. What does it feel like?" }, { id: 3, timestamp: 18800, text: "J: Like I can never catch up. My thoughts race, and I find it hard to focus on one task." }, { id: 4, timestamp: 25000, text: "T: That sounds exhausting. We can explore some CBT techniques to manage those racing thoughts." } ], status: 'completed', whisperJobId: null, chats: [ { name: 'Work Stress Discussion', tags: ['stress', 'work'], messages: [ { sender: 'user', text: 'What did Jane say about work?', starred: true, starredName: 'Jane Work Stress Quote' }, { sender: 'ai', text: "Jane mentioned feeling really overwhelmed with work, describing it as constant pressure and feeling like she can never catch up. She also noted that her thoughts race and she finds it hard to focus." } ] as SampleChatMessage[] }, { name: 'CBT Concepts Introduced', tags: ['cbt', 'introduction'], messages: [ { sender: 'user', text: 'Did the therapist explain CBT?' }, { sender: 'ai', text: 'Yes, the therapist mentioned exploring CBT techniques to manage Jane\'s racing thoughts, indicating an introduction to the therapy modality.' } ] as SampleChatMessage[] }, ] as { name?: string; tags?: string[]; messages: SampleChatMessage[] }[], },
+  { localIdRef: 2, fileName: 'session2.mp3', clientName: 'John Smith', sessionName: 'Follow-up Session', date: createIsoTimestamp('2025-04-02', 0), sessionType: 'Individual', therapy: 'Mindfulness', transcriptContent: [ { id: 0, timestamp: 0, text: "T: Welcome back, John. How has your week been since our last mindfulness practice?" }, { id: 1, timestamp: 7100, text: "J: Better in some ways. I noticed my anxiety creeping up during a meeting, but I tried the breathing exercise." }, { id: 2, timestamp: 14500, text: "T: That's great self-awareness. How did the breathing exercise feel in that moment?" }, { id: 3, timestamp: 21200, text: "J: It helped ground me a bit, but the physical sensations were still strong." }, { id: 4, timestamp: 27800, text: "T: Okay, let's work on acknowledging those physical sensations without judgment. That's a key part of mindfulness." } ], status: 'completed', whisperJobId: null, chats: [ { name: 'Mindfulness Check-in', tags: ['anxiety', 'check-in', 'mindfulness'], messages: [ { sender: 'user', text: 'How’s John doing with anxiety?' }, { sender: 'ai', text: 'John reported that his week was better in some ways. He noticed his anxiety during a meeting and used a breathing exercise, which helped ground him, although the physical sensations remained strong.' } ] as SampleChatMessage[] }, { name: undefined, tags: ['anxiety', 'trigger'], messages: [ { sender: 'user', text: 'What triggers John\'s anxiety?', starred: true, starredName: 'John Triggers' }, { sender: 'ai', text: 'The session explicitly mentioned John experiencing anxiety during a meeting.' } ] as SampleChatMessage[] }, { name: 'Therapist Techniques', tags: ['mindfulness', 'reframing', 'technique'], messages: [ { sender: 'user', text: 'What techniques did the therapist suggest?' }, { sender: 'ai', text: 'The therapist acknowledged John\'s use of a breathing exercise and suggested working on acknowledging physical sensations without judgment as a key part of mindfulness.' } ] as SampleChatMessage[] }, ] as { name?: string; tags?: string[]; messages: SampleChatMessage[] }[], },
+  { localIdRef: 3, fileName: 'session3.mp3', clientName: 'Jane Doe', sessionName: 'Follow-up CBT', date: createIsoTimestamp('2025-04-01', 60), sessionType: 'Individual', therapy: 'CBT', transcriptContent: [ { id: 0, timestamp: 0, text: "T: Last time we talked about identifying automatic negative thoughts. Have you noticed any this week?" }, { id: 1, timestamp: 8000, text: "J: Yes, definitely. When my boss gave feedback, I immediately thought, 'I'm going to get fired.'" }, { id: 2, timestamp: 15500, text: "T: That's a perfect example of catastrophizing. Let's challenge that thought. What's the evidence for and against it?" } ], status: 'completed', whisperJobId: null, chats: [] as { name?: string; tags?: string[]; messages: SampleChatMessage[] }[], },
 ];
-// --- End Sample Data Update ---
 
 async function preloadDatabase() {
     console.log(`[Preload] Database file target: ${targetDbPath}`);
-    try { await fs.unlink(targetDbPath); console.log(`[Preload] Deleted existing database file.`); }
-    catch (err: any) { if (err.code !== 'ENOENT') console.error(`[Preload] Error deleting DB:`, err); }
+
+    // *** Improved Deletion Logic ***
+    let deletionAttempted = false;
+    try {
+        // Check if file exists before trying to delete
+        await fs.access(targetDbPath); // Throws if file doesn't exist
+        console.log(`[Preload] Existing database file found. Attempting deletion...`);
+        deletionAttempted = true;
+        await fs.unlink(targetDbPath);
+        // Optional: Delete journal files too
+        try { await fs.unlink(targetDbPath + '-wal'); } catch { /* ignore */ }
+        try { await fs.unlink(targetDbPath + '-shm'); } catch { /* ignore */ }
+        console.log(`[Preload] Database file(s) deletion command executed.`);
+        // Add a small delay to allow the file system to catch up, might help with locks
+        await new Promise(resolve => setTimeout(resolve, 100));
+    } catch (err: any) {
+        if (err.code === 'ENOENT') {
+            console.log(`[Preload] No existing database file found to delete.`);
+        } else {
+            console.error(`[Preload] Error during database file deletion:`, err);
+            // If deletion was attempted but failed, it's critical - exit.
+            if (deletionAttempted) {
+                 console.error(`[Preload] FATAL: Failed to delete existing database file. Check permissions or file locks.`);
+                 process.exit(1);
+            }
+        }
+    }
+    // *** End Improved Deletion Logic ***
+
+
     try { await fs.mkdir(targetDataDir, { recursive: true }); await fs.mkdir(targetTranscriptsDir, { recursive: true }); }
     catch (err) { console.error(`[Preload] Failed create dirs:`, err); process.exit(1); }
 
@@ -95,15 +77,20 @@ async function preloadDatabase() {
     const sessionsToVerify: { name: string; expectedRelativePath: string; expectedDate: string; expectedTokenCount: number | null }[] = [];
 
     try {
+        // Connect AFTER ensuring deletion (or non-existence)
         db = new Database(targetDbPath, { verbose: console.log });
-        initializeDatabase(db); // Initialize and verify schema FIRST
 
+        // *** Call the imported initializeDatabase function ***
+        // This will execute the schema, run migrations (if any apply to new db), and verify the hash
+        initializeDatabase(db);
+
+        // Prepare statements using the now-initialized db instance
         const insertSession = db.prepare(/* SQL */ `INSERT INTO sessions (fileName, clientName, sessionName, date, sessionType, therapy, transcriptPath, audioPath, status, whisperJobId, transcriptTokenCount) VALUES (@fileName, @clientName, @sessionName, @date, @sessionType, @therapy, NULL, NULL, @status, @whisperJobId, @transcriptTokenCount)`);
         const updateSessionPathAndAudio = db.prepare(/* SQL */ `UPDATE sessions SET transcriptPath = ?, audioPath = ? WHERE id = ?`);
         const insertChat = db.prepare(/* SQL */ `INSERT INTO chats (sessionId, timestamp, name, tags) VALUES (?, ?, ?, ?)`);
         const insertMessage = db.prepare(/* SQL */ `INSERT INTO messages (chatId, sender, text, timestamp, promptTokens, completionTokens, starred, starredName) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
 
-        console.log('[Preload] Starting DB transaction...');
+        console.log('[Preload] Starting DB transaction for sample data...');
         db.transaction(() => {
             for (const session of sampleSessions) {
                 const fullTranscriptText = session.transcriptContent.map(p => p.text).join('\n\n');
@@ -112,7 +99,7 @@ async function preloadDatabase() {
                 const sessionId = sessionResult.lastInsertRowid as number;
                 const relativeTranscriptPath = `${sessionId}.json`;
                 const absoluteTranscriptPath = path.join(targetTranscriptsDir, relativeTranscriptPath);
-                const audioIdentifier = `${sessionId}-audio.mp3`;
+                const audioIdentifier = `${sessionId}-audio.mp3`; // Keep simple identifier
                 updateSessionPathAndAudio.run(relativeTranscriptPath, audioIdentifier, sessionId);
                 sessionsToVerify.push({ name: session.sessionName, expectedRelativePath: relativeTranscriptPath, expectedDate: session.date, expectedTokenCount: tokenCount });
                 const transcriptJson = JSON.stringify(session.transcriptContent, null, 2);
@@ -124,7 +111,7 @@ async function preloadDatabase() {
                     const sortedTags = chat.tags ? [...chat.tags].sort((a, b) => a.localeCompare(b)) : null;
                     const tagsJson = (sortedTags && sortedTags.length > 0) ? JSON.stringify(sortedTags) : null;
                     const chatResult = insertChat.run(sessionId, timestamp, chat.name === undefined ? null : chat.name, tagsJson); // Insert tagsJson
-                    const chatId = chatResult.lastInsertRowid;
+                    const chatId = chatResult.lastInsertRowid as number;
                     for (const message of chat.messages) {
                         const messageTimestamp = timestamp + Math.floor(Math.random() * 100);
                         insertMessage.run(chatId, message.sender, message.text, messageTimestamp, null, null, message.starred ? 1 : 0, message.starredName || null);
@@ -133,16 +120,18 @@ async function preloadDatabase() {
             }
         })(); // End transaction
 
-        console.log('[Preload] DB transaction committed.');
+        console.log('[Preload] Sample data DB transaction committed.');
         await Promise.all(fileWritePromises);
         console.log('[Preload] All transcript files written.');
         success = true;
 
-    } catch (error) { console.error('[Preload] Error:', error); success = false; }
+
+    } catch (error) { console.error('[Preload] Error during preload execution:', error); success = false; }
     finally {
-        if (success && db && db.open) {
-             console.log('[Preload Verification] Checking database entries...');
-            try { /* ... Verification Logic ... */
+        // Verification logic remains the same
+         if (success && db && db.open) {
+            console.log('[Preload Verification] Checking database entries...');
+            try {
                 const verifyStmt = db.prepare('SELECT id, status, transcriptPath, date, transcriptTokenCount FROM sessions WHERE sessionName = ?');
                 let verificationPassed = true;
                 for (const sessionToVerify of sessionsToVerify) {
@@ -156,7 +145,7 @@ async function preloadDatabase() {
                 }
                 if(verificationPassed) console.log('[Preload Verification] All DB entries/files look OK.'); else { console.error('[PV] FAILED.'); success = false; }
             } catch(verifyError) { console.error('[PV] Error:', verifyError); success = false; }
-        } else if (!db) { console.error('[Preload] DB connection not established.'); success = false; }
+        } else if (!db) { console.error('[Preload] DB connection not established during verification.'); success = false; }
         if (db && db.open) { db.close(); console.log('[Preload] DB closed.'); }
         if (success) console.log('[Preload] Success!'); else { console.error('[Preload] FAILED.'); process.exitCode = 1; }
     }

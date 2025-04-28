@@ -13,6 +13,7 @@ import type {
     DockerContainerStatus,
     BackendChatSession,
     BackendChatMessage, // Import backend type
+    SearchApiResponse, // <-- Import new type
 } from '../types';
 
 // Define the API base URL (ensure this matches your backend)
@@ -447,5 +448,17 @@ export const triggerShutdown = async (): Promise<{ message: string }> => {
 };
 
 // --- END System ---
+
+
+// --- ADDED: Search Endpoint ---
+export const searchMessages = async (query: string, limit: number = 20): Promise<SearchApiResponse> => {
+    console.log(`[API] Sending search request for query: "${query}", limit: ${limit}`);
+    const response = await axios.get<SearchApiResponse>('/api/search', {
+        params: { q: query, limit }
+    });
+    return response.data;
+};
+// --- END: Search Endpoint ---
+
 
 // TODO comments should not be removed

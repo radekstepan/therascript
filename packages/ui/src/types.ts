@@ -1,3 +1,4 @@
+// packages/ui/src/types.ts
 // TODO can we infer these from the API?
 
 export interface TranscriptParagraphData {
@@ -125,5 +126,23 @@ export interface DockerContainerStatus {
     ports: { PrivatePort: number; PublicPort?: number; Type: string; IP?: string }[];
 }
 // --- END Docker Container Status Type ---
+
+// --- ADDED: Search Result Type (UI) ---
+export interface SearchResultItem {
+    id: number; // message id
+    chatId: number;
+    sessionId: number | null; // Can be null for standalone chats
+    sender: 'user' | 'ai';
+    timestamp: number;
+    snippet: string; // HTML snippet with highlights
+    rank: number;
+}
+
+export interface SearchApiResponse {
+    query: string;
+    results: SearchResultItem[];
+}
+// --- END: Search Result Type ---
+
 
 // TODO comments should not be removed

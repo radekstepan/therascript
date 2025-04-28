@@ -1,4 +1,3 @@
-// packages/api/src/server.ts
 import http from 'node:http';
 import { WritableStream, ReadableStream } from 'node:stream/web';
 import { Elysia, t, ValidationError, type Context as ElysiaContext, type Static } from 'elysia';
@@ -12,7 +11,8 @@ import { standaloneChatRoutes } from './routes/standaloneChatRoutes.js'; // Rout
 import { ollamaRoutes } from './routes/ollamaRoutes.js';
 import { dockerRoutes } from './routes/dockerRoutes.js';
 import { metaRoutes } from './routes/metaRoutes.js';
-import { systemRoutes } from './routes/systemRoutes.js'; // <-- Import System routes
+import { systemRoutes } from './routes/systemRoutes.js';
+import { searchRoutes } from './routes/searchRoutes.js'; // <-- Import Search routes
 import { ApiError, InternalServerError, ConflictError, BadRequestError, NotFoundError } from './errors.js';
 import { getActiveModel, getConfiguredContextSize } from './services/activeModelService.js';
 import fs from 'node:fs';
@@ -66,10 +66,11 @@ const app = new Elysia()
                 { name: 'Session', description: 'Session and Transcript Endpoints' },
                 { name: 'Chat', description: 'Chat Interaction Endpoints (within a session or global)' }, // Combined Chat Tag
                 { name: 'Standalone Chat', description: 'Chat Interaction Endpoints (not tied to a session)' }, // New Tag
+                { name: 'Search', description: 'Full-Text Search Endpoints' }, // <-- Added Search tag
                 { name: 'Transcription', description: 'Transcription Job Management' },
                 { name: 'Ollama', description: 'Ollama LLM Management Endpoints' },
                 { name: 'Docker', description: 'Docker Container Management' },
-                { name: 'System', description: 'System-level Actions (Shutdown, etc.)' }, // <-- Added System tag
+                { name: 'System', description: 'System-level Actions (Shutdown, etc.)' },
                 { name: 'Meta', description: 'API Metadata and Health' },
             ]
         }
@@ -108,7 +109,8 @@ const app = new Elysia()
     .use(metaRoutes)          // Handles /api/health, /api/schema, /api/starred-messages
     .use(ollamaRoutes)        // Handles /api/ollama/*
     .use(dockerRoutes)        // Handles /api/docker/*
-    .use(systemRoutes)        // Handles /api/system/* <-- Added System routes
+    .use(systemRoutes)        // Handles /api/system/*
+    .use(searchRoutes)        // Handles /api/search/* <-- Added Search routes
     .use(sessionRoutes)       // Handles /api/sessions/* and /api/transcription/*
     .use(chatRoutes)          // Handles /api/sessions/:sessionId/chats/*
     .use(standaloneChatRoutes); // Handles /api/chats/*

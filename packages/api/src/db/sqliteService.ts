@@ -16,11 +16,9 @@ if (!fs.existsSync(dbDir)) {
     fs.mkdirSync(dbDir, { recursive: true });
 }
 
-// --- Schema Definition (Updated) ---
-// Defines tables and ensures cascading deletes using FOREIGN KEY constraints.
-// Changed chats.sessionId to be NULLABLE for standalone chats.
-// Added starred and starredName to messages table.
-const schema = `
+// --- Schema Definition (Updated with FTS Table and Triggers) ---
+// *** ADDED 'export' ***
+export const schema = `
     -- Sessions Table
     CREATE TABLE IF NOT EXISTS sessions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,6 +40,7 @@ const schema = `
         sessionId INTEGER NULL, -- Session ID is optional for standalone chats
         timestamp INTEGER NOT NULL, -- UNIX Millis Timestamp for sorting/display
         name TEXT,
+        tags TEXT NULL, -- Added tags column
         -- Ensures that deleting a session automatically deletes its associated session chats
         -- Standalone chats (sessionId IS NULL) are unaffected by session deletion.
         FOREIGN KEY (sessionId) REFERENCES sessions (id) ON DELETE CASCADE
@@ -68,6 +67,32 @@ const schema = `
     -- Optional index for starred messages if performance becomes an issue
     -- CREATE INDEX IF NOT EXISTS idx_message_starred ON messages (starred);
 
+    -- *** ADDED: Messages FTS5 Table ***
+    CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+        content, -- Column in FTS table to store the text
+        content='messages', -- Link to original table 'messages'
+        content_rowid='id', -- Link FTS rowid to the original 'id' column
+        tokenize='porter unicode61' -- Use Porter stemmer with Unicode support
+    );
+
+    -- *** ADDED: Triggers to keep FTS table synchronized ***
+    -- Trigger for INSERT on messages
+    CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+        INSERT INTO messages_fts (rowid, content) VALUES (new.id, new.text);
+    END;
+    -- Trigger for DELETE on messages
+    CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
+        -- FTS5 uses 'delete' command with original rowid and content
+        INSERT INTO messages_fts (messages_fts, rowid, content) VALUES ('delete', old.id, old.text);
+    END;
+    -- Trigger for UPDATE on messages
+    CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
+        -- FTS5 update requires deleting the old entry and inserting the new one
+        INSERT INTO messages_fts (messages_fts, rowid, content) VALUES ('delete', old.id, old.text);
+        INSERT INTO messages_fts (rowid, content) VALUES (new.id, new.text);
+    END;
+    -- *** END FTS Additions ***
+
     -- Schema Metadata Table (New)
     CREATE TABLE IF NOT EXISTS schema_metadata (
         key TEXT PRIMARY KEY,
@@ -92,14 +117,16 @@ const closeDb = (): void => {
 };
 
 // --- Helper Function: Calculate MD5 Hash ---
-function calculateSchemaHash(schemaString: string): string {
+// *** ADDED 'export' ***
+export function calculateSchemaHash(schemaString: string): string {
     return crypto.createHash('md5').update(schemaString).digest('hex');
 }
 
 // --- Helper Function: Verify Schema Version ---
-function verifySchemaVersion(dbInstance: DB, currentSchemaDefinition: string) {
+// *** ADDED 'export' ***
+export function verifySchemaVersion(dbInstance: DB, currentSchemaDefinition: string) {
     console.log('[db Schema Check]: Verifying schema version...');
-    const currentSchemaHash = calculateSchemaHash(currentSchemaDefinition);
+    const currentSchemaHash = calculateSchemaHash(currentSchemaDefinition); // Use exported hash function
     console.log(`[db Schema Check]: Current schema definition hash: ${currentSchemaHash}`);
 
     let storedSchemaHash: string | undefined;
@@ -135,7 +162,7 @@ function verifySchemaVersion(dbInstance: DB, currentSchemaDefinition: string) {
             console.error('  >   3. Delete the database file to allow re-initialization with the new schema,');
             console.error('  >      OR implement a proper migration strategy.');
             console.error('---------------------------------------------------------------------');
-            closeDb();
+            closeDb(); // Use local closeDb
             process.exit(1);
         }
     } else {
@@ -146,7 +173,7 @@ function verifySchemaVersion(dbInstance: DB, currentSchemaDefinition: string) {
             console.log(`[db Schema Check]: Stored current schema hash (${currentSchemaHash}) in database.`);
         } catch (insertError) {
             console.error(`[db Schema Check]: FATAL: Failed to store initial schema hash:`, insertError);
-            closeDb();
+            closeDb(); // Use local closeDb
             process.exit(1);
         }
     }
@@ -154,7 +181,8 @@ function verifySchemaVersion(dbInstance: DB, currentSchemaDefinition: string) {
 
 
 // --- Initialize Function Definition (Updated for new columns) ---
-function initializeDatabase(dbInstance: DB) {
+// *** ADDED 'export' ***
+export function initializeDatabase(dbInstance: DB) {
     console.log('[db Init Func]: Attempting to initialize schema...'); // Log entry
     try {
         dbInstance.pragma('journal_mode = WAL');
@@ -162,50 +190,42 @@ function initializeDatabase(dbInstance: DB) {
         dbInstance.pragma('foreign_keys = ON');
         console.log('[db Init Func]: WAL mode and foreign keys enabled.');
 
-        dbInstance.exec(schema);
-        console.log('[db Init Func]: Database schema exec command executed.');
+        dbInstance.exec(schema); // This now includes FTS table and triggers
+        console.log('[db Init Func]: Database schema exec command executed (includes FTS setup).');
 
+        // --- Migrations (keep existing ones) ---
+        // These are less critical for preload (which deletes DB) but vital for running API against existing DB
         const sessionColumns = dbInstance.pragma("table_info(sessions)") as { name: string; type: string; }[];
         const chatColumns = dbInstance.pragma("table_info(chats)") as { name: string; type: string; }[];
         const messageColumns = dbInstance.pragma("table_info(messages)") as { name: string; type: string; }[];
 
-        // --- Session Table Migrations ---
-        const hasStatus = sessionColumns.some((col) => col.name === 'status');
-        const hasWhisperJobId = sessionColumns.some((col) => col.name === 'whisperJobId');
-        const hasAudioPath = sessionColumns.some((col) => col.name === 'audioPath'); // Check for new column
-        const hasTokenCount = sessionColumns.some((col) => col.name === 'transcriptTokenCount'); // <-- Check for token count
-
-        if (!hasStatus) { console.log('[db Init Func Migration]: Adding "status" column...'); dbInstance.exec("ALTER TABLE sessions ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'"); console.log('[db Init Func Migration]: "status" column added.'); }
-        if (!hasWhisperJobId) { console.log('[db Init Func Migration]: Adding "whisperJobId" column...'); dbInstance.exec("ALTER TABLE sessions ADD COLUMN whisperJobId TEXT NULL"); console.log('[db Init Func Migration]: "whisperJobId" column added.'); }
-        if (!hasAudioPath) { console.log('[db Init Func Migration]: Adding "audioPath" column...'); dbInstance.exec("ALTER TABLE sessions ADD COLUMN audioPath TEXT NULL"); console.log('[db Init Func Migration]: "audioPath" column added.'); }
-        if (!hasTokenCount) { console.log('[db Init Func Migration]: Adding "transcriptTokenCount" column...'); dbInstance.exec("ALTER TABLE sessions ADD COLUMN transcriptTokenCount INTEGER NULL"); console.log('[db Init Func Migration]: "transcriptTokenCount" column added.'); }
+        // Session Table Migrations
+        if (!sessionColumns.some((col) => col.name === 'status')) { console.log('[db Mig]: Adding "status"...'); dbInstance.exec("ALTER TABLE sessions ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'"); }
+        if (!sessionColumns.some((col) => col.name === 'whisperJobId')) { console.log('[db Mig]: Adding "whisperJobId"...'); dbInstance.exec("ALTER TABLE sessions ADD COLUMN whisperJobId TEXT NULL"); }
+        if (!sessionColumns.some((col) => col.name === 'audioPath')) { console.log('[db Mig]: Adding "audioPath"...'); dbInstance.exec("ALTER TABLE sessions ADD COLUMN audioPath TEXT NULL"); }
+        if (!sessionColumns.some((col) => col.name === 'transcriptTokenCount')) { console.log('[db Mig]: Adding "transcriptTokenCount"...'); dbInstance.exec("ALTER TABLE sessions ADD COLUMN transcriptTokenCount INTEGER NULL"); }
 
         const dateColumn = sessionColumns.find(col => col.name === 'date');
-        if (dateColumn && dateColumn.type.toUpperCase() !== 'TEXT') { console.warn(`[db Init Func Migration]: 'date' column type mismatch...`); }
+        if (dateColumn && dateColumn.type.toUpperCase() !== 'TEXT') { console.warn(`[db Mig]: 'date' column type mismatch...`); }
 
-
-        // --- Chat Table Migrations ---
-        // No specific migration needed for making sessionId nullable if recreating DB
+        // Chat Table Migrations
+        if (!chatColumns.some((col) => col.name === 'tags')) { console.log('[db Mig]: Adding "tags" to chats...'); dbInstance.exec("ALTER TABLE chats ADD COLUMN tags TEXT NULL"); } // Add tags if missing
         const chatIndexes = dbInstance.pragma("index_list('chats')") as { name: string }[];
-        if (!chatIndexes.some(idx => idx.name === 'idx_chat_timestamp')) { console.log('[db Init Func Migration]: Adding chat timestamp index...'); dbInstance.exec("CREATE INDEX IF NOT EXISTS idx_chat_timestamp ON chats (timestamp);"); console.log('[db Init Func Migration]: Chat timestamp index added.'); }
+        if (!chatIndexes.some(idx => idx.name === 'idx_chat_timestamp')) { console.log('[db Mig]: Adding chat timestamp index...'); dbInstance.exec("CREATE INDEX IF NOT EXISTS idx_chat_timestamp ON chats (timestamp);"); }
 
-        // --- Message Table Migrations (Added Token & Starred Columns) ---
-        const hasPromptTokens = messageColumns.some((col) => col.name === 'promptTokens');
-        const hasCompletionTokens = messageColumns.some((col) => col.name === 'completionTokens');
-        const hasStarred = messageColumns.some((col) => col.name === 'starred'); // Check for starred
-        const hasStarredName = messageColumns.some((col) => col.name === 'starredName'); // Check for starredName
+        // Message Table Migrations
+        if (!messageColumns.some((col) => col.name === 'promptTokens')) { console.log('[db Mig]: Adding "promptTokens" to messages...'); dbInstance.exec("ALTER TABLE messages ADD COLUMN promptTokens INTEGER NULL"); }
+        if (!messageColumns.some((col) => col.name === 'completionTokens')) { console.log('[db Mig]: Adding "completionTokens" to messages...'); dbInstance.exec("ALTER TABLE messages ADD COLUMN completionTokens INTEGER NULL"); }
+        if (!messageColumns.some((col) => col.name === 'starred')) { console.log('[db Mig]: Adding "starred" to messages...'); dbInstance.exec("ALTER TABLE messages ADD COLUMN starred INTEGER DEFAULT 0"); }
+        if (!messageColumns.some((col) => col.name === 'starredName')) { console.log('[db Mig]: Adding "starredName" to messages...'); dbInstance.exec("ALTER TABLE messages ADD COLUMN starredName TEXT NULL"); }
 
-        if (!hasPromptTokens) { console.log('[db Init Func Migration]: Adding "promptTokens" column to messages...'); dbInstance.exec("ALTER TABLE messages ADD COLUMN promptTokens INTEGER NULL"); console.log('[db Init Func Migration]: "promptTokens" column added.'); }
-        if (!hasCompletionTokens) { console.log('[db Init Func Migration]: Adding "completionTokens" column to messages...'); dbInstance.exec("ALTER TABLE messages ADD COLUMN completionTokens INTEGER NULL"); console.log('[db Init Func Migration]: "completionTokens" column added.'); }
-        if (!hasStarred) { console.log('[db Init Func Migration]: Adding "starred" column to messages...'); dbInstance.exec("ALTER TABLE messages ADD COLUMN starred INTEGER DEFAULT 0"); console.log('[db Init Func Migration]: "starred" column added.'); }
-        if (!hasStarredName) { console.log('[db Init Func Migration]: Adding "starredName" column to messages...'); dbInstance.exec("ALTER TABLE messages ADD COLUMN starredName TEXT NULL"); console.log('[db Init Func Migration]: "starredName" column added.'); }
-
-        // --- Message Timestamp Index ---
+        // Message Timestamp Index
         const messageIndexes = dbInstance.pragma("index_list('messages')") as { name: string }[];
-        if (!messageIndexes.some(idx => idx.name === 'idx_message_timestamp')) { console.log('[db Init Func Migration]: Adding message timestamp index...'); dbInstance.exec("CREATE INDEX IF NOT EXISTS idx_message_timestamp ON messages (timestamp);"); console.log('[db Init Func Migration]: Message timestamp index added.'); }
+        if (!messageIndexes.some(idx => idx.name === 'idx_message_timestamp')) { console.log('[db Mig]: Adding message timestamp index...'); dbInstance.exec("CREATE INDEX IF NOT EXISTS idx_message_timestamp ON messages (timestamp);"); }
+        // --- End Migrations ---
 
         // --- Verify Schema Version (AFTER schema exec and migrations) ---
-        verifySchemaVersion(dbInstance, schema);
+        verifySchemaVersion(dbInstance, schema); // Use the local schema constant
 
     } catch (error) {
         console.error('[db Init Func]: Error initializing database:', error);
@@ -221,7 +241,7 @@ try {
         verbose: isDev ? console.log : undefined,
     });
     console.log(`[db]: Successfully connected to database: ${dbFilePath}`);
-    initializeDatabase(db);
+    initializeDatabase(db); // Call the initialization logic
 } catch (err) {
     console.error(`[db]: FATAL: Could not connect or initialize database at ${dbFilePath}:`, (err as Error).message);
     process.exit(1);
@@ -230,6 +250,7 @@ try {
 // --- Prepared Statements Cache ---
 const statementCache = new Map<string, Statement>();
 
+// --- Make prepare function available internally, but also exported helpers ---
 function prepare(sql: string): Statement {
     let stmt = statementCache.get(sql);
     if (!stmt) {
@@ -244,7 +265,7 @@ function prepare(sql: string): Statement {
     return stmt;
 }
 
-// --- Synchronous Helper Functions ---
+// --- Synchronous Helper Functions (Exported) ---
 function run(sql: string, ...params: any[]): RunResult {
     return prepare(sql).run(params);
 }
@@ -261,13 +282,10 @@ function transaction<T>(fn: (...args: any[]) => T): (...args: any[]) => T {
     return db.transaction(fn);
 }
 
-// --- Moved from dbAccess.ts ---
-// TODO move to sqliteService
-// Simple wrapper to check database health
+// --- Health Check (Exported) ---
 export const checkDatabaseHealth = (): void => {
   db.pragma('quick_check');
 };
-// --- End Moved ---
 
 // --- Process Event Listeners ---
 process.on('exit', closeDb);
@@ -285,4 +303,5 @@ process.on('unhandledRejection', (reason, promise) => {
     process.exit(1);
 });
 
-export { db, run, get, all, exec, transaction, closeDb, initializeDatabase, schema };
+// Export the main instance and helpers
+export { db, run, get, all, exec, transaction, closeDb }; // Exclude initializeDatabase, schema, verifySchemaVersion from direct export if they are only meant for internal use and preload
