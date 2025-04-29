@@ -1,4 +1,3 @@
-/* packages/api/src/repositories/chatRepository.ts */
 import { db, exec, run, all, get } from '../db/sqliteService.js';
 import type { BackendChatSession, BackendChatMessage, ChatMetadata } from '../types/index.js';
 import { Statement } from 'better-sqlite3';
@@ -187,35 +186,68 @@ export const chatRepository = {
         catch (error) { console.error(`DB error fetching starred messages:`, error); throw new Error(`Database error fetching starred messages.`); }
     },
 
-    // --- FTS Search Function ---
+    // --- FTS Search Function (Corrected Logic v4) ---
     searchMessages: (query: string, limit: number = 20): FtsSearchResult[] => {
-         if (!query || !query.trim()) {
+         const trimmedQuery = query?.trim() ?? '';
+         if (!trimmedQuery) {
              return [];
          }
-         const cleanedQuery = query.trim();
-         let ftsQuery: string;
-         // TODO this logic sucks
-         if (cleanedQuery.includes(' ') || cleanedQuery.includes('-')) {
-            ftsQuery = `"${cleanedQuery.replace(/"/g, '""')}"`;
-         } else {
-            ftsQuery = cleanedQuery;
+
+         // 1. Split into potential keywords by whitespace
+         const tokens = trimmedQuery.split(/\s+/);
+
+         // 2. Process each token
+         const processedTokens = tokens
+             .map(token => {
+                 let processed = token.trim();
+                 // Remove only leading asterisks
+                 processed = processed.replace(/^\*+/, '');
+
+                 // **Filter out tokens consisting only of typical FTS punctuation/operators**
+                 // This aims to remove isolated problematic characters like standalone quotes.
+                 // Regex includes: *, ", ', (, ), +, -, ^, !, &, |, <, >, = and whitespace (though split should handle ws)
+                 // We keep alphanumeric characters and potentially internal hyphens/apostrophes if needed.
+                 if (!processed || /^[\\*"'()+\-^!&|<>=\s]+$/.test(processed)) {
+                     console.log(`[ChatRepo:searchMessages] Filtering out potentially problematic token: "${token}" -> "${processed}"`);
+                     return null;
+                 }
+
+                 // Escape internal double quotes *only*
+                 // Single quotes inside a double-quoted FTS term are typically treated literally
+                 processed = processed.replace(/"/g, '""');
+
+                 // Wrap the entire processed token in double quotes and add the prefix asterisk *inside*
+                 // This handles spaces, single quotes, hyphens etc., within the term safely for FTS5.
+                 return `"${processed}*"`;
+             })
+             .filter((token): token is string => token !== null); // Filter out nulls (empty or punctuation-only tokens)
+
+         // 3. If no valid tokens remain, return empty
+         if (processedTokens.length === 0) {
+             console.log(`[ChatRepo:searchMessages] No valid search tokens derived from query: "${query}"`);
+             return [];
          }
+
+         // 4. Join the valid, quoted tokens with a space (implicit AND in FTS)
+         const ftsQuery = processedTokens.join(' ');
 
          const integerLimit = Math.floor(limit); // Ensure integer limit
 
-         console.log(`[ChatRepo:searchMessages] Executing FTS query (NO ORDER BY, NO snippet()): ${ftsQuery}, LIMIT: ${integerLimit}`);
+         console.log(`[ChatRepo:searchMessages] Executing FTS query: '${ftsQuery}', LIMIT: ${integerLimit}`);
          try {
              // Query now doesn't select rank, snippet, or order by rank
              const results = searchMessagesStmt.all(ftsQuery, integerLimit);
              console.log(`[ChatRepo:searchMessages] Found ${results.length} results.`);
              return results as FtsSearchResult[];
          } catch (error) {
-             console.error(`DB error searching messages with query ${ftsQuery}:`, error);
-             if (error instanceof Error && error.message.includes('malformed MATCH expression')) {
-                 throw new Error(`Database FTS query syntax error for query: ${cleanedQuery}`);
+             console.error(`DB error searching messages with FTS query '${ftsQuery}' derived from original query "${query}":`, error);
+             if (error instanceof Error && (error.message.includes('malformed MATCH expression') || error.message.includes('fts5: syntax error'))) {
+                 // Provide more context in the error message
+                 throw new Error(`Database FTS query syntax error for query: "${query}". Processed FTS query: '${ftsQuery}'`);
              }
              // Re-throwing the original error might give more clues if it's not the match expression
              throw new Error(`Database error searching messages: ${error instanceof Error ? error.message : String(error)}`);
          }
     },
+    // TODO comments should not be removed
 };

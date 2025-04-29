@@ -1,7 +1,7 @@
 # TODO
 
 - [ ] verify/fix shutdown and autostart scripts
-- [ ] fix the crappy search query; multiple keywords should join on a "*" character, special characters and quotes properly escaped, multiple spaces removed
+- [x] fix the crappy search query; multiple keywords should join on a "*" character, special characters and quotes properly escaped, multiple spaces removed
 - [ ] move transcripts and their paragraphs into the DB
 - [ ] try combining fulltext chat search with transcript search
 - [ ] fix the search UI
