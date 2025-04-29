@@ -1,3 +1,4 @@
+/* packages/api/src/db/sqliteService.ts */
 // packages/api/src/db/sqliteService.ts
 import crypto from 'node:crypto'; // <-- Import crypto
 import Database, { type Database as DB, type Statement, type RunResult } from 'better-sqlite3';
@@ -19,7 +20,7 @@ if (!fs.existsSync(dbDir)) {
 // --- Schema Definition (Updated with FTS Table and Triggers) ---
 // *** ADDED 'export' ***
 export const schema = `
-    -- Sessions Table
+    -- Sessions Table (Removed transcriptPath)
     CREATE TABLE IF NOT EXISTS sessions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         fileName TEXT NOT NULL,
@@ -28,12 +29,26 @@ export const schema = `
         date TEXT NOT NULL, -- ISO 8601 timestamp string
         sessionType TEXT NOT NULL,
         therapy TEXT NOT NULL,
-        transcriptPath TEXT NULL,
+        -- transcriptPath TEXT NULL, -- Removed column
         status TEXT NOT NULL DEFAULT 'pending',
         whisperJobId TEXT NULL,
         audioPath TEXT NULL, -- Added column for the path/identifier to the original audio file
         transcriptTokenCount INTEGER NULL -- Added column for transcript token count
     );
+
+    -- *** Transcript Paragraphs Table Definition (kept here for hash calculation) ***
+    CREATE TABLE IF NOT EXISTS transcript_paragraphs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sessionId INTEGER NOT NULL,
+        paragraphIndex INTEGER NOT NULL, -- Order of the paragraph within the session transcript
+        timestampMs INTEGER NOT NULL, -- Original timestamp in milliseconds from Whisper
+        text TEXT NOT NULL,
+        FOREIGN KEY (sessionId) REFERENCES sessions (id) ON DELETE CASCADE -- Delete paragraphs when session is deleted
+    );
+    CREATE INDEX IF NOT EXISTS idx_paragraph_session ON transcript_paragraphs (sessionId);
+    CREATE INDEX IF NOT EXISTS idx_paragraph_session_index ON transcript_paragraphs (sessionId, paragraphIndex); -- For fetching in order
+    -- *** END Definition ***
+
     -- Chats Table (sessionId is now NULLABLE)
     CREATE TABLE IF NOT EXISTS chats (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -41,8 +56,6 @@ export const schema = `
         timestamp INTEGER NOT NULL, -- UNIX Millis Timestamp for sorting/display
         name TEXT,
         tags TEXT NULL, -- Added tags column
-        -- Ensures that deleting a session automatically deletes its associated session chats
-        -- Standalone chats (sessionId IS NULL) are unaffected by session deletion.
         FOREIGN KEY (sessionId) REFERENCES sessions (id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_chat_session ON chats (sessionId);
@@ -59,7 +72,6 @@ export const schema = `
         completionTokens INTEGER,
         starred INTEGER DEFAULT 0, -- 0 = false, 1 = true
         starredName TEXT NULL,
-        -- Ensures that deleting a chat automatically deletes its associated messages
         FOREIGN KEY (chatId) REFERENCES chats (id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_message_chat ON messages (chatId);
@@ -190,10 +202,30 @@ export function initializeDatabase(dbInstance: DB) {
         dbInstance.pragma('foreign_keys = ON');
         console.log('[db Init Func]: WAL mode and foreign keys enabled.');
 
-        dbInstance.exec(schema); // This now includes FTS table and triggers
-        console.log('[db Init Func]: Database schema exec command executed (includes FTS setup).');
+        // Execute the main schema (which includes the definition for transcript_paragraphs)
+        dbInstance.exec(schema);
+        console.log('[db Init Func]: Main database schema exec command executed.');
 
-        // --- Migrations (keep existing ones) ---
+        // --- Explicitly ensure transcript_paragraphs table exists again ---
+        // This might be redundant but acts as a safeguard if the main exec had issues.
+        console.log('[db Init Func]: Explicitly ensuring transcript_paragraphs table exists...');
+        dbInstance.exec(`
+            CREATE TABLE IF NOT EXISTS transcript_paragraphs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sessionId INTEGER NOT NULL,
+                paragraphIndex INTEGER NOT NULL,
+                timestampMs INTEGER NOT NULL,
+                text TEXT NOT NULL,
+                FOREIGN KEY (sessionId) REFERENCES sessions (id) ON DELETE CASCADE
+            );
+        `);
+        dbInstance.exec(`CREATE INDEX IF NOT EXISTS idx_paragraph_session ON transcript_paragraphs (sessionId);`);
+        dbInstance.exec(`CREATE INDEX IF NOT EXISTS idx_paragraph_session_index ON transcript_paragraphs (sessionId, paragraphIndex);`);
+        console.log('[db Init Func]: Explicit transcript_paragraphs creation/indexing check complete.');
+        // --- End Explicit Check ---
+
+
+        // --- Migrations (keep existing ones, remove transcriptPath migration) ---
         // These are less critical for preload (which deletes DB) but vital for running API against existing DB
         const sessionColumns = dbInstance.pragma("table_info(sessions)") as { name: string; type: string; }[];
         const chatColumns = dbInstance.pragma("table_info(chats)") as { name: string; type: string; }[];
@@ -204,6 +236,8 @@ export function initializeDatabase(dbInstance: DB) {
         if (!sessionColumns.some((col) => col.name === 'whisperJobId')) { console.log('[db Mig]: Adding "whisperJobId"...'); dbInstance.exec("ALTER TABLE sessions ADD COLUMN whisperJobId TEXT NULL"); }
         if (!sessionColumns.some((col) => col.name === 'audioPath')) { console.log('[db Mig]: Adding "audioPath"...'); dbInstance.exec("ALTER TABLE sessions ADD COLUMN audioPath TEXT NULL"); }
         if (!sessionColumns.some((col) => col.name === 'transcriptTokenCount')) { console.log('[db Mig]: Adding "transcriptTokenCount"...'); dbInstance.exec("ALTER TABLE sessions ADD COLUMN transcriptTokenCount INTEGER NULL"); }
+        // Remove migration for transcriptPath if it exists (handled by schema change)
+        if (sessionColumns.some((col) => col.name === 'transcriptPath')) { console.warn('[db Mig]: "transcriptPath" column found on sessions table. It is no longer used. Consider dropping manually.'); }
 
         const dateColumn = sessionColumns.find(col => col.name === 'date');
         if (dateColumn && dateColumn.type.toUpperCase() !== 'TEXT') { console.warn(`[db Mig]: 'date' column type mismatch...`); }

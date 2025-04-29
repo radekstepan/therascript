@@ -3,12 +3,15 @@ import path from 'path';
 import crypto from 'node:crypto'; // Import crypto for unique name generation
 import config from '../config/index.js';
 import { isNodeError } from '../utils/helpers.js';
-import type { StructuredTranscript } from '../types/index.js'; // Import the type
+// --- REMOVED StructuredTranscript import as file functions are removed ---
+// import type { StructuredTranscript } from '../types/index.js';
 // --- Import Tiktoken class and TiktokenEncoding type ---
 import { get_encoding, type Tiktoken, type TiktokenEncoding } from '@dqbd/tiktoken';
 
-const transcriptsDir = config.db.transcriptsDir;
+// --- Keep upload directory ---
 const uploadsDir = config.db.uploadsDir;
+// --- Remove transcripts directory ---
+// const transcriptsDir = config.db.transcriptsDir;
 
 // --- Tokenizer Initialization ---
 let tokenizer: Tiktoken | null = null; // <-- Changed type to Tiktoken | null
@@ -25,6 +28,7 @@ try {
 
 // --- Token Calculation Helper ---
 // Returns null if tokenizer failed to initialize
+// Accepts text directly now, doesn't load from file.
 const calculateTokenCount = (text: string): number | null => {
     if (!tokenizer) {
         console.warn('[FileService] Tokenizer not available, cannot calculate token count.');
@@ -83,11 +87,7 @@ export const saveUploadedAudio = async (
 };
 
 
-// --- FIX: getTranscriptPath now expects ID, not a relative path ---
-// It constructs the expected ABSOLUTE path within the transcripts directory
-const getTranscriptPath = (sessionId: number): string => {
-  return path.join(transcriptsDir, `${sessionId}.json`);
-};
+// --- REMOVED getTranscriptPath ---
 
 // --- FIX: getAudioAbsolutePath expects RELATIVE filename, returns absolute path ---
 // Renamed from getTranscriptPath for clarity
@@ -111,93 +111,11 @@ const getAudioAbsolutePath = (relativeFilename: string | null): string | null =>
 // --- End FIX ---
 
 
-// Loads and parses JSON, returns StructuredTranscript
-export const loadTranscriptContent = async (sessionId: number): Promise<StructuredTranscript> => {
-  // Use the helper that creates the path based on ID
-  const filePath = getTranscriptPath(sessionId);
-  console.log(`[FileService DEBUG] Attempting to load transcript from: ${filePath}`); // DEBUG LOG
-  try {
-    await fs.access(filePath); // Check existence first
-    console.log(`[FileService DEBUG] File found: ${filePath}`); // DEBUG LOG
-    const fileContent = await fs.readFile(filePath, 'utf-8');
-    console.log(`[FileService DEBUG] Raw file content (first 200 chars): "${fileContent.substring(0, 200).replace(/\n/g, '\\n')}"`); // DEBUG LOG
-    if (!fileContent.trim()) {
-        console.warn(`[FileService] Transcript file for session ${sessionId} is empty.`);
-        return [];
-    }
-    // Parse the JSON content
-    const transcriptData = JSON.parse(fileContent) as StructuredTranscript;
-     // Basic validation (optional, but good practice)
-     if (!Array.isArray(transcriptData)) {
-         console.error(`[FileService] Invalid transcript format for session ${sessionId}: Expected an array, got ${typeof transcriptData}.`);
-         throw new Error('Invalid transcript format: Expected an array.');
-     }
-     console.log(`[FileService] Loaded and parsed transcript for session ${sessionId}. Found ${transcriptData.length} paragraphs.`);
-     return transcriptData;
-  } catch (error: any) {
-    if (isNodeError(error) && error.code === 'ENOENT') {
-      console.warn(`[FileService] Transcript file for session ${sessionId} not found at ${filePath}.`);
-      return []; // Return empty array if file not found
-    }
-    if (error instanceof SyntaxError) {
-         console.error(`[FileService] Error parsing transcript JSON for session ${sessionId}:`, error);
-         // Log snippet of content that failed parsing
-         try {
-            const contentSnippet = await fs.readFile(filePath, 'utf-8').catch(() => 'Could not read file for snippet');
-            console.error(`[FileService DEBUG] Content snippet failing parse (first 200 chars): "${contentSnippet.substring(0,200).replace(/\n/g, '\\n')}"`);
-         } catch {}
-         throw new Error(`Could not parse transcript ${sessionId}. Invalid JSON format.`);
-    }
-    console.error(`[FileService] Error loading transcript ${sessionId}:`, error);
-    throw new Error(`Could not load transcript ${sessionId}.`);
-  }
-};
+// --- REMOVED loadTranscriptContent ---
 
-// Saves StructuredTranscript as JSON, returns the relative path stored AND token count
-export const saveTranscriptContent = async (
-    sessionId: number,
-    content: StructuredTranscript
-): Promise<{ relativePath: string; tokenCount: number | null }> => { // <-- Return type changed
-  // Get the absolute path for saving
-  const absoluteFilePath = getTranscriptPath(sessionId);
-  // Determine the relative path to store/return (relative to transcriptsDir base)
-  const relativeFilePath = `${sessionId}.json`;
-  try {
-    await fs.mkdir(path.dirname(absoluteFilePath), { recursive: true });
-    // Stringify the structured content with indentation for readability
-    const jsonContent = JSON.stringify(content, null, 2);
-    await fs.writeFile(absoluteFilePath, jsonContent, 'utf-8');
-    console.log(`[FileService] Transcript saved to absolute path: ${absoluteFilePath}`);
+// --- REMOVED saveTranscriptContent ---
 
-    // --- Calculate token count ---
-    const fullText = content.map(p => p.text).join('\n\n');
-    const tokenCount = calculateTokenCount(fullText);
-    console.log(`[FileService] Calculated token count for session ${sessionId}: ${tokenCount ?? 'N/A'}`);
-    // --- End Calculation ---
-
-    // Return the relative path and token count
-    return { relativePath: relativeFilePath, tokenCount: tokenCount };
-  } catch (error) {
-    console.error(`[FileService] Error saving transcript ${sessionId}:`, error);
-    throw new Error(`Could not save transcript ${sessionId}.`);
-  }
-};
-
-// Performs a hard delete of the transcript file using fs.unlink.
-export const deleteTranscriptFile = async (sessionId: number): Promise<void> => {
-    const filePath = getTranscriptPath(sessionId); // Gets absolute path
-    try {
-        await fs.unlink(filePath);
-        console.log(`[FileService] Deleted transcript file: ${filePath}`);
-    } catch (error) {
-        if (isNodeError(error) && error.code === 'ENOENT') {
-          console.warn(`[FileService] Transcript file for session ${sessionId} not found during delete.`);
-        } else {
-          console.error(`[FileService] Error deleting transcript ${sessionId}:`, error);
-          throw new Error(`Could not delete transcript ${sessionId}.`);
-        }
-    }
-};
+// --- REMOVED deleteTranscriptFile ---
 
 // Performs a hard delete of the audio file using fs.unlink.
 export const deleteUploadedAudioFile = async (relativeAudioIdentifier: string | null): Promise<void> => {

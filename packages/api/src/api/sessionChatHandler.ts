@@ -1,5 +1,6 @@
 import { chatRepository } from '../repositories/chatRepository.js';
-import { loadTranscriptContent } from '../services/fileService.js';
+import { transcriptRepository } from '../repositories/transcriptRepository.js'; // <-- Import Transcript Repo
+// --- Removed loadTranscriptContent ---
 import { streamChatResponse } from '../services/ollamaService.js';
 import { NotFoundError, InternalServerError, ApiError, BadRequestError } from '../errors.js';
 import type { StructuredTranscript, BackendChatMessage, ChatMetadata } from '../types/index.js';
@@ -46,8 +47,11 @@ export const addSessionChatMessage = async ({ sessionData, chatData, body, set }
 
     try {
         userMessage = chatRepository.addMessage(chatData.id, 'user', trimmedText);
-        const structuredTranscript: StructuredTranscript = await loadTranscriptContent(sessionData.id);
-        const transcriptString = structuredTranscript.map(p => p.text).join('\n\n');
+
+        // --- Fetch transcript text from DB using transcriptRepository ---
+        const transcriptString = transcriptRepository.getTranscriptTextForSession(sessionData.id);
+        // --- End fetch ---
+
         const currentMessages = chatRepository.findMessagesByChatId(chatData.id);
         if (currentMessages.length === 0) throw new InternalServerError(`CRITICAL: Chat ${chatData.id} has no messages immediately after adding one.`);
 

@@ -25,13 +25,28 @@ export type ChatMetadata = Omit<BackendChatSession, 'messages'> & {
     tags?: string[] | null; // <-- Ensure this exists here too
 };
 
+// --- Renamed TranscriptParagraphData to BackendTranscriptParagraph ---
+// Represents the row in the DB table
+export interface BackendTranscriptParagraph {
+    id: number; // Primary key of the paragraph row itself
+    sessionId: number;
+    paragraphIndex: number; // Logical index (0, 1, 2...) within the session
+    timestampMs: number; // Timestamp from Whisper
+    text: string;
+}
 
+// --- Kept StructuredTranscript as the API/Service-level structure ---
+// This is what Whisper service returns and what the API GET /transcript returns.
+// The 'id' here corresponds to BackendTranscriptParagraph.paragraphIndex
+// The 'timestamp' here corresponds to BackendTranscriptParagraph.timestampMs
 export interface TranscriptParagraphData { id: number; timestamp: number; text: string; }
 export type StructuredTranscript = TranscriptParagraphData[];
+
 export interface WhisperSegment { id: number; seek: number; start: number; end: number; text: string; tokens: number[]; temperature: number; avg_logprob: number; compression_ratio: number; no_speech_prob: number; }
 export interface WhisperTranscriptionResult { text: string; segments: WhisperSegment[]; language: string; }
 export interface WhisperJobStatus { job_id: string; status: "queued" | "processing" | "completed" | "failed" | "canceled"; progress?: number; result?: WhisperTranscriptionResult; error?: string; start_time?: number; end_time?: number; duration?: number; }
 
+// --- Removed transcriptPath from BackendSession ---
 export interface BackendSession {
   id: number;
   fileName: string;
@@ -40,7 +55,7 @@ export interface BackendSession {
   date: string;
   sessionType: string;
   therapy: string;
-  transcriptPath: string | null;
+  // transcriptPath: string | null; // Removed
   audioPath: string | null;
   status: 'pending' | 'transcribing' | 'completed' | 'failed';
   whisperJobId: string | null;
@@ -50,7 +65,8 @@ export interface BackendSession {
   chats?: (Omit<ChatMetadata, 'tags'> & { sessionId: number })[];
 }
 
-export type BackendSessionMetadata = Omit<BackendSession, 'id' | 'transcriptPath' | 'transcriptTokenCount' | 'chats' | 'fileName' | 'status' | 'whisperJobId' | 'audioPath'>;
+// --- Removed transcriptPath from BackendSessionMetadata ---
+export type BackendSessionMetadata = Omit<BackendSession, 'id' /* | 'transcriptPath' */ | 'transcriptTokenCount' | 'chats' | 'fileName' | 'status' | 'whisperJobId' | 'audioPath'>;
 
 export interface ActionSchema { endpoint: string; method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; description: string; requestBody?: Record<string, unknown> | string; pathParams?: Record<string, string>; queryParams?: Record<string, string>; responseBody?: Record<string, unknown> | string; }
 export interface ApiErrorResponse { error: string; details?: string | Record<string, any>; validationErrors?: any; }

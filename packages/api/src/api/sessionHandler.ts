@@ -1,16 +1,15 @@
-/* packages/api/src/api/sessionHandler.ts */
 import { sessionRepository } from '../repositories/sessionRepository.js';
 import { chatRepository } from '../repositories/chatRepository.js';
+import { transcriptRepository } from '../repositories/transcriptRepository.js'; // <-- Import Transcript Repo
 import {
-    loadTranscriptContent,
-    saveTranscriptContent,
+    // --- REMOVED loadTranscriptContent, saveTranscriptContent ---
     calculateTokenCount, // <-- Import token calculation helper
     deleteUploadedAudioFile, // <-- Import audio file delete helper
 } from '../services/fileService.js';
 // --- NEW: Import reload function ---
 import { reloadActiveModelContext } from '../services/ollamaService.js';
 // --- END NEW ---
-import type { BackendSession, StructuredTranscript } from '../types/index.js';
+import type { BackendSession, StructuredTranscript } from '../types/index.js'; // <-- Ensure StructuredTranscript is imported
 import { NotFoundError, BadRequestError, InternalServerError, ApiError } from '../errors.js';
 
 // Helper to convert YYYY-MM-DD to ISO 8601 using Noon UTC
@@ -33,7 +32,7 @@ const dateToIsoString = (dateString: string): string | null => {
 };
 
 // GET / - List all sessions (metadata only)
-// FIX: Add audioPath and transcriptTokenCount to the returned DTO
+// FIX: Add audioPath and transcriptTokenCount to the returned DTO, Remove transcriptPath
 export const listSessions = ({ set }: any) => {
     try {
         const sessions = sessionRepository.findAll();
@@ -46,7 +45,7 @@ export const listSessions = ({ set }: any) => {
             date: s.date,
             sessionType: s.sessionType,
             therapy: s.therapy,
-            transcriptPath: s.transcriptPath,
+            // transcriptPath: s.transcriptPath, // Removed
             audioPath: s.audioPath, // <-- Included audioPath
             status: s.status,
             whisperJobId: s.whisperJobId,
@@ -63,7 +62,7 @@ export const listSessions = ({ set }: any) => {
 // POST /upload handler remains inline in routes and async (uses current time)
 
 // GET /:sessionId - Get session metadata and list of chat metadata
-// FIX: Add audioPath and transcriptTokenCount to the returned DTO
+// FIX: Add audioPath and transcriptTokenCount to the returned DTO, Remove transcriptPath
 export const getSessionDetails = ({ sessionData, set }: any) => {
     try {
         const chats = chatRepository.findChatsBySessionId(sessionData.id);
@@ -81,7 +80,7 @@ export const getSessionDetails = ({ sessionData, set }: any) => {
              date: sessionData.date,
              sessionType: sessionData.sessionType,
              therapy: sessionData.therapy,
-             transcriptPath: sessionData.transcriptPath,
+             // transcriptPath: sessionData.transcriptPath, // Removed
              audioPath: sessionData.audioPath, // <-- Included audioPath
              status: sessionData.status,
              whisperJobId: sessionData.whisperJobId,
@@ -95,12 +94,13 @@ export const getSessionDetails = ({ sessionData, set }: any) => {
 };
 
 // PUT /:sessionId/metadata - Update metadata
-// FIX: Add audioPath and transcriptTokenCount to the returned DTO
+// FIX: Add audioPath and transcriptTokenCount to the returned DTO, Remove transcriptPath
 export const updateSessionMetadata = ({ sessionData, body, set }: any) => {
     const sessionId = sessionData.id;
     const { date: dateInput, ...restOfBody } = body; // Separate date input
-    // Explicitly define type allowing audioPath update
+    // Explicitly define type allowing audioPath update, remove transcriptPath
     const metadataUpdate: Partial<BackendSession> = { ...restOfBody };
+     // --- REMOVED: delete metadataUpdate.transcriptPath; (property no longer exists) ---
 
     if (Object.keys(body).length === 0) {
          throw new BadRequestError('No metadata provided for update.');
@@ -131,7 +131,7 @@ export const updateSessionMetadata = ({ sessionData, body, set }: any) => {
             date: updatedSession.date,
             sessionType: updatedSession.sessionType,
             therapy: updatedSession.therapy,
-            transcriptPath: updatedSession.transcriptPath,
+            // transcriptPath: updatedSession.transcriptPath, // Removed
             audioPath: updatedSession.audioPath, // <-- Included audioPath
             status: updatedSession.status,
             whisperJobId: updatedSession.whisperJobId,
@@ -144,48 +144,74 @@ export const updateSessionMetadata = ({ sessionData, body, set }: any) => {
     }
 };
 
-// GET /:sessionId/transcript - Get structured transcript content (no change)
-export const getTranscript = async ({ sessionData, set }: any) => {
+// GET /:sessionId/transcript - Get structured transcript content (fetch from DB)
+export const getTranscript = async ({ sessionData, set }: any): Promise<StructuredTranscript> => { // <-- Added Promise<StructuredTranscript> return type hint
     const sessionId = sessionData.id;
-    if (sessionData.status !== 'completed' || !sessionData.transcriptPath) {
-         console.warn(`[API getTranscript] Transcript requested for session ${sessionId} but status is ${sessionData.status} or path is missing.`);
+    // Check status, but transcriptPath is no longer relevant
+    if (sessionData.status !== 'completed') {
+         console.warn(`[API getTranscript] Transcript requested for session ${sessionId} but status is ${sessionData.status}.`);
+         // Decide if returning empty is correct, or maybe a 409 Conflict if not completed?
+         // Let's return empty for now, mirroring previous behavior for missing file.
          set.status = 200;
          return [];
     }
     try {
-        const structuredTranscript: StructuredTranscript = await loadTranscriptContent(sessionId);
+        // Use transcriptRepository to fetch paragraphs
+        const structuredTranscript: StructuredTranscript = transcriptRepository.findParagraphsBySessionId(sessionId);
         set.status = 200;
         return structuredTranscript;
     } catch (error) {
         console.error(`[API Error] getTranscript (ID: ${sessionId}):`, error);
         if (error instanceof ApiError) throw error;
-        throw new InternalServerError('Failed to load transcript', error instanceof Error ? error : undefined);
+        throw new InternalServerError('Failed to load transcript from database', error instanceof Error ? error : undefined);
     }
 };
 
-// PATCH /:sessionId/transcript - Update a specific paragraph
-// FIX: Recalculate and save token count, trigger model reload
-export const updateTranscriptParagraph = async ({ sessionData, body, set }: any) => {
+// PATCH /:sessionId/transcript - Update a specific paragraph in the DB
+// FIX: Use transcriptRepository, Recalculate token count, trigger model reload
+export const updateTranscriptParagraph = async ({ sessionData, body, set }: any): Promise<StructuredTranscript> => { // <-- Added Promise<StructuredTranscript> return type hint
     const sessionId = sessionData.id;
     const { paragraphIndex, newText } = body;
-     if (sessionData.status !== 'completed' || !sessionData.transcriptPath) {
-          throw new BadRequestError(`Cannot update transcript for session ${sessionId}: Status is ${sessionData.status} or transcript path is missing.`);
-     }
+
+    // Check status, transcriptPath no longer relevant
+    if (sessionData.status !== 'completed') {
+          throw new BadRequestError(`Cannot update transcript for session ${sessionId}: Status is ${sessionData.status}.`);
+    }
+
     try {
-        let currentTranscript: StructuredTranscript = await loadTranscriptContent(sessionId);
+        // Fetch current transcript from DB to check index validity and no-change case
+        // --- FIX: Explicitly type currentTranscript ---
+        const currentTranscript: StructuredTranscript = transcriptRepository.findParagraphsBySessionId(sessionId);
+
         if (paragraphIndex < 0 || paragraphIndex >= currentTranscript.length) {
-            throw new BadRequestError(`Invalid paragraph index: ${paragraphIndex}.`);
+            throw new BadRequestError(`Invalid paragraph index: ${paragraphIndex}. Transcript has ${currentTranscript.length} paragraphs.`);
         }
+
         const trimmedNewText = newText.trim();
-        if (trimmedNewText === currentTranscript[paragraphIndex].text.trim()) {
+        // Ensure currentTranscript[paragraphIndex] exists before accessing .text
+        if (currentTranscript[paragraphIndex] && trimmedNewText === currentTranscript[paragraphIndex].text.trim()) {
              console.log(`[API updateTranscriptParagraph] No change needed for paragraph ${paragraphIndex}.`);
              set.status = 200;
-             return currentTranscript;
+             return currentTranscript; // Return the original transcript
         }
-        const updatedTranscript = currentTranscript.map((p, i) => i === paragraphIndex ? { ...p, text: trimmedNewText } : p);
 
-        // Save the updated transcript AND get the new token count
-        const { tokenCount } = await saveTranscriptContent(sessionId, updatedTranscript);
+        // Update the specific paragraph in the database
+        const updateSuccess = transcriptRepository.updateParagraphText(sessionId, paragraphIndex, trimmedNewText);
+        if (!updateSuccess) {
+            // This might happen if the paragraph was deleted between fetch and update, unlikely but possible
+            throw new InternalServerError(`Failed to update paragraph ${paragraphIndex} for session ${sessionId} in the database.`);
+        }
+
+        // Fetch the *entire* updated transcript from the DB after the update
+        // --- FIX: Explicitly type updatedTranscript ---
+        const updatedTranscript: StructuredTranscript = transcriptRepository.findParagraphsBySessionId(sessionId);
+        if (updatedTranscript.length !== currentTranscript.length) {
+             console.warn(`[API updateTranscriptParagraph] Transcript length changed after update for session ${sessionId}. This is unexpected.`);
+        }
+
+        // Recalculate token count based on the updated transcript text from DB
+        const fullText = updatedTranscript.map(p => p.text).join('\n\n');
+        const tokenCount = calculateTokenCount(fullText);
 
         // Update the token count in the session metadata
         sessionRepository.updateMetadata(sessionId, { transcriptTokenCount: tokenCount });
@@ -204,7 +230,7 @@ export const updateTranscriptParagraph = async ({ sessionData, body, set }: any)
         // --- END NEW ---
 
         set.status = 200;
-        return updatedTranscript; // Return the updated transcript content
+        return updatedTranscript; // Return the updated transcript content from the DB
     } catch (error) {
         console.error(`[API Error] updateTranscriptParagraph (ID: ${sessionId}, Index: ${paragraphIndex}):`, error);
         if (error instanceof ApiError) throw error;
