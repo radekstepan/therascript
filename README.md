@@ -1,8 +1,10 @@
 # TODO
 
-- [ ] shutdown and autostart scripts
-    - https://aistudio.google.com/prompts/12ixBihqRs-Vn7qgPVNv8EzoqszjTg1Pl
-    - https://grok.com/chat/d53dbfa2-fdf7-4d5c-83fb-1e900f113ae2
+- [ ] verify/fix shutdown and autostart scripts
+- [x] preload:db should delete the whole "data" folder
+- [ ] move transcripts and their paragraphs into the DB
+- [ ] try combining fulltext chat search with transcript search
+- [ ] fix the search UI, be able to filter by client and/or tags
 
 - [ ] make the chat paragraph icons larger, add a gap between them AND/OR move the play icon to the left of the paragraph
 - [ ] fix vertical align of transcript header, items too close to the top; `align-items: flex-end`
@@ -17,18 +19,15 @@
 - [ ] when you upload/transcribe a file, you should reset the New Session modal
 - [ ] when I click to Rename Chat, the input field that opens in the modal should be focused
 - [ ] toast should above modal
-- [x] make sure the AI response "cursor" is less dark and is still blinking.The copy icon shouldn't show until after the whole response has been received.
-- [x] starred messages don't show in the popover
 - [ ] the star message icon is too small and not vertically aligned with the message itself
-- [x] think about the starred messages popover, the list/UI looks odd
 - [ ] move env files to root dir
 - [ ] is the token count actually accurate? the current "used" tokens, but also the tokens in the transcript. Do they update after edititing a paragraph?
 - [ ] when you fail to pull a model, putting a correct link won't start the pull (clear existing pull errors)
 - [ ] you should clear the input field when you send a message and be able to type your new message while the AI is responding
 - [ ] issue with chats in loading state (ask Gemma about Jotai implementation)
 - [ ] toast needs a bit of border else it fades with the background
-- [x] starring standalone chat messages is not working at all
 - [ ] sidebar chats should be sorted the same way they are sorted on the homepage; on session chats they should be by date
+- [ ] messaging in mock mode should "connect" the mock ollama model (it works even without, but it is important to update the UI just like "real" mode would)
 
 ## Nice to have
 

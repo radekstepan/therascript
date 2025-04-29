@@ -43,24 +43,21 @@ async function preloadDatabase() {
     let deletionAttempted = false;
     try {
         // Check if file exists before trying to delete
-        await fs.access(targetDbPath); // Throws if file doesn't exist
-        console.log(`[Preload] Existing database file found. Attempting deletion...`);
+        await fs.access(targetDataDir); // Throws if folder doesn't exist
+        console.log(`[Preload] Existing data dir found. Attempting deletion...`);
         deletionAttempted = true;
-        await fs.unlink(targetDbPath);
-        // Optional: Delete journal files too
-        try { await fs.unlink(targetDbPath + '-wal'); } catch { /* ignore */ }
-        try { await fs.unlink(targetDbPath + '-shm'); } catch { /* ignore */ }
-        console.log(`[Preload] Database file(s) deletion command executed.`);
+        await fs.rm(targetDataDir, {recursive: true, force: true});
+        console.log(`[Preload] Data dir deletion command executed.`);
         // Add a small delay to allow the file system to catch up, might help with locks
         await new Promise(resolve => setTimeout(resolve, 100));
     } catch (err: any) {
         if (err.code === 'ENOENT') {
-            console.log(`[Preload] No existing database file found to delete.`);
+            console.log(`[Preload] No existing data dir found to delete.`);
         } else {
-            console.error(`[Preload] Error during database file deletion:`, err);
+            console.error(`[Preload] Error during data dir deletion:`, err);
             // If deletion was attempted but failed, it's critical - exit.
             if (deletionAttempted) {
-                 console.error(`[Preload] FATAL: Failed to delete existing database file. Check permissions or file locks.`);
+                 console.error(`[Preload] FATAL: Failed to delete existing data dir. Check permissions or file locks.`);
                  process.exit(1);
             }
         }

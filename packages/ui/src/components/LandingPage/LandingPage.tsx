@@ -200,40 +200,42 @@ export function LandingPage() {
             <Box className="w-full flex-grow flex flex-col">
                 {/* Header Bar */}
                 <Box py="2" px={{ initial: '4', md: '6', lg: '8' }} flexShrink="0" style={{ backgroundColor: 'var(--color-panel-solid)', borderBottom: '1px solid var(--gray-a6)' }} >
-                    <Flex justify="between" align="center" gap="4">
-                         {/* Search Input Wrapper - Centered */}
-                         <Flex justify="center" style={{ flexGrow: 1 }}>
-                            <Box style={{ width: '100%', maxWidth: '500px' }}> {/* Max width for search bar */}
-                                <TextField.Root
-                                    size="2"
-                                    placeholder="Search all messages (Press Enter)"
-                                    value={searchInput}
-                                    onChange={handleSearchInputChange}
-                                    onKeyDown={handleSearchKeyDown} // Use KeyDown for Enter/Escape
-                                    disabled={isFetchingSearch} // Disable slightly during fetch
-                                >
-                                    <TextField.Slot>
-                                        <MagnifyingGlassIcon height="16" width="16" />
-                                    </TextField.Slot>
-                                    {/* Add loading spinner and clear button */}
-                                    {(isLoadingSearch || isFetchingSearch) && <TextField.Slot><Spinner size="1"/></TextField.Slot>}
-                                    {searchInput && !(isLoadingSearch || isFetchingSearch) && (
-                                        <TextField.Slot pr="2">
-                                            <IconButton size="1" variant="ghost" color="gray" onClick={handleClearSearch} aria-label="Clear search" title="Clear search">
-                                                <Cross1Icon />
-                                            </IconButton>
+                    <Container>
+                        <Flex justify="between" align="center" gap="4">
+                            {/* Search Input Wrapper - Centered */}
+                            <Flex style={{ flexGrow: 1 }}>
+                                <Box style={{ width: '100%', maxWidth: '500px' }}> {/* Max width for search bar */}
+                                    <TextField.Root
+                                        size="2"
+                                        placeholder="Search all messages (Press Enter)"
+                                        value={searchInput}
+                                        onChange={handleSearchInputChange}
+                                        onKeyDown={handleSearchKeyDown} // Use KeyDown for Enter/Escape
+                                        disabled={isFetchingSearch} // Disable slightly during fetch
+                                    >
+                                        <TextField.Slot>
+                                            <MagnifyingGlassIcon height="16" width="16" />
                                         </TextField.Slot>
-                                    )}
-                                </TextField.Root>
-                            </Box>
-                         </Flex>
-                         {/* Right side buttons */}
-                         <Flex gap="3" align="center" flexShrink="0">
-                             <Button variant="outline" size="2" onClick={handleNewStandaloneChat} disabled={createStandaloneChatMutation.isPending}><ChatBubbleIcon width="16" height="16" /><Text ml="2">New Chat</Text></Button>
-                             <Button variant="soft" size="2" onClick={openUploadModal}><PlusCircledIcon width="16" height="16" /><Text ml="2">New Session</Text></Button>
-                             <UserThemeDropdown />
-                         </Flex>
-                    </Flex>
+                                        {/* Add loading spinner and clear button */}
+                                        {(isLoadingSearch || isFetchingSearch) && <TextField.Slot><Spinner size="1"/></TextField.Slot>}
+                                        {searchInput && !(isLoadingSearch || isFetchingSearch) && (
+                                            <TextField.Slot pr="2">
+                                                <IconButton size="1" variant="ghost" color="gray" onClick={handleClearSearch} aria-label="Clear search" title="Clear search">
+                                                    <Cross1Icon />
+                                                </IconButton>
+                                            </TextField.Slot>
+                                        )}
+                                    </TextField.Root>
+                                </Box>
+                            </Flex>
+                            {/* Right side buttons */}
+                            <Flex gap="3" align="center" flexShrink="0">
+                                <Button variant="outline" size="2" onClick={handleNewStandaloneChat} disabled={createStandaloneChatMutation.isPending}><ChatBubbleIcon width="16" height="16" /><Text ml="2">New Chat</Text></Button>
+                                <Button variant="soft" size="2" onClick={openUploadModal}><PlusCircledIcon width="16" height="16" /><Text ml="2">New Session</Text></Button>
+                                <UserThemeDropdown />
+                            </Flex>
+                        </Flex>
+                    </Container>
                 </Box>
 
                 {/* Main Content Area */}
