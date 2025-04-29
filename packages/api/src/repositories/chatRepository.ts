@@ -194,6 +194,7 @@ export const chatRepository = {
          }
          const cleanedQuery = query.trim();
          let ftsQuery: string;
+         // TODO this logic sucks
          if (cleanedQuery.includes(' ') || cleanedQuery.includes('-')) {
             ftsQuery = `"${cleanedQuery.replace(/"/g, '""')}"`;
          } else {

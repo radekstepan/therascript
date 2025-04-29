@@ -1,10 +1,15 @@
 # TODO
 
 - [ ] verify/fix shutdown and autostart scripts
-- [x] preload:db should delete the whole "data" folder
+- [ ] fix the crappy search query; multiple keywords should join on a "*" character, special characters and quotes properly escaped, multiple spaces removed
 - [ ] move transcripts and their paragraphs into the DB
 - [ ] try combining fulltext chat search with transcript search
-- [ ] fix the search UI, be able to filter by client and/or tags
+- [ ] fix the search UI
+    - be able to filter by client and/or tags
+    - Escape should exit out of the UI much like clicking the "x"
+    - input field should remain focused on Enter keypress
+- [ ] put search query in the URL so that you can go back to your results easily
+- [ ] make favoriting work again
 
 - [ ] make the chat paragraph icons larger, add a gap between them AND/OR move the play icon to the left of the paragraph
 - [ ] fix vertical align of transcript header, items too close to the top; `align-items: flex-end`
@@ -36,10 +41,8 @@
 - [ ] actually delete cached Ollama models
 - [ ] when you render markdown, the output is usually a paragraph tag which means the cursor will always be on the newline.
 - [ ] when a message has finished streaming we refetch the messages which causes a flash of content
-
-## Future
-
-- [ ] the topbar/header should have a search field. Clicking into it expands a panel that lets you search for chats or transcripts and has extra optional filters to drill down by different tags, client names, dates. Does this mean all paragraphs and chats are stored in a vector database in addition or instead of sqlite? Is that the best way to find a document through "free text"?
+- [ ] clicking on a search result should scroll to the paragraph/message in the UI
+- [ ] be able to put "weights" on the search results so that a text appearing in a title is weighted more heavily
 
 ## Refactor
 
@@ -52,6 +55,7 @@
 - [ ] reuse package dependencies
 - [ ] make sure READMEs are up to date, plus add screenshots
 - [ ] consistent error messages when we go offline
+- [ ] Enter keypress means main action, Escape keypress means exit out of a UI (modal)
 
 ## Ideas
 

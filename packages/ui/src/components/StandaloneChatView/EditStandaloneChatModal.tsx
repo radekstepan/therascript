@@ -170,7 +170,7 @@ export function EditStandaloneChatModal({
                                         }}
                                         disabled={isSaving}
                                         aria-label={`Remove tag ${tag}`}
-                                        style={{ marginLeft: '4px', marginRight: '-2px', height: '16px', width: '16px', cursor: 'pointer' }}
+                                        style={{ marginLeft: '4px', marginRight: '-5px', height: '12px', width: '12px', cursor: 'pointer' }}
                                     >
                                         <Cross2Icon width="10" height="10" />
                                     </IconButton>
