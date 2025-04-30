@@ -1,8 +1,11 @@
+// =========================================
+// File: packages/ui/src/components/LandingPage/LandingPage.tsx
+// =========================================
 /*
  * packages/ui/src/components/LandingPage/LandingPage.tsx
  */
-import React, { useMemo, useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAtomValue, useSetAtom } from 'jotai';
 import {
     CounterClockwiseClockIcon, PlusCircledIcon, TrashIcon,
@@ -10,6 +13,9 @@ import {
     ChatBubbleIcon,
     MagnifyingGlassIcon,
     Cross1Icon,
+    PersonIcon,
+    BookmarkIcon,
+    PlusIcon,
 } from '@radix-ui/react-icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { SessionListTable } from './SessionListTable';
@@ -19,6 +25,9 @@ import {
     Button, Card, Flex, Heading, Text, Box, Container, Spinner, AlertDialog,
     TextField,
     IconButton,
+    Grid,
+    Select,
+    Badge,
 } from '@radix-ui/themes';
 import { UserThemeDropdown } from '../User/UserThemeDropdown';
 import { EditDetailsModal } from '../SessionView/Modals/EditDetailsModal';
@@ -47,19 +56,38 @@ import {
     // Others
     toastMessageAtom,
 } from '../../store';
-import type { Session, SessionMetadata, ChatSession, SearchApiResponse } from '../../types';
-import { formatTimestamp } from '../../helpers'; // Removed debounce import
+import type { Session, SessionMetadata, ChatSession, SearchApiResponse, SearchResultItem } from '../../types';
+import { formatTimestamp } from '../../helpers';
 
+// Helper function to get unique, sorted client names
+const getUniqueClientNames = (sessions: Session[] | undefined): string[] => {
+    if (!sessions) return [];
+    const names = new Set<string>();
+    sessions.forEach(s => {
+        if (s.clientName) names.add(s.clientName.trim());
+    });
+    return Array.from(names).sort((a, b) => a.localeCompare(b));
+};
+
+// Special value for the 'All Clients' option to avoid empty string value prop
+const ALL_CLIENTS_VALUE = "__ALL_CLIENTS__";
 
 export function LandingPage() {
     const openUploadModal = useSetAtom(openUploadModalAtom);
     const setToast = useSetAtom(toastMessageAtom);
     const queryClient = useQueryClient();
     const navigate = useNavigate();
+    const [searchParams, setSearchParams] = useSearchParams();
 
     // --- Search State ---
-    const [searchInput, setSearchInput] = useState(''); // Input field value
-    const [activeSearchQuery, setActiveSearchQuery] = useState(''); // Query currently being searched for
+    const [searchInput, setSearchInput] = useState(searchParams.get('q') || '');
+    const [activeSearchQuery, setActiveSearchQuery] = useState(searchParams.get('q') || '');
+    const searchInputRef = useRef<HTMLInputElement>(null);
+
+    // --- Filter State ---
+    const [clientFilter, setClientFilter] = useState('');
+    const [filterTags, setFilterTags] = useState<string[]>([]);
+    const [newFilterTagInput, setNewFilterTagInput] = useState('');
 
     // Session Sort State
     const currentSessionSortCriteria = useAtomValue(sessionSortCriteriaAtom);
@@ -87,17 +115,44 @@ export function LandingPage() {
 
     // --- Search Query (Triggers when activeSearchQuery changes) ---
     const { data: searchResultsData, isLoading: isLoadingSearch, error: searchError, isFetching: isFetchingSearch } = useQuery<SearchApiResponse, Error>({
-        queryKey: ['searchMessages', activeSearchQuery], // Use active query in key
+        queryKey: ['searchMessages', activeSearchQuery],
         queryFn: () => {
-            if (!activeSearchQuery) return Promise.resolve({ query: '', results: [] }); // Don't fetch if query is empty
+            if (!activeSearchQuery) return Promise.resolve({ query: '', results: [] });
             console.log(`[Search Query] Fetching results for: "${activeSearchQuery}"`);
             return searchMessages(activeSearchQuery);
         },
-        enabled: !!activeSearchQuery, // Only run query if active query is not empty
-        staleTime: 5 * 60 * 1000, // Cache results for 5 mins
+        enabled: !!activeSearchQuery,
+        staleTime: 5 * 60 * 1000,
     });
 
-    // --- REMOVED Debounce Logic ---
+    // --- Accurate Client-Side Filtering ---
+    const filteredSearchResults = useMemo(() => {
+        if (!searchResultsData?.results) return [];
+        const lowerClientFilter = clientFilter.toLowerCase().trim();
+        const lowerFilterTags = filterTags.map(tag => tag.toLowerCase());
+
+        if (!lowerClientFilter && lowerFilterTags.length === 0) {
+            return searchResultsData.results;
+        }
+
+        return searchResultsData.results.filter(item => {
+            const clientMatch = lowerClientFilter
+                ? item.clientName?.toLowerCase() === lowerClientFilter
+                : true;
+
+            const tagsMatch = lowerFilterTags.length > 0
+                ? lowerFilterTags.every(filterTag =>
+                      item.tags?.some(itemTag => itemTag.toLowerCase() === filterTag)
+                  )
+                : true;
+
+            return clientMatch && tagsMatch;
+        });
+    }, [searchResultsData, clientFilter, filterTags]);
+    // --- End Accurate Filtering ---
+
+    // Extract unique client names for dropdown
+    const uniqueClientNames = useMemo(() => getUniqueClientNames(sessions), [sessions]);
 
     // Mutations (Unchanged)
     const deleteSessionMutation = useMutation<{ message: string }, Error, number>({ mutationFn: deleteSessionApi, onSuccess: (d,id)=>{setToast(d.message||`Session ${id} deleted`); queryClient.invalidateQueries({queryKey:['sessions']});}, onError:(e,id)=>{setToast(`Error deleting session ${id}: ${e.message}`);}, onSettled:()=>{setIsDeleteConfirmOpen(false);setSessionToDelete(null);} });
@@ -106,7 +161,7 @@ export function LandingPage() {
     const deleteChatMutation = useMutation<{ message: string }, Error, number>({ mutationFn: deleteStandaloneChatApi, onSuccess: (d,id)=>{setToast(d.message||`Chat ${id} deleted.`); queryClient.invalidateQueries({queryKey:['standaloneChats']});}, onError:(e,id)=>{setToast(`Error deleting chat ${id}: ${e.message}`);}, onSettled:()=>{setIsDeleteChatConfirmOpen(false);setChatToDelete(null);} });
 
     // Session Sorting Logic (Unchanged)
-    const sortedSessions = useMemo(() => {
+    const sortedSessions = useMemo(() => { /* ... */
          if (!sessions) return [];
          const criteria = currentSessionSortCriteria;
          const direction = currentSessionSortDirection;
@@ -115,7 +170,7 @@ export function LandingPage() {
       }, [sessions, currentSessionSortCriteria, currentSessionSortDirection]);
 
       // Standalone Chat Sorting (Unchanged)
-      const sortedStandaloneChats = useMemo(() => {
+      const sortedStandaloneChats = useMemo(() => { /* ... */
          if (!standaloneChats) return [];
          const criteria = currentStandaloneChatSortCriteria;
          const direction = currentStandaloneChatSortDirection;
@@ -137,7 +192,7 @@ export function LandingPage() {
       }, [standaloneChats, currentStandaloneChatSortCriteria, currentStandaloneChatSortDirection]);
 
 
-     // Handlers (Unchanged except for search)
+     // Handlers (Update search handlers)
     const handleSessionSort = (criteria: SessionSortCriteria) => setSessionSort(criteria);
     const handleStandaloneChatSort = (criteria: StandaloneChatSortCriteria) => setStandaloneChatSort(criteria);
     const handleEditSession = (session: Session) => { setSessionToEdit(session); setIsEditingModalOpen(true); };
@@ -153,28 +208,32 @@ export function LandingPage() {
     // --- Search Handlers ---
     const handleSearchInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
         setSearchInput(event.target.value);
-        // If user clears input, also clear active search
-        if (event.target.value.trim() === '') {
-            setActiveSearchQuery('');
-        }
     };
 
     const handleSearchSubmit = (event?: React.FormEvent<HTMLFormElement> | React.KeyboardEvent<HTMLInputElement>) => {
-        if (event) event.preventDefault(); // Prevent default form submission/enter behavior
+        if (event) event.preventDefault();
         const trimmedQuery = searchInput.trim();
+        setActiveSearchQuery(trimmedQuery);
+
         if (trimmedQuery) {
-            setActiveSearchQuery(trimmedQuery); // Trigger the search query
+            setSearchParams({ q: trimmedQuery }, { replace: true });
         } else {
-            setActiveSearchQuery(''); // Clear results if input is empty
+            searchParams.delete('q');
+            setSearchParams(searchParams, { replace: true });
         }
-        // Optional: Keep focus or blur based on preference
-        // (document.activeElement as HTMLElement)?.blur();
+        requestAnimationFrame(() => searchInputRef.current?.focus());
     };
 
-    const handleClearSearch = () => {
+    const handleClearSearch = useCallback(() => {
         setSearchInput('');
         setActiveSearchQuery('');
-    };
+        setClientFilter('');
+        setFilterTags([]);
+        setNewFilterTagInput('');
+        searchParams.delete('q');
+        setSearchParams(searchParams, { replace: true });
+        requestAnimationFrame(() => searchInputRef.current?.focus());
+    }, [searchParams, setSearchParams]);
 
     const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
         if (event.key === 'Enter') {
@@ -185,6 +244,67 @@ export function LandingPage() {
     };
     // --- End Search Handlers ---
 
+    // --- Tag Filter Handlers ---
+    const handleAddFilterTag = useCallback(() => {
+        const tagToAdd = newFilterTagInput.trim();
+        if (tagToAdd && !filterTags.some(tag => tag.toLowerCase() === tagToAdd.toLowerCase())) {
+            if (filterTags.length < 5) {
+                setFilterTags(prev => [...prev, tagToAdd]);
+                setNewFilterTagInput('');
+            } else {
+                setToast("Maximum of 5 filter tags allowed.");
+            }
+        }
+        setNewFilterTagInput('');
+    }, [newFilterTagInput, filterTags, setToast]);
+
+    const handleRemoveFilterTag = useCallback((tagToRemove: string) => {
+        setFilterTags(prev => prev.filter(tag => tag !== tagToRemove));
+    }, []);
+
+    const handleFilterTagInputKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === 'Enter' || e.key === ',') {
+            e.preventDefault();
+            handleAddFilterTag();
+        }
+    }, [handleAddFilterTag]);
+    // --- End Tag Filter Handlers ---
+
+    // --- Escape Key Listener ---
+    useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape' && !!activeSearchQuery) {
+                handleClearSearch();
+            }
+        };
+        if (activeSearchQuery) {
+            document.addEventListener('keydown', handleKeyDown);
+        } else {
+            document.removeEventListener('keydown', handleKeyDown);
+        }
+        return () => {
+            document.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [activeSearchQuery, handleClearSearch]);
+    // --- End Escape Key Listener ---
+
+    // --- Client Filter Change Handler ---
+    const handleClientFilterChange = (value: string) => {
+        setClientFilter(value === ALL_CLIENTS_VALUE ? '' : value);
+    };
+    // --- End Client Filter Handler ---
+
+    // --- Auto Focus Effect ---
+    useEffect(() => {
+        if (activeSearchQuery && searchInputRef.current) {
+             requestAnimationFrame(() => {
+                searchInputRef.current?.focus();
+            });
+        }
+    }, [activeSearchQuery]);
+    // --- End Auto Focus Effect ---
+
+
     // Loading and Error States (Unchanged)
     const isLoading = isLoadingSessions || isLoadingStandaloneChats;
     const error = sessionsError || standaloneChatsError;
@@ -194,6 +314,7 @@ export function LandingPage() {
 
     // Show search results if an active search query exists
     const showSearchResults = !!activeSearchQuery;
+    const hasInitialResults = searchResultsData?.results && searchResultsData.results.length > 0;
 
     return (
         <> {/* Fragment for content + modals */}
@@ -201,33 +322,31 @@ export function LandingPage() {
                 {/* Header Bar */}
                 <Box py="2" px={{ initial: '4', md: '6', lg: '8' }} flexShrink="0" style={{ backgroundColor: 'var(--color-panel-solid)', borderBottom: '1px solid var(--gray-a6)' }} >
                     <Container>
+                        {/* Search Input */}
                         <Flex justify="between" align="center" gap="4">
-                            {/* Search Input Wrapper - Centered */}
-                            <Flex style={{ flexGrow: 1 }}>
-                                <Box style={{ width: '100%', maxWidth: '500px' }}> {/* Max width for search bar */}
-                                    <TextField.Root
-                                        size="2"
-                                        placeholder="Search all messages (Press Enter)"
-                                        value={searchInput}
-                                        onChange={handleSearchInputChange}
-                                        onKeyDown={handleSearchKeyDown} // Use KeyDown for Enter/Escape
-                                        disabled={isFetchingSearch} // Disable slightly during fetch
-                                    >
-                                        <TextField.Slot>
-                                            <MagnifyingGlassIcon height="16" width="16" />
+                            <Box style={{ flexGrow: 1 }}>
+                                <TextField.Root
+                                    ref={searchInputRef}
+                                    size="2"
+                                    placeholder="Search all messages and transcripts..."
+                                    value={searchInput}
+                                    onChange={handleSearchInputChange}
+                                    onKeyDown={handleSearchKeyDown}
+                                    disabled={isFetchingSearch}
+                                >
+                                    <TextField.Slot>
+                                        <MagnifyingGlassIcon height="16" width="16" />
+                                    </TextField.Slot>
+                                    {(isLoadingSearch || isFetchingSearch) && <TextField.Slot><Spinner size="1"/></TextField.Slot>}
+                                    {searchInput && !(isLoadingSearch || isFetchingSearch) && (
+                                        <TextField.Slot pr="2">
+                                            <IconButton size="1" variant="ghost" color="gray" onClick={handleClearSearch} aria-label="Clear search" title="Clear search (Esc)">
+                                                <Cross1Icon />
+                                            </IconButton>
                                         </TextField.Slot>
-                                        {/* Add loading spinner and clear button */}
-                                        {(isLoadingSearch || isFetchingSearch) && <TextField.Slot><Spinner size="1"/></TextField.Slot>}
-                                        {searchInput && !(isLoadingSearch || isFetchingSearch) && (
-                                            <TextField.Slot pr="2">
-                                                <IconButton size="1" variant="ghost" color="gray" onClick={handleClearSearch} aria-label="Clear search" title="Clear search">
-                                                    <Cross1Icon />
-                                                </IconButton>
-                                            </TextField.Slot>
-                                        )}
-                                    </TextField.Root>
-                                </Box>
-                            </Flex>
+                                    )}
+                                </TextField.Root>
+                            </Box>
                             {/* Right side buttons */}
                             <Flex gap="3" align="center" flexShrink="0">
                                 <Button variant="outline" size="2" onClick={handleNewStandaloneChat} disabled={createStandaloneChatMutation.isPending}><ChatBubbleIcon width="16" height="16" /><Text ml="2">New Chat</Text></Button>
@@ -235,6 +354,74 @@ export function LandingPage() {
                                 <UserThemeDropdown />
                             </Flex>
                         </Flex>
+                         {/* Filter Inputs - Shown only when search is active */}
+                         {showSearchResults && (
+                            <Grid columns={{ initial: '1', md: '2' }} gap="3" width="100%" mt="2">
+                                {/* Client Filter Dropdown */}
+                                <Flex direction="column" gap="1">
+                                     <Text as="label" size="1" color="gray" htmlFor="client-filter-select">Filter by Client</Text>
+                                     <Select.Root
+                                        value={clientFilter || ALL_CLIENTS_VALUE}
+                                        onValueChange={handleClientFilterChange}
+                                        size="2"
+                                        name="client-filter-select"
+                                    >
+                                        <Select.Trigger placeholder="All Clients..." />
+                                        <Select.Content>
+                                            <Select.Item value={ALL_CLIENTS_VALUE}>All Clients</Select.Item>
+                                            {uniqueClientNames.map(name => (
+                                                <Select.Item key={name} value={name}>{name}</Select.Item>
+                                            ))}
+                                        </Select.Content>
+                                    </Select.Root>
+                                </Flex>
+
+                                {/* Tag Filter Input */}
+                                <Flex direction="column" gap="1">
+                                    <Text as="label" size="1" color="gray" htmlFor="tag-filter-input">Filter by Tags (AND)</Text>
+                                    {/* Tag Display Area */}
+                                    {filterTags.length > 0 && (
+                                        <Flex gap="1" wrap="wrap" mb="1" style={{minHeight: '28px'}}>
+                                            {filterTags.map((tag, index) => (
+                                                <Badge key={`${tag}-${index}`} color="gray" variant="soft" radius="full">
+                                                    {tag}
+                                                    <IconButton
+                                                        size="1" variant="ghost" color="gray" radius="full"
+                                                        onClick={() => handleRemoveFilterTag(tag)}
+                                                        aria-label={`Remove filter tag ${tag}`}
+                                                        style={{ marginLeft: '4px', marginRight: '-5px', height: '12px', width: '12px', cursor: 'pointer' }}
+                                                    >
+                                                        <Cross1Icon width="10" height="10" />
+                                                    </IconButton>
+                                                </Badge>
+                                            ))}
+                                        </Flex>
+                                    )}
+                                    {/* Tag Input Field */}
+                                    <Flex gap="2" align="center">
+                                        <TextField.Root
+                                            id="tag-filter-input"
+                                            size="2"
+                                            placeholder="Add tag filter..."
+                                            value={newFilterTagInput}
+                                            onChange={(e) => setNewFilterTagInput(e.target.value)}
+                                            onKeyDown={handleFilterTagInputKeyDown}
+                                            disabled={filterTags.length >= 5}
+                                            style={{ flexGrow: 1 }}
+                                        />
+                                        <IconButton
+                                            size="2" variant="soft"
+                                            onClick={handleAddFilterTag}
+                                            disabled={!newFilterTagInput.trim() || filterTags.length >= 5}
+                                            aria-label="Add filter tag"
+                                            title="Add filter tag"
+                                        >
+                                            <PlusIcon />
+                                        </IconButton>
+                                    </Flex>
+                                </Flex>
+                            </Grid>
+                         )}
                     </Container>
                 </Box>
 
@@ -256,14 +443,22 @@ export function LandingPage() {
                                         <Text color="red">Error searching: {searchError.message}</Text>
                                     </Card>
                                 )}
-                                {searchResultsData?.results && !isLoadingSearch && !isFetchingSearch && (
-                                    <SearchResultList results={searchResultsData.results} query={activeSearchQuery} />
+                                {/* Render SearchResultList only if initial results exist */}
+                                {hasInitialResults && !isLoadingSearch && !isFetchingSearch && (
+                                    <SearchResultList results={filteredSearchResults} query={activeSearchQuery} />
                                 )}
-                                {!searchError && !isLoadingSearch && !isFetchingSearch && searchResultsData?.results?.length === 0 && (
+                                {/* Show "No results found" if initial fetch returned empty */}
+                                {!searchError && !isLoadingSearch && !isFetchingSearch && !hasInitialResults && (
                                     <Card size="2" mb="4">
                                         <Text color="gray">No results found for "{activeSearchQuery}".</Text>
                                     </Card>
                                 )}
+                                 {/* Show "No results match filters" only if initial results existed but filters hide them all */}
+                                 {!searchError && !isLoadingSearch && !isFetchingSearch && hasInitialResults && filteredSearchResults.length === 0 && (
+                                    <Card size="2" mb="4">
+                                        <Text color="gray">No results match the current filters for "{activeSearchQuery}".</Text>
+                                    </Card>
+                                 )}
                              </>
                         ) : (
                             <>

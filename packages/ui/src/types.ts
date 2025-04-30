@@ -1,3 +1,6 @@
+// =========================================
+// File: packages/ui/src/types.ts
+// =========================================
 // packages/ui/src/types.ts
 // TODO can we infer these from the API?
 
@@ -41,24 +44,21 @@ export interface SessionMetadata {
 export interface Session extends SessionMetadata {
     id: number;
     fileName: string;
-    // transcriptPath: string | null; // Removed
     audioPath: string | null; // Path/Identifier to the original uploaded audio file
     status: 'pending' | 'transcribing' | 'completed' | 'failed';
     whisperJobId: string | null;
     date: string; // ISO string from backend
     transcriptTokenCount?: number | null;
-    // Changed chats to use ChatSession metadata, sessionId must be number here
     chats: Pick<ChatSession, 'id' | 'sessionId' | 'timestamp' | 'name'>[];
 }
 
-// --- Standalone Chat Type (potentially reused BackendChatSession metadata type) ---
 export interface BackendChatSession {
   id: number;
   sessionId: number | null; // Important: can be null
   timestamp: number;
   name?: string;
   messages?: BackendChatMessage[];
-  tags?: string[] | null; // <-- Added tags
+  tags?: string[] | null;
 }
 
 export interface BackendChatMessage {
@@ -73,7 +73,6 @@ export interface BackendChatMessage {
   starredName?: string | null;
 }
 
-// --- LLM Management Types ---
 export interface OllamaModelInfo {
     name: string;
     modified_at: string;
@@ -116,27 +115,28 @@ export interface UIPullJobStatus {
     totalBytes?: number;
 }
 
-// --- Docker Container Status Type (UI) ---
 export interface DockerContainerStatus {
     id: string;
     name: string;
     image: string;
-    state: string; // e.g., 'running', 'stopped', 'exited', 'not_found'
-    status: string; // e.g., 'Up 2 hours', 'Exited (0) 5 minutes ago', 'Container not found'
+    state: string;
+    status: string;
     ports: { PrivatePort: number; PublicPort?: number; Type: string; IP?: string }[];
 }
-// --- END Docker Container Status Type ---
 
 // --- UPDATED: Search Result Type (UI) ---
 export interface SearchResultItem {
-    id: number; // message ID or paragraphIndex
-    type: 'chat' | 'transcript'; // Distinguishes the result type
-    chatId: number | null; // null for transcripts
-    sessionId: number | null; // null for standalone chats
-    sender: 'user' | 'ai' | null; // null for transcripts
+    id: number;
+    type: 'chat' | 'transcript';
+    chatId: number | null;
+    sessionId: number | null;
+    sender: 'user' | 'ai' | null;
     timestamp: number;
-    snippet: string; // HTML snippet with highlights (Backend should still provide highlights)
+    snippet: string; // The text content that matched the search
     rank: number;
+    // Add fields needed for accurate filtering
+    clientName?: string | null; // Added from backend
+    tags?: string[] | null;    // Added from backend
 }
 
 export interface SearchApiResponse {

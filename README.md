@@ -2,12 +2,6 @@
 
 - [ ] make sure the preload task deletes the whole data folder
 - [ ] verify/fix shutdown and autostart scripts
-- [ ] fix the search UI
-    - be able to filter by client and/or tags
-    - Escape should exit out of the UI much like clicking the "x"
-    - input field should remain focused on Enter keypress
-- [ ] put search query in the URL so that you can go back to your results easily
-- [x] make favoriting work again
 - [ ] yarn dev works in mock mode, only mock mode should work in mock mode
 
 - [ ] make the chat paragraph icons larger, add a gap between them AND/OR move the play icon to the left of the paragraph.
@@ -29,10 +23,10 @@
 - [ ] when you fail to pull a model, putting a correct link won't start the pull (clear existing pull errors)
 - [ ] you should clear the input field when you send a message and be able to type your new message while the AI is responding
 - [ ] issue with chats in loading state (ask Gemma about Jotai implementation)
-- [x] toast needs a bit of border else it fades with the background
 - [ ] sidebar chats should be sorted the same way they are sorted on the homepage; on session chats they should be by date
 - [ ] messaging in mock mode should "connect" the mock ollama model (it works even without, but it is important to update the UI just like "real" mode would)
 - [ ] highlight the search word in the search results
+- [ ] input field should remain focused on Enter keypress
 
 ## Nice to have
 

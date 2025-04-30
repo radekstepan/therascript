@@ -1,9 +1,12 @@
+// =========================================
+// File: packages/api/src/repositories/chatRepository.ts
+// =========================================
 /* packages/api/src/repositories/chatRepository.ts */
 import { db, exec, run, all, get } from '../db/sqliteService.js';
 import type { BackendChatSession, BackendChatMessage, ChatMetadata } from '../types/index.js';
 import { Statement } from 'better-sqlite3';
 
-// Helper to safely parse JSON tags column
+// Helper to safely parse JSON tags column (unchanged)
 const parseTags = (tagsJson: string | null): string[] | null => {
     if (!tagsJson) return null;
     try {
@@ -36,72 +39,77 @@ const updateMessageStarStatusSql = 'UPDATE messages SET starred = ?, starredName
 const selectStarredMessagesSql = 'SELECT * FROM messages WHERE starred = 1 ORDER BY timestamp DESC';
 
 
-// --- FTS Search Statement (UPDATED for UNION ALL) ---
-// Combine results from messages and transcript paragraphs
+// --- FTS Search Statement (UPDATED with JOINs for clientName and tags) ---
 const searchSql = `
-    -- Select from Messages
+    -- Select from Messages, joining chats and optionally sessions
     SELECT
         m.id,
         'chat' as type,
         m.chatId,
         c.sessionId,
+        s.clientName AS clientName, -- Get clientName from sessions if available
+        c.tags AS tags, -- Get tags JSON from chats
         m.sender,
         m.timestamp,
-        m.text as snippet, -- Use original text as snippet
+        m.text as snippet,
         m.starred,
         m.starredName,
-        NULL as paragraphIndex -- Placeholder for paragraph index
+        NULL as paragraphIndex
     FROM messages_fts
     JOIN messages m ON messages_fts.rowid = m.id
     JOIN chats c ON m.chatId = c.id
+    LEFT JOIN sessions s ON c.sessionId = s.id -- LEFT JOIN for standalone chats (sessionId is NULL)
     WHERE messages_fts MATCH ?
 
     UNION ALL
 
-    -- Select from Transcript Paragraphs
+    -- Select from Transcript Paragraphs, joining sessions
     SELECT
         tp.id,
         'transcript' as type,
-        NULL as chatId, -- No chatId for paragraphs
+        NULL as chatId,
         tp.sessionId,
-        NULL as sender, -- No sender for paragraphs
-        tp.timestampMs as timestamp, -- Use paragraph timestamp
-        tp.text as snippet, -- Use original text as snippet
-        NULL as starred, -- No starring for paragraphs
+        s.clientName AS clientName, -- Get clientName from sessions
+        NULL AS tags, -- Transcripts don't have tags
+        NULL as sender,
+        tp.timestampMs as timestamp,
+        tp.text as snippet,
+        NULL as starred,
         NULL as starredName,
-        tp.paragraphIndex -- Include paragraph index
+        tp.paragraphIndex
     FROM transcript_paragraphs_fts
     JOIN transcript_paragraphs tp ON transcript_paragraphs_fts.rowid = tp.id
+    JOIN sessions s ON tp.sessionId = s.id -- Must have a session
     WHERE transcript_paragraphs_fts MATCH ?
 
-    -- TODO: Add relevance ordering later if possible (e.g., using BM25 scores if switching FTS implementation)
-    -- For now, limit the combined results
     LIMIT ?;
 `;
 let searchStmt: Statement;
 try {
     searchStmt = db.prepare(searchSql);
 } catch (e) {
-    console.error("FATAL: Failed to prepare combined FTS search statement:", e);
-    throw new Error("Failed to prepare database combined search statement.");
+    console.error("FATAL: Failed to prepare combined FTS search statement with joins:", e);
+    throw new Error("Failed to prepare database combined search statement with joins.");
 }
 
-// Updated Interface for combined results
+// Updated Interface for combined results (add clientName, tags)
 export interface FtsSearchResult {
-    id: number; // message.id or paragraph.id (DB primary key)
+    id: number;
     type: 'chat' | 'transcript';
     chatId: number | null;
     sessionId: number | null;
+    clientName: string | null; // Added
+    tags: string[] | null; // Added (parsed from JSON)
     sender: 'user' | 'ai' | null;
     timestamp: number;
     snippet: string;
-    paragraphIndex?: number | null; // paragraphIndex can be null for chat results
+    paragraphIndex?: number | null;
     starred?: number | undefined;
     starredName?: string | null | undefined;
 }
 
 
-// Helper to combine chat row with its messages, parsing tags
+// Helper to combine chat row with its messages, parsing tags (unchanged)
 const findChatWithMessages = (chatId: number): BackendChatSession | null => {
     try {
         const chatRow = get<RawChatRow>(selectChatByIdSql, chatId);
@@ -125,7 +133,7 @@ const findChatWithMessages = (chatId: number): BackendChatSession | null => {
 
 // Export the repository object
 export const chatRepository = {
-    // ... (other methods remain unchanged) ...
+    // ... (createChat, addMessage, findChatsBySessionId, findStandaloneChats, etc. remain unchanged) ...
     createChat: (sessionId: number | null): BackendChatSession => {
         const timestamp = Date.now();
         try {
@@ -143,7 +151,6 @@ export const chatRepository = {
     addMessage: ( chatId: number, sender: 'user' | 'ai', text: string, promptTokens?: number | null, completionTokens?: number | null ): BackendChatMessage => {
         const timestamp = Date.now();
          try {
-            // The insertMessage trigger (messages_ai) should automatically update messages_fts
             const info = run( insertMessageSql, chatId, sender, text, timestamp, promptTokens ?? null, completionTokens ?? null, 0, null );
             const newId = info.lastInsertRowid as number;
             const newMsg = get<BackendChatMessage>(selectMessageByIdSql, newId);
@@ -213,14 +220,15 @@ export const chatRepository = {
         catch (error) { console.error(`DB error fetching starred messages:`, error); throw new Error(`Database error fetching starred messages.`); }
     },
 
-    // --- FTS Search Function (UPDATED for UNION) ---
+
+    // --- FTS Search Function (UPDATED mapping logic) ---
     searchMessages: (query: string, limit: number = 20): FtsSearchResult[] => {
          const trimmedQuery = query?.trim() ?? '';
          if (!trimmedQuery) {
              return [];
          }
 
-         // Process query for FTS5 syntax
+         // Process query for FTS5 syntax (unchanged)
          const tokens = trimmedQuery.split(/\s+/);
          const processedTokens = tokens
              .map(token => {
@@ -247,12 +255,15 @@ export const chatRepository = {
              // Execute the UNION query, passing the query term twice
              const results = searchStmt.all(ftsQuery, ftsQuery, integerLimit);
              console.log(`[ChatRepo:searchMessages] Found ${results.length} combined results.`);
-             // Map results to ensure correct types (e.g., nulls for fields not present in one source)
+
+             // Map results to ensure correct types, INCLUDING parsing tags
              return (results as any[]).map(row => ({
                  id: row.id,
                  type: row.type, // 'chat' or 'transcript'
                  chatId: row.chatId ?? null,
                  sessionId: row.sessionId ?? null,
+                 clientName: row.clientName ?? null, // Added clientName
+                 tags: parseTags(row.tags), // Added parsed tags
                  sender: row.sender ?? null,
                  timestamp: row.timestamp,
                  snippet: row.snippet,
