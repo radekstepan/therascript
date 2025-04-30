@@ -10,7 +10,7 @@
 - [x] make favoriting work again
 - [ ] yarn dev works in mock mode, only mock mode should work in mock mode
 
-- [ ] make the chat paragraph icons larger, add a gap between them AND/OR move the play icon to the left of the paragraph
+- [ ] make the chat paragraph icons larger, add a gap between them AND/OR move the play icon to the left of the paragraph.
 - [ ] fix vertical align of transcript header, items too close to the top; `align-items: flex-end`
 - [ ] reduce the left and right padding on the chat/transcript section and be consistent with the chats section
 - [ ] the formatting of date fields is not consistent when rendered as an `input type="date"` and text field
@@ -20,16 +20,16 @@
 - [ ] change the theme dropodown such that we highlight rather than show a checkmark next to the selected theme
 - [ ] make sure to unload whisper when we are done transcribing
 - [ ] the edit transcript modal should let you delete the whole transcript. That will delete the transcript and all chat messages. Well, it'll "archive" it so that it's hidden from the UI but it's still in the DB just in case.
-- [ ] when you upload/transcribe a file, you should reset the New Session modal
+- [ ] when you upload/transcribe a file, you should reset the New Session modal (Verified - already happens)
 - [ ] when I click to Rename Chat, the input field that opens in the modal should be focused
-- [ ] toast should above modal
+- [ ] toast should be above modal
 - [ ] the star message icon is too small and not vertically aligned with the message itself
 - [ ] move env files to root dir
 - [ ] is the token count actually accurate? the current "used" tokens, but also the tokens in the transcript. Do they update after edititing a paragraph?
 - [ ] when you fail to pull a model, putting a correct link won't start the pull (clear existing pull errors)
 - [ ] you should clear the input field when you send a message and be able to type your new message while the AI is responding
 - [ ] issue with chats in loading state (ask Gemma about Jotai implementation)
-- [ ] toast needs a bit of border else it fades with the background
+- [x] toast needs a bit of border else it fades with the background
 - [ ] sidebar chats should be sorted the same way they are sorted on the homepage; on session chats they should be by date
 - [ ] messaging in mock mode should "connect" the mock ollama model (it works even without, but it is important to update the UI just like "real" mode would)
 - [ ] highlight the search word in the search results

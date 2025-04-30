@@ -69,3 +69,9 @@ html, body {
   }
 }
 /* --- END Streaming Cursor Styles --- */
+
+/* --- Added Toast Border --- */
+.rt-Toast-root-bordered {
+  border: 1px solid var(--gray-a6);
+}
+/* --- End Toast Border --- */
