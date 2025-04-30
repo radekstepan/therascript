@@ -1,7 +1,6 @@
-/* packages/api/src/preloadDb.ts */
 import Database from 'better-sqlite3';
 import path from 'node:path';
-import fs from 'node:fs/promises';
+import fs from 'node:fs/promises'; // <-- Use fs.promises for async operations
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { calculateTokenCount } from './services/fileService.js';
@@ -20,7 +19,7 @@ const __filename = fileURLToPath(import.meta.url);
 // Adjust path based on build output location (e.g., 'dist/')
 // If preloadDb.js is in `dist/`, navigate up twice to get to `packages/api`
 const packageApiDir = path.resolve(__filename, '../../');
-const targetDataDir = path.join(packageApiDir, 'data');
+const targetDataDir = path.join(packageApiDir, 'data'); // <-- Target the whole data directory
 const targetDbPath = path.join(targetDataDir, 'therapy-analyzer.sqlite');
 // --- REMOVED targetTranscriptsDir ---
 // const targetTranscriptsDir = path.join(targetDataDir, 'transcripts');
@@ -48,40 +47,46 @@ const sampleSessions = [
 
 async function preloadDatabase() {
     console.log(`[Preload] Database file target: ${targetDbPath}`);
+    console.log(`[Preload] Data directory target: ${targetDataDir}`);
 
-    // *** Improved Deletion Logic ***
+    // *** START DELETION LOGIC ***
+    // Delete the entire 'data' directory if it exists
     let deletionAttempted = false;
     try {
-        // Check if file exists before trying to delete
-        await fs.access(targetDataDir); // Throws if folder doesn't exist
-        console.log(`[Preload] Existing data dir found. Attempting deletion...`);
+        await fs.access(targetDataDir); // Check if the directory exists
+        console.log(`[Preload] Existing data directory found at ${targetDataDir}. Attempting deletion...`);
         deletionAttempted = true;
-        await fs.rm(targetDataDir, {recursive: true, force: true});
-        console.log(`[Preload] Data dir deletion command executed.`);
-        // Add a small delay to allow the file system to catch up, might help with locks
+        // Use fs.rm to recursively delete the directory
+        await fs.rm(targetDataDir, { recursive: true, force: true });
+        console.log(`[Preload] Successfully deleted directory: ${targetDataDir}`);
+        // Optional: Add a small delay to allow the file system to catch up
         await new Promise(resolve => setTimeout(resolve, 100));
     } catch (err: any) {
         if (err.code === 'ENOENT') {
-            console.log(`[Preload] No existing data dir found to delete.`);
+            // ENOENT means the directory didn't exist, which is fine
+            console.log(`[Preload] Data directory not found at ${targetDataDir}. No deletion needed.`);
         } else {
-            console.error(`[Preload] Error during data dir deletion:`, err);
+            // Other errors during deletion are problematic
+            console.error(`[Preload] Error deleting data directory ${targetDataDir}:`, err);
             // If deletion was attempted but failed, it's critical - exit.
             if (deletionAttempted) {
-                 console.error(`[Preload] FATAL: Failed to delete existing data dir. Check permissions or file locks.`);
+                 console.error(`[Preload] FATAL: Failed to delete existing data directory. Check permissions or file locks.`);
                  process.exit(1);
             }
         }
     }
-    // *** End Improved Deletion Logic ***
+    // *** END DELETION LOGIC ***
 
 
     try {
         // --- REMOVED mkdir for transcripts dir ---
+        // Create the data directory AFTER deleting it
+        console.log(`[Preload] Creating data directory: ${targetDataDir}`);
         await fs.mkdir(targetDataDir, { recursive: true });
-        // Ensure uploads dir exists as well
+        // Ensure uploads dir exists as well (will be inside the newly created data dir)
         await fs.mkdir(path.join(targetDataDir, 'uploads'), { recursive: true });
     }
-    catch (err) { console.error(`[Preload] Failed create dirs:`, err); process.exit(1); }
+    catch (err) { console.error(`[Preload] Failed create data directory:`, err); process.exit(1); }
 
     let db: Database.Database | null = null;
     let success = false;
@@ -89,7 +94,8 @@ async function preloadDatabase() {
     const sessionsToVerify: { name: string; expectedDate: string; expectedTokenCount: number | null; expectedParagraphCount: number }[] = [];
 
     try {
-        // Connect AFTER ensuring deletion (or non-existence)
+        // Connect AFTER ensuring deletion and recreation
+        console.log(`[Preload] Connecting to database: ${targetDbPath}`);
         db = new Database(targetDbPath, { verbose: console.log });
 
         // *** Call the imported initializeDatabase function ***

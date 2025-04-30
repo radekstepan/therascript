@@ -1,6 +1,5 @@
 # TODO
 
-- [ ] make sure the preload task deletes the whole data folder
 - [ ] verify/fix shutdown and autostart scripts
 - [ ] yarn dev works in mock mode, only mock mode should work in mock mode
 
