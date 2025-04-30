@@ -2,15 +2,13 @@
 
 - [ ] make sure the preload task deletes the whole data folder
 - [ ] verify/fix shutdown and autostart scripts
-- [x] fix the crappy search query; multiple keywords should join on a "*" character, special characters and quotes properly escaped, multiple spaces removed
-- [x] move transcripts and their paragraphs into the DB
-- [x] try combining fulltext chat search with transcript search
 - [ ] fix the search UI
     - be able to filter by client and/or tags
     - Escape should exit out of the UI much like clicking the "x"
     - input field should remain focused on Enter keypress
 - [ ] put search query in the URL so that you can go back to your results easily
-- [ ] make favoriting work again
+- [x] make favoriting work again
+- [ ] yarn dev works in mock mode, only mock mode should work in mock mode
 
 - [ ] make the chat paragraph icons larger, add a gap between them AND/OR move the play icon to the left of the paragraph
 - [ ] fix vertical align of transcript header, items too close to the top; `align-items: flex-end`
@@ -34,6 +32,7 @@
 - [ ] toast needs a bit of border else it fades with the background
 - [ ] sidebar chats should be sorted the same way they are sorted on the homepage; on session chats they should be by date
 - [ ] messaging in mock mode should "connect" the mock ollama model (it works even without, but it is important to update the UI just like "real" mode would)
+- [ ] highlight the search word in the search results
 
 ## Nice to have
 
@@ -44,6 +43,7 @@
 - [ ] when a message has finished streaming we refetch the messages which causes a flash of content
 - [ ] clicking on a search result should scroll to the paragraph/message in the UI
 - [ ] be able to put "weights" on the search results so that a text appearing in a title is weighted more heavily
+- [ ] combine keyword search with llm embeddings based search
 
 ## Refactor
 

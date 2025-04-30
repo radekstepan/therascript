@@ -1,3 +1,4 @@
+/* packages/ui/src/components/SessionView/Chat/ChatInterface.tsx */
 import React, { useRef, useEffect, useCallback, useState, useMemo } from 'react';
 import { Box, Flex, ScrollArea, Spinner, Text } from '@radix-ui/themes';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -40,6 +41,7 @@ export function ChatInterface({
     initialScrollTop = 0,
     onScrollUpdate,
 }: ChatInterfaceProps) {
+    // Get activeSessionId from the session prop IF it exists
     const activeSessionId = session?.id ?? null;
 
     const restoreScrollRef = useRef(false);
@@ -92,7 +94,8 @@ export function ChatInterface({
         const decoder = new TextDecoder();
         let buffer = '';
         let actualUserMessageId = receivedUserMsgId;
-        const currentChatQueryKey = isStandalone ? ['standaloneChat', activeChatId] : ['chat', activeSessionId, activeChatId];
+        // Use the memoized key
+        const currentChatQueryKey = chatQueryKey;
         let streamErrored = false;
 
         try {
@@ -186,6 +189,7 @@ export function ChatInterface({
         },
         onMutate: async (newMessageText) => {
             if (!activeChatId) return;
+            // Use memoized key
             const currentChatQueryKey = chatQueryKey;
             await queryClient.cancelQueries({ queryKey: currentChatQueryKey });
             const previousChatData = queryClient.getQueryData<ChatSession>(currentChatQueryKey);
@@ -234,6 +238,7 @@ export function ChatInterface({
         },
         onError: (error, newMessageText, context) => {
             console.error("Mutation failed (Initiation or Stream Error):", error);
+            // Use memoized key
             const currentChatQueryKey = chatQueryKey;
             if (context?.previousChatData && activeChatId && (isStandalone || activeSessionId)) {
                  queryClient.setQueryData(currentChatQueryKey, context.previousChatData);
@@ -307,6 +312,7 @@ export function ChatInterface({
                     <ChatMessages
                         messages={chatMessages}
                         activeChatId={activeChatId}
+                        activeSessionId={activeSessionId} // Pass activeSessionId down
                         isStandalone={isStandalone}
                         streamingMessageId={streamingAiMessageId}
                     />
@@ -325,3 +331,4 @@ export function ChatInterface({
         </Flex>
     );
 }
+// TODO comments should not be removed

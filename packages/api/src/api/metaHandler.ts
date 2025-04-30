@@ -25,3 +25,4 @@ export const getStarredMessages = ({ set }: any): ApiChatMessageResponse[] => {
         throw new InternalServerError('Failed to fetch starred messages', error instanceof Error ? error : undefined);
     }
 };
+// TODO comments should not be removed

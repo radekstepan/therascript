@@ -1,3 +1,4 @@
+/* packages/api/src/repositories/chatRepository.ts */
 import { db, exec, run, all, get } from '../db/sqliteService.js';
 import type { BackendChatSession, BackendChatMessage, ChatMetadata } from '../types/index.js';
 import { Statement } from 'better-sqlite3';
