@@ -41,7 +41,7 @@ export interface SessionMetadata {
 export interface Session extends SessionMetadata {
     id: number;
     fileName: string;
-    transcriptPath: string | null;
+    // transcriptPath: string | null; // Removed
     audioPath: string | null; // Path/Identifier to the original uploaded audio file
     status: 'pending' | 'transcribing' | 'completed' | 'failed';
     whisperJobId: string | null;
@@ -127,14 +127,15 @@ export interface DockerContainerStatus {
 }
 // --- END Docker Container Status Type ---
 
-// --- ADDED: Search Result Type (UI) ---
+// --- UPDATED: Search Result Type (UI) ---
 export interface SearchResultItem {
-    id: number; // message id
-    chatId: number;
-    sessionId: number | null; // Can be null for standalone chats
-    sender: 'user' | 'ai';
+    id: number; // message ID or paragraphIndex
+    type: 'chat' | 'transcript'; // Distinguishes the result type
+    chatId: number | null; // null for transcripts
+    sessionId: number | null; // null for standalone chats
+    sender: 'user' | 'ai' | null; // null for transcripts
     timestamp: number;
-    snippet: string; // HTML snippet with highlights
+    snippet: string; // HTML snippet with highlights (Backend should still provide highlights)
     rank: number;
 }
 

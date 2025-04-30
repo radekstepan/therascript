@@ -1,7 +1,6 @@
-// packages/api/src/routes/searchRoutes.ts
 import { Elysia, t } from 'elysia';
 import { chatRepository } from '../repositories/chatRepository.js';
-// Import type without rank (snippet is now full text)
+// --- Import updated search result type ---
 import type { FtsSearchResult } from '../repositories/chatRepository.js';
 import { InternalServerError, BadRequestError } from '../errors.js';
 
@@ -11,20 +10,22 @@ const SearchQuerySchema = t.Object({
     limit: t.Optional(t.Numeric({ minimum: 1, maximum: 100, default: 20 }))
 });
 
-// Schema for response item (UI expects rank, snippet)
+// --- UPDATED Schema for response item ---
 const SearchResultItemSchema = t.Object({
+    // Use paragraphIndex as ID for transcripts, message ID for chats
     id: t.Number(),
-    chatId: t.Number(),
-    sessionId: t.Union([t.Number(), t.Null()]),
-    sender: t.Union([t.Literal('user'), t.Literal('ai')]),
+    type: t.Union([t.Literal('chat'), t.Literal('transcript')]), // Added type
+    chatId: t.Union([t.Number(), t.Null()]), // Nullable for transcripts
+    sessionId: t.Union([t.Number(), t.Null()]), // Nullable for standalone chats
+    sender: t.Union([t.Literal('user'), t.Literal('ai'), t.Null()]), // Nullable for transcripts
     timestamp: t.Number(),
-    snippet: t.String(), // Keep snippet, it will contain full text now
-    rank: t.Number()
+    snippet: t.String(), // Contains full text now
+    rank: t.Number() // Index-based rank
 });
 
 const SearchResponseSchema = t.Object({
     query: t.String(),
-    results: t.Array(SearchResultItemSchema),
+    results: t.Array(SearchResultItemSchema), // Use updated item schema
 });
 
 export const searchRoutes = new Elysia({ prefix: '/api/search' })
@@ -41,18 +42,20 @@ export const searchRoutes = new Elysia({ prefix: '/api/search' })
             console.log(`[API Search] Received search request: query="${searchQuery}", limit=${limit} (integer)`);
 
             try {
-                // Results now don't have rank/snippet from the repo
+                // Results now include 'type' and 'paragraphIndex?'
                 const results: FtsSearchResult[] = chatRepository.searchMessages(searchQuery, limit);
 
-                // Map results - rank is index, snippet is original text
+                // --- Map results based on type ---
                 const responseResults = results.map((r: FtsSearchResult, index: number) => ({
-                    id: r.id,
-                    chatId: r.chatId,
-                    sessionId: r.sessionId,
-                    sender: r.sender as 'user' | 'ai',
+                    // If transcript, use paragraphIndex as ID, otherwise use message ID (r.id)
+                    id: r.type === 'transcript' ? (r.paragraphIndex ?? -1) : r.id,
+                    type: r.type,
+                    chatId: r.chatId, // Will be null for transcripts
+                    sessionId: r.sessionId, // Will be present for transcripts and session chats
+                    sender: r.sender, // Will be null for transcripts
                     timestamp: r.timestamp,
-                    snippet: r.snippet, // This now contains the original text from the DB query
-                    rank: index + 1,
+                    snippet: r.snippet, // Contains full text
+                    rank: index + 1, // Simple index-based rank
                 }));
 
                 set.status = 200;
@@ -61,7 +64,11 @@ export const searchRoutes = new Elysia({ prefix: '/api/search' })
                     results: responseResults,
                 };
             } catch (error: any) {
-                console.error(`[API Search] Error searching messages with query "${searchQuery}":`, error);
+                console.error(`[API Search] Error searching messages/transcripts with query "${searchQuery}":`, error);
+                // Handle FTS syntax errors more specifically
+                if (error instanceof Error && error.message.includes('FTS query syntax error')) {
+                     throw new BadRequestError(error.message);
+                }
                 throw new InternalServerError('Failed to perform search', error instanceof Error ? error : undefined);
             }
         }, {
@@ -72,8 +79,8 @@ export const searchRoutes = new Elysia({ prefix: '/api/search' })
                 500: t.Object({ error: t.String(), message: t.String(), details: t.Optional(t.Any()) })
             },
             detail: {
-                summary: 'Search chat messages using Full-Text Search',
-                description: 'Performs a full-text search across message content. Returns relevant messages (NOT ORDERED BY RELEVANCE), with full text content.', // Updated description
+                summary: 'Search chat messages and transcript paragraphs', // Updated summary
+                description: 'Performs a full-text search across message and transcript content. Returns relevant messages and paragraphs.', // Updated description
             }
         })
     );

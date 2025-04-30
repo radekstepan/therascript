@@ -4,7 +4,7 @@
 - [ ] verify/fix shutdown and autostart scripts
 - [x] fix the crappy search query; multiple keywords should join on a "*" character, special characters and quotes properly escaped, multiple spaces removed
 - [x] move transcripts and their paragraphs into the DB
-- [ ] try combining fulltext chat search with transcript search
+- [x] try combining fulltext chat search with transcript search
 - [ ] fix the search UI
     - be able to filter by client and/or tags
     - Escape should exit out of the UI much like clicking the "x"

@@ -35,40 +35,66 @@ const updateMessageStarStatusSql = 'UPDATE messages SET starred = ?, starredName
 const selectStarredMessagesSql = 'SELECT * FROM messages WHERE starred = 1 ORDER BY timestamp DESC';
 
 
-// --- FTS Search Statement (REMOVED rank, ORDER BY, and snippet) ---
-const searchMessagesSql = `
+// --- FTS Search Statement (UPDATED for UNION ALL) ---
+// Combine results from messages and transcript paragraphs
+const searchSql = `
+    -- Select from Messages
     SELECT
         m.id,
+        'chat' as type,
         m.chatId,
         c.sessionId,
         m.sender,
         m.timestamp,
-        -- snippet(messages_fts, 0, '[HL]', '[/HL]', '...', 25) as snippet, -- <-- REMOVED snippet()
-        m.text as snippet, -- <-- Use original text as fallback for now
+        m.text as snippet, -- Use original text as snippet
         m.starred,
-        m.starredName
+        m.starredName,
+        NULL as paragraphIndex -- Placeholder for paragraph index
     FROM messages_fts
     JOIN messages m ON messages_fts.rowid = m.id
     JOIN chats c ON m.chatId = c.id
     WHERE messages_fts MATCH ?
+
+    UNION ALL
+
+    -- Select from Transcript Paragraphs
+    SELECT
+        tp.id,
+        'transcript' as type,
+        NULL as chatId, -- No chatId for paragraphs
+        tp.sessionId,
+        NULL as sender, -- No sender for paragraphs
+        tp.timestampMs as timestamp, -- Use paragraph timestamp
+        tp.text as snippet, -- Use original text as snippet
+        NULL as starred, -- No starring for paragraphs
+        NULL as starredName,
+        tp.paragraphIndex -- Include paragraph index
+    FROM transcript_paragraphs_fts
+    JOIN transcript_paragraphs tp ON transcript_paragraphs_fts.rowid = tp.id
+    WHERE transcript_paragraphs_fts MATCH ?
+
+    -- TODO: Add relevance ordering later if possible (e.g., using BM25 scores if switching FTS implementation)
+    -- For now, limit the combined results
     LIMIT ?;
 `;
-let searchMessagesStmt: Statement;
+let searchStmt: Statement;
 try {
-    searchMessagesStmt = db.prepare(searchMessagesSql);
+    searchStmt = db.prepare(searchSql);
 } catch (e) {
-    console.error("FATAL: Failed to prepare FTS search statement:", e);
-    throw new Error("Failed to prepare database search statement.");
+    console.error("FATAL: Failed to prepare combined FTS search statement:", e);
+    throw new Error("Failed to prepare database combined search statement.");
 }
 
-// Interface for results coming *from this query* (no rank)
+// Updated Interface for combined results
 export interface FtsSearchResult {
-    id: number;
-    chatId: number;
+    id: number; // message.id or paragraph.id (DB primary key)
+    type: 'chat' | 'transcript';
+    chatId: number | null;
     sessionId: number | null;
-    sender: 'user' | 'ai';
+    sender: 'user' | 'ai' | null;
     timestamp: number;
-    snippet: string; // Will contain full text for now
+    snippet: string;
+    paragraphIndex?: number | null; // paragraphIndex can be null for chat results
     starred?: number | undefined;
     starredName?: string | null | undefined;
 }
@@ -186,67 +212,59 @@ export const chatRepository = {
         catch (error) { console.error(`DB error fetching starred messages:`, error); throw new Error(`Database error fetching starred messages.`); }
     },
 
-    // --- FTS Search Function (Corrected Logic v4) ---
+    // --- FTS Search Function (UPDATED for UNION) ---
     searchMessages: (query: string, limit: number = 20): FtsSearchResult[] => {
          const trimmedQuery = query?.trim() ?? '';
          if (!trimmedQuery) {
              return [];
          }
 
-         // 1. Split into potential keywords by whitespace
+         // Process query for FTS5 syntax
          const tokens = trimmedQuery.split(/\s+/);
-
-         // 2. Process each token
          const processedTokens = tokens
              .map(token => {
-                 let processed = token.trim();
-                 // Remove only leading asterisks
-                 processed = processed.replace(/^\*+/, '');
-
-                 // **Filter out tokens consisting only of typical FTS punctuation/operators**
-                 // This aims to remove isolated problematic characters like standalone quotes.
-                 // Regex includes: *, ", ', (, ), +, -, ^, !, &, |, <, >, = and whitespace (though split should handle ws)
-                 // We keep alphanumeric characters and potentially internal hyphens/apostrophes if needed.
+                 let processed = token.trim().replace(/^\*+/, '');
                  if (!processed || /^[\\*"'()+\-^!&|<>=\s]+$/.test(processed)) {
                      console.log(`[ChatRepo:searchMessages] Filtering out potentially problematic token: "${token}" -> "${processed}"`);
                      return null;
                  }
-
-                 // Escape internal double quotes *only*
-                 // Single quotes inside a double-quoted FTS term are typically treated literally
                  processed = processed.replace(/"/g, '""');
-
-                 // Wrap the entire processed token in double quotes and add the prefix asterisk *inside*
-                 // This handles spaces, single quotes, hyphens etc., within the term safely for FTS5.
                  return `"${processed}*"`;
              })
-             .filter((token): token is string => token !== null); // Filter out nulls (empty or punctuation-only tokens)
+             .filter((token): token is string => token !== null);
 
-         // 3. If no valid tokens remain, return empty
          if (processedTokens.length === 0) {
              console.log(`[ChatRepo:searchMessages] No valid search tokens derived from query: "${query}"`);
              return [];
          }
 
-         // 4. Join the valid, quoted tokens with a space (implicit AND in FTS)
          const ftsQuery = processedTokens.join(' ');
+         const integerLimit = Math.floor(limit);
 
-         const integerLimit = Math.floor(limit); // Ensure integer limit
-
-         console.log(`[ChatRepo:searchMessages] Executing FTS query: '${ftsQuery}', LIMIT: ${integerLimit}`);
+         console.log(`[ChatRepo:searchMessages] Executing combined FTS query: '${ftsQuery}', LIMIT: ${integerLimit}`);
          try {
-             // Query now doesn't select rank, snippet, or order by rank
-             const results = searchMessagesStmt.all(ftsQuery, integerLimit);
-             console.log(`[ChatRepo:searchMessages] Found ${results.length} results.`);
-             return results as FtsSearchResult[];
+             // Execute the UNION query, passing the query term twice
+             const results = searchStmt.all(ftsQuery, ftsQuery, integerLimit);
+             console.log(`[ChatRepo:searchMessages] Found ${results.length} combined results.`);
+             // Map results to ensure correct types (e.g., nulls for fields not present in one source)
+             return (results as any[]).map(row => ({
+                 id: row.id,
+                 type: row.type, // 'chat' or 'transcript'
+                 chatId: row.chatId ?? null,
+                 sessionId: row.sessionId ?? null,
+                 sender: row.sender ?? null,
+                 timestamp: row.timestamp,
+                 snippet: row.snippet,
+                 paragraphIndex: row.paragraphIndex ?? null,
+                 starred: row.starred,
+                 starredName: row.starredName,
+             }));
          } catch (error) {
-             console.error(`DB error searching messages with FTS query '${ftsQuery}' derived from original query "${query}":`, error);
+             console.error(`DB error searching combined messages/transcripts with FTS query '${ftsQuery}' derived from original query "${query}":`, error);
              if (error instanceof Error && (error.message.includes('malformed MATCH expression') || error.message.includes('fts5: syntax error'))) {
-                 // Provide more context in the error message
                  throw new Error(`Database FTS query syntax error for query: "${query}". Processed FTS query: '${ftsQuery}'`);
              }
-             // Re-throwing the original error might give more clues if it's not the match expression
-             throw new Error(`Database error searching messages: ${error instanceof Error ? error.message : String(error)}`);
+             throw new Error(`Database error searching messages/transcripts: ${error instanceof Error ? error.message : String(error)}`);
          }
     },
     // TODO comments should not be removed

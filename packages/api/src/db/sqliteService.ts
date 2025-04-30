@@ -1,4 +1,3 @@
-/* packages/api/src/db/sqliteService.ts */
 // packages/api/src/db/sqliteService.ts
 import crypto from 'node:crypto'; // <-- Import crypto
 import Database, { type Database as DB, type Statement, type RunResult } from 'better-sqlite3';
@@ -29,14 +28,13 @@ export const schema = `
         date TEXT NOT NULL, -- ISO 8601 timestamp string
         sessionType TEXT NOT NULL,
         therapy TEXT NOT NULL,
-        -- transcriptPath TEXT NULL, -- Removed column
         status TEXT NOT NULL DEFAULT 'pending',
         whisperJobId TEXT NULL,
         audioPath TEXT NULL, -- Added column for the path/identifier to the original audio file
         transcriptTokenCount INTEGER NULL -- Added column for transcript token count
     );
 
-    -- *** Transcript Paragraphs Table Definition (kept here for hash calculation) ***
+    -- Transcript Paragraphs Table Definition
     CREATE TABLE IF NOT EXISTS transcript_paragraphs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         sessionId INTEGER NOT NULL,
@@ -47,7 +45,6 @@ export const schema = `
     );
     CREATE INDEX IF NOT EXISTS idx_paragraph_session ON transcript_paragraphs (sessionId);
     CREATE INDEX IF NOT EXISTS idx_paragraph_session_index ON transcript_paragraphs (sessionId, paragraphIndex); -- For fetching in order
-    -- *** END Definition ***
 
     -- Chats Table (sessionId is now NULLABLE)
     CREATE TABLE IF NOT EXISTS chats (
@@ -79,7 +76,7 @@ export const schema = `
     -- Optional index for starred messages if performance becomes an issue
     -- CREATE INDEX IF NOT EXISTS idx_message_starred ON messages (starred);
 
-    -- *** ADDED: Messages FTS5 Table ***
+    -- Messages FTS5 Table
     CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
         content, -- Column in FTS table to store the text
         content='messages', -- Link to original table 'messages'
@@ -87,21 +84,36 @@ export const schema = `
         tokenize='porter unicode61' -- Use Porter stemmer with Unicode support
     );
 
-    -- *** ADDED: Triggers to keep FTS table synchronized ***
-    -- Trigger for INSERT on messages
+    -- Triggers to keep messages_fts synchronized
     CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
         INSERT INTO messages_fts (rowid, content) VALUES (new.id, new.text);
     END;
-    -- Trigger for DELETE on messages
     CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
-        -- FTS5 uses 'delete' command with original rowid and content
         INSERT INTO messages_fts (messages_fts, rowid, content) VALUES ('delete', old.id, old.text);
     END;
-    -- Trigger for UPDATE on messages
     CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
-        -- FTS5 update requires deleting the old entry and inserting the new one
         INSERT INTO messages_fts (messages_fts, rowid, content) VALUES ('delete', old.id, old.text);
         INSERT INTO messages_fts (rowid, content) VALUES (new.id, new.text);
+    END;
+
+    -- *** ADDED: Transcript Paragraphs FTS5 Table ***
+    CREATE VIRTUAL TABLE IF NOT EXISTS transcript_paragraphs_fts USING fts5(
+        content, -- Column in FTS table to store the text
+        content='transcript_paragraphs', -- Link to original table
+        content_rowid='id', -- Link FTS rowid to the original 'id' column
+        tokenize='porter unicode61' -- Use Porter stemmer with Unicode support
+    );
+
+    -- *** ADDED: Triggers to keep transcript_paragraphs_fts synchronized ***
+    CREATE TRIGGER IF NOT EXISTS transcript_paragraphs_ai AFTER INSERT ON transcript_paragraphs BEGIN
+        INSERT INTO transcript_paragraphs_fts (rowid, content) VALUES (new.id, new.text);
+    END;
+    CREATE TRIGGER IF NOT EXISTS transcript_paragraphs_ad AFTER DELETE ON transcript_paragraphs BEGIN
+        INSERT INTO transcript_paragraphs_fts (transcript_paragraphs_fts, rowid, content) VALUES ('delete', old.id, old.text);
+    END;
+    CREATE TRIGGER IF NOT EXISTS transcript_paragraphs_au AFTER UPDATE ON transcript_paragraphs BEGIN
+        INSERT INTO transcript_paragraphs_fts (transcript_paragraphs_fts, rowid, content) VALUES ('delete', old.id, old.text);
+        INSERT INTO transcript_paragraphs_fts (rowid, content) VALUES (new.id, new.text);
     END;
     -- *** END FTS Additions ***
 
@@ -192,7 +204,7 @@ export function verifySchemaVersion(dbInstance: DB, currentSchemaDefinition: str
 }
 
 
-// --- Initialize Function Definition (Updated for new columns) ---
+// --- Initialize Function Definition (Updated for new columns and FTS) ---
 // *** ADDED 'export' ***
 export function initializeDatabase(dbInstance: DB) {
     console.log('[db Init Func]: Attempting to initialize schema...'); // Log entry
@@ -202,28 +214,9 @@ export function initializeDatabase(dbInstance: DB) {
         dbInstance.pragma('foreign_keys = ON');
         console.log('[db Init Func]: WAL mode and foreign keys enabled.');
 
-        // Execute the main schema (which includes the definition for transcript_paragraphs)
+        // Execute the main schema (which includes FTS tables and triggers now)
         dbInstance.exec(schema);
         console.log('[db Init Func]: Main database schema exec command executed.');
-
-        // --- Explicitly ensure transcript_paragraphs table exists again ---
-        // This might be redundant but acts as a safeguard if the main exec had issues.
-        console.log('[db Init Func]: Explicitly ensuring transcript_paragraphs table exists...');
-        dbInstance.exec(`
-            CREATE TABLE IF NOT EXISTS transcript_paragraphs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                sessionId INTEGER NOT NULL,
-                paragraphIndex INTEGER NOT NULL,
-                timestampMs INTEGER NOT NULL,
-                text TEXT NOT NULL,
-                FOREIGN KEY (sessionId) REFERENCES sessions (id) ON DELETE CASCADE
-            );
-        `);
-        dbInstance.exec(`CREATE INDEX IF NOT EXISTS idx_paragraph_session ON transcript_paragraphs (sessionId);`);
-        dbInstance.exec(`CREATE INDEX IF NOT EXISTS idx_paragraph_session_index ON transcript_paragraphs (sessionId, paragraphIndex);`);
-        console.log('[db Init Func]: Explicit transcript_paragraphs creation/indexing check complete.');
-        // --- End Explicit Check ---
-
 
         // --- Migrations (keep existing ones, remove transcriptPath migration) ---
         // These are less critical for preload (which deletes DB) but vital for running API against existing DB
