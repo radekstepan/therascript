@@ -32,6 +32,7 @@
 - [ ] for reasoning models, display the <think> section separately
 - [ ] actually delete cached Ollama models
 - [ ] when you render markdown, the output is usually a paragraph tag which means the cursor will always be on the newline.
+  - https://www.typeitjs.com/
 - [ ] when a message has finished streaming we refetch the messages which causes a flash of content
 - [ ] clicking on a search result should scroll to the paragraph/message in the UI
 - [ ] be able to put "weights" on the search results so that a text appearing in a title is weighted more heavily
@@ -41,13 +42,10 @@
 
 - [ ] centralize types into a separate package
 - [ ] detect similar code
-- [x] 4 spaces everywhere plus autoformat on git commit
 - [ ] remove unused logic
-- [x] split into smaller files
 - [ ] reuse package dependencies
 - [ ] make sure READMEs are up to date, plus add screenshots
 - [ ] consistent error messages when we go offline
-- [x] Enter keypress means main action, Escape keypress means exit out of a UI (modal)
 
 ## Ideas
 
