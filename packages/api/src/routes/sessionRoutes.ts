@@ -1,3 +1,6 @@
+// =========================================
+// File: packages/api/src/routes/sessionRoutes.ts
+// =========================================
 import { Elysia, t, type Static, type Context as ElysiaContext, type Cookie } from 'elysia';
 import path from 'node:path';
 import fs from 'node:fs/promises';
@@ -6,17 +9,19 @@ import { Readable } from 'node:stream';
 import { sessionRepository } from '../repositories/sessionRepository.js';
 import { chatRepository } from '../repositories/chatRepository.js';
 import { transcriptRepository } from '../repositories/transcriptRepository.js'; // <-- Import Transcript Repo
+import { messageRepository } from '../repositories/messageRepository.js'; // <-- Import Message Repo
 import {
     listSessions, getSessionDetails, updateSessionMetadata,
     getTranscript, updateTranscriptParagraph,
     deleteSessionAudioHandler
 } from '../api/sessionHandler.js';
+// --- Import from tokenizerService ---
+import { calculateTokenCount } from '../services/tokenizerService.js';
 import {
     // --- REMOVED saveTranscriptContent, deleteTranscriptFile ---
     deleteUploadedAudioFile,
     saveUploadedAudio,
     getAudioAbsolutePath,
-    calculateTokenCount,
 } from '../services/fileService.js';
 import {
     startTranscriptionJob,
@@ -141,7 +146,9 @@ const sessionRoutesInstance = new Elysia({ prefix: '/api' })
                       // 6. Create initial chat if none exist
                       if (!chatsMetadata || chatsMetadata.length === 0) {
                           const newFullChat = chatRepository.createChat(sessionId);
-                          chatRepository.addMessage(newFullChat.id, 'ai', `Session "${finalizedSession.sessionName}" uploaded on ${finalizedSession.date.split('T')[0]} has been transcribed...`);
+                          // --- FIX: Use messageRepository ---
+                          messageRepository.addMessage(newFullChat.id, 'ai', `Session "${finalizedSession.sessionName}" uploaded on ${finalizedSession.date.split('T')[0]} has been transcribed...`);
+                          // --- END FIX ---
                           console.log(`[API Finalize] Initial chat created (ID: ${newFullChat.id}) for session ${sessionId}.`);
                            // --- FIX: Exclude tags when fetching/assigning chat metadata ---
                           const updatedChatsMetadataRaw = chatRepository.findChatsBySessionId(sessionId);

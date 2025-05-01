@@ -1,5 +1,8 @@
+// =========================================
+// File: packages/api/src/api/metaHandler.ts
+// =========================================
 /* packages/api/src/api/metaHandler.ts */
-import { chatRepository } from '../repositories/chatRepository.js';
+import { messageRepository } from '../repositories/messageRepository.js'; // <-- Import Message Repo
 import { InternalServerError } from '../errors.js';
 import type { BackendChatMessage } from '../types/index.js';
 
@@ -9,7 +12,7 @@ type ApiChatMessageResponse = Omit<BackendChatMessage, 'starred'> & { starred: b
 // --- Handler for fetching starred messages ---
 export const getStarredMessages = ({ set }: any): ApiChatMessageResponse[] => {
     try {
-        const starredMessages = chatRepository.findStarredMessages();
+        const starredMessages = messageRepository.findStarredMessages(); // <-- Use messageRepository
         set.status = 200;
         // Map starred number to boolean for API response
         return starredMessages.map(m => {

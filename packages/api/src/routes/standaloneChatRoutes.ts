@@ -1,6 +1,10 @@
+// =========================================
+// File: packages/api/src/routes/standaloneChatRoutes.ts
+// =========================================
 /* packages/api/src/routes/standaloneChatRoutes.ts */
 import { Elysia, t } from 'elysia';
 import { chatRepository } from '../repositories/chatRepository.js'; // Correct import
+import { messageRepository } from '../repositories/messageRepository.js'; // <-- Import Message Repo
 import {
     createStandaloneChat, listStandaloneChats, getStandaloneChatDetails,
     addStandaloneChatMessage,
@@ -57,8 +61,8 @@ export const standaloneChatRoutes = new Elysia({ prefix: '/api/chats' })
                 .derive(({ params, chatData }) => {
                     const messageId = parseInt(params.messageId, 10);
                     if (isNaN(messageId)) throw new BadRequestError('Invalid msg ID');
-                    // Use the correct exported function here
-                    const message = chatRepository.findMessageById(messageId);
+                    // Use the messageRepository function here
+                    const message = messageRepository.findMessageById(messageId);
                     if (!message || message.chatId !== chatData.id) {
                         throw new NotFoundError(`Message ${messageId} in chat ${chatData.id}`);
                     }

@@ -1,3 +1,6 @@
+// =========================================
+// File: packages/ui/src/components/StandaloneChatView/EditStandaloneChatModal.tsx
+// =========================================
 /*
  * packages/ui/src/components/StandaloneChatView/EditStandaloneChatModal.tsx
  *
@@ -7,7 +10,7 @@
 import React, { useState, useEffect, useCallback } from 'react'; // Added useCallback
 import { Dialog, Button, Flex, Text, TextField, Box, Badge, IconButton, Callout } from '@radix-ui/themes';
 import { Cross2Icon, CheckIcon, PlusIcon, InfoCircledIcon } from '@radix-ui/react-icons';
-import type { StandaloneChatListItem } from '../../api/api';
+import type { StandaloneChatListItem } from '../../types'; // <-- Import from types
 
 interface EditStandaloneChatModalProps {
     isOpen: boolean;

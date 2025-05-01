@@ -146,4 +146,26 @@ export interface SearchApiResponse {
 // --- END: Search Result Type ---
 
 
+// --- ADDED: UI Transcription Status Type ---
+export interface UITranscriptionStatus {
+    job_id: string;
+    status: "queued" | "processing" | "completed" | "failed" | "canceled";
+    progress?: number;
+    error?: string;
+    duration?: number;
+}
+// --- END: UI Transcription Status Type ---
+
+// --- ADDED: Standalone Chat List Item Type ---
+// Define type for standalone chat list item (metadata only)
+export interface StandaloneChatListItem {
+  id: number;
+  sessionId: null; // Should always be null
+  timestamp: number;
+  name?: string;
+  tags?: string[] | null; // <-- Added tags
+}
+// --- END: Standalone Chat List Item Type ---
+
+
 // TODO comments should not be removed

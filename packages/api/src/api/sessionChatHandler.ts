@@ -1,6 +1,10 @@
+// =========================================
+// File: packages/api/src/api/sessionChatHandler.ts
+// (Refined processStream function)
+// =========================================
 import { chatRepository } from '../repositories/chatRepository.js';
-import { transcriptRepository } from '../repositories/transcriptRepository.js'; // <-- Import Transcript Repo
-// --- Removed loadTranscriptContent ---
+import { transcriptRepository } from '../repositories/transcriptRepository.js';
+import { messageRepository } from '../repositories/messageRepository.js';
 import { streamChatResponse } from '../services/ollamaService.js';
 import { NotFoundError, InternalServerError, ApiError, BadRequestError } from '../errors.js';
 import type { StructuredTranscript, BackendChatMessage, ChatMetadata } from '../types/index.js';
@@ -8,10 +12,8 @@ import { TransformStream } from 'node:stream/web';
 import { TextEncoder } from 'node:util';
 
 // Define precise return types matching the schemas where needed
-// Session chat metadata does NOT include tags currently
 type SessionChatMetadataResponse = Omit<ChatMetadata, 'tags'> & { sessionId: number };
 type ApiChatMessageResponse = Omit<BackendChatMessage, 'starred'> & { starred: boolean };
-// Full Session Chat Response does NOT include tags currently
 type FullSessionChatApiResponse = SessionChatMetadataResponse & { messages: ApiChatMessageResponse[] };
 
 
@@ -21,14 +23,11 @@ export const createSessionChat = ({ sessionData, set }: any): SessionChatMetadat
     try {
         const newChat = chatRepository.createChat(sessionId);
         console.log(`[API] Created new chat ${newChat.id} in session ${sessionId}`);
-        // --- FIX: Remove 'tags' from destructuring as it's not expected in the response type ---
         const { messages, ...chatMetadata } = newChat;
-        // --- END FIX ---
         set.status = 201;
         if(chatMetadata.sessionId === null) throw new InternalServerError("Created session chat has null sessionId");
-        // Ensure tags are explicitly excluded if they somehow exist on chatMetadata
         const { tags, ...responseMetadata } = chatMetadata;
-        return responseMetadata as SessionChatMetadataResponse; // Assert sessionId is number, tags excluded
+        return responseMetadata as SessionChatMetadataResponse;
     } catch (error) {
         console.error(`[API Error] createSessionChat (Session ID: ${sessionId}):`, error);
         throw new InternalServerError('Failed to create session chat', error instanceof Error ? error : undefined);
@@ -36,7 +35,6 @@ export const createSessionChat = ({ sessionData, set }: any): SessionChatMetadat
 };
 
 // POST /api/sessions/:sessionId/chats/:chatId/messages - Add message to session chat (Streaming)
-// (No changes needed here regarding types)
 export const addSessionChatMessage = async ({ sessionData, chatData, body, set }: any): Promise<Response> => {
     const { text } = body;
     const trimmedText = text.trim();
@@ -46,13 +44,9 @@ export const addSessionChatMessage = async ({ sessionData, chatData, body, set }
     if (chatData.sessionId !== sessionData.id) throw new ApiError(403, `Chat ${chatData.id} does not belong to session ${sessionData.id}.`);
 
     try {
-        userMessage = chatRepository.addMessage(chatData.id, 'user', trimmedText);
-
-        // --- Fetch transcript text from DB using transcriptRepository ---
+        userMessage = messageRepository.addMessage(chatData.id, 'user', trimmedText);
         const transcriptString = transcriptRepository.getTranscriptTextForSession(sessionData.id);
-        // --- End fetch ---
-
-        const currentMessages = chatRepository.findMessagesByChatId(chatData.id);
+        const currentMessages = messageRepository.findMessagesByChatId(chatData.id);
         if (currentMessages.length === 0) throw new InternalServerError(`CRITICAL: Chat ${chatData.id} has no messages immediately after adding one.`);
 
         const ollamaStream = await streamChatResponse(transcriptString, currentMessages);
@@ -62,27 +56,96 @@ export const addSessionChatMessage = async ({ sessionData, chatData, body, set }
         const writer = passthrough.writable.getWriter();
         const encoder = new TextEncoder();
 
-        const writeSseEvent = async (data: object) => { try { await writer.write(encoder.encode(`data: ${JSON.stringify(data)}\n\n`)); } catch (e) { console.error("SSE Write Error:", e); throw e; } };
-
-        const processStream = async () => {
-             let fullAiText = '';
-             let finalPromptTokens: number | undefined;
-             let finalCompletionTokens: number | undefined;
-             try { /* ... stream processing logic ... */
-                 for await (const chunk of ollamaStream) {
-                     if (chunk.message?.content) { const textChunk = chunk.message.content; fullAiText += textChunk; await writeSseEvent({ chunk: textChunk }); }
-                     if (chunk.done) { finalPromptTokens = chunk.prompt_eval_count; finalCompletionTokens = chunk.eval_count; await writeSseEvent({ done: true, promptTokens: finalPromptTokens, completionTokens: finalCompletionTokens }); }
-                 }
-             } catch (streamError) { console.error("[API addSessionChatMessage] Error processing Ollama stream:", streamError); try { await writeSseEvent({ error: 'Stream processing failed on server.' }); } catch {} await writer.abort(streamError); }
-             finally {
-                  if (!writer.closed && writer.desiredSize !== null) { try { await writer.close(); } catch {} }
-                  if (fullAiText.trim()) {
-                      chatRepository.addMessage(chatData.id, 'ai', fullAiText.trim(), finalPromptTokens, finalCompletionTokens);
-                      console.log(`[API addSessionChatMessage] Saved complete AI message after stream end/error.`);
-                  } else { console.warn("[API addSessionChatMessage] Stream finished or errored, AI response empty."); }
+        const writeSseEvent = async (data: object) => {
+             try {
+                 // Check if writer is already closed or closing before writing
+                 // Note: There isn't a perfect cross-platform way to check if a writer is locked/closed
+                 // without potentially causing an error. We rely on catching the error.
+                 await writer.write(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+             } catch (e) {
+                 // If write fails, it likely means the client disconnected or the stream errored.
+                 console.warn(`[API SSE Write Error ${chatData.id}]: Failed to write to stream (client likely disconnected):`, e);
+                 // We should abort further processing if we can't write
+                 throw new Error("SSE write failed, aborting stream processing.");
              }
+         };
+
+        // --- Refined processStream ---
+        const processStream = async () => {
+            let fullAiText = '';
+            let finalPromptTokens: number | undefined;
+            let finalCompletionTokens: number | undefined;
+            let ollamaStreamError: Error | null = null;
+
+            // Wrap the Ollama stream iteration in its own try/catch
+            try {
+                console.log(`[API ProcessStream ${chatData.id}] Starting Ollama stream processing...`);
+                for await (const chunk of ollamaStream) {
+                    // Send chunk to client
+                    if (chunk.message?.content) {
+                        const textChunk = chunk.message.content;
+                        fullAiText += textChunk;
+                        await writeSseEvent({ chunk: textChunk });
+                    }
+                    // Check for final 'done' data from Ollama
+                    if (chunk.done) {
+                        finalPromptTokens = chunk.prompt_eval_count;
+                        finalCompletionTokens = chunk.eval_count;
+                        console.log(`[API ProcessStream ${chatData.id}] Ollama stream 'done' signal received. Tokens: C=${finalCompletionTokens}, P=${finalPromptTokens}`);
+                        // Send final 'done' event to client
+                        await writeSseEvent({ done: true, promptTokens: finalPromptTokens, completionTokens: finalCompletionTokens });
+                    }
+                }
+                console.log(`[API ProcessStream ${chatData.id}] Finished iterating Ollama stream successfully.`);
+            } catch (streamError: any) {
+                 ollamaStreamError = streamError instanceof Error ? streamError : new Error(String(streamError));
+                 console.error(`[API ProcessStream ${chatData.id}] Error DURING Ollama stream iteration:`, ollamaStreamError);
+                 // Attempt to inform the client about the error before closing
+                 try { await writeSseEvent({ error: 'Stream processing failed on server during LLM interaction.' }); } catch {}
+            } finally {
+                 console.log(`[API ProcessStream Finally ${chatData.id}] Cleaning up. Ollama stream errored: ${!!ollamaStreamError}`);
+                 // --- Database Saving ---
+                 // Attempt to save even if Ollama stream errored, as we might have partial text
+                 if (fullAiText.trim()) {
+                    try {
+                        messageRepository.addMessage(chatData.id, 'ai', fullAiText.trim(), finalPromptTokens, finalCompletionTokens);
+                        console.log(`[API ProcessStream Finally ${chatData.id}] Saved AI message (length: ${fullAiText.trim().length}) to DB.`);
+                    } catch (dbError) {
+                         console.error(`[API ProcessStream Finally ${chatData.id}] CRITICAL: Failed to save AI message to DB:`, dbError);
+                         // If DB save fails, it's a server error, but we still need to close the client connection.
+                         ollamaStreamError = ollamaStreamError || new InternalServerError("Failed to save AI response to database.", dbError instanceof Error ? dbError : undefined);
+                         // Attempt to inform client if possible
+                         try { await writeSseEvent({ error: 'Failed to save final AI response.' }); } catch {}
+                    }
+                 } else {
+                     console.warn(`[API ProcessStream Finally ${chatData.id}] No AI text generated or saved.`);
+                 }
+
+                 // --- Ensure Writer Closure ---
+                 // Use abort if there was any error, otherwise close.
+                 if (ollamaStreamError) {
+                     console.log(`[API ProcessStream Finally ${chatData.id}] Aborting writer due to error.`);
+                     // Use catch because aborting a potentially already closed writer can throw
+                     await writer.abort(ollamaStreamError).catch(e => console.warn(`[API ProcessStream Finally ${chatData.id}] Error aborting writer (may be expected):`, e));
+                 } else {
+                      console.log(`[API ProcessStream Finally ${chatData.id}] Closing writer normally.`);
+                      // Use catch because closing an already closed writer can throw
+                      await writer.close().catch(e => console.warn(`[API ProcessStream Finally ${chatData.id}] Error closing writer (may be expected):`, e));
+                 }
+                 console.log(`[API ProcessStream Finally ${chatData.id}] Writer cleanup attempt finished.`);
+            }
         };
-        processStream().catch(err => { console.error("[API addSessionChatMessage] Uncaught background stream processing error:", err); });
+        // --- End Refined processStream ---
+
+        // Run processStream in the background, don't await it here
+        processStream().catch(err => {
+            // This catch is for unexpected errors *outside* the processStream's try/catch/finally
+            console.error(`[API AddMsg ${chatData.id}] UNHANDLED error from background stream processing task:`, err);
+            // Ensure writer is cleaned up if an error occurred *before* finally block in processStream ran
+             if (writer && !writer.closed) {
+                 writer.abort(err).catch(abortErr => console.error("Error aborting writer in outer catch:", abortErr));
+             }
+        });
 
         return new Response(passthrough.readable as any, { status: 200, headers });
 
@@ -104,7 +167,7 @@ export const updateSessionChatMessageStarStatus = ({ sessionData, chatData, mess
 
     try {
         console.log(`[API Star] Updating star status for message ${messageData.id} in chat ${chatData.id} (session ${sessionData.id}) to starred=${starred}, name=${starredName}`);
-        const updatedMessage = chatRepository.updateMessageStarStatus(messageData.id, starred, starredName);
+        const updatedMessage = messageRepository.updateMessageStarStatus(messageData.id, starred, starredName); // <-- Use messageRepository
         if (!updatedMessage) throw new NotFoundError(`Message ${messageData.id} not found during update.`);
         set.status = 200;
         const { starred: starredNum, ...rest } = updatedMessage;

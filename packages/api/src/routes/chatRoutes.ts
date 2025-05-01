@@ -1,6 +1,10 @@
+// =========================================
+// File: packages/api/src/routes/chatRoutes.ts
+// =========================================
 /* packages/api/src/routes/chatRoutes.ts */
 import { Elysia, t } from 'elysia';
 import { chatRepository } from '../repositories/chatRepository.js';
+import { messageRepository } from '../repositories/messageRepository.js'; // <-- Import Message Repo
 import { sessionRepository } from '../repositories/sessionRepository.js';
 import {
     createSessionChat, addSessionChatMessage, renameSessionChat, deleteSessionChat, getSessionChatDetails,
@@ -156,7 +160,8 @@ export const chatRoutes = new Elysia({ prefix: '/api/sessions/:sessionId/chats' 
                         console.log(`[Derive Session Message] Received Message ID Param: ${params.messageId} for Chat ID: ${params.chatId}`);
                         const messageId = parseInt(params.messageId, 10);
                         if (isNaN(messageId)) throw new BadRequestError('Invalid message ID format');
-                        const message = chatRepository.findMessageById(messageId);
+                        // Use the messageRepository function here
+                        const message = messageRepository.findMessageById(messageId);
                         console.log(`[Derive Session Message] Found message? ${!!message}. Does it belong to chat ${chatData.id}? ${message?.chatId === chatData.id}`);
                         if (!message || message.chatId !== chatData.id) {
                             if (!message) console.error(`[Derive Session Message] Error: Message ${messageId} not found.`);

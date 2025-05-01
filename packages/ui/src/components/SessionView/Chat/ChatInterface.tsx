@@ -1,3 +1,6 @@
+// =========================================
+// File: packages/ui/src/components/SessionView/Chat/ChatInterface.tsx
+// =========================================
 /* packages/ui/src/components/SessionView/Chat/ChatInterface.tsx */
 import React, { useRef, useEffect, useCallback, useState, useMemo } from 'react';
 import { Box, Flex, ScrollArea, Spinner, Text } from '@radix-ui/themes';
@@ -5,10 +8,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChatInput } from './ChatInput';
 import { ChatMessages } from './ChatMessages';
 import { ChatPanelHeader } from './ChatPanelHeader';
+import { useMessageStream } from '../../../hooks/useMessageStream'; // <-- Import the hook
 import {
     fetchSessionChatDetails, addSessionChatMessageStream, // Session APIs
     fetchStandaloneChatDetails, addStandaloneChatMessageStream, // Standalone APIs
-} from '../../../api/api';
+} from '../../../api/api'; // <-- Use barrel file
 import { debounce } from '../../../helpers';
 import type { ChatSession, Session, ChatMessage, OllamaStatus } from '../../../types';
 import { currentQueryAtom } from '../../../store';
@@ -50,8 +54,6 @@ export function ChatInterface({
     const queryClient = useQueryClient();
     const [currentQuery, setCurrentQuery] = useAtom(currentQueryAtom);
 
-    const [streamingAiMessageId, setStreamingAiMessageId] = useState<number | null>(null);
-
     const chatQueryKey = useMemo(() => isStandalone ? ['standaloneChat', activeChatId] : ['chat', activeSessionId, activeChatId], [isStandalone, activeChatId, activeSessionId]);
 
     const { data: chatData, isLoading: isLoadingMessages, error: chatError, isFetching } = useQuery<ChatSession | null, Error>({
@@ -73,6 +75,14 @@ export function ChatInterface({
         refetchOnWindowFocus: true,
     });
 
+    // --- Use the custom hook for stream processing ---
+    const { streamingAiMessageId, processStream } = useMessageStream({
+        chatQueryKey: chatQueryKey,
+        onStreamComplete: (key) => { console.log("[Stream Complete Callback] Invalidating chat query:", key); setTimeout(() => queryClient.invalidateQueries({ queryKey: key }), 100); },
+        onStreamError: (error) => { console.error("[Stream Error Callback] Stream processing failed:", error); /* Optionally show toast */ }
+    });
+    // --- End hook usage ---
+
     const lastAiMessageWithTokens = useMemo(() => {
         if (!chatData?.messages || chatData.messages.length === 0) {
             return null;
@@ -83,98 +93,7 @@ export function ChatInterface({
     const latestPromptTokens = lastAiMessageWithTokens?.promptTokens ?? null;
     const latestCompletionTokens = lastAiMessageWithTokens?.completionTokens ?? null;
 
-    // Process Stream Function
-    const processStream = async (
-        stream: ReadableStream<Uint8Array>,
-        tempUserMsgId: number | undefined,
-        receivedUserMsgId: number,
-        tempAiMessageId: number
-    ) => {
-        const reader = stream.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let actualUserMessageId = receivedUserMsgId;
-        // Use the memoized key
-        const currentChatQueryKey = chatQueryKey;
-        let streamErrored = false;
-
-        try {
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
-
-                for (const line of lines) {
-                    if (line.startsWith('data:')) {
-                        const dataStr = line.substring(5).trim();
-                        try {
-                            const data = JSON.parse(dataStr);
-                            if (data.userMessageId && actualUserMessageId === -1) {
-                                actualUserMessageId = data.userMessageId;
-                                console.log("Received user message ID via SSE:", actualUserMessageId);
-                                if (tempUserMsgId && activeChatId && (isStandalone || activeSessionId)) {
-                                     queryClient.setQueryData<ChatSession>(currentChatQueryKey, (oldData) => {
-                                         if (!oldData) return oldData;
-                                         const currentMessages = oldData.messages ?? [];
-                                         return { ...oldData, messages: currentMessages.map(msg => msg.id === tempUserMsgId ? { ...msg, id: actualUserMessageId } : msg) };
-                                     });
-                                }
-                            } else if (data.chunk) {
-                                // Update the temporary AI message in the query cache
-                                queryClient.setQueryData<ChatSession>(currentChatQueryKey, (oldData) => {
-                                    if (!oldData) return oldData;
-                                    const currentMessages = oldData.messages ?? [];
-                                    return {
-                                        ...oldData,
-                                        messages: currentMessages.map(msg =>
-                                            msg.id === tempAiMessageId ? { ...msg, text: msg.text + data.chunk } : msg
-                                        ),
-                                    };
-                                });
-                            } else if (data.done) {
-                                console.log("Stream processing received done signal. Tokens:", data);
-                                // TODO need to call the finally here.
-                                setStreamingAiMessageId(null);
-
-                                if (activeChatId && !streamErrored) {
-                                    console.log("[Stream Finally] Stream completed without error. Invalidating chat query.");
-                                    setTimeout(() => {
-                                        queryClient.invalidateQueries({ queryKey: currentChatQueryKey });
-                                    }, 100);
-                                }
-                            } else if (data.error) {
-                                console.error("Received error event from backend stream:", data.error);
-                                streamErrored = true;
-                            }
-                        } catch (e) { console.error('SSE parse error', e); }
-                    }
-                }
-            }
-            console.log("Stream processing loop complete.");
-
-        } catch (error) {
-            console.error("Error reading stream:", error);
-            streamErrored = true;
-        } finally {
-            // TODO is this ever called?
-
-            // --- Clear streaming state ---
-            console.log(`[Stream Finally] Clearing streaming message ID: ${tempAiMessageId}. Stream Errored: ${streamErrored}`);
-            setStreamingAiMessageId(null);
-
-            if (activeChatId && !streamErrored) {
-                console.log("[Stream Finally] Stream completed without error. Invalidating chat query.");
-                setTimeout(() => {
-                    queryClient.invalidateQueries({ queryKey: currentChatQueryKey });
-                }, 100);
-            } else if (streamErrored) {
-                 console.warn("[Stream Finally] Stream ended with an error. Skipping query invalidation.");
-            }
-        }
-    };
+    // Removed inline processStream function, now handled by the hook
 
      // Add Message Mutation
      const addMessageMutation = useMutation({
@@ -187,7 +106,7 @@ export function ChatInterface({
                 return addSessionChatMessageStream(activeSessionId, activeChatId, text);
             }
         },
-        onMutate: async (newMessageText) => {
+        onMutate: async (newMessageText) => { // Optimistic update logic remains similar
             if (!activeChatId) return;
             // Use memoized key
             const currentChatQueryKey = chatQueryKey;
@@ -216,8 +135,6 @@ export function ChatInterface({
                 messages: [...(oldData?.messages ?? []), temporaryUserMessage, temporaryAiMessage],
             }));
 
-            setStreamingAiMessageId(tempAiMessageId);
-
             console.log('[Optimistic ChatInterface] Added temporary user message ID:', temporaryUserMessage.id);
             console.log('[Optimistic ChatInterface] Added temporary AI message ID:', tempAiMessageId);
 
@@ -231,10 +148,12 @@ export function ChatInterface({
              }
              processStream(data.stream, context.temporaryUserMessageId, data.userMessageId, context.tempAiMessageId)
                  .catch(streamError => {
+                     // Error is now also handled by the hook's onStreamError callback
                      console.error("Caught error from processStream in onSuccess:", streamError);
-                     setStreamingAiMessageId(null);
+                     // The hook's finally block handles setting streaming ID to null
                      throw streamError;
                  });
+             // Removed the direct call to setStreamingAiMessageId(null) from here
         },
         onError: (error, newMessageText, context) => {
             console.error("Mutation failed (Initiation or Stream Error):", error);
@@ -244,7 +163,7 @@ export function ChatInterface({
                  queryClient.setQueryData(currentChatQueryKey, context.previousChatData);
                  console.log("[Mutation Error] Reverted optimistic user message.");
             }
-            setStreamingAiMessageId(null);
+            // The hook's finally block handles setting streaming ID to null
         },
         onSettled: () => {
             console.log("[Mutation Settled] Clearing input.");

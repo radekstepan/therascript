@@ -13,21 +13,16 @@ import {
     ChatBubbleIcon,
     MagnifyingGlassIcon,
     Cross1Icon,
-    PersonIcon,
-    BookmarkIcon,
-    PlusIcon,
 } from '@radix-ui/react-icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { SessionListTable } from './SessionListTable';
 import { StandaloneChatListTable } from './StandaloneChatListTable';
 import { SearchResultList } from '../Search/SearchResultList';
+import { FilterControls } from './FilterControls'; // <-- Import FilterControls
 import {
     Button, Card, Flex, Heading, Text, Box, Container, Spinner, AlertDialog,
     TextField,
     IconButton,
-    Grid,
-    Select,
-    Badge,
 } from '@radix-ui/themes';
 import { UserThemeDropdown } from '../User/UserThemeDropdown';
 import { EditDetailsModal } from '../SessionView/Modals/EditDetailsModal';
@@ -39,38 +34,22 @@ import {
     renameStandaloneChat as editStandaloneChatApi,
     deleteStandaloneChat as deleteStandaloneChatApi,
     searchMessages,
-    StandaloneChatListItem,
-} from '../../api/api';
+} from '../../api/api'; // <-- Use the barrel file
 import {
     openUploadModalAtom,
-    // Session Sort
     sessionSortCriteriaAtom,
     sessionSortDirectionAtom,
     setSessionSortAtom,
     SessionSortCriteria,
-    // Standalone Chat Sort
     standaloneChatSortCriteriaAtom,
     standaloneChatSortDirectionAtom,
     setStandaloneChatSortAtom,
     StandaloneChatSortCriteria,
-    // Others
     toastMessageAtom,
 } from '../../store';
-import type { Session, SessionMetadata, ChatSession, SearchApiResponse, SearchResultItem } from '../../types';
+import type { Session, SessionMetadata, ChatSession, SearchApiResponse, SearchResultItem, StandaloneChatListItem } from '../../types'; // <-- Import StandaloneChatListItem from types
 import { formatTimestamp } from '../../helpers';
 
-// Helper function to get unique, sorted client names
-const getUniqueClientNames = (sessions: Session[] | undefined): string[] => {
-    if (!sessions) return [];
-    const names = new Set<string>();
-    sessions.forEach(s => {
-        if (s.clientName) names.add(s.clientName.trim());
-    });
-    return Array.from(names).sort((a, b) => a.localeCompare(b));
-};
-
-// Special value for the 'All Clients' option to avoid empty string value prop
-const ALL_CLIENTS_VALUE = "__ALL_CLIENTS__";
 
 export function LandingPage() {
     const openUploadModal = useSetAtom(openUploadModalAtom);
@@ -88,8 +67,6 @@ export function LandingPage() {
     const [clientFilter, setClientFilter] = useState('');
     const [filterTags, setFilterTags] = useState<string[]>([]);
     const [newFilterTagInput, setNewFilterTagInput] = useState('');
-
-    // Session Sort State
     const currentSessionSortCriteria = useAtomValue(sessionSortCriteriaAtom);
     const currentSessionSortDirection = useAtomValue(sessionSortDirectionAtom);
     const setSessionSort = useSetAtom(setSessionSortAtom);
@@ -99,7 +76,7 @@ export function LandingPage() {
     const currentStandaloneChatSortDirection = useAtomValue(standaloneChatSortDirectionAtom);
     const setStandaloneChatSort = useSetAtom(setStandaloneChatSortAtom);
 
-    // Modal States (unchanged)
+    // Modal States
     const [isEditingModalOpen, setIsEditingModalOpen] = useState(false);
     const [sessionToEdit, setSessionToEdit] = useState<Session | null>(null);
     const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
@@ -109,7 +86,7 @@ export function LandingPage() {
     const [isDeleteChatConfirmOpen, setIsDeleteChatConfirmOpen] = useState(false);
     const [chatToDelete, setChatToDelete] = useState<StandaloneChatListItem | null>(null);
 
-    // --- Queries ---
+    // Queries
     const { data: sessions, isLoading: isLoadingSessions, error: sessionsError, refetch: refetchSessions } = useQuery<Session[], Error>({ queryKey: ['sessions'], queryFn: fetchSessions });
     const { data: standaloneChats, isLoading: isLoadingStandaloneChats, error: standaloneChatsError, refetch: refetchStandaloneChats } = useQuery<StandaloneChatListItem[], Error>({ queryKey: ['standaloneChats'], queryFn: fetchStandaloneChats });
 
@@ -124,18 +101,17 @@ export function LandingPage() {
         enabled: !!activeSearchQuery,
         staleTime: 5 * 60 * 1000,
     });
-
-    // --- Accurate Client-Side Filtering ---
-    const filteredSearchResults = useMemo(() => {
+    // Accurate Client-Side Filtering
+    const filteredSearchResults = useMemo(() => { // Filter logic remains here
         if (!searchResultsData?.results) return [];
         const lowerClientFilter = clientFilter.toLowerCase().trim();
         const lowerFilterTags = filterTags.map(tag => tag.toLowerCase());
 
         if (!lowerClientFilter && lowerFilterTags.length === 0) {
-            return searchResultsData.results;
+            return searchResultsData.results; // No filters applied
         }
 
-        return searchResultsData.results.filter(item => {
+        return searchResultsData.results.filter(item => { // Adjusted filtering logic
             const clientMatch = lowerClientFilter
                 ? item.clientName?.toLowerCase() === lowerClientFilter
                 : true;
@@ -149,10 +125,6 @@ export function LandingPage() {
             return clientMatch && tagsMatch;
         });
     }, [searchResultsData, clientFilter, filterTags]);
-    // --- End Accurate Filtering ---
-
-    // Extract unique client names for dropdown
-    const uniqueClientNames = useMemo(() => getUniqueClientNames(sessions), [sessions]);
 
     // Mutations (Unchanged)
     const deleteSessionMutation = useMutation<{ message: string }, Error, number>({ mutationFn: deleteSessionApi, onSuccess: (d,id)=>{setToast(d.message||`Session ${id} deleted`); queryClient.invalidateQueries({queryKey:['sessions']});}, onError:(e,id)=>{setToast(`Error deleting session ${id}: ${e.message}`);}, onSettled:()=>{setIsDeleteConfirmOpen(false);setSessionToDelete(null);} });
@@ -189,7 +161,7 @@ export function LandingPage() {
              } catch (e) { console.error(`Error during localeCompare for criteria "${criteria}":`, e); return 0; }
              if (direction === 'desc' && criteria !== 'date') { compareResult *= -1; } else if (direction === 'asc' && criteria === 'date') { compareResult *= -1; } return compareResult;
          });
-      }, [standaloneChats, currentStandaloneChatSortCriteria, currentStandaloneChatSortDirection]);
+      }, [standaloneChats, currentStandaloneChatSortCriteria, currentStandaloneChatSortDirection]); // Dependencies unchanged
 
 
      // Handlers (Update search handlers)
@@ -206,11 +178,11 @@ export function LandingPage() {
     const handleConfirmDeleteChat = () => { if (!chatToDelete || deleteChatMutation.isPending) return; deleteChatMutation.mutate(chatToDelete.id); };
 
     // --- Search Handlers ---
-    const handleSearchInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const handleSearchInputChange = (event: React.ChangeEvent<HTMLInputElement>) => { // Logic unchanged
         setSearchInput(event.target.value);
     };
 
-    const handleSearchSubmit = (event?: React.FormEvent<HTMLFormElement> | React.KeyboardEvent<HTMLInputElement>) => {
+    const handleSearchSubmit = (event?: React.FormEvent<HTMLFormElement> | React.KeyboardEvent<HTMLInputElement>) => { // Logic unchanged
         if (event) event.preventDefault();
         const trimmedQuery = searchInput.trim();
         setActiveSearchQuery(trimmedQuery);
@@ -224,7 +196,7 @@ export function LandingPage() {
         requestAnimationFrame(() => searchInputRef.current?.focus());
     };
 
-    const handleClearSearch = useCallback(() => {
+    const handleClearSearch = useCallback(() => { // Logic unchanged
         setSearchInput('');
         setActiveSearchQuery('');
         setClientFilter('');
@@ -235,7 +207,7 @@ export function LandingPage() {
         requestAnimationFrame(() => searchInputRef.current?.focus());
     }, [searchParams, setSearchParams]);
 
-    const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => { // Logic unchanged
         if (event.key === 'Enter') {
             handleSearchSubmit(event);
         } else if (event.key === 'Escape') {
@@ -245,7 +217,7 @@ export function LandingPage() {
     // --- End Search Handlers ---
 
     // --- Tag Filter Handlers ---
-    const handleAddFilterTag = useCallback(() => {
+    const handleAddFilterTag = useCallback(() => { // Logic unchanged
         const tagToAdd = newFilterTagInput.trim();
         if (tagToAdd && !filterTags.some(tag => tag.toLowerCase() === tagToAdd.toLowerCase())) {
             if (filterTags.length < 5) {
@@ -259,10 +231,10 @@ export function LandingPage() {
     }, [newFilterTagInput, filterTags, setToast]);
 
     const handleRemoveFilterTag = useCallback((tagToRemove: string) => {
-        setFilterTags(prev => prev.filter(tag => tag !== tagToRemove));
+        setFilterTags(prev => prev.filter(tag => tag !== tagToRemove)); // Logic unchanged
     }, []);
 
-    const handleFilterTagInputKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    const handleFilterTagInputKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => { // Logic unchanged
         if (e.key === 'Enter' || e.key === ',') {
             e.preventDefault();
             handleAddFilterTag();
@@ -271,7 +243,7 @@ export function LandingPage() {
     // --- End Tag Filter Handlers ---
 
     // --- Escape Key Listener ---
-    useEffect(() => {
+    useEffect(() => { // Logic unchanged
         const handleKeyDown = (event: KeyboardEvent) => {
             if (event.key === 'Escape' && !!activeSearchQuery) {
                 handleClearSearch();
@@ -288,19 +260,14 @@ export function LandingPage() {
     }, [activeSearchQuery, handleClearSearch]);
     // --- End Escape Key Listener ---
 
-    // --- Client Filter Change Handler ---
-    const handleClientFilterChange = (value: string) => {
-        setClientFilter(value === ALL_CLIENTS_VALUE ? '' : value);
-    };
-    // --- End Client Filter Handler ---
-
     // --- Auto Focus Effect ---
-    useEffect(() => {
+    useEffect(() => { // Logic unchanged
         if (activeSearchQuery && searchInputRef.current) {
              requestAnimationFrame(() => {
                 searchInputRef.current?.focus();
             });
         }
+        // No change needed here
     }, [activeSearchQuery]);
     // --- End Auto Focus Effect ---
 
@@ -347,81 +314,17 @@ export function LandingPage() {
                                     )}
                                 </TextField.Root>
                             </Box>
-                            {/* Right side buttons */}
+                            {/* Right side buttons (unchanged) */}
                             <Flex gap="3" align="center" flexShrink="0">
                                 <Button variant="outline" size="2" onClick={handleNewStandaloneChat} disabled={createStandaloneChatMutation.isPending}><ChatBubbleIcon width="16" height="16" /><Text ml="2">New Chat</Text></Button>
                                 <Button variant="soft" size="2" onClick={openUploadModal}><PlusCircledIcon width="16" height="16" /><Text ml="2">New Session</Text></Button>
                                 <UserThemeDropdown />
                             </Flex>
                         </Flex>
-                         {/* Filter Inputs - Shown only when search is active */}
-                         {showSearchResults && (
-                            <Grid columns={{ initial: '1', md: '2' }} gap="3" width="100%" mt="2">
-                                {/* Client Filter Dropdown */}
-                                <Flex direction="column" gap="1">
-                                     <Text as="label" size="1" color="gray" htmlFor="client-filter-select">Filter by Client</Text>
-                                     <Select.Root
-                                        value={clientFilter || ALL_CLIENTS_VALUE}
-                                        onValueChange={handleClientFilterChange}
-                                        size="2"
-                                        name="client-filter-select"
-                                    >
-                                        <Select.Trigger placeholder="All Clients..." />
-                                        <Select.Content>
-                                            <Select.Item value={ALL_CLIENTS_VALUE}>All Clients</Select.Item>
-                                            {uniqueClientNames.map(name => (
-                                                <Select.Item key={name} value={name}>{name}</Select.Item>
-                                            ))}
-                                        </Select.Content>
-                                    </Select.Root>
-                                </Flex>
-
-                                {/* Tag Filter Input */}
-                                <Flex direction="column" gap="1">
-                                    <Text as="label" size="1" color="gray" htmlFor="tag-filter-input">Filter by Tags (AND)</Text>
-                                    {/* Tag Display Area */}
-                                    {filterTags.length > 0 && (
-                                        <Flex gap="1" wrap="wrap" mb="1" style={{minHeight: '28px'}}>
-                                            {filterTags.map((tag, index) => (
-                                                <Badge key={`${tag}-${index}`} color="gray" variant="soft" radius="full">
-                                                    {tag}
-                                                    <IconButton
-                                                        size="1" variant="ghost" color="gray" radius="full"
-                                                        onClick={() => handleRemoveFilterTag(tag)}
-                                                        aria-label={`Remove filter tag ${tag}`}
-                                                        style={{ marginLeft: '4px', marginRight: '-5px', height: '12px', width: '12px', cursor: 'pointer' }}
-                                                    >
-                                                        <Cross1Icon width="10" height="10" />
-                                                    </IconButton>
-                                                </Badge>
-                                            ))}
-                                        </Flex>
-                                    )}
-                                    {/* Tag Input Field */}
-                                    <Flex gap="2" align="center">
-                                        <TextField.Root
-                                            id="tag-filter-input"
-                                            size="2"
-                                            placeholder="Add tag filter..."
-                                            value={newFilterTagInput}
-                                            onChange={(e) => setNewFilterTagInput(e.target.value)}
-                                            onKeyDown={handleFilterTagInputKeyDown}
-                                            disabled={filterTags.length >= 5}
-                                            style={{ flexGrow: 1 }}
-                                        />
-                                        <IconButton
-                                            size="2" variant="soft"
-                                            onClick={handleAddFilterTag}
-                                            disabled={!newFilterTagInput.trim() || filterTags.length >= 5}
-                                            aria-label="Add filter tag"
-                                            title="Add filter tag"
-                                        >
-                                            <PlusIcon />
-                                        </IconButton>
-                                    </Flex>
-                                </Flex>
-                            </Grid>
-                         )}
+                         {/* --- Render FilterControls Component --- */}
+                        {showSearchResults && (
+                            <FilterControls sessions={sessions} clientFilter={clientFilter} setClientFilter={setClientFilter} filterTags={filterTags} setFilterTags={setFilterTags} newFilterTagInput={newFilterTagInput} setNewFilterTagInput={setNewFilterTagInput} onAddFilterTag={handleAddFilterTag} onRemoveFilterTag={handleRemoveFilterTag} onFilterTagInputKeyDown={handleFilterTagInputKeyDown} />
+                          )}
                     </Container>
                 </Box>
 

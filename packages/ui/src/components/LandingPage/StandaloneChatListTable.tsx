@@ -1,3 +1,6 @@
+// =========================================
+// File: packages/ui/src/components/LandingPage/StandaloneChatListTable.tsx
+// =========================================
 /*
  * packages/ui/src/components/LandingPage/StandaloneChatListTable.tsx
  *
@@ -16,7 +19,7 @@ import {
     ChevronDownIcon, // <-- Added sort icon
 } from '@radix-ui/react-icons';
 import { Table, Text, Flex, IconButton, DropdownMenu, Badge } from '@radix-ui/themes';
-import type { StandaloneChatListItem } from '../../api/api';
+import type { StandaloneChatListItem } from '../../types'; // <-- Import from types
 import type { StandaloneChatSortCriteria, SortDirection } from '../../store'; // <-- Import sort types
 import { formatTimestamp } from '../../helpers';
 
@@ -151,7 +154,7 @@ export function StandaloneChatListTable({
                             <Table.Cell>
                                 <Flex gap="1" wrap="wrap">
                                     {(chat.tags && chat.tags.length > 0) ? (
-                                        chat.tags.slice(0, 3).map(tag => (
+                                        chat.tags.slice(0, 3).map((tag: string) => ( // <-- Added type annotation
                                             <Badge key={tag} color="gray" variant="soft" radius="full" size="1">
                                                 {tag}
                                             </Badge>

@@ -1,17 +1,21 @@
+// =========================================
+// File: packages/api/src/api/sessionHandler.ts
+// =========================================
 import { sessionRepository } from '../repositories/sessionRepository.js';
 import { chatRepository } from '../repositories/chatRepository.js';
 import { transcriptRepository } from '../repositories/transcriptRepository.js'; // <-- Import Transcript Repo
 import {
+    // --- REMOVED calculateTokenCount from fileService import ---
     // --- REMOVED loadTranscriptContent, saveTranscriptContent ---
-    calculateTokenCount, // <-- Import token calculation helper
     deleteUploadedAudioFile, // <-- Import audio file delete helper
-} from '../services/fileService.js';
+} from '../services/fileService.js'; // calculateTokenCount moved to tokenizerService
 // --- NEW: Import reload function ---
 import { reloadActiveModelContext } from '../services/ollamaService.js';
 // --- END NEW ---
 import type { BackendSession, StructuredTranscript } from '../types/index.js'; // <-- Ensure StructuredTranscript is imported
 import { NotFoundError, BadRequestError, InternalServerError, ApiError } from '../errors.js';
 
+import { calculateTokenCount } from '../services/tokenizerService.js'; // <-- Import from tokenizerService
 // Helper to convert YYYY-MM-DD to ISO 8601 using Noon UTC
 // TODO move to helpers or utils
 const dateToIsoString = (dateString: string): string | null => {

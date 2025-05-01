@@ -2,6 +2,7 @@
 // File: packages/api/src/repositories/chatRepository.ts
 // =========================================
 /* packages/api/src/repositories/chatRepository.ts */
+// Handles Chat entities and FTS Search across messages and transcripts
 import { db, exec, run, all, get } from '../db/sqliteService.js';
 import type { BackendChatSession, BackendChatMessage, ChatMetadata } from '../types/index.js';
 import { Statement } from 'better-sqlite3';
@@ -27,16 +28,13 @@ type RawChatRow = Omit<BackendChatSession, 'tags' | 'messages'> & { tags: string
 
 // --- SQL Statements ---
 const insertChatSql = 'INSERT INTO chats (sessionId, timestamp, name, tags) VALUES (?, ?, ?, ?)';
-const insertMessageSql = `INSERT INTO messages (chatId, sender, text, timestamp, promptTokens, completionTokens, starred, starredName) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
 const selectChatsBySessionIdSql = 'SELECT id, sessionId, timestamp, name, tags FROM chats WHERE sessionId = ? ORDER BY timestamp DESC';
 const selectStandaloneChatsSql = 'SELECT id, sessionId, timestamp, name, tags FROM chats WHERE sessionId IS NULL ORDER BY timestamp DESC';
+// --- Moved Message SQL to messageRepository ---
 const selectMessagesByChatIdSql = 'SELECT * FROM messages WHERE chatId = ? ORDER BY id ASC';
 const selectChatByIdSql = 'SELECT * FROM chats WHERE id = ?';
-const selectMessageByIdSql = 'SELECT * FROM messages WHERE id = ?';
 const updateChatDetailsSql = 'UPDATE chats SET name = ?, tags = ? WHERE id = ?';
 const deleteChatSql = 'DELETE FROM chats WHERE id = ?';
-const updateMessageStarStatusSql = 'UPDATE messages SET starred = ?, starredName = ? WHERE id = ?';
-const selectStarredMessagesSql = 'SELECT * FROM messages WHERE starred = 1 ORDER BY timestamp DESC';
 
 
 // --- FTS Search Statement (UPDATED with JOINs for clientName and tags) ---
@@ -137,7 +135,7 @@ export const chatRepository = {
     createChat: (sessionId: number | null): BackendChatSession => {
         const timestamp = Date.now();
         try {
-            const info = run(insertChatSql, sessionId, timestamp, null, null);
+            const info = run(insertChatSql, sessionId, timestamp, null, null); // Pass null for tags initially
             const newChatId = info.lastInsertRowid as number;
             const newChatSession = findChatWithMessages(newChatId);
             if (!newChatSession) throw new Error(`Failed retrieve chat ${newChatId} immediately after creation.`);
@@ -148,17 +146,7 @@ export const chatRepository = {
             throw new Error(`Database error creating chat: ${error instanceof Error ? error.message : String(error)}`);
         }
     },
-    addMessage: ( chatId: number, sender: 'user' | 'ai', text: string, promptTokens?: number | null, completionTokens?: number | null ): BackendChatMessage => {
-        const timestamp = Date.now();
-         try {
-            const info = run( insertMessageSql, chatId, sender, text, timestamp, promptTokens ?? null, completionTokens ?? null, 0, null );
-            const newId = info.lastInsertRowid as number;
-            const newMsg = get<BackendChatMessage>(selectMessageByIdSql, newId);
-            if(!newMsg) throw new Error("Failed retrieve msg");
-            console.log(`[ChatRepo AddMessage] Inserted message ${newId}. FTS trigger should have fired.`);
-            return newMsg;
-         } catch (error) { console.error(`DB error adding message to chat ${chatId}:`, error); throw new Error("DB error adding message"); }
-    },
+    // --- Moved addMessage, findMessagesByChatId, findMessageById, updateMessageStarStatus, findStarredMessages to messageRepository ---
     findChatsBySessionId: (sessionId: number): (ChatMetadata & { sessionId: number })[] => {
         try {
             const chatRows = all<RawChatRow>(selectChatsBySessionIdSql, sessionId);
@@ -186,19 +174,7 @@ export const chatRepository = {
     findChatById: (chatId: number): BackendChatSession | null => {
         return findChatWithMessages(chatId);
     },
-    findMessagesByChatId: (chatId: number): BackendChatMessage[] => {
-        try {
-            const messages = all<BackendChatMessage>(selectMessagesByChatIdSql, chatId);
-            return messages ?? [];
-        } catch (error) { console.error(`DB error fetching messages for chat ${chatId}:`, error); throw new Error(`Database error fetching messages.`); }
-    },
-    findMessageById: (messageId: number): BackendChatMessage | null => {
-        try {
-            const messageRow = get<BackendChatMessage>(selectMessageByIdSql, messageId);
-            return messageRow ?? null;
-        } catch (error) { console.error(`DB error fetching message ${messageId}:`, error); throw new Error(`Database error fetching message.`); }
-    },
-    updateChatDetails: (chatId: number, name: string | null, tags: string[] | null): ChatMetadata | null => {
+    updateChatDetails: (chatId: number, name: string | null, tags: string[] | null): ChatMetadata | null => { // Takes sorted tags
         try {
             const tagsJson = (tags && tags.length > 0) ? JSON.stringify(tags) : null;
             run(updateChatDetailsSql, name, tagsJson, chatId);
@@ -212,15 +188,6 @@ export const chatRepository = {
         try { const info = run(deleteChatSql, chatId); return info.changes > 0; }
         catch (error) { console.error(`DB error deleting chat ${chatId}:`, error); throw new Error(`Database error deleting chat.`); }
     },
-    updateMessageStarStatus: ( messageId: number, starred: boolean, starredName?: string | null ): BackendChatMessage | null => {
-        try { const nameToSave = starred ? (starredName ?? null) : null; const starredIntValue = starred ? 1 : 0; const info = run(updateMessageStarStatusSql, starredIntValue, nameToSave, messageId); if (info.changes === 0) { console.warn(`[ChatRepo] No message found with ID ${messageId} to update star status.`); return null; } const updatedMessage = get<BackendChatMessage>(selectMessageByIdSql, messageId); if (!updatedMessage) { console.error(`[ChatRepo] CRITICAL: Failed to retrieve message ${messageId} immediately after star update.`); return null; } return updatedMessage; } catch (error) { console.error(`DB error updating star status for message ${messageId}:`, error); throw new Error(`Database error updating message star status.`); }
-    },
-    findStarredMessages: (): BackendChatMessage[] => {
-        try { const starredRows = all<BackendChatMessage>(selectStarredMessagesSql); return starredRows ?? []; }
-        catch (error) { console.error(`DB error fetching starred messages:`, error); throw new Error(`Database error fetching starred messages.`); }
-    },
-
-
     // --- FTS Search Function (UPDATED mapping logic) ---
     searchMessages: (query: string, limit: number = 20): FtsSearchResult[] => {
          const trimmedQuery = query?.trim() ?? '';

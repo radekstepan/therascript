@@ -2,6 +2,8 @@
 
 - [ ] verify/fix shutdown and autostart scripts
 - [x] yarn dev works in mock mode, only mock mode should work in mock mode
+- [ ] loading spinner when waiting on first token from AI
+- [ ] add the copy message icon back in again
 
 - [ ] make the chat paragraph icons larger, add a gap between them AND/OR move the play icon to the left of the paragraph.
 - [ ] fix vertical align of transcript header, items too close to the top; `align-items: flex-end`

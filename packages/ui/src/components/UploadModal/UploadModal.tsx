@@ -1,3 +1,6 @@
+// =========================================
+// File: packages/ui/src/components/UploadModal/UploadModal.tsx
+// =========================================
 // packages/ui/src/components/UploadModal/UploadModal.tsx
 /* src/components/UploadModal/UploadModal.tsx */
 import React, { useState, useRef, useCallback, useEffect } from 'react';
@@ -19,11 +22,10 @@ import {
     ALLOWED_AUDIO_EXTENSIONS,
 } from '../../constants';
 import { getTodayDateString } from '../../helpers';
-import { uploadSession, fetchTranscriptionStatus, finalizeSession } from '../../api/api';
-import type { SessionMetadata } from '../../types';
+import { uploadSession, fetchTranscriptionStatus, finalizeSession } from '../../api/api'; // <-- Use barrel file
+import type { SessionMetadata, UITranscriptionStatus } from '../../types'; // <-- Import UITranscriptionStatus from types
 import { closeUploadModalAtom } from '../../store';
 import { cn } from '../../utils';
-import type { UITranscriptionStatus } from '../../api/api';
 
 interface UploadModalProps {
   isOpen: boolean;

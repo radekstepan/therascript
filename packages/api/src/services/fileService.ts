@@ -1,53 +1,20 @@
+// =========================================
+// File: packages/api/src/services/fileService.ts
+// =========================================
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'node:crypto'; // Import crypto for unique name generation
 import config from '../config/index.js';
 import { isNodeError } from '../utils/helpers.js';
 // --- REMOVED StructuredTranscript import as file functions are removed ---
-// import type { StructuredTranscript } from '../types/index.js';
-// --- Import Tiktoken class and TiktokenEncoding type ---
-import { get_encoding, type Tiktoken, type TiktokenEncoding } from '@dqbd/tiktoken';
+// --- REMOVED Tiktoken imports ---
 
 // --- Keep upload directory ---
 const uploadsDir = config.db.uploadsDir;
 // --- Remove transcripts directory ---
 // const transcriptsDir = config.db.transcriptsDir;
 
-// --- Tokenizer Initialization ---
-let tokenizer: Tiktoken | null = null; // <-- Changed type to Tiktoken | null
-try {
-    // Use cl100k_base encoding, common for models like gpt-4, gpt-3.5-turbo, text-embedding-ada-002
-    // If using other models, you might need a different encoding.
-    tokenizer = get_encoding("cl100k_base");
-    console.log('[FileService] Tiktoken tokenizer (cl100k_base) initialized.');
-} catch (e) {
-    console.error('[FileService] Failed to initialize Tiktoken tokenizer:', e);
-    tokenizer = null; // Ensure tokenizer is null if init fails
-}
-// --- End Tokenizer Initialization ---
-
-// --- Token Calculation Helper ---
-// Returns null if tokenizer failed to initialize
-// Accepts text directly now, doesn't load from file.
-const calculateTokenCount = (text: string): number | null => {
-    if (!tokenizer) {
-        console.warn('[FileService] Tokenizer not available, cannot calculate token count.');
-        return null;
-    }
-    if (!text) {
-        return 0;
-    }
-    try {
-        const tokens = tokenizer.encode(text); // <-- This should now work correctly
-        return tokens.length;
-    } catch (e) {
-        console.error('[FileService] Error calculating tokens:', e);
-        return null; // Return null on error
-    }
-};
-// Expose the helper for use elsewhere (e.g., sessionHandler)
-export { calculateTokenCount };
-// --- End Token Calculation Helper ---
+// --- MOVED tokenizer logic to tokenizerService.ts ---
 
 
 // Helper to create a safe, unique filename

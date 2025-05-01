@@ -1,3 +1,6 @@
+// =========================================
+// File: packages/ui/src/components/StandaloneChatView/StandaloneChatSidebarList.tsx
+// =========================================
 /*
  * packages/ui/src/components/StandaloneChatView/StandaloneChatSidebarList.tsx
  *
@@ -14,7 +17,7 @@ import {
     TrashIcon,
 } from '@radix-ui/react-icons';
 import { Flex, Text, IconButton, DropdownMenu, Box } from '@radix-ui/themes';
-import type { StandaloneChatListItem } from '../../api/api';
+import type { StandaloneChatListItem } from '../../types'; // <-- Import from types
 import { formatTimestamp } from '../../helpers';
 import { cn } from '../../utils';
 

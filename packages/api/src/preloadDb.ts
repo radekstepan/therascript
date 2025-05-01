@@ -1,10 +1,13 @@
+// =========================================
+// File: packages/api/src/preloadDb.ts
+// =========================================
 // File: packages/api/src/preloadDb.ts
 import Database from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs/promises'; // <-- Use fs.promises for async operations
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { calculateTokenCount } from './services/fileService.js';
+import { calculateTokenCount } from './services/tokenizerService.js'; // <-- Import from tokenizerService
 // *** Import schema and init/verify functions from sqliteService ***
 import {
     schema, // Import the schema string

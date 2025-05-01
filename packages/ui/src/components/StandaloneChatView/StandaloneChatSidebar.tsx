@@ -1,3 +1,6 @@
+// =========================================
+// File: packages/ui/src/components/StandaloneChatView/StandaloneChatSidebar.tsx
+// =========================================
 /*
  * packages/ui/src/components/StandaloneChatView/StandaloneChatSidebar.tsx
  *
@@ -31,15 +34,15 @@ import {
     createStandaloneChat as createStandaloneChatApi,
     renameStandaloneChat as editStandaloneChatApi,
     deleteStandaloneChat as deleteStandaloneChatApi,
-    StandaloneChatListItem,
-} from '../../api/api';
+} from '../../api/api'; // <-- Use barrel file
 import {
     activeChatIdAtom,
     toastMessageAtom,
     // standaloneSearchTermAtom removed as search is being removed
 } from '../../store';
-import type { ChatSession } from '../../types';
+import type { ChatSession, StandaloneChatListItem } from '../../types'; // <-- Import from types
 import { formatTimestamp } from '../../helpers';
+import { cn } from '../../utils'; // Import cn if needed for styling
 
 interface StandaloneChatSidebarProps {
     isLoading?: boolean; // Optional loading state from parent
@@ -146,7 +149,18 @@ export function StandaloneChatSidebar({ isLoading: isLoadingParent, error: paren
             <EditStandaloneChatModal isOpen={isEditModalOpen} onOpenChange={setIsEditModalOpen} chat={chatToEdit} onSave={handleConfirmEdit} isSaving={editChatMutation.isPending} saveError={editChatMutation.error?.message} />
 
             {/* Delete Confirmation Modal */}
-            <AlertDialog.Root open={isDeleteConfirmOpen} onOpenChange={(open) => !open && handleCancelDelete()}> <AlertDialog.Content style={{maxWidth:450}}> <AlertDialog.Title>Delete Chat</AlertDialog.Title> <AlertDialog.Description size="2"> Are you sure you want to permanently delete this chat? This action cannot be undone. </AlertDialog.Description> {deleteChatMutation.isError && <Text color="red" size="1" my="2">Error: {deleteChatMutation.error.message}</Text>} <Flex gap="3" mt="4" justify="end"> <AlertDialog.Cancel> <Button variant="soft" color="gray" onClick={handleCancelDelete} disabled={deleteChatMutation.isPending}>Cancel</Button> </AlertDialog.Cancel> <AlertDialog.Action> <Button color="red" onClick={handleConfirmDelete} disabled={deleteChatMutation.isPending}> {deleteChatMutation.isPending ? <Spinner size="1"/> : <TrashIcon />} <Text ml="1">Delete Chat</Text> </Button> </AlertDialog.Action> </Flex> </AlertDialog.Content> </AlertDialog.Root>
+            {/* *** FIX: Use isDeleteConfirmOpen here *** */}
+            <AlertDialog.Root open={isDeleteConfirmOpen} onOpenChange={(open) => !open && handleCancelDelete()}>
+                <AlertDialog.Content style={{maxWidth:450}}>
+                    <AlertDialog.Title>Delete Chat</AlertDialog.Title>
+                    <AlertDialog.Description size="2"> Are you sure you want to permanently delete this chat? This action cannot be undone. </AlertDialog.Description>
+                    {deleteChatMutation.isError && <Text color="red" size="1" my="2">Error: {deleteChatMutation.error.message}</Text>}
+                    <Flex gap="3" mt="4" justify="end">
+                        <AlertDialog.Cancel> <Button variant="soft" color="gray" onClick={handleCancelDelete} disabled={deleteChatMutation.isPending}>Cancel</Button> </AlertDialog.Cancel>
+                        <AlertDialog.Action> <Button color="red" onClick={handleConfirmDelete} disabled={deleteChatMutation.isPending}> {deleteChatMutation.isPending ? <Spinner size="1"/> : <TrashIcon />} <Text ml="1">Delete Chat</Text> </Button> </AlertDialog.Action>
+                    </Flex>
+                </AlertDialog.Content>
+            </AlertDialog.Root>
         </>
     );
 }
