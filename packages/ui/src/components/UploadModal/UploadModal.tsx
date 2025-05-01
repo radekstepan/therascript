@@ -1,8 +1,4 @@
-// =========================================
-// File: packages/ui/src/components/UploadModal/UploadModal.tsx
-// =========================================
-// packages/ui/src/components/UploadModal/UploadModal.tsx
-/* src/components/UploadModal/UploadModal.tsx */
+/* packages/ui/src/components/UploadModal/UploadModal.tsx */
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useSetAtom } from 'jotai';
 import { useNavigate } from 'react-router-dom';
@@ -65,7 +61,21 @@ export function UploadModal({ isOpen }: UploadModalProps) {
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
   const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
 
-  // --- Mutations and Queries (remain the same) ---
+  // Ref for auto-focus
+  const sessionNameRef = useRef<HTMLInputElement>(null);
+
+  // Auto-focus effect
+  useEffect(() => {
+    if (isOpen && !currentJobId) {
+      // Only focus if open and not already processing
+      const timer = setTimeout(() => {
+        sessionNameRef.current?.focus();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen, currentJobId]);
+
+  // --- Mutations and Queries (logic unchanged) ---
   const uploadMutation = useMutation({
     mutationFn: ({
       file,
@@ -128,6 +138,7 @@ export function UploadModal({ isOpen }: UploadModalProps) {
         navigate(`/sessions/${finalizedSession.id}`);
       }
       closeModal();
+      resetModal(); // Reset after navigation and closing
     },
     onError: (error) => {
       console.error('Finalization failed:', error);
@@ -155,7 +166,7 @@ export function UploadModal({ isOpen }: UploadModalProps) {
     finalizeMutation.isSuccess,
   ]);
 
-  // --- Combined State (remains the same) ---
+  // --- Combined State (unchanged) ---
   const isUploading = uploadMutation.isPending;
   const isPolling = !!currentJobId && !transcriptionStatus && !pollingError;
   const isProcessing =
@@ -187,14 +198,14 @@ export function UploadModal({ isOpen }: UploadModalProps) {
     setFormError(null);
     setCurrentJobId(null);
     setCurrentSessionId(null);
-    if (fileInputRef.current) fileInputRef.current.value = ''; // Keep clearing on reset
+    if (fileInputRef.current) fileInputRef.current.value = '';
     uploadMutation.reset();
     finalizeMutation.reset();
     if (currentJobId)
       queryClient.removeQueries({
         queryKey: ['transcriptionStatus', currentJobId],
       });
-  }, [uploadMutation, finalizeMutation, queryClient, currentJobId]);
+  }, [uploadMutation, finalizeMutation, queryClient, currentJobId]); // Added currentJobId dependency
 
   const handleDrag = (
     e: React.DragEvent<HTMLDivElement | HTMLLabelElement>
@@ -220,13 +231,11 @@ export function UploadModal({ isOpen }: UploadModalProps) {
         );
       else setFormError(null);
     }
-    // --- Clear input value *after* state update, wrapped in requestAnimationFrame ---
     requestAnimationFrame(() => {
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
     });
-    // --- End Change ---
   };
 
   const handleDrop = (
@@ -242,11 +251,8 @@ export function UploadModal({ isOpen }: UploadModalProps) {
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     e.preventDefault();
-    // handleFileSelection is called when the input value changes
     handleFileSelection(e.target.files?.[0] ?? null);
   };
-
-  // Remove handleUploadAreaClick as we rely on the label's default behavior
 
   const handleStartClick = async () => {
     setFormError(null);
@@ -296,7 +302,7 @@ export function UploadModal({ isOpen }: UploadModalProps) {
     }
   };
 
-  // --- Styling and Progress Text (remain the same) ---
+  // --- Styling and Progress Text (unchanged) ---
   const dropAreaClasses = cn(
     'rounded-md p-6 text-center transition-colors duration-200 ease-in-out',
     'flex flex-col items-center justify-center space-y-2 min-h-[10rem]',
@@ -334,6 +340,14 @@ export function UploadModal({ isOpen }: UploadModalProps) {
     );
   };
 
+  // Handle Enter key press in input fields to trigger save/upload
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && !overallIsLoading && !currentJobId) {
+      e.preventDefault();
+      handleStartClick();
+    }
+  };
+
   return (
     <Dialog.Root open={isOpen} onOpenChange={handleOpenChange}>
       <Dialog.Content style={{ maxWidth: 550 }}>
@@ -343,11 +357,10 @@ export function UploadModal({ isOpen }: UploadModalProps) {
           {ALLOWED_AUDIO_EXTENSIONS.join(', ')}) to start analysis.
         </Dialog.Description>
         <Flex direction="column" gap="4">
-          {/* --- Upload Area using Label --- */}
+          {/* Upload Area */}
           <label
-            htmlFor="audio-upload-input" // Critical for label behavior
+            htmlFor="audio-upload-input"
             className={dropAreaClasses}
-            // REMOVED onClick handler - rely on default label behavior
             onDragEnter={handleDrag}
             onDragLeave={handleDrag}
             onDragOver={handleDrag}
@@ -359,7 +372,6 @@ export function UploadModal({ isOpen }: UploadModalProps) {
                 : `Drag and drop audio file (${ALLOWED_AUDIO_EXTENSIONS.join(', ')}) or click here to upload`
             }
           >
-            {/* Hidden Input */}
             <input
               ref={fileInputRef}
               type="file"
@@ -369,9 +381,8 @@ export function UploadModal({ isOpen }: UploadModalProps) {
               onChange={handleFileChange}
               disabled={overallIsLoading}
             />
-            {/* Internal Content */}
             <Flex direction="column" align="center" gap="1">
-              {/* Icon logic remains */}
+              {/* Icon */}
               {hasFailed ? (
                 <ExclamationTriangleIcon
                   width="32"
@@ -397,11 +408,11 @@ export function UploadModal({ isOpen }: UploadModalProps) {
                   )}
                 />
               )}
-              {/* Progress text remains */}
+              {/* Progress Text */}
               <Text size="2" color="gray" mt="2">
                 {getProgressText()}
               </Text>
-              {/* Progress Bar remains */}
+              {/* Progress Bar */}
               {isProcessing && transcriptionStatus?.progress !== undefined && (
                 <Box width="100%" mt="2">
                   {' '}
@@ -411,22 +422,19 @@ export function UploadModal({ isOpen }: UploadModalProps) {
                   />{' '}
                 </Box>
               )}
-
-              {/* Conditional "Remove File" Button */}
+              {/* Remove Button */}
               {modalFile && !overallIsLoading && !hasFailed && (
                 <Box mt="3" onClick={(e) => e.stopPropagation()}>
                   {' '}
-                  {/* Prevent click on button container from triggering label */}
                   <Button
-                    type="button" // Ensure it doesn't submit form
+                    type="button"
                     variant="ghost"
                     color="red"
                     size="1"
                     highContrast
                     onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-                      e.preventDefault(); // Prevent default button action
-                      handleFileSelection(null); // Just clear the state
-                      // Clearing input value now happens in handleFileSelection via requestAnimationFrame
+                      e.preventDefault();
+                      handleFileSelection(null);
                     }}
                     aria-label="Remove selected file"
                   >
@@ -436,33 +444,29 @@ export function UploadModal({ isOpen }: UploadModalProps) {
               )}
             </Flex>
           </label>
-          {/* --- End Upload Area --- */}
 
-          {/* Metadata Fields (remain the same) */}
+          {/* Metadata Fields */}
           <Flex direction="column" gap="3">
-            {' '}
-            {/* ... */}
             <label>
-              {' '}
               <Text as="div" size="2" mb="1" weight="medium">
                 Session Name / Title
-              </Text>{' '}
+              </Text>
               <TextField.Root
+                ref={sessionNameRef} // Attach ref for focus
                 size="2"
                 placeholder="e.g., Weekly Check-in"
                 value={sessionNameInput}
                 onChange={(e) => setSessionNameInput(e.target.value)}
                 disabled={overallIsLoading}
                 required
-              />{' '}
+                onKeyDown={handleKeyDown} // Add keydown handler
+              />
             </label>
             <Box className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {' '}
               <label>
-                {' '}
                 <Text as="div" size="2" mb="1" weight="medium">
                   Client Name
-                </Text>{' '}
+                </Text>
                 <TextField.Root
                   size="2"
                   placeholder="Client's Full Name"
@@ -470,33 +474,32 @@ export function UploadModal({ isOpen }: UploadModalProps) {
                   onChange={(e) => setClientNameInput(e.target.value)}
                   disabled={overallIsLoading}
                   required
-                />{' '}
-              </label>{' '}
+                  onKeyDown={handleKeyDown} // Add keydown handler
+                />
+              </label>
               <label>
-                {' '}
                 <Text as="div" size="2" mb="1" weight="medium">
                   Date
-                </Text>{' '}
+                </Text>
                 <input
                   type="date"
                   value={sessionDate}
                   onChange={(e) => setSessionDate(e.target.value)}
                   disabled={overallIsLoading}
                   required
+                  onKeyDown={handleKeyDown} // Add keydown handler
                   className={cn(
                     'flex w-full rounded-md border border-[--gray-a7] bg-[--gray-1] focus:border-[--accent-8] focus:shadow-[0_0_0_1px_var(--accent-8)]',
                     'h-8 px-2 py-1 text-sm text-[--gray-12] placeholder:text-[--gray-a9] focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50'
                   )}
-                />{' '}
-              </label>{' '}
+                />
+              </label>
             </Box>
             <Box className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {' '}
               <label>
-                {' '}
                 <Text as="div" size="2" mb="1" weight="medium">
                   Session Type
-                </Text>{' '}
+                </Text>
                 <Select.Root
                   value={sessionTypeInput}
                   onValueChange={setSessionTypeInput}
@@ -504,26 +507,23 @@ export function UploadModal({ isOpen }: UploadModalProps) {
                   required
                   size="2"
                 >
-                  {' '}
                   <Select.Trigger
                     placeholder="Select type..."
                     style={{ width: '100%' }}
-                  />{' '}
+                  />
                   <Select.Content>
-                    {' '}
                     {SESSION_TYPES.map((type) => (
                       <Select.Item key={type} value={type}>
                         {type.charAt(0).toUpperCase() + type.slice(1)}
                       </Select.Item>
-                    ))}{' '}
-                  </Select.Content>{' '}
-                </Select.Root>{' '}
-              </label>{' '}
+                    ))}
+                  </Select.Content>
+                </Select.Root>
+              </label>
               <label>
-                {' '}
                 <Text as="div" size="2" mb="1" weight="medium">
                   Therapy Modality
-                </Text>{' '}
+                </Text>
                 <Select.Root
                   value={therapyInput}
                   onValueChange={setTherapyInput}
@@ -531,38 +531,35 @@ export function UploadModal({ isOpen }: UploadModalProps) {
                   required
                   size="2"
                 >
-                  {' '}
                   <Select.Trigger
                     placeholder="Select therapy..."
                     style={{ width: '100%' }}
-                  />{' '}
+                  />
                   <Select.Content>
-                    {' '}
                     {THERAPY_TYPES.map((type) => (
                       <Select.Item key={type} value={type}>
                         {type}
                       </Select.Item>
-                    ))}{' '}
-                  </Select.Content>{' '}
-                </Select.Root>{' '}
-              </label>{' '}
+                    ))}
+                  </Select.Content>
+                </Select.Root>
+              </label>
             </Box>
           </Flex>
-          {/* Error display remains the same */}
+
+          {/* Error display */}
           {overallError && (
             <Callout.Root color="red" role="alert" size="1" mt="2">
-              {' '}
               <Callout.Icon>
                 <InfoCircledIcon />
-              </Callout.Icon>{' '}
-              <Callout.Text>{overallError}</Callout.Text>{' '}
+              </Callout.Icon>
+              <Callout.Text>{overallError}</Callout.Text>
             </Callout.Root>
           )}
         </Flex>
-        {/* Footer buttons remain the same */}
+
+        {/* Footer buttons */}
         <Flex gap="3" mt="5" justify="end">
-          {' '}
-          {/* ... */}
           <Button
             type="button"
             variant="soft"
@@ -570,9 +567,8 @@ export function UploadModal({ isOpen }: UploadModalProps) {
             onClick={() => handleOpenChange(false)}
             disabled={overallIsLoading && !hasFailed}
           >
-            {' '}
             <Cross2Icon />{' '}
-            {overallIsLoading && !hasFailed ? 'Processing...' : 'Cancel'}{' '}
+            {overallIsLoading && !hasFailed ? 'Processing...' : 'Cancel'}
           </Button>
           {!currentJobId && (
             <Button
@@ -580,7 +576,6 @@ export function UploadModal({ isOpen }: UploadModalProps) {
               onClick={handleStartClick}
               disabled={!modalFile || isUploading}
             >
-              {' '}
               {isUploading ? (
                 <>
                   <Spinner size="2" />
@@ -588,16 +583,14 @@ export function UploadModal({ isOpen }: UploadModalProps) {
                 </>
               ) : (
                 <>
-                  {' '}
-                  <UploadIcon /> Upload & Start{' '}
+                  <UploadIcon /> Upload & Start
                 </>
-              )}{' '}
+              )}
             </Button>
           )}
           {hasFailed && (
             <Button type="button" color="orange" onClick={resetModal}>
-              {' '}
-              Retry Upload{' '}
+              Retry Upload
             </Button>
           )}
         </Flex>

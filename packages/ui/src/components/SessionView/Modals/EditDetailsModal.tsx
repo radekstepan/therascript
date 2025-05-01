@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+/* packages/ui/src/components/SessionView/Modals/EditDetailsModal.tsx */
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Button,
   Dialog,
@@ -16,7 +17,6 @@ import { SESSION_TYPES, THERAPY_TYPES } from '../../../constants';
 import { updateSessionMetadata } from '../../../api/api';
 import type { Session, SessionMetadata } from '../../../types';
 import { cn } from '../../../utils';
-// Import the date formatter
 import { formatIsoDateToYMD } from '../../../helpers';
 
 interface EditDetailsModalProps {
@@ -34,17 +34,20 @@ export function EditDetailsModal({
 }: EditDetailsModalProps) {
   const [editClientName, setEditClientName] = useState('');
   const [editSessionName, setEditSessionName] = useState('');
-  const [editDate, setEditDate] = useState(''); // State expects "YYYY-MM-DD"
+  const [editDate, setEditDate] = useState('');
   const [editType, setEditType] = useState('');
   const [editTherapy, setEditTherapy] = useState('');
   const [validationError, setValidationError] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
+  // Ref for auto-focus
+  const sessionNameInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     if (isOpen && session) {
       setEditClientName(session.clientName || '');
       setEditSessionName(session.sessionName || session.fileName || '');
-      setEditDate(formatIsoDateToYMD(session.date)); // Use helper here
+      setEditDate(formatIsoDateToYMD(session.date));
 
       const currentSessionTypeLower = session.sessionType?.toLowerCase();
       const matchingType = SESSION_TYPES.find(
@@ -62,10 +65,16 @@ export function EditDetailsModal({
 
       setValidationError(null);
       updateMetadataMutation.reset();
+
+      // Auto-focus on the first input field when the modal opens
+      const timer = setTimeout(() => {
+        sessionNameInputRef.current?.focus();
+      }, 50); // Small delay ensures element is ready
+      return () => clearTimeout(timer);
     } else if (!isOpen) {
       updateMetadataMutation.reset();
     }
-  }, [isOpen, session]); // Removed updateMetadataMutation from deps
+  }, [isOpen, session]);
 
   const updateMetadataMutation = useMutation({
     mutationFn: (metadata: Partial<SessionMetadata>) => {
@@ -147,6 +156,14 @@ export function EditDetailsModal({
     onOpenChange(open);
   };
 
+  // Handle Enter key press in input fields to trigger save
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleSave();
+    }
+  };
+
   return (
     <Dialog.Root open={isOpen} onOpenChange={handleManualClose}>
       <Dialog.Content style={{ maxWidth: 525 }}>
@@ -163,6 +180,7 @@ export function EditDetailsModal({
               Session Name
             </Text>
             <TextField.Root
+              ref={sessionNameInputRef} // Attach ref for focus
               id="sessionNameEditModal"
               size="2"
               value={editSessionName}
@@ -171,6 +189,7 @@ export function EditDetailsModal({
               required
               aria-required="true"
               disabled={isSaving}
+              onKeyDown={handleKeyDown} // Add keydown handler
             />
             <Text
               as="label"
@@ -181,7 +200,6 @@ export function EditDetailsModal({
             >
               Client Name
             </Text>
-            {/* *** FIX: Use setEditClientName here *** */}
             <TextField.Root
               id="clientNameEditModal"
               size="2"
@@ -191,6 +209,7 @@ export function EditDetailsModal({
               required
               aria-required="true"
               disabled={isSaving}
+              onKeyDown={handleKeyDown} // Add keydown handler
             />
             <Text
               as="label"
@@ -209,6 +228,7 @@ export function EditDetailsModal({
               required
               aria-required="true"
               disabled={isSaving}
+              onKeyDown={handleKeyDown} // Add keydown handler
               className={cn(
                 'flex w-full rounded-md border border-[--gray-a7] bg-[--gray-1] focus:border-[--accent-8] focus:shadow-[0_0_0_1px_var(--accent-8)]',
                 'h-8 px-2 py-1 text-sm text-[--gray-12] placeholder:text-[--gray-a9] focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50'

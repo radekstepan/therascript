@@ -1,6 +1,5 @@
-// Purpose: Renders a popover list of starred user messages (templates)
-//          that can be clicked to insert their text into the chat input.
-import React from 'react';
+/* packages/ui/src/components/SessionView/Chat/StarredTemplatesList.tsx */
+import React, { useEffect } from 'react'; // Added useEffect
 import { useQuery } from '@tanstack/react-query'; // For fetching starred messages data
 import {
   Button,
@@ -40,6 +39,21 @@ export function StarredTemplatesList({
     staleTime: 5 * 60 * 1000, // Cache data for 5 minutes before considering it stale
   });
   // --- End Fetch ---
+
+  // --- Escape Key Handler ---
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+    // Add listener when the component mounts (popover is open)
+    document.addEventListener('keydown', handleKeyDown);
+    // Remove listener when the component unmounts (popover closes)
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [onClose]); // Dependency on onClose ensures the correct function is called
 
   // CSS classes for the popover container
   const popoverClasses = cn(

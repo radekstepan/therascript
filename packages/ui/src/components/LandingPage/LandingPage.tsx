@@ -1,9 +1,4 @@
-// =========================================
-// File: packages/ui/src/components/LandingPage/LandingPage.tsx
-// =========================================
-/*
- * packages/ui/src/components/LandingPage/LandingPage.tsx
- */
+/* packages/ui/src/components/LandingPage/LandingPage.tsx */
 import React, {
   useMemo,
   useState,
@@ -386,7 +381,7 @@ export function LandingPage() {
     currentStandaloneChatSortDirection,
   ]); // Dependencies unchanged
 
-  // Handlers (Update search handlers)
+  // Handlers (Unchanged)
   const handleSessionSort = (criteria: SessionSortCriteria) =>
     setSessionSort(criteria);
   const handleStandaloneChatSort = (criteria: StandaloneChatSortCriteria) =>
@@ -431,7 +426,7 @@ export function LandingPage() {
     deleteChatMutation.mutate(chatToDelete.id);
   };
 
-  // --- Search Handlers ---
+  // --- Search Handlers (Unchanged) ---
   const handleSearchInputChange = (
     event: React.ChangeEvent<HTMLInputElement>
   ) => {
@@ -482,7 +477,7 @@ export function LandingPage() {
   };
   // --- End Search Handlers ---
 
-  // --- Tag Filter Handlers ---
+  // --- Tag Filter Handlers (Unchanged) ---
   const handleAddFilterTag = useCallback(() => {
     // Logic unchanged
     const tagToAdd = newFilterTagInput.trim();
@@ -516,7 +511,7 @@ export function LandingPage() {
   );
   // --- End Tag Filter Handlers ---
 
-  // --- Escape Key Listener ---
+  // --- Escape Key Listener (Unchanged) ---
   useEffect(() => {
     // Logic unchanged
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -535,7 +530,7 @@ export function LandingPage() {
   }, [activeSearchQuery, handleClearSearch]);
   // --- End Escape Key Listener ---
 
-  // --- Auto Focus Effect ---
+  // --- Auto Focus Effect (Unchanged) ---
   useEffect(() => {
     // Logic unchanged
     if (activeSearchQuery && searchInputRef.current) {
@@ -815,7 +810,7 @@ export function LandingPage() {
           </Container>
         </Box>
       </Box>
-      {/* Modals (Unchanged) */}
+      {/* Modals */}
       <EditDetailsModal
         isOpen={isEditingModalOpen}
         onOpenChange={(open) => {
@@ -853,34 +848,33 @@ export function LandingPage() {
           <Flex gap="3" mt="4" justify="end">
             {' '}
             <AlertDialog.Cancel>
-              {' '}
-              <Button
+              <Button // Wrap children in button
                 variant="soft"
                 color="gray"
                 disabled={deleteSessionMutation.isPending}
               >
-                {' '}
-                Cancel{' '}
-              </Button>{' '}
-            </AlertDialog.Cancel>{' '}
+                Cancel
+              </Button>
+            </AlertDialog.Cancel>
             <AlertDialog.Action>
-              {' '}
-              <Button
+              <Button // Wrap children in button
                 color="red"
                 onClick={handleConfirmDeleteSession}
                 disabled={deleteSessionMutation.isPending}
               >
-                {' '}
-                {deleteSessionMutation.isPending ? (
-                  <Spinner size="1" />
-                ) : (
-                  <TrashIcon />
-                )}{' '}
-                <Text ml="1">Delete Session</Text>{' '}
-              </Button>{' '}
-            </AlertDialog.Action>{' '}
-          </Flex>{' '}
-        </AlertDialog.Content>{' '}
+                {/* Wrap icon and text in fragment */}
+                <>
+                  {deleteSessionMutation.isPending ? (
+                    <Spinner size="1" />
+                  ) : (
+                    <TrashIcon />
+                  )}{' '}
+                  <Text ml="1">Delete Session</Text>{' '}
+                </>
+              </Button>
+            </AlertDialog.Action>
+          </Flex>
+        </AlertDialog.Content>
       </AlertDialog.Root>
       <EditStandaloneChatModal
         isOpen={isEditChatModalOpen}
@@ -919,36 +913,34 @@ export function LandingPage() {
           <Flex gap="3" mt="4" justify="end">
             {' '}
             <AlertDialog.Cancel>
-              {' '}
-              <Button
+              <Button // Wrap children in button
                 variant="soft"
                 color="gray"
                 disabled={deleteChatMutation.isPending}
               >
                 Cancel
-              </Button>{' '}
-            </AlertDialog.Cancel>{' '}
+              </Button>
+            </AlertDialog.Cancel>
             <AlertDialog.Action>
-              {' '}
-              <Button
+              <Button // Wrap children in button
                 color="red"
                 onClick={handleConfirmDeleteChat}
                 disabled={deleteChatMutation.isPending}
               >
-                {' '}
-                {deleteChatMutation.isPending ? (
-                  <Spinner size="1" />
-                ) : (
-                  <TrashIcon />
-                )}{' '}
-                <Text ml="1">Delete Chat</Text>{' '}
-              </Button>{' '}
-            </AlertDialog.Action>{' '}
-          </Flex>{' '}
-        </AlertDialog.Content>{' '}
+                {/* Wrap icon and text in fragment */}
+                <>
+                  {deleteChatMutation.isPending ? (
+                    <Spinner size="1" />
+                  ) : (
+                    <TrashIcon />
+                  )}{' '}
+                  <Text ml="1">Delete Chat</Text>{' '}
+                </>
+              </Button>
+            </AlertDialog.Action>
+          </Flex>
+        </AlertDialog.Content>
       </AlertDialog.Root>
     </>
   );
 }
-
-// TODO comments should not be removed

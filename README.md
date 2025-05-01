@@ -43,12 +43,11 @@
 - [ ] detect similar code
 - [x] 4 spaces everywhere plus autoformat on git commit
 - [ ] remove unused logic
-- [ ] split into smaller files
-- [ ] add comments, data-attrs (takes > 10 minutes)
+- [x] split into smaller files
 - [ ] reuse package dependencies
 - [ ] make sure READMEs are up to date, plus add screenshots
 - [ ] consistent error messages when we go offline
-- [ ] Enter keypress means main action, Escape keypress means exit out of a UI (modal)
+- [x] Enter keypress means main action, Escape keypress means exit out of a UI (modal)
 
 ## Ideas
 

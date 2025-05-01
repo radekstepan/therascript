@@ -1,5 +1,5 @@
-// Purpose: Displays a modal showing the status of project-related Docker containers.
-import React from 'react';
+/* packages/ui/src/components/User/DockerStatusModal.tsx */
+import React, { useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query'; // For fetching data
 import {
   Dialog,
@@ -75,6 +75,8 @@ export function DockerStatusModal({
   isOpen,
   onOpenChange,
 }: DockerStatusModalProps) {
+  const closeButtonRef = useRef<HTMLButtonElement>(null); // Ref for auto-focus
+
   // Fetch Docker status using Tanstack Query
   const {
     data: containers,
@@ -89,6 +91,16 @@ export function DockerStatusModal({
     refetchInterval: isOpen ? 10000 : false, // Refetch every 10s if modal remains open
     refetchOnWindowFocus: false, // Don't refetch just because the window gained focus
   });
+
+  // Auto-focus on the Close button when the modal opens
+  useEffect(() => {
+    if (isOpen) {
+      const timer = setTimeout(() => {
+        closeButtonRef.current?.focus();
+      }, 50); // Small delay ensures element is ready
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen]);
 
   // Handler to explicitly close the modal via the props callback
   const handleClose = () => {
@@ -243,7 +255,12 @@ export function DockerStatusModal({
             Refresh
           </Button>
           {/* Close Button */}
-          <Button type="button" variant="surface" onClick={handleClose}>
+          <Button
+            ref={closeButtonRef} // Attach ref for focus
+            type="button"
+            variant="surface"
+            onClick={handleClose}
+          >
             <Cross2Icon /> Close
           </Button>
         </Flex>

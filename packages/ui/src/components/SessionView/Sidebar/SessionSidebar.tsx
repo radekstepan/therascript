@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+/* packages/ui/src/components/SessionView/Sidebar/SessionSidebar.tsx */
+import React, { useState, useRef, useEffect } from 'react';
 import { NavLink, useParams, useNavigate } from 'react-router-dom';
 import { useAtomValue } from 'jotai';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -65,21 +66,43 @@ export function SessionSidebar({
   const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
   const [renamingChat, setRenamingChat] = useState<ChatSession | null>(null);
   const [currentRenameValue, setCurrentRenameValue] = useState('');
+  // Ref for auto-focus rename input
+  const renameInputRef = useRef<HTMLInputElement>(null);
 
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [deletingChat, setDeletingChat] = useState<ChatSession | null>(null);
+  // Ref for delete confirm button
+  const deleteConfirmButtonRef = useRef<HTMLButtonElement>(null);
 
   const sessionId = session?.id ?? null;
 
-  // Mutation: Start New Chat
+  // Effect for auto-focusing rename input
+  useEffect(() => {
+    if (isRenameModalOpen) {
+      const timer = setTimeout(() => {
+        renameInputRef.current?.focus();
+      }, 50); // Small delay ensures element is ready
+      return () => clearTimeout(timer);
+    }
+  }, [isRenameModalOpen]);
+
+  // Effect for auto-focusing delete confirm button
+  useEffect(() => {
+    if (isDeleteConfirmOpen) {
+      const timer = setTimeout(() => {
+        deleteConfirmButtonRef.current?.focus();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [isDeleteConfirmOpen]);
+
+  // Mutation: Start New Chat (unchanged)
   const startNewChatMutation = useMutation<ChatSession, Error>({
-    // Explicit types
     mutationFn: () => {
       if (!sessionId) throw new Error('Session ID missing');
       return startNewChatApi(sessionId);
     },
     onSuccess: (newChat) => {
-      // Type newChat
       setToast('New chat started.');
       queryClient.setQueryData<Session>(
         ['sessionMeta', sessionId],
@@ -90,7 +113,7 @@ export function SessionSidebar({
             : [];
           const newChatMetadata: ChatSession = {
             id: newChat.id,
-            sessionId: newChat.sessionId, // Make sure sessionId is correct type
+            sessionId: newChat.sessionId,
             timestamp: newChat.timestamp,
             name: newChat.name,
             messages: [],
@@ -98,11 +121,10 @@ export function SessionSidebar({
           return { ...oldData, chats: [...existingChats, newChatMetadata] };
         }
       );
-      // FIX: Ensure sessionId is not null before prefetching
       if (sessionId !== null) {
         queryClient.prefetchQuery({
           queryKey: ['chat', sessionId, newChat.id],
-          queryFn: () => fetchSessionChatDetails(sessionId!, newChat.id), // Assert non-null
+          queryFn: () => fetchSessionChatDetails(sessionId!, newChat.id),
         });
         navigate(`/sessions/${sessionId}/chats/${newChat.id}`);
       } else {
@@ -115,19 +137,17 @@ export function SessionSidebar({
     },
   });
 
-  // Mutation: Rename Chat
+  // Mutation: Rename Chat (unchanged)
   const renameChatMutation = useMutation<
     ChatSession,
     Error,
     { chatId: number; newName: string | null }
   >({
-    // Explicit types
     mutationFn: (variables: { chatId: number; newName: string | null }) => {
       if (!sessionId) throw new Error('Session ID missing');
       return renameChatApi(sessionId, variables.chatId, variables.newName);
     },
     onSuccess: (updatedChatMetadata) => {
-      // Type updatedChatMetadata
       setToast('Chat renamed successfully.');
       queryClient.setQueryData<Session>(
         ['sessionMeta', sessionId],
@@ -143,7 +163,6 @@ export function SessionSidebar({
           };
         }
       );
-      // FIX: Ensure sessionId is not null before setting chat data
       if (sessionId !== null) {
         queryClient.setQueryData<ChatSession>(
           ['chat', sessionId, updatedChatMetadata.id],
@@ -161,9 +180,8 @@ export function SessionSidebar({
     },
   });
 
-  // Mutation: Delete Chat
+  // Mutation: Delete Chat (unchanged)
   const deleteChatMutation = useMutation<{ message: string }, Error, number>({
-    // Explicit types
     mutationFn: (chatId: number) => {
       if (!sessionId) throw new Error('Session ID missing');
       return deleteChatApi(sessionId, chatId);
@@ -220,6 +238,7 @@ export function SessionSidebar({
     },
   });
 
+  // Loading/Error checks (unchanged)
   if (isLoadingSession) {
     return (
       <Box
@@ -254,11 +273,13 @@ export function SessionSidebar({
     ? [...session.chats].sort((a, b) => b.timestamp - a.timestamp)
     : [];
 
+  // Helper function (unchanged)
   const getChatDisplayTitle = (chat: ChatSession | null): string => {
     if (!chat) return 'Unknown Chat';
     return chat.name || `Chat (${formatTimestamp(chat.timestamp)})`;
   };
 
+  // Handlers (unchanged)
   const handleNewChatClick = () => startNewChatMutation.mutate();
   const handleRenameClick = (chat: ChatSession) => {
     setRenamingChat(chat);
@@ -293,6 +314,15 @@ export function SessionSidebar({
     deleteChatMutation.reset();
   };
 
+  // Handle Enter key in rename modal
+  const handleRenameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleSaveRename();
+    }
+  };
+
+  // NavLink class helper (unchanged)
   const getNavLinkClass = ({ isActive }: { isActive: boolean }): string => {
     const base = 'block w-full px-2 py-1.5 rounded-md group';
     const inactive =
@@ -308,6 +338,7 @@ export function SessionSidebar({
         className="flex flex-col h-full w-full overflow-hidden"
         style={{ backgroundColor: 'var(--color-panel-solid)' }}
       >
+        {/* Header (Conditional) */}
         {!hideHeader && (
           <Flex justify="between" align="center" flexShrink="0" mb="2">
             <Heading as="h3" size="2" color="gray" trim="start" weight="medium">
@@ -330,6 +361,7 @@ export function SessionSidebar({
           </Flex>
         )}
 
+        {/* Header (Conditional - Minimal) */}
         {hideHeader && (
           <Flex justify="end" align="center" flexShrink="0" mb="2">
             <Button
@@ -349,6 +381,7 @@ export function SessionSidebar({
           </Flex>
         )}
 
+        {/* Chat List */}
         {isLoadingSession ? (
           <Flex flexGrow="1" align="center" justify="center">
             <Spinner size="2" />
@@ -452,17 +485,12 @@ export function SessionSidebar({
           )}
           <Flex direction="column" gap="3">
             <TextField.Root
+              ref={renameInputRef} // Attach ref for focus
               size="2"
               value={currentRenameValue}
               onChange={(e) => setCurrentRenameValue(e.target.value)}
               placeholder="Enter new name (optional)"
-              autoFocus
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  handleSaveRename();
-                }
-              }}
+              onKeyDown={handleRenameKeyDown} // Add keydown handler
               disabled={renameChatMutation.isPending}
             />
             {renameChatMutation.isError && (
@@ -529,6 +557,7 @@ export function SessionSidebar({
               <Cross2Icon /> Cancel
             </Button>
             <Button
+              ref={deleteConfirmButtonRef} // Attach ref for focus
               color="red"
               onClick={confirmDelete}
               disabled={deleteChatMutation.isPending}

@@ -1,13 +1,5 @@
-// =========================================
-// File: packages/ui/src/components/StandaloneChatView/EditStandaloneChatModal.tsx
-// =========================================
-/*
- * packages/ui/src/components/StandaloneChatView/EditStandaloneChatModal.tsx
- *
- * This modal allows users to edit the details of a standalone chat,
- * including its name and associated tags.
- */
-import React, { useState, useEffect, useCallback } from 'react'; // Added useCallback
+/* packages/ui/src/components/StandaloneChatView/EditStandaloneChatModal.tsx */
+import React, { useState, useEffect, useCallback, useRef } from 'react'; // Added useRef
 import {
   Dialog,
   Button,
@@ -49,6 +41,9 @@ export function EditStandaloneChatModal({
   const [newTagInput, setNewTagInput] = useState('');
   const [inputError, setInputError] = useState<string | null>(null);
 
+  // Ref for auto-focus
+  const editNameRef = useRef<HTMLInputElement>(null);
+
   // Effect to initialize state when modal opens or chat changes
   useEffect(() => {
     // Only update state if the modal is open AND the chat prop is valid
@@ -73,6 +68,12 @@ export function EditStandaloneChatModal({
       });
       setNewTagInput('');
       setInputError(null);
+
+      // Auto-focus on the name input field
+      const timer = setTimeout(() => {
+        editNameRef.current?.focus();
+      }, 50); // Small delay ensures element is ready
+      return () => clearTimeout(timer);
     }
     // Intentionally not resetting state when isOpen becomes false here.
     // Resetting should happen when the modal *intends* to close cleanly (e.g., Cancel, Save success).
@@ -174,6 +175,14 @@ export function EditStandaloneChatModal({
     onSave(chat.id, finalName, editTags);
   }, [chat, isSaving, editName, editTags, onSave]); // Dependencies for save
 
+  // Handle Enter key press in name input field to trigger save
+  const handleNameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleSaveClick();
+    }
+  };
+
   // Wrapper to prevent closing while saving
   const handleOpenChangeWrapper = useCallback(
     (open: boolean) => {
@@ -201,11 +210,13 @@ export function EditStandaloneChatModal({
               Name (Optional)
             </Text>
             <TextField.Root
+              ref={editNameRef} // Attach ref for focus
               size="2"
               placeholder="Enter chat name"
               value={editName}
               onChange={(e) => setEditName(e.target.value)}
               disabled={isSaving}
+              onKeyDown={handleNameKeyDown} // Add keydown handler
             />
           </label>
 
@@ -264,7 +275,7 @@ export function EditStandaloneChatModal({
                 placeholder="Add a tag..."
                 value={newTagInput}
                 onChange={(e) => setNewTagInput(e.target.value)}
-                onKeyDown={handleTagInputKeyDown}
+                onKeyDown={handleTagInputKeyDown} // Handles Enter for adding tag
                 disabled={isSaving || editTags.length >= 10}
                 style={{ flexGrow: 1 }}
                 aria-invalid={!!inputError}

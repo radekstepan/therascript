@@ -1,5 +1,5 @@
-// packages/ui/src/components/SessionView/Modals/LlmManagementModal.tsx
-import React, { useState, useEffect } from 'react';
+/* packages/ui/src/components/SessionView/Modals/LlmManagementModal.tsx */
+import React, { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Dialog,
@@ -81,6 +81,9 @@ export function LlmManagementModal({
   const [loadingModelName, setLoadingModelName] = useState<string | null>(null);
   const [modelToPull, setModelToPull] = useState<string>('');
 
+  // Ref for auto-focus
+  const pullInputRef = useRef<HTMLInputElement>(null);
+
   // State for Polling
   const [pullJobId, setPullJobId] = useState<string | null>(null);
   const [pullingModelName, setPullingModelName] = useState<string | null>(null);
@@ -93,14 +96,49 @@ export function LlmManagementModal({
   const [contextModalError, setContextModalError] = useState<string | null>(
     null
   );
+  // Ref for context input focus
+  const contextInputRef = useRef<HTMLInputElement>(null);
 
   // State for Delete Confirmation
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [modelToDelete, setModelToDelete] = useState<OllamaModelInfo | null>(
     null
   );
+  // Ref for delete confirm button focus
+  const deleteConfirmButtonRef = useRef<HTMLButtonElement>(null);
 
-  // --- Queries and Mutations ---
+  // --- Auto-focus on main modal open ---
+  useEffect(() => {
+    if (isOpen && !pullJobId) {
+      // Only focus pull input if not currently pulling
+      const timer = setTimeout(() => {
+        pullInputRef.current?.focus();
+      }, 50); // Small delay ensures element is ready
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen, pullJobId]);
+
+  // --- Auto-focus on context modal open ---
+  useEffect(() => {
+    if (isContextModalOpen) {
+      const timer = setTimeout(() => {
+        contextInputRef.current?.focus();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [isContextModalOpen]);
+
+  // --- Auto-focus on delete confirm modal open ---
+  useEffect(() => {
+    if (isDeleteConfirmOpen) {
+      const timer = setTimeout(() => {
+        deleteConfirmButtonRef.current?.focus();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [isDeleteConfirmOpen]);
+
+  // --- Queries and Mutations (Unchanged logic, only ref updates) ---
   const {
     data: ollamaStatus,
     isLoading: isLoadingStatus,
@@ -321,7 +359,7 @@ export function LlmManagementModal({
     },
   });
 
-  // --- Handlers ---
+  // --- Handlers (Unchanged) ---
   const resetPullState = (clearQuery: boolean = true) => {
     const currentJobId = pullJobId;
     setPullJobId(null);
@@ -364,7 +402,7 @@ export function LlmManagementModal({
     }
   };
 
-  // Effects for unload/load confirmation
+  // Effects for unload/load confirmation (Unchanged)
   useEffect(() => {
     if (isWaitingForUnload && ollamaStatus) {
       if (
@@ -386,7 +424,7 @@ export function LlmManagementModal({
     }
   }, [loadingModelName, ollamaStatus]);
 
-  // Event Handlers (Unload, Load)
+  // Event Handlers (Unload, Load) (Unchanged)
   const handleUnloadClick = () => {
     if (isAnyOperationActive || unloadMutation.isPending) return;
     unloadMutation.mutate();
@@ -396,7 +434,7 @@ export function LlmManagementModal({
     setModelMutation.mutate({ modelName, contextSize: null });
   };
 
-  // Handlers for Modals
+  // Handlers for Modals (Unchanged)
   const openContextModal = (model: OllamaModelInfo) => {
     setModelForContextModal(model);
     setCustomContextSizeInput('');
@@ -467,7 +505,23 @@ export function LlmManagementModal({
     }
   };
 
-  // Loading states
+  // Handle Enter key press in inputs
+  const handlePullInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handlePullClick();
+    }
+  };
+  const handleContextInputKeyDown = (
+    e: React.KeyboardEvent<HTMLInputElement>
+  ) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleSaveCustomContext();
+    }
+  };
+
+  // Loading states (Unchanged)
   const isUnloading = unloadMutation.isPending || isWaitingForUnload;
   const isLoadingSelectedModel =
     setModelMutation.isPending ||
@@ -495,13 +549,13 @@ export function LlmManagementModal({
     pullStatus?.error ||
     deleteModelMutation.error?.message;
 
-  // UI Display Values
+  // UI Display Values (Unchanged)
   const activeModelName = ollamaStatus?.activeModel ?? 'N/A';
   const isAnyModelLoaded = ollamaStatus?.loaded ?? false;
   const loadedModelFullName = ollamaStatus?.details?.name;
   const activeConfiguredContextSize = ollamaStatus?.configuredContextSize;
 
-  // Render list item function
+  // Render list item function (Unchanged)
   const renderModelListItem = (model: OllamaModelInfo) => {
     const isCurrentlyLoadingThis =
       (isLoadingSelectedModel || isDeletingSelectedModel) &&
@@ -638,7 +692,7 @@ export function LlmManagementModal({
     );
   };
 
-  // Determine pull progress display values
+  // Determine pull progress display values (Unchanged)
   const displayPullProgress =
     pullStatus?.progress ??
     (pullStatus?.status === 'completed'
@@ -664,7 +718,7 @@ export function LlmManagementModal({
             models.
           </Dialog.Description>
 
-          {/* Active Model Status */}
+          {/* Active Model Status (Unchanged) */}
           <Box
             mb="4"
             p="3"
@@ -754,7 +808,7 @@ export function LlmManagementModal({
             )}
           </Box>
 
-          {/* Available Models List */}
+          {/* Available Models List (Unchanged) */}
           <Box mb="4">
             <Flex justify="between" align="center" mb="2">
               {' '}
@@ -876,12 +930,14 @@ export function LlmManagementModal({
               )}
             <Flex gap="2">
               <TextField.Root
+                ref={pullInputRef} // Attach ref for focus
                 style={{ flexGrow: 1 }}
                 size="2"
                 placeholder="Enter model name (e.g., llama3:latest, mistral:7b)"
                 value={modelToPull}
                 onChange={(e) => setModelToPull(e.target.value)}
                 disabled={isAnyOperationActive}
+                onKeyDown={handlePullInputKeyDown} // Add keydown handler
               />
               {isPulling || isCancelingPull ? (
                 <Button
@@ -935,7 +991,7 @@ export function LlmManagementModal({
             </Flex>
           </Box>
 
-          {/* Display General Mutation Errors */}
+          {/* Display General Mutation Errors (Unchanged) */}
           {unloadMutation.isError && (
             <Callout.Root color="red" size="1" mt="2">
               <Callout.Icon>
@@ -979,7 +1035,7 @@ export function LlmManagementModal({
               </Callout.Root>
             )}
 
-          {/* Footer Buttons */}
+          {/* Footer Buttons (Unchanged) */}
           <Flex gap="3" mt="4" justify="end">
             <Button
               type="button"
@@ -1017,6 +1073,7 @@ export function LlmManagementModal({
                 Context Size (e.g., 2048, 4096)
               </Text>
               <TextField.Root
+                ref={contextInputRef} // Attach ref for focus
                 size="2"
                 type="number"
                 min="1"
@@ -1031,7 +1088,7 @@ export function LlmManagementModal({
                   }
                 }}
                 disabled={setModelMutation.isPending}
-                autoFocus
+                onKeyDown={handleContextInputKeyDown} // Add keydown handler
               />
             </label>
             {contextModalError && (
@@ -1118,6 +1175,7 @@ export function LlmManagementModal({
               <Cross2Icon /> Cancel{' '}
             </Button>
             <Button
+              ref={deleteConfirmButtonRef} // Attach ref for focus
               color="red"
               onClick={handleConfirmDelete}
               disabled={deleteModelMutation.isPending}

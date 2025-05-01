@@ -1,7 +1,5 @@
-/*
- * packages/ui/src/components/SessionView/Chat/ChatMessages.tsx
- */
-import React, { useState } from 'react';
+/* packages/ui/src/components/SessionView/Chat/ChatMessages.tsx */
+import React, { useState, useRef, useEffect } from 'react';
 import { useSetAtom } from 'jotai';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -23,7 +21,7 @@ import {
   Cross1Icon,
   Pencil1Icon,
   InfoCircledIcon,
-  CopyIcon, // <-- Import Copy Icon
+  CopyIcon,
 } from '@radix-ui/react-icons';
 import ReactMarkdown from 'react-markdown';
 import { updateMessageStarStatus } from '../../../api/api';
@@ -58,7 +56,20 @@ export function ChatMessages({
   const [currentStarredName, setCurrentStarredName] = useState('');
   const [starEditError, setStarEditError] = useState<string | null>(null);
 
-  // Mutation for updating star status
+  // Ref for auto-focus
+  const starNameInputRef = useRef<HTMLInputElement>(null);
+
+  // Effect for auto-focusing star name input
+  useEffect(() => {
+    if (editingStarMessageId !== null) {
+      const timer = setTimeout(() => {
+        starNameInputRef.current?.focus();
+      }, 50); // Small delay ensures element is ready
+      return () => clearTimeout(timer);
+    }
+  }, [editingStarMessageId]);
+
+  // Mutation for updating star status (unchanged)
   const starMutation = useMutation({
     mutationFn: (variables: {
       messageId: number;
@@ -66,7 +77,6 @@ export function ChatMessages({
       starredName?: string | null;
     }) => {
       const { messageId, starred, starredName } = variables;
-      // Determine the correct API call parameters based on context
       if (isStandalone && activeChatId) {
         return updateMessageStarStatus(
           messageId,
@@ -76,7 +86,6 @@ export function ChatMessages({
           null
         );
       } else if (!isStandalone && activeSessionId && activeChatId) {
-        // Pass the activeSessionId prop here
         return updateMessageStarStatus(
           messageId,
           starred,
@@ -94,7 +103,6 @@ export function ChatMessages({
       const queryKey = isStandalone
         ? ['standaloneChat', activeChatId]
         : ['chat', activeSessionId, activeChatId];
-      // Optimistically update the message in the query cache
       queryClient.setQueryData<ChatSession>(queryKey, (oldData) => {
         if (!oldData) return oldData;
         return {
@@ -104,17 +112,15 @@ export function ChatMessages({
           ),
         };
       });
-      // Invalidate starred messages query for the popover
       queryClient.invalidateQueries({ queryKey: ['starredMessages'] });
       setToast(
         `Message ${updatedMessage.starred ? 'starred' : 'unstarred'} successfully.`
       );
-      cancelStarEdit(); // Close modal on success
+      cancelStarEdit();
     },
     onError: (error) => {
       console.error('Star update failed:', error);
       setStarEditError(`Failed to update star status: ${error.message}`);
-      // Don't close modal on error
     },
   });
 
@@ -127,7 +133,7 @@ export function ChatMessages({
     } else {
       // Star: Open modal to get name
       setEditingStarMessageId(message.id);
-      setCurrentStarredName(message.starredName || ''); // Pre-fill if previously named
+      setCurrentStarredName(message.starredName || '');
       setStarEditError(null);
     }
   };
@@ -151,10 +157,18 @@ export function ChatMessages({
     setEditingStarMessageId(null);
     setCurrentStarredName('');
     setStarEditError(null);
-    starMutation.reset(); // Reset mutation state if modal is closed
+    starMutation.reset();
   };
 
-  // --- Copy Message Handler ---
+  // Handle Enter key in star naming modal
+  const handleStarNameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleSaveStarName();
+    }
+  };
+
+  // Copy Message Handler (unchanged)
   const handleCopyClick = (textToCopy: string) => {
     navigator.clipboard
       .writeText(textToCopy)
@@ -166,7 +180,6 @@ export function ChatMessages({
         setToast('Error copying text.');
       });
   };
-  // --- End Copy Message Handler ---
 
   return (
     <>
@@ -339,18 +352,13 @@ export function ChatMessages({
                 Template Name
               </Text>
               <TextField.Root
+                ref={starNameInputRef} // Attach ref for focus
                 size="2"
                 placeholder="Enter template name..."
                 value={currentStarredName}
                 onChange={(e) => setCurrentStarredName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    handleSaveStarName();
-                  }
-                }}
+                onKeyDown={handleStarNameKeyDown} // Add keydown handler
                 disabled={starMutation.isPending}
-                autoFocus
                 maxLength={50} // Optional: limit name length
               />
             </label>
@@ -402,4 +410,3 @@ export function ChatMessages({
     </>
   );
 }
-// TODO comments should not be removed
