@@ -1,3 +1,4 @@
+// File: packages/api/src/preloadDb.ts
 import Database from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs/promises'; // <-- Use fs.promises for async operations
@@ -19,21 +20,23 @@ const __filename = fileURLToPath(import.meta.url);
 // Adjust path based on build output location (e.g., 'dist/')
 // If preloadDb.js is in `dist/`, navigate up twice to get to `packages/api`
 const packageApiDir = path.resolve(__filename, '../../');
-const targetDataDir = path.join(packageApiDir, 'data'); // <-- Target the whole data directory
-const targetDbPath = path.join(targetDataDir, 'therapy-analyzer.sqlite');
-// --- REMOVED targetTranscriptsDir ---
-// const targetTranscriptsDir = path.join(targetDataDir, 'transcripts');
 
-// --- REMOVED local schema definition ---
-// --- REMOVED local initializeDatabase definition ---
-// --- REMOVED local verifySchemaVersion/calculateSchemaHash definitions ---
+// --- Read DB_PATH from environment (loaded by --env-file) ---
+// Fallback needed if run directly without --env-file for some reason
+const dbPathFromEnv = process.env.DB_PATH || './data/therapy-analyzer-dev.sqlite';
+if (!process.env.DB_PATH) {
+    console.warn(`[Preload] WARN: DB_PATH not found in environment variables. Falling back to default: ${dbPathFromEnv}`);
+} else {
+    console.log(`[Preload] Read DB_PATH from environment: ${process.env.DB_PATH}`);
+}
+// --- Resolve the target DB path relative to the API package directory ---
+const targetDbPath = path.resolve(packageApiDir, dbPathFromEnv);
+const targetDataDir = path.dirname(targetDbPath); // Get the directory from the resolved path
 
-
-// Sample data remains the same
+// Sample data interfaces (remain the same)
 interface SessionVerificationData {
     id: number;
     status: string;
-    // transcriptPath: string | null; // Removed
     date: string;
     transcriptTokenCount: number | null;
 }
@@ -46,8 +49,8 @@ const sampleSessions = [
 ];
 
 async function preloadDatabase() {
-    console.log(`[Preload] Database file target: ${targetDbPath}`);
-    console.log(`[Preload] Data directory target: ${targetDataDir}`);
+    console.log(`[Preload] Target DB Path (from env or default): ${targetDbPath}`);
+    console.log(`[Preload] Target Data Directory: ${targetDataDir}`);
 
     // *** START DELETION LOGIC ***
     // Delete the entire 'data' directory if it exists
@@ -79,22 +82,24 @@ async function preloadDatabase() {
 
 
     try {
-        // --- REMOVED mkdir for transcripts dir ---
         // Create the data directory AFTER deleting it
         console.log(`[Preload] Creating data directory: ${targetDataDir}`);
         await fs.mkdir(targetDataDir, { recursive: true });
-        // Ensure uploads dir exists as well (will be inside the newly created data dir)
-        await fs.mkdir(path.join(targetDataDir, 'uploads'), { recursive: true });
+        // Also ensure uploads dir exists within the target data dir
+        // Read UPLOADS_DIR from env, resolve relative to API package dir
+        const uploadsDirRelative = process.env.DB_UPLOADS_DIR || './data/uploads';
+        const targetUploadsDir = path.resolve(packageApiDir, uploadsDirRelative);
+        console.log(`[Preload] Creating uploads directory: ${targetUploadsDir}`);
+        await fs.mkdir(targetUploadsDir, { recursive: true });
     }
-    catch (err) { console.error(`[Preload] Failed create data directory:`, err); process.exit(1); }
+    catch (err) { console.error(`[Preload] Failed create data/uploads directory:`, err); process.exit(1); }
 
     let db: Database.Database | null = null;
     let success = false;
-    // --- REMOVED fileWritePromises ---
     const sessionsToVerify: { name: string; expectedDate: string; expectedTokenCount: number | null; expectedParagraphCount: number }[] = [];
 
     try {
-        // Connect AFTER ensuring deletion and recreation
+        // Connect AFTER ensuring deletion and recreation, using the correct target path
         console.log(`[Preload] Connecting to database: ${targetDbPath}`);
         db = new Database(targetDbPath, { verbose: console.log });
 
@@ -121,7 +126,6 @@ async function preloadDatabase() {
 
         // Prepare statements using the now-initialized db instance
         const insertSession = db.prepare(/* SQL */ `INSERT INTO sessions (fileName, clientName, sessionName, date, sessionType, therapy, audioPath, status, whisperJobId, transcriptTokenCount) VALUES (@fileName, @clientName, @sessionName, @date, @sessionType, @therapy, @audioPath, @status, @whisperJobId, @transcriptTokenCount)`);
-        // --- REMOVED updateSessionPathAndAudio ---
         const insertChat = db.prepare(/* SQL */ `INSERT INTO chats (sessionId, timestamp, name, tags) VALUES (?, ?, ?, ?)`);
         const insertMessage = db.prepare(/* SQL */ `INSERT INTO messages (chatId, sender, text, timestamp, promptTokens, completionTokens, starred, starredName) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
         const insertParagraph = db.prepare(/* SQL */ `INSERT INTO transcript_paragraphs (sessionId, paragraphIndex, timestampMs, text) VALUES (?, ?, ?, ?)`); // <-- New statement
@@ -131,7 +135,8 @@ async function preloadDatabase() {
             for (const session of sampleSessions) {
                 const fullTranscriptText = session.transcriptContent.map(p => p.text).join('\n\n');
                 const tokenCount = calculateTokenCount(fullTranscriptText);
-                const audioIdentifier = `${session.localIdRef}-audio.mp3`; // Keep simple identifier based on localIdRef
+                // Use a relative path for audioPath based on the filename for simplicity in sample data
+                const audioIdentifier = session.fileName; // Simple identifier
 
                 // Insert session without transcriptPath, but with audioPath
                 const sessionResult = insertSession.run({
@@ -162,8 +167,6 @@ async function preloadDatabase() {
                     expectedParagraphCount: session.transcriptContent.length
                 });
 
-                // --- REMOVED file writing logic ---
-
                 // Insert chats and messages (unchanged)
                 for (const chat of session.chats) {
                     const timestamp = Date.now() + Math.floor(Math.random() * 1000);
@@ -181,7 +184,6 @@ async function preloadDatabase() {
         })(); // End transaction
 
         console.log('[Preload] Sample data DB transaction committed.');
-        // --- REMOVED await Promise.all(fileWritePromises); ---
         success = true;
 
 
@@ -205,8 +207,6 @@ async function preloadDatabase() {
                     if (dbSession.status !== 'completed') { console.error(`[PV] FAILED: Session '${sessionToVerify.name}' (ID: ${dbSession.id}) status '${dbSession.status}' != 'completed'.`); verificationPassed = false; }
                     if (dbSession.date !== sessionToVerify.expectedDate) { console.error(`[PV] FAILED: Session '${sessionToVerify.name}' (ID: ${dbSession.id}) date '${dbSession.date}' != '${sessionToVerify.expectedDate}'.`); verificationPassed = false; }
                     if (dbSession.transcriptTokenCount !== sessionToVerify.expectedTokenCount) { console.error(`[PV] FAILED: Session '${sessionToVerify.name}' (ID: ${dbSession.id}) token count '${dbSession.transcriptTokenCount}' != '${sessionToVerify.expectedTokenCount}'.`); verificationPassed = false; }
-
-                    // --- REMOVED transcriptPath and file checks ---
 
                     // Verify paragraph count
                     const paraCountResult = verifyParagraphCountStmt.get(dbSession.id) as { count: number } | undefined;
