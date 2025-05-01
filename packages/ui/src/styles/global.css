@@ -50,25 +50,10 @@ html, body {
 /* --- End Scoped Markdown Styles --- */
 
 
-/* --- Streaming Cursor Styles --- */
-.streaming-cursor {
-  display: inline-block;
-  width: 8px;
-  height: 1em;
-  background-color: var(--gray-a10);
-  margin-left: 2px;
-  vertical-align: text-bottom;
-  /* Apply animation but default to paused */
-  animation: blink-animation 1s steps(2, start) infinite;
-  animation-play-state: paused; /* Default to paused */
-}
-
-@keyframes blink-animation {
-  to {
-    visibility: hidden;
-  }
-}
-/* --- END Streaming Cursor Styles --- */
+/* --- REMOVED Streaming Cursor Styles --- */
+/* .streaming-cursor { ... } */
+/* @keyframes blink-animation { ... } */
+/* --- END REMOVAL --- */
 
 /* --- Added Toast Border --- */
 .rt-Toast-root-bordered {

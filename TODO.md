@@ -31,9 +31,6 @@
 - [ ] autocomplete client name when typing in both the create new session and editing an existing one (select dropdown with a free form input too?)
 - [ ] for reasoning models, display the <think> section separately
 - [ ] actually delete cached Ollama models
-- [ ] when you render markdown, the output is usually a paragraph tag which means the cursor will always be on the newline.
-  - https://www.typeitjs.com/
-- [ ] when a message has finished streaming we refetch the messages which causes a flash of content
 - [ ] clicking on a search result should scroll to the paragraph/message in the UI
 - [ ] be able to put "weights" on the search results so that a text appearing in a title is weighted more heavily
 - [ ] combine keyword search with llm embeddings based search
