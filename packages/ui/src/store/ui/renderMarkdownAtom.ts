@@ -10,6 +10,6 @@ import { atomWithStorage } from 'jotai/utils'; // Utility to persist atom state 
  * - Defaults to `true` if no value is found in storage.
  */
 export const renderMarkdownAtom = atomWithStorage<boolean>(
-    'ui-render-markdown', // localStorage key
-    true                  // Default value
+  'ui-render-markdown', // localStorage key
+  true // Default value
 );

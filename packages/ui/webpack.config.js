@@ -24,8 +24,8 @@ module.exports = {
     extensions: ['.tsx', '.ts', '.js'],
     // Alias setup: Matches tsconfig.json paths for convenient imports (e.g., '@/components/Button')
     alias: {
-       '@': path.resolve(__dirname, 'src/'), // '@/' maps to the 'src' directory
-    }
+      '@': path.resolve(__dirname, 'src/'), // '@/' maps to the 'src' directory
+    },
   },
 
   // Module rules: How Webpack processes different file types
@@ -46,14 +46,10 @@ module.exports = {
         // style-loader: Injects CSS into the DOM via <style> tags
         // css-loader: Resolves @import and url() in CSS
         // postcss-loader: Processes CSS with PostCSS (e.g., for Tailwind CSS and Autoprefixer)
-        use: [
-          'style-loader',
-          'css-loader',
-          'postcss-loader'
-        ],
+        use: ['style-loader', 'css-loader', 'postcss-loader'],
       },
-       // Add loaders for other asset types (images, fonts) if needed
-       // Example for images:
+      // Add loaders for other asset types (images, fonts) if needed
+      // Example for images:
       // {
       //   test: /\.(png|svg|jpg|jpeg|gif)$/i,
       //   type: 'asset/resource', // Copies files to output directory and exports URL
@@ -84,9 +80,9 @@ module.exports = {
     historyApiFallback: true,
   },
 
-   // Source maps: Control how source maps are generated for debugging.
-   // 'inline-source-map' is good for development (embeds maps in bundle),
-   // use 'source-map' for production (separate files).
+  // Source maps: Control how source maps are generated for debugging.
+  // 'inline-source-map' is good for development (embeds maps in bundle),
+  // use 'source-map' for production (separate files).
   devtool: 'inline-source-map',
 
   // Mode: 'development' or 'production'. Affects optimizations and plugin behavior.

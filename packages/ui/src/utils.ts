@@ -1,7 +1,7 @@
 // Purpose: General utility functions used across the UI package.
 
-import { type ClassValue, clsx } from "clsx"; // Utility for conditionally joining class names together
-import { twMerge } from "tailwind-merge"; // Utility to merge Tailwind CSS classes without conflicts
+import { type ClassValue, clsx } from 'clsx'; // Utility for conditionally joining class names together
+import { twMerge } from 'tailwind-merge'; // Utility to merge Tailwind CSS classes without conflicts
 
 /**
  * Combines multiple class names or conditional class objects into a single string,

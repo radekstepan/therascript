@@ -3,7 +3,7 @@
   "compilerOptions": {
     "module": "NodeNext", // Keep NodeNext for Node.js backend
     "outDir": "./dist",
-    "rootDir": "./src",
+    "rootDir": "./src"
     // Add specific types if needed, e.g., "node" (often implicit)
     // "types": ["node"]
   },

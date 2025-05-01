@@ -2,10 +2,10 @@
 //          related to Therapy Sessions and their Transcripts (excluding chat interactions).
 import axios from 'axios'; // Import Axios for making HTTP requests
 import type {
-    Session,               // UI type for a full session including chat list metadata
-    SessionMetadata,       // UI type for core session metadata (used for updates)
-    StructuredTranscript,  // UI type for the array of transcript paragraphs
-    UITranscriptionStatus, // UI type for transcription job status
+  Session, // UI type for a full session including chat list metadata
+  SessionMetadata, // UI type for core session metadata (used for updates)
+  StructuredTranscript, // UI type for the array of transcript paragraphs
+  UITranscriptionStatus, // UI type for transcription job status
 } from '../types'; // Import UI type definitions
 
 /**
@@ -16,13 +16,13 @@ import type {
  * @throws {Error} If the API request fails.
  */
 export const fetchSessions = async (): Promise<Session[]> => {
-    // Backend returns an array of session metadata
-    const response = await axios.get<Omit<Session, 'chats'>[]>('/api/sessions/');
-    // Map response to ensure the 'chats' property exists as an empty array for the UI type
-    return response.data.map((sessionMeta: Omit<Session, 'chats'>) => ({
-        ...sessionMeta,
-        chats: [], // Ensure `chats` property exists, even if empty for list view
-    }));
+  // Backend returns an array of session metadata
+  const response = await axios.get<Omit<Session, 'chats'>[]>('/api/sessions/');
+  // Map response to ensure the 'chats' property exists as an empty array for the UI type
+  return response.data.map((sessionMeta: Omit<Session, 'chats'>) => ({
+    ...sessionMeta,
+    chats: [], // Ensure `chats` property exists, even if empty for list view
+  }));
 };
 
 /**
@@ -36,21 +36,23 @@ export const fetchSessions = async (): Promise<Session[]> => {
  * @throws {Error} If the API request fails.
  */
 export const uploadSession = async (
-    file: File,
-    metadata: SessionMetadata
+  file: File,
+  metadata: SessionMetadata
 ): Promise<{ sessionId: number; jobId: string; message: string }> => {
-    // Create FormData object to send file and metadata
-    const formData = new FormData();
-    formData.append('audioFile', file);
-    // Append metadata fields to the form data
-    Object.entries(metadata).forEach(([key, value]) => formData.append(key, value));
+  // Create FormData object to send file and metadata
+  const formData = new FormData();
+  formData.append('audioFile', file);
+  // Append metadata fields to the form data
+  Object.entries(metadata).forEach(([key, value]) =>
+    formData.append(key, value)
+  );
 
-    // Make POST request with FormData
-    const response = await axios.post('/api/sessions/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }, // Set correct content type
-    });
-    // Return the data containing sessionId, jobId, and message
-    return response.data;
+  // Make POST request with FormData
+  const response = await axios.post('/api/sessions/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }, // Set correct content type
+  });
+  // Return the data containing sessionId, jobId, and message
+  return response.data;
 };
 
 /**
@@ -64,9 +66,11 @@ export const uploadSession = async (
  * @throws {Error} If the API request fails.
  */
 export const finalizeSession = async (sessionId: number): Promise<Session> => {
-    const response = await axios.post<Session>(`/api/sessions/${sessionId}/finalize`);
-    // Ensure the returned Session object always has a `chats` array, even if empty
-    return { ...response.data, chats: response.data.chats || [] };
+  const response = await axios.post<Session>(
+    `/api/sessions/${sessionId}/finalize`
+  );
+  // Ensure the returned Session object always has a `chats` array, even if empty
+  return { ...response.data, chats: response.data.chats || [] };
 };
 
 /**
@@ -78,9 +82,9 @@ export const finalizeSession = async (sessionId: number): Promise<Session> => {
  * @throws {Error} If the API request fails or the session is not found (404).
  */
 export const fetchSession = async (sessionId: number): Promise<Session> => {
-    const response = await axios.get(`/api/sessions/${sessionId}`);
-    // Ensure the returned Session object always has a `chats` array
-    return { ...response.data, chats: response.data.chats || [] };
+  const response = await axios.get(`/api/sessions/${sessionId}`);
+  // Ensure the returned Session object always has a `chats` array
+  return { ...response.data, chats: response.data.chats || [] };
 };
 
 /**
@@ -91,9 +95,13 @@ export const fetchSession = async (sessionId: number): Promise<Session> => {
  * @returns {Promise<StructuredTranscript>} A promise resolving to the structured transcript array.
  * @throws {Error} If the API request fails.
  */
-export const fetchTranscript = async (sessionId: number): Promise<StructuredTranscript> => {
-    const response = await axios.get<StructuredTranscript>(`/api/sessions/${sessionId}/transcript`);
-    return response.data;
+export const fetchTranscript = async (
+  sessionId: number
+): Promise<StructuredTranscript> => {
+  const response = await axios.get<StructuredTranscript>(
+    `/api/sessions/${sessionId}/transcript`
+  );
+  return response.data;
 };
 
 /**
@@ -106,12 +114,21 @@ export const fetchTranscript = async (sessionId: number): Promise<StructuredTran
  * @throws {Error} If the API request fails.
  */
 export const updateSessionMetadata = async (
-    sessionId: number,
-    metadata: Partial<SessionMetadata & { audioPath?: string | null; transcriptTokenCount?: number | null }>
-): Promise<SessionMetadata> => { // Return type reflects backend (metadata only)
-    const response = await axios.put(`/api/sessions/${sessionId}/metadata`, metadata);
-    // The backend returns only the core metadata part of the session
-    return response.data;
+  sessionId: number,
+  metadata: Partial<
+    SessionMetadata & {
+      audioPath?: string | null;
+      transcriptTokenCount?: number | null;
+    }
+  >
+): Promise<SessionMetadata> => {
+  // Return type reflects backend (metadata only)
+  const response = await axios.put(
+    `/api/sessions/${sessionId}/metadata`,
+    metadata
+  );
+  // The backend returns only the core metadata part of the session
+  return response.data;
 };
 
 /**
@@ -125,13 +142,16 @@ export const updateSessionMetadata = async (
  * @throws {Error} If the API request fails.
  */
 export const updateTranscriptParagraph = async (
-    sessionId: number,
-    paragraphIndex: number,
-    newText: string
+  sessionId: number,
+  paragraphIndex: number,
+  newText: string
 ): Promise<StructuredTranscript> => {
-    const response = await axios.patch<StructuredTranscript>(`/api/sessions/${sessionId}/transcript`, { paragraphIndex, newText });
-    // Backend returns the full updated transcript
-    return response.data;
+  const response = await axios.patch<StructuredTranscript>(
+    `/api/sessions/${sessionId}/transcript`,
+    { paragraphIndex, newText }
+  );
+  // Backend returns the full updated transcript
+  return response.data;
 };
 
 /**
@@ -143,9 +163,11 @@ export const updateTranscriptParagraph = async (
  * @returns {Promise<{ message: string }>} A promise resolving to a confirmation message.
  * @throws {Error} If the API request fails (e.g., file not found, permissions error).
  */
-export const deleteSessionAudio = async (sessionId: number): Promise<{ message: string }> => {
-    const response = await axios.delete(`/api/sessions/${sessionId}/audio`);
-    return response.data;
+export const deleteSessionAudio = async (
+  sessionId: number
+): Promise<{ message: string }> => {
+  const response = await axios.delete(`/api/sessions/${sessionId}/audio`);
+  return response.data;
 };
 
 /**
@@ -156,7 +178,9 @@ export const deleteSessionAudio = async (sessionId: number): Promise<{ message: 
  * @returns {Promise<{ message: string }>} A promise resolving to a confirmation message.
  * @throws {Error} If the API request fails.
  */
-export const deleteSession = async (sessionId: number): Promise<{ message: string }> => {
-    const response = await axios.delete(`/api/sessions/${sessionId}`);
-    return response.data;
+export const deleteSession = async (
+  sessionId: number
+): Promise<{ message: string }> => {
+  const response = await axios.delete(`/api/sessions/${sessionId}`);
+  return response.data;
 };

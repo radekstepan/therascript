@@ -13,6 +13,6 @@ import type { SortDirection } from './session/sessionSortDirectionAtom.ts';
  *   so the default overall sort is newest chats first.
  */
 export const standaloneChatSortDirectionAtom = atomWithStorage<SortDirection>(
-    'standalone-chat-sort-direction', // localStorage key
-    'desc'                            // Default value
+  'standalone-chat-sort-direction', // localStorage key
+  'desc' // Default value
 );

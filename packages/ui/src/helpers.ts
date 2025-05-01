@@ -10,25 +10,25 @@ export const getTodayDateString = (): string => {
 };
 
 /**
-* Formats a Unix timestamp (milliseconds) into a locale-aware date and time string.
-*/
+ * Formats a Unix timestamp (milliseconds) into a locale-aware date and time string.
+ */
 export const formatTimestamp = (timestamp?: number): string => {
   if (timestamp === null || timestamp === undefined || isNaN(timestamp)) {
-      return '';
+    return '';
   }
   try {
-      const date = new Date(timestamp);
-      if (isNaN(date.getTime())) {
-         return 'Invalid Date';
-      }
-      // Using standard Intl formatting for locale-awareness
-      return date.toLocaleString(undefined, {
-          dateStyle: 'short',
-          timeStyle: 'short'
-      });
-  } catch (e) {
-      console.error("Error formatting timestamp:", timestamp, e);
+    const date = new Date(timestamp);
+    if (isNaN(date.getTime())) {
       return 'Invalid Date';
+    }
+    // Using standard Intl formatting for locale-awareness
+    return date.toLocaleString(undefined, {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    });
+  } catch (e) {
+    console.error('Error formatting timestamp:', timestamp, e);
+    return 'Invalid Date';
   }
 };
 
@@ -37,31 +37,33 @@ export const formatTimestamp = (timestamp?: number): string => {
  * Returns empty string for invalid input.
  */
 export const formatIsoDateToYMD = (isoString?: string | null): string => {
-    if (!isoString) return '';
-    try {
-        const date = new Date(isoString);
-        if (isNaN(date.getTime())) return ''; // Invalid date parsed
+  if (!isoString) return '';
+  try {
+    const date = new Date(isoString);
+    if (isNaN(date.getTime())) return ''; // Invalid date parsed
 
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-    } catch (e) {
-        console.error("Error formatting ISO date:", isoString, e);
-        return '';
-    }
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  } catch (e) {
+    console.error('Error formatting ISO date:', isoString, e);
+    return '';
+  }
 };
-
 
 /**
  * Creates a debounced version of a function that delays invoking func
  * until after wait milliseconds have elapsed since the last time the
  * debounced function was invoked.
  */
-export const debounce = <F extends (...args: any[]) => any>(func: F, waitFor: number) => {
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    return (...args: Parameters<F>): void => {
-        if (timeoutId) clearTimeout(timeoutId);
-        timeoutId = setTimeout(() => func(...args), waitFor);
-    };
+export const debounce = <F extends (...args: any[]) => any>(
+  func: F,
+  waitFor: number
+) => {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  return (...args: Parameters<F>): void => {
+    if (timeoutId) clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => func(...args), waitFor);
+  };
 };

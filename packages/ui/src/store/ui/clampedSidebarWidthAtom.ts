@@ -3,9 +3,9 @@
 //          Also allows setting the width, applying clamping before updating the base atom.
 import { atom } from 'jotai'; // Import base atom function
 import {
-    sidebarWidthAtom,     // The base atom holding the potentially unclamped width
-    MIN_SIDEBAR_WIDTH,    // Minimum allowed width constant
-    MAX_SIDEBAR_WIDTH     // Maximum allowed width constant
+  sidebarWidthAtom, // The base atom holding the potentially unclamped width
+  MIN_SIDEBAR_WIDTH, // Minimum allowed width constant
+  MAX_SIDEBAR_WIDTH, // Maximum allowed width constant
 } from '..'; // Import base atom and constants from the store's index
 
 /**
@@ -17,17 +17,20 @@ import {
  *        with the clamped value. This ensures the stored value is always valid.
  */
 export const clampedSidebarWidthAtom = atom(
-    // Read function: Gets the base width and clamps it
-    (get) => {
-        const width = get(sidebarWidthAtom); // Get the raw width from the base atom
-        // Clamp the width between the minimum and maximum allowed values
-        return Math.max(MIN_SIDEBAR_WIDTH, Math.min(width, MAX_SIDEBAR_WIDTH));
-    },
-    // Write function: Takes a new width, clamps it, and updates the base atom
-    (_get, set, newWidth: number) => {
-        // Clamp the incoming new width value
-        const clampedWidth = Math.max(MIN_SIDEBAR_WIDTH, Math.min(newWidth, MAX_SIDEBAR_WIDTH));
-        // Set the base atom (`sidebarWidthAtom`) with the clamped value
-        set(sidebarWidthAtom, clampedWidth);
-    }
+  // Read function: Gets the base width and clamps it
+  (get) => {
+    const width = get(sidebarWidthAtom); // Get the raw width from the base atom
+    // Clamp the width between the minimum and maximum allowed values
+    return Math.max(MIN_SIDEBAR_WIDTH, Math.min(width, MAX_SIDEBAR_WIDTH));
+  },
+  // Write function: Takes a new width, clamps it, and updates the base atom
+  (_get, set, newWidth: number) => {
+    // Clamp the incoming new width value
+    const clampedWidth = Math.max(
+      MIN_SIDEBAR_WIDTH,
+      Math.min(newWidth, MAX_SIDEBAR_WIDTH)
+    );
+    // Set the base atom (`sidebarWidthAtom`) with the clamped value
+    set(sidebarWidthAtom, clampedWidth);
+  }
 );

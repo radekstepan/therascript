@@ -26,7 +26,9 @@ export async function shutdownSystem(): Promise<string> {
 
   console.log(`[Shutdown Func] Attempting to execute command: "${command}"`);
   // Remind the developer/user about the sudo requirement.
-  console.warn('[Shutdown Func] Ensure this function is called with root privileges (sudo)!');
+  console.warn(
+    '[Shutdown Func] Ensure this function is called with root privileges (sudo)!'
+  );
 
   try {
     // Execute the command and capture stdout/stderr
@@ -36,14 +38,18 @@ export async function shutdownSystem(): Promise<string> {
     if (stderr) {
       console.warn(`[Shutdown Func] Shutdown command stderr: ${stderr}`);
     }
-    console.log(`[Shutdown Func] Shutdown command executed successfully. System is shutting down...`);
+    console.log(
+      `[Shutdown Func] Shutdown command executed successfully. System is shutting down...`
+    );
     console.log(`[Shutdown Func] stdout: ${stdout}`);
 
     // Return stdout if successful (though caller might not receive it)
     return stdout;
   } catch (error: any) {
     // Handle errors during command execution
-    console.error(`[Shutdown Func] Failed to execute shutdown command: ${error.message}`);
+    console.error(
+      `[Shutdown Func] Failed to execute shutdown command: ${error.message}`
+    );
     if (error.stderr) console.error(`[Shutdown Func] stderr: ${error.stderr}`);
     if (error.stdout) console.error(`[Shutdown Func] stdout: ${error.stdout}`); // Log stdout on error too
 

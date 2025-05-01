@@ -27,23 +27,51 @@ export interface BackendChatSession {
 }
 
 export type ChatMetadata = Omit<BackendChatSession, 'messages'> & {
-    tags?: string[] | null;
+  tags?: string[] | null;
 };
 
 export interface BackendTranscriptParagraph {
-    id: number;
-    sessionId: number;
-    paragraphIndex: number;
-    timestampMs: number;
-    text: string;
+  id: number;
+  sessionId: number;
+  paragraphIndex: number;
+  timestampMs: number;
+  text: string;
 }
 
-export interface TranscriptParagraphData { id: number; timestamp: number; text: string; }
+export interface TranscriptParagraphData {
+  id: number;
+  timestamp: number;
+  text: string;
+}
 export type StructuredTranscript = TranscriptParagraphData[];
 
-export interface WhisperSegment { id: number; seek: number; start: number; end: number; text: string; tokens: number[]; temperature: number; avg_logprob: number; compression_ratio: number; no_speech_prob: number; }
-export interface WhisperTranscriptionResult { text: string; segments: WhisperSegment[]; language: string; }
-export interface WhisperJobStatus { job_id: string; status: "queued" | "processing" | "completed" | "failed" | "canceled"; progress?: number; result?: WhisperTranscriptionResult; error?: string; start_time?: number; end_time?: number; duration?: number; }
+export interface WhisperSegment {
+  id: number;
+  seek: number;
+  start: number;
+  end: number;
+  text: string;
+  tokens: number[];
+  temperature: number;
+  avg_logprob: number;
+  compression_ratio: number;
+  no_speech_prob: number;
+}
+export interface WhisperTranscriptionResult {
+  text: string;
+  segments: WhisperSegment[];
+  language: string;
+}
+export interface WhisperJobStatus {
+  job_id: string;
+  status: 'queued' | 'processing' | 'completed' | 'failed' | 'canceled';
+  progress?: number;
+  result?: WhisperTranscriptionResult;
+  error?: string;
+  start_time?: number;
+  end_time?: number;
+  duration?: number;
+}
 
 export interface BackendSession {
   id: number;
@@ -60,13 +88,80 @@ export interface BackendSession {
   chats?: (Omit<ChatMetadata, 'tags'> & { sessionId: number })[];
 }
 
-export type BackendSessionMetadata = Omit<BackendSession, 'id' | 'transcriptTokenCount' | 'chats' | 'fileName' | 'status' | 'whisperJobId' | 'audioPath'>;
+export type BackendSessionMetadata = Omit<
+  BackendSession,
+  | 'id'
+  | 'transcriptTokenCount'
+  | 'chats'
+  | 'fileName'
+  | 'status'
+  | 'whisperJobId'
+  | 'audioPath'
+>;
 
-export interface ActionSchema { endpoint: string; method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; description: string; requestBody?: Record<string, unknown> | string; pathParams?: Record<string, string>; queryParams?: Record<string, string>; responseBody?: Record<string, unknown> | string; }
-export interface ApiErrorResponse { error: string; details?: string | Record<string, any>; validationErrors?: any; }
-export interface OllamaModelInfo { name: string; modified_at: Date; size: number; digest: string; details: { format: string; family: string; families: string[] | null; parameter_size: string; quantization_level: string; }; size_vram?: number; expires_at?: Date; }
-export type OllamaPullJobStatusState = 'queued' | 'parsing' | 'downloading' | 'verifying' | 'completed' | 'failed' | 'canceling' | 'canceled';
-export interface OllamaPullJobStatus { jobId: string; modelName: string; status: OllamaPullJobStatusState; message: string; progress?: number; completedBytes?: number; totalBytes?: number; currentLayer?: string; startTime: number; endTime?: number; error?: string; }
-export interface DockerContainerStatus { id: string; name: string; image: string; state: string; status: string; ports: { PrivatePort: number; PublicPort?: number; Type: string; IP?: string }[]; }
+export interface ActionSchema {
+  endpoint: string;
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  description: string;
+  requestBody?: Record<string, unknown> | string;
+  pathParams?: Record<string, string>;
+  queryParams?: Record<string, string>;
+  responseBody?: Record<string, unknown> | string;
+}
+export interface ApiErrorResponse {
+  error: string;
+  details?: string | Record<string, any>;
+  validationErrors?: any;
+}
+export interface OllamaModelInfo {
+  name: string;
+  modified_at: Date;
+  size: number;
+  digest: string;
+  details: {
+    format: string;
+    family: string;
+    families: string[] | null;
+    parameter_size: string;
+    quantization_level: string;
+  };
+  size_vram?: number;
+  expires_at?: Date;
+}
+export type OllamaPullJobStatusState =
+  | 'queued'
+  | 'parsing'
+  | 'downloading'
+  | 'verifying'
+  | 'completed'
+  | 'failed'
+  | 'canceling'
+  | 'canceled';
+export interface OllamaPullJobStatus {
+  jobId: string;
+  modelName: string;
+  status: OllamaPullJobStatusState;
+  message: string;
+  progress?: number;
+  completedBytes?: number;
+  totalBytes?: number;
+  currentLayer?: string;
+  startTime: number;
+  endTime?: number;
+  error?: string;
+}
+export interface DockerContainerStatus {
+  id: string;
+  name: string;
+  image: string;
+  state: string;
+  status: string;
+  ports: {
+    PrivatePort: number;
+    PublicPort?: number;
+    Type: string;
+    IP?: string;
+  }[];
+}
 
 // TODO comments should not be removed

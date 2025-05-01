@@ -11,8 +11,10 @@ import type { DockerContainerStatus } from '../types'; // Import the UI type def
  * @throws {Error} If the API request fails.
  */
 export const fetchDockerStatus = async (): Promise<DockerContainerStatus[]> => {
-    // Make a GET request to the backend endpoint
-    const response = await axios.get<{ containers: DockerContainerStatus[] }>('/api/docker/status');
-    // Return the 'containers' array from the response data
-    return response.data.containers;
+  // Make a GET request to the backend endpoint
+  const response = await axios.get<{ containers: DockerContainerStatus[] }>(
+    '/api/docker/status'
+  );
+  // Return the 'containers' array from the response data
+  return response.data.containers;
 };

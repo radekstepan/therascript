@@ -12,7 +12,8 @@ export type StandaloneChatSortCriteria = 'name' | 'date' | 'tags';
  * - Persisted in localStorage under the key 'standalone-chat-sort-criteria'.
  * - Defaults to 'date' if no value is found in storage.
  */
-export const standaloneChatSortCriteriaAtom = atomWithStorage<StandaloneChatSortCriteria>(
+export const standaloneChatSortCriteriaAtom =
+  atomWithStorage<StandaloneChatSortCriteria>(
     'standalone-chat-sort-criteria', // localStorage key
-    'date'                           // Default value
-);
+    'date' // Default value
+  );

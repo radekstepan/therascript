@@ -12,16 +12,15 @@ import type { ChatMessage } from '../types'; // Using UI type
  * @throws {Error} If the API request fails.
  */
 export const fetchStarredMessages = async (): Promise<ChatMessage[]> => {
-    // Backend response uses BackendChatMessage type, we map it here
-    const response = await axios.get<any[]>('/api/starred-messages'); // Use any[] for initial flexibility
-    return (response.data || []).map(m => ({
-        ...m,
-        starred: !!m.starred, // Ensure boolean type
-        starredName: m.starredName === undefined ? undefined : m.starredName, // Preserve undefined
-    }));
+  // Backend response uses BackendChatMessage type, we map it here
+  const response = await axios.get<any[]>('/api/starred-messages'); // Use any[] for initial flexibility
+  return (response.data || []).map((m) => ({
+    ...m,
+    starred: !!m.starred, // Ensure boolean type
+    starredName: m.starredName === undefined ? undefined : m.starredName, // Preserve undefined
+  }));
 };
 // --- End Starred Messages Fetching ---
-
 
 // --- Health Check (Optional) ---
 /**
@@ -32,11 +31,17 @@ export const fetchStarredMessages = async (): Promise<ChatMessage[]> => {
  * @returns {Promise<{ status: string; database: string; timestamp: string }>} Health status object.
  * @throws {Error} If the API request fails.
  */
-export const checkApiHealth = async (): Promise<{ status: string; database: string; timestamp: string }> => {
-    const response = await axios.get('/api/health');
-    return response.data;
+export const checkApiHealth = async (): Promise<{
+  status: string;
+  database: string;
+  timestamp: string;
+}> => {
+  const response = await axios.get('/api/health');
+  return response.data;
 };
 // --- End Health Check ---
 
 // Placeholder for potential future meta API calls
-export const placeholderMetaCall = async () => { return { status: 'ok' }; };
+export const placeholderMetaCall = async () => {
+  return { status: 'ok' };
+};

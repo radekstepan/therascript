@@ -12,14 +12,17 @@ import type { SearchApiResponse } from '../types'; // Import the specific UI typ
  * @returns {Promise<SearchApiResponse>} A promise resolving to the search results object, containing the original query and an array of result items.
  * @throws {Error} If the API request fails.
  */
-export const searchMessages = async (query: string, limit: number = 20): Promise<SearchApiResponse> => {
-    // Make a GET request with query parameters
-    const response = await axios.get<SearchApiResponse>('/api/search', {
-        params: {
-            q: query, // The search term
-            limit: limit // Max results
-        }
-    });
-    // Return the data part of the response, which should match SearchApiResponse
-    return response.data;
+export const searchMessages = async (
+  query: string,
+  limit: number = 20
+): Promise<SearchApiResponse> => {
+  // Make a GET request with query parameters
+  const response = await axios.get<SearchApiResponse>('/api/search', {
+    params: {
+      q: query, // The search term
+      limit: limit, // Max results
+    },
+  });
+  // Return the data part of the response, which should match SearchApiResponse
+  return response.data;
 };

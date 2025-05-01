@@ -13,8 +13,10 @@ import axios from 'axios'; // Import Axios for making HTTP requests
  * @throws {Error} If the API request fails (e.g., network error, permission error (503), server error (500)).
  */
 export const triggerShutdown = async (): Promise<{ message: string }> => {
-    // Make a POST request to the shutdown endpoint
-    const response = await axios.post<{ message: string }>('/api/system/shutdown');
-    // Return the message from the response data
-    return response.data;
+  // Make a POST request to the shutdown endpoint
+  const response = await axios.post<{ message: string }>(
+    '/api/system/shutdown'
+  );
+  // Return the message from the response data
+  return response.data;
 };

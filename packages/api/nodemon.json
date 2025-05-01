@@ -1,12 +1,7 @@
 {
   "watch": ["dist"],
   "ext": "js",
-  "ignore": [
-    "node_modules/",
-    "data/",
-    "*.test.js",
-    "*.spec.js"
-  ],
+  "ignore": ["node_modules/", "data/", "*.test.js", "*.spec.js"],
   "delay": "1500ms",
   "exec": "node ./dist/server.js",
   "verbose": true

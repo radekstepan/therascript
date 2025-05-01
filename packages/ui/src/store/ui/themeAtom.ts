@@ -14,6 +14,6 @@ export type Theme = 'light' | 'dark' | 'system';
  * - Defaults to 'system' if no value is found in storage.
  */
 export const themeAtom = atomWithStorage<Theme>(
-    'ui-theme', // localStorage key
-    'system'    // Default value
+  'ui-theme', // localStorage key
+  'system' // Default value
 );

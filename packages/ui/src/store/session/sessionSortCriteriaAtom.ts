@@ -4,7 +4,13 @@ import { atomWithStorage } from 'jotai/utils'; // Utility to persist atom state 
 
 // Define the possible columns/criteria by which the session list can be sorted.
 // These should correspond to the columns in the SessionListTable component.
-export type SessionSortCriteria = 'sessionName' | 'clientName' | 'sessionType' | 'therapy' | 'date' | 'id';
+export type SessionSortCriteria =
+  | 'sessionName'
+  | 'clientName'
+  | 'sessionType'
+  | 'therapy'
+  | 'date'
+  | 'id';
 
 /**
  * Atom storing the current sort criteria for the session list.
@@ -12,6 +18,6 @@ export type SessionSortCriteria = 'sessionName' | 'clientName' | 'sessionType' |
  * - Defaults to 'date' if no value is found in storage.
  */
 export const sessionSortCriteriaAtom = atomWithStorage<SessionSortCriteria>(
-    'session-sort-criteria', // localStorage key
-    'date'                     // Default value
+  'session-sort-criteria', // localStorage key
+  'date' // Default value
 );

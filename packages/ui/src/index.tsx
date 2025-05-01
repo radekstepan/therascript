@@ -9,7 +9,9 @@ import './styles/global.css';
 const rootElement = document.getElementById('root');
 
 if (!rootElement) {
-  throw new Error("Fatal Error: Root element with ID 'root' not found in the DOM.");
+  throw new Error(
+    "Fatal Error: Root element with ID 'root' not found in the DOM."
+  );
 }
 
 const root = ReactDOM.createRoot(rootElement);

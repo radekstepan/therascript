@@ -1,4 +1,4 @@
-import { BackendSession } from "../types/index.js";
+import { BackendSession } from '../types/index.js';
 
 // Type guard for file system errors
 export const isNodeError = (error: unknown): error is NodeJS.ErrnoException => {
@@ -41,10 +41,12 @@ export const isNodeError = (error: unknown): error is NodeJS.ErrnoException => {
 
 // Helper to create session DTO for list views
 // Removed transcriptPath from DTO creation
-export const createSessionListDTO = (session: BackendSession): Omit<BackendSession, /* 'transcriptPath' | */ 'chats'> => {
-    // Selectively pick or omit fields for the DTO
-    // This ensures the returned object matches the SessionListResponseItemSchema
-    // --- FIX: Remove transcriptPath from destructuring ---
-    const { chats, ...dto } = session; // Remove transcriptPath here
-    return dto; // Return only the metadata fields expected by the schema
+export const createSessionListDTO = (
+  session: BackendSession
+): Omit<BackendSession, /* 'transcriptPath' | */ 'chats'> => {
+  // Selectively pick or omit fields for the DTO
+  // This ensures the returned object matches the SessionListResponseItemSchema
+  // --- FIX: Remove transcriptPath from destructuring ---
+  const { chats, ...dto } = session; // Remove transcriptPath here
+  return dto; // Return only the metadata fields expected by the schema
 };

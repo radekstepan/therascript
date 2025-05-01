@@ -11,9 +11,13 @@ import type { UITranscriptionStatus } from '../types'; // Import the specific UI
  * @returns {Promise<UITranscriptionStatus>} A promise resolving to the transcription job status object.
  * @throws {Error} If the API request fails (e.g., job not found (404), server error).
  */
-export const fetchTranscriptionStatus = async (jobId: string): Promise<UITranscriptionStatus> => {
-    // Make a GET request to the specific job status endpoint
-    const response = await axios.get<UITranscriptionStatus>(`/api/transcription/status/${jobId}`);
-    // Return the data part of the response, which should match UITranscriptionStatus
-    return response.data;
+export const fetchTranscriptionStatus = async (
+  jobId: string
+): Promise<UITranscriptionStatus> => {
+  // Make a GET request to the specific job status endpoint
+  const response = await axios.get<UITranscriptionStatus>(
+    `/api/transcription/status/${jobId}`
+  );
+  // Return the data part of the response, which should match UITranscriptionStatus
+  return response.data;
 };

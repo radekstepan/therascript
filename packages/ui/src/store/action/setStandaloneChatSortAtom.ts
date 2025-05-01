@@ -4,9 +4,9 @@
  */
 import { atom } from 'jotai'; // Import the base atom function from Jotai
 import {
-    standaloneChatSortCriteriaAtom,     // Atom storing the current sort criteria
-    standaloneChatSortDirectionAtom,    // Atom storing the current sort direction
-    type StandaloneChatSortCriteria      // Type definition for possible sort criteria
+  standaloneChatSortCriteriaAtom, // Atom storing the current sort criteria
+  standaloneChatSortDirectionAtom, // Atom storing the current sort direction
+  type StandaloneChatSortCriteria, // Type definition for possible sort criteria
 } from '..'; // Import state atoms and types from the store's index
 
 /**
@@ -26,20 +26,27 @@ import {
  * setSort('date');
  */
 export const setStandaloneChatSortAtom = atom(
-    null, // Read function is null because this is a write-only atom for actions
-    (get, set, newCriteria: StandaloneChatSortCriteria) => { // Write function
-        // Get the current sort criteria and direction from their respective atoms
-        const currentCriteria = get(standaloneChatSortCriteriaAtom);
-        const currentDirection = get(standaloneChatSortDirectionAtom);
+  null, // Read function is null because this is a write-only atom for actions
+  (get, set, newCriteria: StandaloneChatSortCriteria) => {
+    // Write function
+    // Get the current sort criteria and direction from their respective atoms
+    const currentCriteria = get(standaloneChatSortCriteriaAtom);
+    const currentDirection = get(standaloneChatSortDirectionAtom);
 
-        if (newCriteria === currentCriteria) {
-            // Case 1: Clicked the same column header again - toggle direction
-            set(standaloneChatSortDirectionAtom, currentDirection === 'asc' ? 'desc' : 'asc');
-        } else {
-            // Case 2: Clicked a new column header - set new criteria and default direction
-            set(standaloneChatSortCriteriaAtom, newCriteria);
-            // Set default sort direction: 'date' defaults to descending, others default to ascending
-            set(standaloneChatSortDirectionAtom, newCriteria === 'date' ? 'desc' : 'asc');
-        }
+    if (newCriteria === currentCriteria) {
+      // Case 1: Clicked the same column header again - toggle direction
+      set(
+        standaloneChatSortDirectionAtom,
+        currentDirection === 'asc' ? 'desc' : 'asc'
+      );
+    } else {
+      // Case 2: Clicked a new column header - set new criteria and default direction
+      set(standaloneChatSortCriteriaAtom, newCriteria);
+      // Set default sort direction: 'date' defaults to descending, others default to ascending
+      set(
+        standaloneChatSortDirectionAtom,
+        newCriteria === 'date' ? 'desc' : 'asc'
+      );
     }
+  }
 );

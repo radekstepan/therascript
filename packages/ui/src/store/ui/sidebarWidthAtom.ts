@@ -18,6 +18,6 @@ export const DEFAULT_SIDEBAR_WIDTH = 256; // Initial default width in pixels
  *   a guaranteed valid width for rendering.
  */
 export const sidebarWidthAtom = atomWithStorage<number>(
-    'session-sidebar-width', // localStorage key
-    DEFAULT_SIDEBAR_WIDTH    // Default value
+  'session-sidebar-width', // localStorage key
+  DEFAULT_SIDEBAR_WIDTH // Default value
 );

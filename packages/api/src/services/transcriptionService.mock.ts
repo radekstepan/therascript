@@ -6,7 +6,7 @@
 import type {
   StructuredTranscript,
   WhisperJobStatus,
-  WhisperSegment
+  WhisperSegment,
 } from '../types/index.js'; // Import type definitions
 import { NotFoundError } from '../errors.js'; // Import custom error for missing jobs
 import config from '../config/index.js'; // Access configuration (though mostly unused here)
@@ -15,7 +15,8 @@ import config from '../config/index.js'; // Access configuration (though mostly 
 // Simulate network delay and processing time
 const MOCK_DELAY_MS = parseInt(process.env.MOCK_WHISPER_DELAY_MS || '500', 10);
 // Sample text used for the mock transcription result
-const MOCK_TRANSCRIPT_TEXT = "This is a mocked transcription generated during mock mode. It simulates the Whisper service output. The quick brown fox jumps over the lazy dog. This allows development on systems without a dedicated GPU or Whisper running.";
+const MOCK_TRANSCRIPT_TEXT =
+  'This is a mocked transcription generated during mock mode. It simulates the Whisper service output. The quick brown fox jumps over the lazy dog. This allows development on systems without a dedicated GPU or Whisper running.';
 // --- End Mock Configuration ---
 
 // --- Mock Data Store ---
@@ -28,7 +29,10 @@ const mockJobStore = new Map<string, WhisperJobStatus>();
  * Creates a plausible-looking array of WhisperSegment objects based on input text and duration.
  * Splits text into segments and distributes the duration somewhat evenly.
  */
-const createMockSegments = (text: string, durationSec: number): WhisperSegment[] => {
+const createMockSegments = (
+  text: string,
+  durationSec: number
+): WhisperSegment[] => {
   const words = text.split(' ');
   const segmentCount = Math.max(1, Math.floor(words.length / 8)); // Approximate 8 words per segment
   const timePerSegment = durationSec / segmentCount;
@@ -37,30 +41,30 @@ const createMockSegments = (text: string, durationSec: number): WhisperSegment[]
   let currentTime = 0; // Start time for the current segment
 
   for (let i = 0; i < segmentCount; i++) {
-      const segmentStartTime = currentTime;
-      // Ensure segment end time doesn't exceed total duration
-      const segmentEndTime = Math.min(currentTime + timePerSegment, durationSec);
-      // Slice words for the current segment
-      const wordsInSegment = words.slice(wordIndex, wordIndex + 8);
-      wordIndex += wordsInSegment.length;
+    const segmentStartTime = currentTime;
+    // Ensure segment end time doesn't exceed total duration
+    const segmentEndTime = Math.min(currentTime + timePerSegment, durationSec);
+    // Slice words for the current segment
+    const wordsInSegment = words.slice(wordIndex, wordIndex + 8);
+    wordIndex += wordsInSegment.length;
 
-      // Create a mock segment object with plausible (but fake) data
-      mockSegments.push({
-          id: i,
-          seek: segmentStartTime * 1000, // Approx seek offset in ms
-          start: segmentStartTime,
-          end: segmentEndTime,
-          text: wordsInSegment.join(' ').trim(),
-          tokens: Array(wordsInSegment.length * 2).fill(1234), // Fake token IDs
-          temperature: 0.1, // Fake data
-          avg_logprob: -0.2, // Fake data
-          compression_ratio: 1.5, // Fake data
-          no_speech_prob: 0.05, // Fake data
-      });
+    // Create a mock segment object with plausible (but fake) data
+    mockSegments.push({
+      id: i,
+      seek: segmentStartTime * 1000, // Approx seek offset in ms
+      start: segmentStartTime,
+      end: segmentEndTime,
+      text: wordsInSegment.join(' ').trim(),
+      tokens: Array(wordsInSegment.length * 2).fill(1234), // Fake token IDs
+      temperature: 0.1, // Fake data
+      avg_logprob: -0.2, // Fake data
+      compression_ratio: 1.5, // Fake data
+      no_speech_prob: 0.05, // Fake data
+    });
 
-      currentTime = segmentEndTime + 0.1; // Add a small gap between segments
-      // Stop if all words are processed
-      if (wordIndex >= words.length) break;
+    currentTime = segmentEndTime + 0.1; // Add a small gap between segments
+    // Stop if all words are processed
+    if (wordIndex >= words.length) break;
   }
   return mockSegments;
 };
@@ -74,9 +78,21 @@ const mockTranscriptResult: Required<WhisperJobStatus>['result'] = {
 
 // Pre-define the structured transcript format expected by the API consumers
 const mockTranscriptStructure: StructuredTranscript = [
-  { id: 0, timestamp: 500, text: "This is a mocked transcription generated during mock mode." },
-  { id: 1, timestamp: 6000, text: "It simulates the Whisper service output. The quick brown fox jumps over the lazy dog." },
-  { id: 2, timestamp: 18000, text: "This allows development on systems without a dedicated GPU or Whisper running." },
+  {
+    id: 0,
+    timestamp: 500,
+    text: 'This is a mocked transcription generated during mock mode.',
+  },
+  {
+    id: 1,
+    timestamp: 6000,
+    text: 'It simulates the Whisper service output. The quick brown fox jumps over the lazy dog.',
+  },
+  {
+    id: 2,
+    timestamp: 18000,
+    text: 'This allows development on systems without a dedicated GPU or Whisper running.',
+  },
 ];
 // --- End Mock Data Generation ---
 
@@ -92,10 +108,12 @@ console.log('[Mock Service] Using Mock Transcription Service');
  * @param filePath - Path to the audio file (used only for logging in mock).
  * @returns A promise resolving to the mock job ID.
  */
-export const startTranscriptionJob = async (filePath: string): Promise<string> => {
+export const startTranscriptionJob = async (
+  filePath: string
+): Promise<string> => {
   console.log(`[Mock Transcription] Received request for file: ${filePath}`);
   // Simulate initial processing/queuing delay
-  await new Promise(resolve => setTimeout(resolve, MOCK_DELAY_MS / 5));
+  await new Promise((resolve) => setTimeout(resolve, MOCK_DELAY_MS / 5));
 
   // Generate a unique mock job ID
   const jobId = `mock-whisper-job-${Date.now()}`;
@@ -103,44 +121,59 @@ export const startTranscriptionJob = async (filePath: string): Promise<string> =
 
   // Initialize job status in the store
   mockJobStore.set(jobId, {
-      job_id: jobId,
-      status: 'queued',
-      start_time: jobStartTime,
-      duration: 35, // Simulate a fixed 35-second audio duration
-      progress: 0,
+    job_id: jobId,
+    status: 'queued',
+    start_time: jobStartTime,
+    duration: 35, // Simulate a fixed 35-second audio duration
+    progress: 0,
   });
   console.log(`[Mock Transcription] Created mock job ID: ${jobId}`);
 
   // Simulate background processing steps with delays
   setTimeout(() => {
-      const currentJob = mockJobStore.get(jobId);
-      if (currentJob?.status === 'queued') { // Check current status before updating
-          mockJobStore.set(jobId, { ...currentJob, status: 'processing', progress: 10 });
-          console.log(`[Mock Transcription BG ${jobId}] Status -> processing (10%)`);
-      }
+    const currentJob = mockJobStore.get(jobId);
+    if (currentJob?.status === 'queued') {
+      // Check current status before updating
+      mockJobStore.set(jobId, {
+        ...currentJob,
+        status: 'processing',
+        progress: 10,
+      });
+      console.log(
+        `[Mock Transcription BG ${jobId}] Status -> processing (10%)`
+      );
+    }
   }, MOCK_DELAY_MS / 2);
 
   setTimeout(() => {
-       const currentJob = mockJobStore.get(jobId);
-       if (currentJob?.status === 'processing') { // Check current status
-           mockJobStore.set(jobId, { ...currentJob, status: 'processing', progress: 65 });
-           console.log(`[Mock Transcription BG ${jobId}] Status -> processing (65%)`);
-       }
-   }, MOCK_DELAY_MS);
+    const currentJob = mockJobStore.get(jobId);
+    if (currentJob?.status === 'processing') {
+      // Check current status
+      mockJobStore.set(jobId, {
+        ...currentJob,
+        status: 'processing',
+        progress: 65,
+      });
+      console.log(
+        `[Mock Transcription BG ${jobId}] Status -> processing (65%)`
+      );
+    }
+  }, MOCK_DELAY_MS);
 
   setTimeout(() => {
-      const currentJob = mockJobStore.get(jobId);
-      if (currentJob?.status === 'processing') { // Check current status
-           // Final update: mark as completed and add the mock result
-           mockJobStore.set(jobId, {
-              ...currentJob,
-              status: 'completed',
-              progress: 100,
-              end_time: Date.now(),
-              result: mockTranscriptResult, // Attach the pre-generated result
-           });
-          console.log(`[Mock Transcription BG ${jobId}] Status -> completed`);
-      }
+    const currentJob = mockJobStore.get(jobId);
+    if (currentJob?.status === 'processing') {
+      // Check current status
+      // Final update: mark as completed and add the mock result
+      mockJobStore.set(jobId, {
+        ...currentJob,
+        status: 'completed',
+        progress: 100,
+        end_time: Date.now(),
+        result: mockTranscriptResult, // Attach the pre-generated result
+      });
+      console.log(`[Mock Transcription BG ${jobId}] Status -> completed`);
+    }
   }, MOCK_DELAY_MS * 1.5);
 
   return jobId; // Return the generated job ID immediately
@@ -154,21 +187,25 @@ export const startTranscriptionJob = async (filePath: string): Promise<string> =
  * @returns A promise resolving to the job's status (excluding the full result).
  * @throws {NotFoundError} If the job ID is not found in the store.
  */
-export const getTranscriptionStatus = async (jobId: string): Promise<WhisperJobStatus> => {
+export const getTranscriptionStatus = async (
+  jobId: string
+): Promise<WhisperJobStatus> => {
   console.log(`[Mock Transcription] Checking status for job ID: ${jobId}`);
   // Simulate a very short network delay for status check
-  await new Promise(resolve => setTimeout(resolve, MOCK_DELAY_MS / 10));
+  await new Promise((resolve) => setTimeout(resolve, MOCK_DELAY_MS / 10));
 
   const job = mockJobStore.get(jobId);
   if (!job) {
-      // Throw a specific error if the job ID is invalid
-      throw new NotFoundError(`Mock Job ID ${jobId} not found.`);
+    // Throw a specific error if the job ID is invalid
+    throw new NotFoundError(`Mock Job ID ${jobId} not found.`);
   }
 
   // Return a copy of the job status, *excluding* the full 'result' field
   // to match the expected behavior of a status polling endpoint.
   const { result, ...statusOnly } = job;
-  console.log(`[Mock Transcription] Status for ${jobId}: ${statusOnly.status} (${statusOnly.progress}%)`);
+  console.log(
+    `[Mock Transcription] Status for ${jobId}: ${statusOnly.status} (${statusOnly.progress}%)`
+  );
   return statusOnly;
 };
 
@@ -181,21 +218,29 @@ export const getTranscriptionStatus = async (jobId: string): Promise<WhisperJobS
  * @throws {NotFoundError} If the job ID is not found.
  * @throws {Error} If the job status is not 'completed'.
  */
-export const getStructuredTranscriptionResult = async (jobId: string): Promise<StructuredTranscript> => {
-  console.log(`[Mock Transcription] Getting structured result for job ID: ${jobId}`);
+export const getStructuredTranscriptionResult = async (
+  jobId: string
+): Promise<StructuredTranscript> => {
+  console.log(
+    `[Mock Transcription] Getting structured result for job ID: ${jobId}`
+  );
   // Simulate a short delay
-  await new Promise(resolve => setTimeout(resolve, MOCK_DELAY_MS / 10));
+  await new Promise((resolve) => setTimeout(resolve, MOCK_DELAY_MS / 10));
 
   const job = mockJobStore.get(jobId);
   if (!job) {
-      throw new NotFoundError(`Mock Job ID ${jobId} not found.`);
+    throw new NotFoundError(`Mock Job ID ${jobId} not found.`);
   }
   // Ensure the job is actually marked as completed before returning results
   if (job.status !== 'completed') {
-      throw new Error(`Mock Job ${jobId} is not completed (status: ${job.status}).`);
+    throw new Error(
+      `Mock Job ${jobId} is not completed (status: ${job.status}).`
+    );
   }
 
-  console.log(`[Mock Transcription] Returning mock structured transcript for ${jobId}`);
+  console.log(
+    `[Mock Transcription] Returning mock structured transcript for ${jobId}`
+  );
   // Return the pre-defined structured mock data
   return mockTranscriptStructure;
 };

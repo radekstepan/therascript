@@ -12,6 +12,6 @@ export type SortDirection = 'asc' | 'desc';
  *   so the default overall sort is newest sessions first.
  */
 export const sessionSortDirectionAtom = atomWithStorage<SortDirection>(
-    'session-sort-direction', // localStorage key
-    'desc'                    // Default value
+  'session-sort-direction', // localStorage key
+  'desc' // Default value
 );

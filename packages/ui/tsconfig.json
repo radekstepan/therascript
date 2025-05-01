@@ -12,7 +12,8 @@
     "lib": ["DOM", "DOM.Iterable", "ESNext"],
     "allowJs": false,
     "baseUrl": "./src", // For '@/' alias
-    "paths": { // Keep path alias if used
+    "paths": {
+      // Keep path alias if used
       "@/*": ["*"]
     }
   },

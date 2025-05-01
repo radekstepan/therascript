@@ -29,7 +29,9 @@ const getEnvVar = (key: string, defaultValue?: string): string => {
     return defaultValue;
   }
   // Throw error if required variable is missing
-  throw new Error(`Missing required environment variable and no default provided: ${key}`);
+  throw new Error(
+    `Missing required environment variable and no default provided: ${key}`
+  );
 };
 
 // --- Determine appMode AFTER env vars are loaded by Node ---
@@ -46,43 +48,74 @@ const ollamaModel = getEnvVar('OLLAMA_MODEL', 'llama3');
 const ollamaKeepAlive = getEnvVar('OLLAMA_CHAT_KEEP_ALIVE', '5m');
 const whisperApiURL = getEnvVar('WHISPER_API_URL', 'http://localhost:8000');
 const whisperModel = getEnvVar('WHISPER_MODEL', 'tiny');
-const allowedAudioMimeTypes = [ 'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-m4a', 'audio/ogg', 'audio/aac', ];
+const allowedAudioMimeTypes = [
+  'audio/mpeg',
+  'audio/mp3',
+  'audio/wav',
+  'audio/x-m4a',
+  'audio/ogg',
+  'audio/aac',
+];
 const maxUploadFileSize = getEnvVar('UPLOAD_MAX_FILE_SIZE', '100m');
 
 // --- Resolve DB and data paths relative to the *API package* directory ---
 // IMPORTANT: Paths in the .env file should still be relative to the API package dir
 const dbPathFromEnv = getEnvVar('DB_PATH', './data/therapy-analyzer.sqlite');
-const transcriptsDirFromEnv = getEnvVar('DB_TRANSCRIPTS_DIR', './data/transcripts');
+const transcriptsDirFromEnv = getEnvVar(
+  'DB_TRANSCRIPTS_DIR',
+  './data/transcripts'
+);
 const uploadsDirFromEnv = getEnvVar('DB_UPLOADS_DIR', './data/uploads');
 
 const resolvedDbPath = path.resolve(packageApiDir, dbPathFromEnv);
-const resolvedTranscriptsDir = path.resolve(packageApiDir, transcriptsDirFromEnv);
+const resolvedTranscriptsDir = path.resolve(
+  packageApiDir,
+  transcriptsDirFromEnv
+);
 const resolvedUploadsDir = path.resolve(packageApiDir, uploadsDirFromEnv);
 // --- End path resolution ---
-
 
 // Assemble the configuration object
 const config = {
   server: {
-      port: port,
-      nodeEnv: nodeEnv,
-      isProduction: isProduction,
-      corsOrigin: corsOrigin,
-      appMode: appMode as 'production' | 'development' | 'mock', // Add appMode
+    port: port,
+    nodeEnv: nodeEnv,
+    isProduction: isProduction,
+    corsOrigin: corsOrigin,
+    appMode: appMode as 'production' | 'development' | 'mock', // Add appMode
   },
-  ollama: { baseURL: ollamaBaseURL, model: ollamaModel, keepAlive: ollamaKeepAlive },
+  ollama: {
+    baseURL: ollamaBaseURL,
+    model: ollamaModel,
+    keepAlive: ollamaKeepAlive,
+  },
   whisper: { apiUrl: whisperApiURL, model: whisperModel },
-  db: { sqlitePath: resolvedDbPath, transcriptsDir: resolvedTranscriptsDir, uploadsDir: resolvedUploadsDir },
-  upload: { allowedMimeTypes: allowedAudioMimeTypes, maxFileSize: maxUploadFileSize },
+  db: {
+    sqlitePath: resolvedDbPath,
+    transcriptsDir: resolvedTranscriptsDir,
+    uploadsDir: resolvedUploadsDir,
+  },
+  upload: {
+    allowedMimeTypes: allowedAudioMimeTypes,
+    maxFileSize: maxUploadFileSize,
+  },
 };
 
 // --- Directory Creation Logic (remains the same) ---
 const ensureDirectoryExists = (dirPath: string, dirNameForLog: string) => {
-    if (!fs.existsSync(dirPath)) {
-        console.log(`[Config] Creating ${dirNameForLog} directory: ${dirPath}`);
-        try { fs.mkdirSync(dirPath, { recursive: true }); console.log(`[Config] Successfully created ${dirNameForLog} directory.`); }
-        catch (err) { console.error(`[Config] FATAL: Error creating ${dirNameForLog} directory at ${dirPath}:`, err); process.exit(1); }
+  if (!fs.existsSync(dirPath)) {
+    console.log(`[Config] Creating ${dirNameForLog} directory: ${dirPath}`);
+    try {
+      fs.mkdirSync(dirPath, { recursive: true });
+      console.log(`[Config] Successfully created ${dirNameForLog} directory.`);
+    } catch (err) {
+      console.error(
+        `[Config] FATAL: Error creating ${dirNameForLog} directory at ${dirPath}:`,
+        err
+      );
+      process.exit(1);
     }
+  }
 };
 ensureDirectoryExists(path.dirname(config.db.sqlitePath), 'database');
 ensureDirectoryExists(config.db.transcriptsDir, 'transcripts');
@@ -90,10 +123,12 @@ ensureDirectoryExists(config.db.uploadsDir, 'uploads');
 // --- End Directory Creation ---
 
 // --- Log effective config (remains the same) ---
-console.log("[Config] Final check before exporting config object:");
+console.log('[Config] Final check before exporting config object:');
 console.log(`  - Value of APP_MODE in process.env: ${process.env.APP_MODE}`);
-console.log(`  - Value of OLLAMA_MODEL in process.env: ${process.env.OLLAMA_MODEL}`);
-console.log("[Config] Effective Configuration Loaded:");
+console.log(
+  `  - Value of OLLAMA_MODEL in process.env: ${process.env.OLLAMA_MODEL}`
+);
+console.log('[Config] Effective Configuration Loaded:');
 console.log(`  - APP_MODE: ${config.server.appMode}`);
 console.log(`  - NODE_ENV: ${config.server.nodeEnv}`);
 console.log(`  - Port: ${config.server.port}`);
