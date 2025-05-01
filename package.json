@@ -7,7 +7,7 @@
     "packages/*"
   ],
   "scripts": {
-    "prepare": "husky install",
+    "prepare": "husky",
     "build": "lerna run build",
     "build:api": "lerna run build --scope=api",
     "build:ui": "lerna run build --scope=ui",
@@ -39,8 +39,10 @@
   "license": "MIT",
   "devDependencies": {
     "concurrently": "^8.2.2",
+    "husky": "^9.1.7",
     "lerna": "^8.1.7",
-    "prettier": "^3.3.3",
+    "lint-staged": "^15.5.1",
+    "prettier": "^3.5.3",
     "ts-node": "^10.9.2",
     "typescript": "^5.5.4"
   }
