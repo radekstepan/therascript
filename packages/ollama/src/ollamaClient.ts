@@ -1,5 +1,5 @@
 import axios, { AxiosError } from 'axios';
-import { OLLAMA_SERVICE_NAME } from './dockerManager';
+import { OLLAMA_SERVICE_NAME } from './dockerManager.js';
 
 // Default to localhost as the script runs on the host now
 const OLLAMA_URL = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';

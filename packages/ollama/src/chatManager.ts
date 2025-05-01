@@ -3,7 +3,7 @@ import {
   OllamaChatOptions,
   sendChatRequest,
   OllamaChatRequest,
-} from './ollamaClient';
+} from './ollamaClient.js';
 
 // Interface for a single chat conversation (remains the same)
 interface ChatConversation {

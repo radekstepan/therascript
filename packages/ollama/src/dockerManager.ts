@@ -2,8 +2,9 @@ import { exec as callbackExec, spawn, ChildProcess } from 'child_process'; // Ke
 import * as util from 'util';
 import * as path from 'path';
 import { Readable } from 'stream'; // Keep Readable for pull stream
-import Dockerode from 'dockerode'; // Import Dockerode
+import Dockerode from 'dockerode'; // Keep Dockerode for direct stop
 import * as fs from 'fs'; // Added fs import
+import { ensureServiceReady, stopContainer } from '@therascript/docker-utils';
 
 const exec = util.promisify(callbackExec);
 
@@ -11,6 +12,7 @@ const exec = util.promisify(callbackExec);
 const COMPOSE_FILE = path.resolve(__dirname, '..', 'docker-compose.yml');
 export const OLLAMA_SERVICE_NAME = 'ollama';
 const OLLAMA_CONTAINER_NAME = 'ollama_server_managed'; // Exact name from docker-compose.yml
+const OLLAMA_HEALTH_URL = 'http://localhost:11434'; // Assuming default port mapping
 
 // --- Dockerode Initialization ---
 let docker: Dockerode | null = null;
@@ -24,115 +26,42 @@ try {
   );
 }
 
-// --- Helper Functions ---
-/** Helper to run docker compose commands (used for start/pull/list) */
-async function runDockerComposeCommand(command: string): Promise<string> {
-  // Check if compose file exists before trying to use it
+// --- Helper: Run docker compose exec (Kept for model checks/pulls) ---
+async function runDockerComposeExec(command: string): Promise<string> {
   if (!fs.existsSync(COMPOSE_FILE)) {
     const errorMessage = `[Ollama Docker] Docker Compose file not found at expected path: ${COMPOSE_FILE}. Cannot manage service.`;
     console.error(errorMessage);
-    // Use standard Error as InternalServerError is not available here
     throw new Error(errorMessage);
   }
-  const composeCommand = `docker compose -f "${COMPOSE_FILE}" ${command}`;
-  console.log(`[Ollama Docker] Running: ${composeCommand}`);
+  // Note: compose V2 uses 'exec -T' for non-interactive
+  const composeCommand = `docker compose -f "${COMPOSE_FILE}" exec -T ${OLLAMA_SERVICE_NAME} ${command}`;
+  console.log(`[Ollama Docker Exec] Running: ${composeCommand}`);
   try {
     const { stdout, stderr } = await exec(composeCommand);
     if (stderr && !stderr.toLowerCase().includes('warn')) {
-      console.warn(`[Ollama Docker] Compose stderr: ${stderr}`);
+      console.warn(`[Ollama Docker Exec] Compose stderr: ${stderr}`);
     }
     return stdout.trim();
   } catch (error: any) {
-    console.error(`[Ollama Docker] Error executing: ${composeCommand}`);
-    if (error.stderr) console.error(`[Ollama Docker] Stderr: ${error.stderr}`);
-    if (error.stdout) console.error(`[Ollama Docker] Stdout: ${error.stdout}`);
-    // Use standard Error
+    console.error(`[Ollama Docker Exec] Error executing: ${composeCommand}`);
+    if (error.stderr)
+      console.error(`[Ollama Docker Exec] Stderr: ${error.stderr}`);
+    if (error.stdout)
+      console.error(`[Ollama Docker Exec] Stdout: ${error.stdout}`);
     throw new Error(
-      `Failed to run 'docker compose ${command}'. Is Docker running? Error: ${error.message}`
+      `Failed to run 'docker compose exec ${command}'. Is the container running? Error: ${error.message}`
     );
   }
 }
+// --- End Helper ---
 
-/**
- * Finds the Ollama container by its specific name.
- * @returns Dockerode Container object or null if not found or Docker unavailable.
- */
-const findOllamaContainer = async (): Promise<Dockerode.Container | null> => {
-  if (!docker) {
-    console.warn('[Ollama Docker Manager] Docker client unavailable.');
-    return null;
-  }
-  try {
-    const containers = await docker.listContainers({ all: true });
-    const found = containers.find((c) =>
-      c.Names.some((name) => name === `/${OLLAMA_CONTAINER_NAME}`)
-    );
-    return found ? docker.getContainer(found.Id) : null;
-  } catch (error) {
-    console.error(
-      `[Ollama Docker Manager] Error finding container '${OLLAMA_CONTAINER_NAME}':`,
-      error
-    );
-    return null;
-  }
-};
-
-// --- Docker Management Functions ---
-
-/** Checks if the Ollama container is running */
-async function isOllamaContainerRunning(): Promise<boolean> {
-  const container = await findOllamaContainer();
-  if (!container) return false;
-  try {
-    const data = await container.inspect();
-    console.log(
-      `[Ollama Docker Manager] Container '${OLLAMA_CONTAINER_NAME}' state: ${data.State.Status}`
-    );
-    return data.State.Running === true;
-  } catch (error: any) {
-    if (error.statusCode === 404) {
-      // Dockerode error for not found
-      console.warn(
-        `[Ollama Docker Manager] Container '${OLLAMA_CONTAINER_NAME}' not found during inspect.`
-      );
-    } else {
-      console.error(
-        `[Ollama Docker Manager] Error inspecting container '${OLLAMA_CONTAINER_NAME}':`,
-        error
-      );
-    }
-    return false;
-  }
-}
-
-/** Starts the Ollama service using Docker Compose */
-async function startOllamaService(): Promise<void> {
-  console.log(
-    '🐳 [Ollama Docker] Starting Ollama service via Docker Compose...'
-  );
-  try {
-    await runDockerComposeCommand(`up -d ${OLLAMA_SERVICE_NAME}`);
-    console.log(
-      '⏳ [Ollama Docker] Waiting for Ollama service to potentially initialize (approx 15s)...'
-    );
-    await new Promise((resolve) => setTimeout(resolve, 15000));
-    console.log('✅ [Ollama Docker] Ollama service should be starting up.');
-  } catch (error) {
-    console.error('❌ [Ollama Docker] Failed to start Ollama service.');
-    // Re-throw the Error from the helper
-    throw error;
-  }
-}
-
-/** Checks if the specified model is available in Ollama (Kept using docker compose exec) */
+// --- Checks if the specified model is available in Ollama (Kept using docker compose exec) ---
 export async function isModelPulled(modelName: string): Promise<boolean> {
   console.log(
     `🔍 [Ollama Docker] Checking if model "${modelName}" is pulled...`
   );
   try {
-    const output = await runDockerComposeCommand(
-      `exec ${OLLAMA_SERVICE_NAME} ollama list`
-    );
+    const output = await runDockerComposeExec('ollama list');
     const lines = output.split('\n').slice(1); // Skip header line
     for (const line of lines) {
       const nameParts = line.trim().split(/\s+/);
@@ -148,16 +77,12 @@ export async function isModelPulled(modelName: string): Promise<boolean> {
       `❌ [Ollama Docker] Error checking for model "${modelName}" via compose exec. Is the container running correctly?`,
       error.message
     );
-    if (!(await isOllamaContainerRunning())) {
-      console.error(
-        `[Ollama Docker] Container '${OLLAMA_CONTAINER_NAME}' is not running.`
-      );
-    }
+    // Optional: Could check container running state here, but shared ensureServiceReady should handle it upstream
     return false;
   }
 }
 
-/** Pulls the specified model using Docker Compose (Kept using spawn) */
+// --- Pulls the specified model using Docker Compose (Kept using spawn for streaming) ---
 export function pullModelStream(modelName: string): Readable {
   console.log(
     `⏳ [Ollama Docker Stream] Starting pull for model "${modelName}"...`
@@ -169,7 +94,7 @@ export function pullModelStream(modelName: string): Readable {
     '-f',
     COMPOSE_FILE,
     'exec',
-    '-T',
+    // '-T', // Might need to remove -T if exec needs a pseudo-tty for progress bars
     OLLAMA_SERVICE_NAME,
     'ollama',
     'pull',
@@ -181,10 +106,8 @@ export function pullModelStream(modelName: string): Readable {
     pullProcess = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     stream.push(`{"status": "Starting pull for ${modelName}..."}\n`);
 
-    // Corrected Event Handlers
     pullProcess.stdout?.on('data', (data: Buffer | string) => {
-      // Expect Buffer or string
-      const output = data.toString(); // Ensure it's a string
+      const output = data.toString();
       output.split('\n').forEach((line) => {
         if (line.trim()) {
           stream.push(line + '\n');
@@ -193,17 +116,28 @@ export function pullModelStream(modelName: string): Readable {
     });
 
     pullProcess.stderr?.on('data', (data: Buffer | string) => {
-      // Expect Buffer or string
-      const errorOutput = data.toString(); // Ensure it's a string
+      const errorOutput = data.toString();
       errorOutput.split('\n').forEach((line) => {
         if (line.trim()) {
-          stream.push(`stderr: ${line}\n`);
+          // Check stderr for common errors that might indicate completion/failure
+          const lowerLine = line.toLowerCase();
+          if (lowerLine.includes('error pulling manifest')) {
+            stream.push(
+              `{"status": "failed", "message": "Error pulling manifest: ${line.trim()}"}\n`
+            );
+          } else if (lowerLine.includes('pulling')) {
+            // Treat stderr "pulling" messages as progress/status
+            stream.push(
+              `{"status": "progress", "message": "${line.trim()}"}\n`
+            );
+          } else {
+            stream.push(`stderr: ${line}\n`); // Pass other stderr through
+          }
         }
       });
     });
 
     pullProcess.on('error', (err: Error) => {
-      // Expect Error object
       console.error(
         `❌ [Stream] Failed to start pull process for ${modelName}:`,
         err
@@ -217,7 +151,6 @@ export function pullModelStream(modelName: string): Readable {
     pullProcess.on(
       'close',
       (code: number | null, signal: NodeJS.Signals | null) => {
-        // Expect code and signal
         if (code === 0) {
           console.log(
             `✅ [Stream] Pull process for "${modelName}" finished successfully.`
@@ -252,35 +185,43 @@ export function pullModelStream(modelName: string): Readable {
       console.log(
         `[Stream] Attempting to terminate pull process ${pullProcess.pid}...`
       );
-      pullProcess.kill('SIGTERM'); // Try graceful termination first
+      pullProcess.kill('SIGTERM');
       setTimeout(() => {
         if (pullProcess && !pullProcess.killed) {
-          console.warn(
-            `[Stream] Pull process ${pullProcess.pid} did not terminate, forcing kill.`
-          );
           pullProcess.kill('SIGKILL');
         }
-      }, 2000); // Force kill after 2 seconds
+      }, 2000);
     }
   });
   return stream;
 }
 
-/** Ensures the Ollama service is running */
+// --- Ensures the Ollama service is running using shared utility ---
 export async function ensureOllamaRunning(): Promise<void> {
-  console.log('🐳 [Ollama Docker] Checking Ollama Docker status...');
-  const running = await isOllamaContainerRunning();
-  if (running) {
-    console.log('✅ [Ollama Docker] Ollama container is already running.');
-  } else {
-    console.log(
-      '🅾️ [Ollama Docker] Ollama container not running. Attempting to start...'
+  if (!docker) {
+    throw new Error(
+      'Docker client not initialized. Cannot ensure Ollama running.'
     );
-    await startOllamaService(); // Uses compose
   }
+  // Project name derived from compose file location (adjust if needed)
+  const projectName = path.basename(path.dirname(COMPOSE_FILE));
+  await ensureServiceReady({
+    docker,
+    containerName: OLLAMA_CONTAINER_NAME,
+    serviceName: OLLAMA_SERVICE_NAME,
+    composeFilePath: COMPOSE_FILE,
+    projectName: projectName,
+    healthCheck: {
+      type: 'http', // Ollama has an API endpoint we can hit
+      url: OLLAMA_HEALTH_URL, // Check base URL
+      retries: 10, // Increase retries as Ollama can take time
+      delayMs: 4000, // Slightly longer delay
+      timeoutMs: 3000,
+    },
+  });
 }
 
-/** Stops the Ollama service using Dockerode */
+// --- Stops the Ollama service using shared utility ---
 export async function stopOllamaService(): Promise<void> {
   if (!docker) {
     console.warn(
@@ -288,49 +229,5 @@ export async function stopOllamaService(): Promise<void> {
     );
     return;
   }
-  console.log(
-    `[Ollama Docker Manager] Attempting to stop container '${OLLAMA_CONTAINER_NAME}'...`
-  );
-  try {
-    const container = await findOllamaContainer();
-    if (container) {
-      try {
-        console.log(
-          `[Ollama Docker Manager] Stopping container '${OLLAMA_CONTAINER_NAME}' (ID: ${container.id})...`
-        );
-        await container.stop();
-        console.log(
-          `✅ [Ollama Docker Manager] Container '${OLLAMA_CONTAINER_NAME}' stopped.`
-        );
-        // Remove container after stop?
-        // console.log(`[Ollama Docker Manager] Removing container '${OLLAMA_CONTAINER_NAME}'...`);
-        // await container.remove();
-        // console.log(`✅ [Ollama Docker Manager] Container '${OLLAMA_CONTAINER_NAME}' removed.`);
-      } catch (stopError: any) {
-        if (stopError.statusCode === 304) {
-          console.log(
-            `[Ollama Docker Manager] Container '${OLLAMA_CONTAINER_NAME}' already stopped.`
-          );
-        } else if (stopError.statusCode === 404) {
-          console.log(
-            `[Ollama Docker Manager] Container '${OLLAMA_CONTAINER_NAME}' not found (already removed?).`
-          );
-        } else {
-          console.error(
-            `[Ollama Docker Manager] Error stopping container '${OLLAMA_CONTAINER_NAME}':`,
-            stopError
-          );
-        }
-      }
-    } else {
-      console.log(
-        `[Ollama Docker Manager] Container '${OLLAMA_CONTAINER_NAME}' not found, cannot stop.`
-      );
-    }
-  } catch (error) {
-    console.error(
-      `[Ollama Docker Manager] General error stopping Ollama service:`,
-      error
-    );
-  }
+  await stopContainer(docker, OLLAMA_CONTAINER_NAME);
 }

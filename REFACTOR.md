@@ -1,9 +1,5 @@
 **1. Code Duplication:**
 
-*   **Docker Management Logic:**
-    *   Files: `packages/ollama/src/dockerManager.ts`, `packages/whisper/src/dockerManager.ts`
-    *   Description: Both files contain very similar logic patterns for managing their respective Docker containers. Functions like `ensureXRunning` and `stopXService` share common steps: finding the container using `dockerode`, checking its state, potentially starting it using `docker compose`, polling for readiness (API health check vs. basic responsiveness), and stopping the container using `dockerode`. This core lifecycle management pattern is duplicated.
-
 *   **API Client Stream Handling:**
     *   File: `packages/ui/src/api/chat.ts`
     *   Functions: `addSessionChatMessageStream`, `addStandaloneChatMessageStream`

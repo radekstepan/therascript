@@ -3,7 +3,7 @@
 //          (orchestrated by the root `run-dev.js` script). It ensures the Whisper container
 //          is running and handles graceful shutdown.
 
-import { ensureWhisperRunning, stopWhisperService } from './dockerManager'; // Import Docker management functions
+import { ensureWhisperRunning, stopWhisperService } from './dockerManager.js'; // Import Docker management functions
 
 // Flag to track if the initial startup sequence completed successfully.
 // Used to determine if cleanup (stopping the container) is needed on exit.
