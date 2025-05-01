@@ -13,17 +13,19 @@ This folder contains the client-side state management logic for the application,
 The state is organized into logical units (subdirectories) based on the type of state being managed. Each exported atom resides in its own file within these directories:
 
 *   **`action/`**: Contains atoms that encapsulate actions or mutations *on UI state*.
-    *   *(e.g., `openUploadModalAtom.ts`, `closeUploadModalAtom.ts`, `setSessionSortAtom.ts`)*
+    *   *(e.g., `openUploadModalAtom.ts`, `closeUploadModalAtom.ts`, `setSessionSortAtom.ts`, `setStandaloneChatSortAtom.ts`)*
 *   **`chat/`**: Contains atoms related specifically to the *current* chat interaction state *that isn't server data*.
     *   *(e.g., `currentQueryAtom.ts`, `toastMessageAtom.ts`, `chatErrorAtom.ts` [for local errors])*
+    *   *(Note: `standaloneSearchTermAtom` has been removed)*
 *   **`session/`**: Holds state atoms related to the *currently selected* session/chat identifiers and sorting preferences (which influence how Tanstack Query data is displayed).
     *   *(e.g., `activeSessionIdAtom.ts`, `activeChatIdAtom.ts`, `sessionSortCriteriaAtom.ts`, `sessionSortDirectionAtom.ts`)*
     *   Note: Some files also export related Types (e.g., `SessionSortCriteria` from `sessionSortCriteriaAtom.ts`).
 *   **`ui/`**: Manages state related to the user interface appearance and behavior.
-    *   *(e.g., `themeAtom.ts`, `sidebarWidthAtom.ts`, `isUploadModalOpenAtom.ts`)*
+    *   *(e.g., `themeAtom.ts`, `sidebarWidthAtom.ts`, `isUploadModalOpenAtom.ts`, `renderMarkdownAtom.ts`)*
     *   Note: Some files also export related Types or Constants (e.g., `Theme` from `themeAtom.ts`, width constants from `sidebarWidthAtom.ts`).
 *   **`index.ts`**: A barrel file that re-exports all atoms (and associated types/constants) from their individual files in the subdirectories. This allows for convenient importing elsewhere in the application (e.g., `import { activeSessionIdAtom, themeAtom } from '@/store';`).
 *   **`README.md`**: This file.
+*   **`standaloneChatSortCriteriaAtom.ts` / `standaloneChatSortDirectionAtom.ts`**: Atoms specifically for standalone chat list sorting state.
 
 ## Key Concepts (Jotai)
 
@@ -39,6 +41,6 @@ The state is organized into logical units (subdirectories) based on the type of 
 *   **Modularity:** Each Jotai atom remains self-contained in its file.
 *   **Dependencies:** Trace dependencies by looking at the `import` statements and the `get(...)` calls within each atom's definition.
 *   **Entry Point:** Use `index.ts` to see the complete list of exported state atoms and related entities available from this module.
-*   **Data Source:** Server data (sessions, transcripts, chat messages) is managed by Tanstack Query's cache, not by atoms like `pastSessionsAtom` (which has been removed).
+*   **Data Source:** Server data (sessions, transcripts, chat messages) is managed by Tanstack Query's cache. Atoms like `activeSessionIdAtom` or `activeChatIdAtom` merely *point* to which server data is currently relevant for display or interaction.
 *   **State Modification:** Atoms in the `action/` directory modify UI state. Server state modifications are triggered by calling `mutate` from `useMutation` hooks in components.
-*   **Types:** Pay attention to the types (`Session`, `ChatSession`, `ChatMessage`, etc.) imported from the main `types` directory (likely `../../types` relative to atom files) and any types defined locally within atom files (like `Theme`, `SessionSortCriteria`).
+*   **Types:** Pay attention to the types (`Session`, `ChatSession`, `ChatMessage`, etc.) imported from the main `types.ts` file (likely `../../types` relative to atom files) and any types defined locally within atom files (like `Theme`, `SessionSortCriteria`).
