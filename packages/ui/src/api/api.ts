@@ -1,15 +1,20 @@
+// Purpose: Barrel file to re-export API interaction functions
+//          from feature-specific files, providing a single point of import.
 // =========================================
-// File: packages/ui/src/api/api.ts
-// =========================================
-// packages/ui/src/api/api.ts
-// Barrel file to re-export API functions
-export * from './session';
-export * from './chat';
-export * from './ollama';
-export * from './transcription';
-export * from './docker';
-export * from './system';
-export * from './search';
-export * from './meta';
 
-// TODO comments should not be removed
+// Re-export all functions from session.ts (session metadata, transcript)
+export * from './session';
+// Re-export all functions from chat.ts (session chat, standalone chat - excluding starred message fetch)
+export * from './chat';
+// Re-export all functions from ollama.ts (Ollama model management)
+export * from './ollama';
+// Re-export all functions from transcription.ts (Transcription job status)
+export * from './transcription';
+// Re-export all functions from docker.ts (Docker container status)
+export * from './docker';
+// Re-export all functions from system.ts (System actions like shutdown)
+export * from './system';
+// Re-export all functions from search.ts (Full-text search)
+export * from './search';
+// Re-export all functions from meta.ts (Health checks, Starred message fetch)
+export * from './meta';

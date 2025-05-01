@@ -1,270 +1,321 @@
-// autostartManager.ts
+// Purpose: Provides functions to manage systemd services for autostarting
+//          an application on Linux systems. Includes creating, enabling,
+//          disabling, removing, and checking the status of services.
 
-// --- FIX: Add 'node:' prefix to built-in module imports ---
-import { exec } from 'node:child_process';
-import util from 'node:util';
-import fs from 'node:fs/promises';
-import path from 'node:path';
-// --- END FIX ---
+import { exec } from 'node:child_process'; // For running shell commands
+import util from 'node:util'; // For promisify
+import fs from 'node:fs/promises'; // For async file system operations (writing/deleting service files)
+import path from 'node:path'; // For path manipulation (joining paths)
 
+// Promisify exec for async/await usage
 const execPromise = util.promisify(exec);
+
+// Standard path for system-wide systemd unit files
 const SYSTEMD_PATH = '/etc/systemd/system/';
 
-// Helper function to validate service names (simple version)
+/**
+ * Basic validation for systemd service names.
+ * Ensures the name follows common conventions and ends with '.service'.
+ *
+ * @param {string} name - The service name to validate.
+ * @returns {boolean} True if the name seems valid, false otherwise.
+ */
 function isValidServiceName(name: string): boolean {
-  return /^[a-zA-Z0-9-]+\.service$/.test(name);
+  // Regex: Starts with letters/numbers/hyphen, contains only those, ends with '.service'
+  return /^[a-zA-Z0-9][a-zA-Z0-9-]*\.service$/.test(name);
 }
 
-// Helper function to run commands, handling potential errors
+/**
+ * Helper function to execute shell commands and handle potential errors.
+ * Logs the command being executed and any resulting stdout/stderr.
+ *
+ * @param {string} command - The shell command to execute.
+ * @returns {Promise<{ stdout: string; stderr: string }>} The standard output and standard error.
+ * @throws {Error} If the command execution fails (non-zero exit code).
+ */
 async function runCommand(command: string): Promise<{ stdout: string; stderr: string }> {
-    console.log(`Executing: ${command}`);
+    console.log(`[Sys Mgr] Executing: ${command}`);
     try {
+        // Run the command and wait for it to complete
         return await execPromise(command);
     } catch (error: any) {
-        console.error(`Command failed: ${command}`);
-        console.error(`Error: ${error.message}`);
-        if (error.stderr) console.error(`stderr: ${error.stderr}`);
-        if (error.stdout) console.error(`stdout: ${error.stdout}`); // Log stdout too, might have info
-        throw error; // Re-throw after logging
+        // Log detailed error information if the command fails
+        console.error(`[Sys Mgr] Command failed: ${command}`);
+        console.error(`[Sys Mgr] Error: ${error.message}`);
+        if (error.stderr) console.error(`[Sys Mgr] Stderr: ${error.stderr}`);
+        if (error.stdout) console.error(`[Sys Mgr] Stdout: ${error.stdout}`); // Log stdout too, might contain info
+        throw error; // Re-throw the error to be handled by the caller
     }
 }
 
 
 /**
  * Checks if a systemd service is enabled (configured to start on boot).
- * Requires root privileges if checking system-wide services.
+ * Uses `systemctl is-enabled`. Requires appropriate permissions (usually root).
  *
  * @param {string} serviceName - The name of the service (e.g., 'my-app.service').
- * @returns {Promise<boolean>} True if the service is enabled, false otherwise.
- * @throws {Error} If the check command fails or the service name is invalid.
+ * @returns {Promise<boolean>} True if the service is enabled, false otherwise or if status cannot be determined.
+ * @throws {Error} If the service name format is invalid.
  */
 export async function isAutostartEnabled(serviceName: string): Promise<boolean> {
   if (!isValidServiceName(serviceName)) {
     throw new Error(`Invalid service name format: "${serviceName}". Should end with '.service'.`);
   }
-  // Warning moved to the calling scripts (setup/remove/check) as it's context-dependent
-  // console.warn(`Checking autostart for "${serviceName}". Requires root privileges (sudo).`);
+  // Note: Permission warnings are handled by the calling scripts (setup/remove/check)
 
-  // `systemctl is-enabled` returns exit code 0 and prints "enabled" if enabled.
-  // It returns exit code 1 and prints "disabled" or "static" etc. otherwise.
-  // We wrap it in a command that always exits 0 to check the output easily.
+  // `systemctl is-enabled` has tricky exit codes. It returns 0 if enabled, 1 otherwise.
+  // We wrap it to check the command's *output text* instead of relying solely on exit code.
+  // This command prints "enabled" or "disabled" (or other statuses) and always exits 0.
+  // Redirect stderr to /dev/null to avoid polluting logs if the service doesn't exist.
   const command = `systemctl is-enabled ${serviceName} > /dev/null 2>&1 && echo "enabled" || echo "disabled"`;
 
   try {
-    // Note: runCommand already logs execution
+    // runCommand logs execution internally
     const { stdout } = await runCommand(command);
-    const result = stdout.trim();
-    console.log(`[isAutostartEnabled] Check result for ${serviceName}: ${result}`);
-    return result === 'enabled';
+    const result = stdout.trim().toLowerCase(); // Check output text, case-insensitive
+    console.log(`[Sys Mgr isEnabled] Check result for ${serviceName}: ${result}`);
+    return result === 'enabled'; // Return true only if the output is exactly "enabled"
   } catch (error: any) {
-      // Specific handling for 'service not found' might be needed depending on systemctl version
-      // For simplicity, we assume any error here means it's not enabled or doesn't exist.
-      console.warn(`[isAutostartEnabled] Could not determine status for ${serviceName}, assuming not enabled. Error: ${error.message}`);
-      return false; // Treat errors (like service not found) as 'not enabled'
+      // If runCommand fails (unexpectedly, given the wrapper), or systemctl has issues,
+      // log the error and assume the service is not enabled.
+      console.warn(`[Sys Mgr isEnabled] Could not determine status for ${serviceName}, assuming not enabled. Error: ${error.message}`);
+      return false; // Treat errors (like command not found, permission issues) as 'not enabled'
   }
 }
 
 /**
- * Creates and enables a systemd service to run a script on boot.
- * Requires root privileges (run with `sudo`).
+ * Creates and enables a systemd service file to run a script on boot.
+ * IMPORTANT: Requires root privileges (run the calling script with `sudo`).
  *
- * @param {string} scriptPath - Absolute path to the script to run.
- * @param {string} serviceName - Unique name for the service (e.g., 'my-script.service').
+ * @param {string} scriptPath - Absolute path to the script to run (e.g., the startAppWrapper.js).
+ * @param {string} serviceName - Unique name for the service (e.g., 'therascript-app.service').
  * @param {string} [description='Autostart service'] - Description for the service file.
- * @param {string} [nodePath='/usr/bin/env node'] - Path to the node executable. Adjust if needed.
- * @returns {Promise<void>} Resolves when the service is created and enabled.
- * @throws {Error} If creation or enabling fails, path is not absolute, or service name is invalid.
+ * @param {string} [nodePath='/usr/bin/env node'] - Path to the node executable. Adjust if node is installed differently (e.g., via NVM).
+ * @returns {Promise<void>} Resolves when the service is created and enabled successfully.
+ * @throws {Error} If creation or enabling fails, path is not absolute, service name is invalid, or script is not accessible.
  */
 export async function setAutostart(
     scriptPath: string,
     serviceName: string,
     description: string = 'Autostart service',
-    nodePath: string = '/usr/bin/env node' // Common path, adjust if node is elsewhere
+    nodePath: string = '/usr/bin/env node' // Uses env to find node, relies on PATH
 ): Promise<void> {
+  // Note: Permission warnings are handled by the calling scripts
 
-  // Warning moved to the calling scripts
-  // console.warn(`Setting up autostart for "${scriptPath}" as "${serviceName}". Requires root privileges (sudo).`);
-
+  // --- Input Validation ---
   if (!path.isAbsolute(scriptPath)) {
       throw new Error(`Script path must be absolute: "${scriptPath}"`);
   }
   if (!isValidServiceName(serviceName)) {
     throw new Error(`Invalid service name format: "${serviceName}". Should end with '.service'.`);
   }
+  // --- End Validation ---
 
-  // Check if the script exists (basic check)
+  // --- Check Script Accessibility ---
   try {
-      // Check read permissions are sufficient for systemd
+      // Check if the script file exists and is readable by the process (needs sudo).
       await fs.access(scriptPath, fs.constants.R_OK);
-      console.log(`[setAutostart] Script found and readable: ${scriptPath}`);
-      // Note: Execute permissions might be needed depending on how nodePath is resolved/used by systemd
-      // await fs.access(scriptPath, fs.constants.R_OK | fs.constants.X_OK);
-  } catch (err: any) { // Catch specific error type if possible
+      console.log(`[Sys Mgr setAutostart] Script found and readable: ${scriptPath}`);
+      // Note: Execute permissions (`fs.constants.X_OK`) might be needed depending on the `nodePath`
+      // and how systemd resolves it, but typically read is sufficient if node executes the script.
+  } catch (err: any) {
       throw new Error(`Script not found or not readable at "${scriptPath}". Error: ${err.message}`);
   }
+  // --- End Script Check ---
 
-  const serviceFilePath = path.join(SYSTEMD_PATH, serviceName);
-
-  // --- Determine user running the script ---
-  // This gets the username of the user who invoked sudo, not necessarily 'root'
-  // Requires `logname` command to be available. Fallback to 'root' if needed.
+  // --- Determine User for Service ---
+  // Attempt to determine the user who invoked `sudo` to run the service as that user.
+  // This is generally safer than running as root if not strictly necessary.
+  // Falls back to 'root' if determination fails.
   let serviceUser = 'root'; // Default to root
   try {
-      // Use 'whoami' as a fallback or primary method if 'logname' isn't reliable in sudo context
-      // const { stdout: whoamiOutput } = await execPromise('whoami'); // Alternative
+      // `logname` usually gives the original user who logged in.
       const { stdout: lognameOutput } = await execPromise('logname');
       const potentialUser = lognameOutput.trim();
       if (potentialUser) {
           serviceUser = potentialUser;
-          console.log(`[setAutostart] Determined sudo invoking user as: ${serviceUser}`);
+          console.log(`[Sys Mgr setAutostart] Determined sudo invoking user via logname: ${serviceUser}`);
       } else {
-          console.warn("[setAutostart] 'logname' command didn't return a user, defaulting service user to 'root'.");
+          // Fallback using `whoami` might work in some contexts if logname fails
+          console.warn("[Sys Mgr setAutostart] 'logname' empty, trying 'whoami'...");
+          const { stdout: whoamiOutput } = await execPromise('whoami');
+          const whoamiUser = whoamiOutput.trim();
+          if (whoamiUser && whoamiUser !== 'root') { // Avoid setting to root if whoami returns root directly
+             serviceUser = whoamiUser;
+             console.log(`[Sys Mgr setAutostart] Determined user via whoami: ${serviceUser}`);
+          } else {
+             console.warn("[Sys Mgr setAutostart] Could not determine non-root user, defaulting service user to 'root'.");
+             serviceUser = 'root'; // Ensure fallback is explicit
+          }
       }
-  } catch (lognameError) {
-       console.warn(`[setAutostart] Could not determine invoking user via 'logname', defaulting service user to 'root'. Error: ${lognameError}`);
+  } catch (userError) {
+       console.warn(`[Sys Mgr setAutostart] Error determining invoking user, defaulting service user to 'root'. Error: ${userError}`);
+       serviceUser = 'root'; // Ensure fallback on error
   }
   // --- End Determine User ---
 
-  // Construct the correct NVM path for the determined user
-  // This assumes a standard NVM installation in the user's home directory
-  // Make sure the Node version (v23.10.0) matches your .nvmrc and is installed for that user
-  const nvmNodePath = `/home/${serviceUser}/.nvm/versions/node/v23.10.0/bin`;
-  const pathEnv = `PATH=/usr/bin:/usr/local/bin:${nvmNodePath}`; // Prepend NVM path
-  console.log(`[setAutostart] Using PATH environment for service: ${pathEnv}`);
+  // --- Construct NVM Path (if applicable) ---
+  // This assumes a standard NVM installation in the determined user's home directory.
+  // The Node version (e.g., v23.10.0) MUST match the project's required version (.nvmrc)
+  // and MUST be installed for the `serviceUser`.
+  // This path is used to set the PATH environment variable within the service definition,
+  // crucial if `nodePath` uses `/usr/bin/env node` or if the script relies on global npm packages.
+  // TODO: Make the Node version dynamic based on .nvmrc? Requires reading the file.
+  const nvmDir = `/home/${serviceUser}/.nvm`;
+  const nvmNodeVersion = 'v23.10.0'; // Hardcoded based on .nvmrc - ensure consistency!
+  const nvmNodePath = `${nvmDir}/versions/node/${nvmNodeVersion}/bin`;
+  // Prepend the NVM path to the standard system PATH. Adjust if necessary.
+  const pathEnv = `PATH=/usr/bin:/usr/local/bin:${nvmNodePath}`;
+  console.log(`[Sys Mgr setAutostart] Using PATH environment for service: ${pathEnv}`);
+  // --- End NVM Path ---
 
-
-  // Define the content of the .service file
+  // --- Systemd Service File Content ---
+  // Defines the unit configuration for systemd.
   const serviceContent = `
 [Unit]
 Description=${description}
-After=network.target network-online.target # Wait for network connectivity
+# Ensures the service starts after network interfaces are up. Critical if the app needs network.
+After=network.target network-online.target
+Wants=network-online.target # Stronger dependency on network being fully online
 
 [Service]
 Type=simple
-# Use the full path to node determined above if not using /usr/bin/env node
-# IMPORTANT: If nodePath is '/usr/bin/env node', the PATH env below is critical
+# Command to execute. Uses the specified nodePath and the scriptPath.
 ExecStart=${nodePath} ${scriptPath}
-WorkingDirectory=${path.dirname(scriptPath)} # Set working directory to script's location
+# Set the working directory to the directory containing the script. Important for relative paths in the script.
+WorkingDirectory=${path.dirname(scriptPath)}
+# Restart the service automatically if it fails.
 Restart=on-failure
-RestartSec=5s      # Wait 5 seconds before restarting
-User=${serviceUser} # Run as the determined user (or root fallback)
-Group=${serviceUser} # Use the same group.
+# Wait 5 seconds before attempting a restart.
+RestartSec=5s
+# Run the service as the determined user (or root fallback).
+User=${serviceUser}
+# Run the service under the user's primary group.
+Group=${serviceUser}
+# Set environment variables for the service process.
 Environment="NODE_ENV=production"
-# Set the PATH environment variable to include the correct NVM node version
-# This is crucial if nodePath is '/usr/bin/env node' or if the script relies on other NVM tools
+# Set the PATH to include the NVM node version. Critical for finding the correct Node binary.
 Environment="${pathEnv}"
-StandardOutput=journal # Send stdout to journald
-StandardError=journal  # Send stderr to journald
+# Redirect standard output and error to the systemd journal for logging (view with journalctl -u serviceName).
+StandardOutput=journal
+StandardError=journal
 
 [Install]
-WantedBy=multi-user.target # For system-wide service
-  `.trim();
+# Enable the service for the multi-user target (standard system startup).
+WantedBy=multi-user.target
+  `.trim(); // Remove leading/trailing whitespace
+  // --- End Service File Content ---
+
+  const serviceFilePath = path.join(SYSTEMD_PATH, serviceName);
 
   try {
-    // 1. Write the service file
-    console.log(`[setAutostart] Writing service file to: ${serviceFilePath}`);
+    // 1. Write the service file content to the systemd directory.
+    console.log(`[Sys Mgr setAutostart] Writing service file to: ${serviceFilePath}`);
+    // Use mode 0o644 (owner read/write, group/other read) - standard for systemd units.
     await fs.writeFile(serviceFilePath, serviceContent, { encoding: 'utf8', mode: 0o644 });
-    console.log(`[setAutostart] Service file ${serviceName} created.`);
+    console.log(`[Sys Mgr setAutostart] Service file ${serviceName} created.`);
 
-    // 2. Reload systemd daemon to recognize the new service
+    // 2. Reload systemd daemon to make it aware of the new/changed service file.
     await runCommand('systemctl daemon-reload');
-    console.log('[setAutostart] Systemd daemon reloaded.');
+    console.log('[Sys Mgr setAutostart] Systemd daemon reloaded.');
 
-    // 3. Enable the service to start on boot
+    // 3. Enable the service, creating the necessary symlinks for it to start on boot.
     await runCommand(`systemctl enable ${serviceName}`);
-    console.log(`[setAutostart] Service ${serviceName} enabled successfully.`);
+    console.log(`[Sys Mgr setAutostart] Service ${serviceName} enabled successfully.`);
 
   } catch (error: any) {
-    console.error(`[setAutostart] Failed to set up autostart service "${serviceName}".`);
-    // Attempt cleanup if file was created
+    console.error(`[Sys Mgr setAutostart] Failed to set up autostart service "${serviceName}".`);
+    // --- Cleanup on Failure ---
+    // Attempt to remove the potentially created service file if setup fails midway.
     try {
       await fs.unlink(serviceFilePath);
-      console.log(`[setAutostart Cleanup] Cleaned up potentially created service file: ${serviceFilePath}`);
+      console.log(`[Sys Mgr Cleanup] Cleaned up potentially created service file: ${serviceFilePath}`);
     } catch (cleanupError: any) {
-      // Ignore cleanup error if file didn't exist or permissions denied (ENOENT)
+      // Ignore ENOENT (file not found) errors during cleanup, but log others.
       if (cleanupError.code !== 'ENOENT') {
-          console.error(`[setAutostart Cleanup] Error during cleanup: ${cleanupError.message}`);
+          console.error(`[Sys Mgr Cleanup] Error during cleanup: ${cleanupError.message}`);
       }
     }
-    throw new Error(`Failed to set autostart: ${error.message}`);
+    // --- End Cleanup ---
+    throw new Error(`Failed to set autostart: ${error.message}`); // Rethrow the original error
   }
 }
 
 /**
- * Disables and removes a systemd service configured for autostart.
- * Requires root privileges (run with `sudo`).
+ * Disables and removes a systemd service file configured for autostart.
+ * IMPORTANT: Requires root privileges (run the calling script with `sudo`).
  *
  * @param {string} serviceName - The name of the service to remove (e.g., 'my-script.service').
- * @returns {Promise<void>} Resolves when the service is disabled and removed.
- * @throws {Error} If disabling or removal fails, or service name is invalid.
+ * @returns {Promise<void>} Resolves when the service is disabled and removed successfully.
+ * @throws {Error} If disabling or removal fails, or the service name is invalid.
  */
 export async function removeAutostart(serviceName: string): Promise<void> {
     if (!isValidServiceName(serviceName)) {
         throw new Error(`Invalid service name format: "${serviceName}". Should end with '.service'.`);
     }
-    // Warning moved to calling script
-    // console.warn(`Removing autostart service "${serviceName}". Requires root privileges (sudo).`);
+    // Note: Permission warnings are handled by the calling scripts
 
     const serviceFilePath = path.join(SYSTEMD_PATH, serviceName);
 
     try {
-        // 1. Disable the service (stop it from starting on boot)
-        // Use --now to also stop it if it's running
+        // 1. Disable the service (prevent it from starting on boot).
+        // Use `--now` to also stop the service if it is currently running.
         try {
             await runCommand(`systemctl disable --now ${serviceName}`);
-            console.log(`[removeAutostart] Service ${serviceName} disabled and stopped.`);
+            console.log(`[Sys Mgr removeAutostart] Service ${serviceName} disabled and stopped.`);
         } catch (disableError: any) {
-            // Ignore "service not loaded" or "does not exist" errors during disable
-             // Check for common error messages indicating the service wasn't enabled/found
-             // --- FIX: Avoid optional chaining ---
-             const msg = (disableError && disableError.message && typeof disableError.message.toLowerCase === 'function') ? disableError.message.toLowerCase() : '';
-             const stderr = (disableError && disableError.stderr && typeof disableError.stderr.toLowerCase === 'function') ? disableError.stderr.toLowerCase() : '';
-             // --- END FIX ---
+            // `systemctl disable` can fail if the service wasn't enabled or doesn't exist.
+            // We should treat these "failures" as warnings and proceed with file removal.
+            const msg = (disableError?.message ?? '').toLowerCase();
+            const stderr = (disableError?.stderr ?? '').toLowerCase();
+            const isNotFoundError = msg.includes('does not exist') ||
+                                   stderr.includes('does not exist') ||
+                                   msg.includes('no such file or directory') ||
+                                   stderr.includes('no such file or directory') ||
+                                   msg.includes('not loaded') || // Service exists but isn't active
+                                   stderr.includes('not loaded') ||
+                                   msg.includes('no vendor preset') || // Another possible message indicating not enabled
+                                   stderr.includes('no vendor preset');
 
-             if (msg.includes('does not exist') ||
-                 stderr.includes('does not exist') ||
-                 msg.includes('no such file or directory') ||
-                 stderr.includes('no such file or directory') ||
-                 msg.includes('not loaded') ||
-                 stderr.includes('not loaded') ||
-                 msg.includes('no vendor preset') || // Another possible message
-                 stderr.includes('no vendor preset'))
-            {
-                console.log(`[removeAutostart] Service ${serviceName} was not found or not loaded/enabled, proceeding with cleanup.`);
+            if (isNotFoundError) {
+                // Service wasn't enabled or found, which is acceptable for removal.
+                console.log(`[Sys Mgr removeAutostart] Service ${serviceName} was not found or not loaded/enabled. Proceeding with cleanup.`);
             } else {
-                console.warn(`[removeAutostart] Warning during disable command (may indicate service wasn't running or enabled): ${disableError.message}`);
-                // Don't re-throw unless it's a critical error, allow cleanup to proceed
+                // Log other disable errors as warnings but don't stop the removal process.
+                console.warn(`[Sys Mgr removeAutostart] Warning during disable command (may indicate service wasn't running or enabled): ${disableError.message}`);
+                // Decide whether to re-throw based on error severity. For now, allow cleanup.
                 // throw disableError;
             }
         }
 
-
-        // 2. Remove the service file
+        // 2. Remove the service file from the systemd directory.
         try {
             await fs.unlink(serviceFilePath);
-            console.log(`[removeAutostart] Service file ${serviceFilePath} removed.`);
+            console.log(`[Sys Mgr removeAutostart] Service file ${serviceFilePath} removed.`);
         } catch (unlinkError: any) {
+            // If the file doesn't exist (ENOENT), it's fine (might have failed creation or already removed).
             if (unlinkError.code === 'ENOENT') {
-                 console.log(`[removeAutostart] Service file ${serviceFilePath} did not exist.`);
+                 console.log(`[Sys Mgr removeAutostart] Service file ${serviceFilePath} did not exist.`);
             } else {
-                console.error(`[removeAutostart] Error removing service file ${serviceFilePath}: ${unlinkError.message}`);
-                throw unlinkError; // Re-throw other file errors
+                // Other file system errors during unlink are problematic.
+                console.error(`[Sys Mgr removeAutostart] Error removing service file ${serviceFilePath}: ${unlinkError.message}`);
+                throw unlinkError; // Re-throw serious file errors
             }
         }
 
-        // 3. Reload systemd daemon
+        // 3. Reload systemd daemon to apply the changes (recognize the file removal).
         await runCommand('systemctl daemon-reload');
-        console.log('[removeAutostart] Systemd daemon reloaded.');
+        console.log('[Sys Mgr removeAutostart] Systemd daemon reloaded.');
 
-        console.log(`[removeAutostart] Autostart service ${serviceName} removed successfully.`);
+        console.log(`[Sys Mgr removeAutostart] Autostart service ${serviceName} removed successfully.`);
 
     } catch (error: any) {
-        console.error(`[removeAutostart] Failed to remove autostart service "${serviceName}".`);
-        // Avoid throwing generic 'Failed to remove' if specific error was already thrown
+        console.error(`[Sys Mgr removeAutostart] Failed to remove autostart service "${serviceName}".`);
+        // Avoid wrapping the error message multiple times if it was already thrown
         if (!(error instanceof Error && error.message.startsWith('Failed to remove autostart:'))) {
            throw new Error(`Failed to remove autostart: ${error.message}`);
         } else {
-             throw error; // Re-throw the original error
+             throw error; // Re-throw the original specific error
         }
     }
 }

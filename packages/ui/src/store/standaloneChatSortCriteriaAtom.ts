@@ -1,13 +1,18 @@
 /*
- * packages/ui/src/store/standaloneChatSortCriteriaAtom.ts
- * State for sorting standalone chats.
+ * Purpose: Defines a Jotai atom with storage to manage the currently selected
+ *          sorting criteria for the standalone chat list on the landing page.
  */
-import { atomWithStorage } from 'jotai/utils';
+import { atomWithStorage } from 'jotai/utils'; // Utility to persist atom state in localStorage
 
-// Define possible sort criteria for standalone chats
+// Define the possible columns/criteria by which the standalone chat list can be sorted.
 export type StandaloneChatSortCriteria = 'name' | 'date' | 'tags';
 
-// Atom to store the current sort criteria, persisted in localStorage
-export const standaloneChatSortCriteriaAtom = atomWithStorage<StandaloneChatSortCriteria>('standalone-chat-sort-criteria', 'date');
-
-// TODO comments should not be removed
+/**
+ * Atom storing the current sort criteria for the standalone chat list.
+ * - Persisted in localStorage under the key 'standalone-chat-sort-criteria'.
+ * - Defaults to 'date' if no value is found in storage.
+ */
+export const standaloneChatSortCriteriaAtom = atomWithStorage<StandaloneChatSortCriteria>(
+    'standalone-chat-sort-criteria', // localStorage key
+    'date'                           // Default value
+);

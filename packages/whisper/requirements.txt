@@ -1,9 +1,29 @@
-# PyPI needed for these dependencies
+# Python dependencies for the Whisper transcription service.
+
+# Instruct pip to also check the official PyPI index. Necessary because we might use
+# alternative indices (like PyTorch nightly) but still need standard packages.
 --extra-index-url https://pypi.org/simple/
 
-# Whisper and other dependencies
+# --- Core Dependencies ---
+# OpenAI's Whisper library for transcription.
+# Note: Consider pinning a specific version for stability (e.g., openai-whisper==20231117).
 openai-whisper
+
+# FastAPI framework for building the REST API.
 fastapi
+
+# Uvicorn ASGI server to run the FastAPI application.
+# '[standard]' includes recommended extras like 'watchfiles' for reloading (useful for dev).
 uvicorn[standard]
+
+# Pydantic for data validation and settings management used by FastAPI.
 pydantic
+
+# Required by FastAPI for handling file uploads (multipart/form-data).
 python-multipart
+
+# PyTorch is installed separately via Dockerfile using --index-url
+# to ensure compatibility with the CUDA version or for specific builds (like nightly).
+# torch
+# torchvision
+# torchaudio

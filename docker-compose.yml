@@ -1,34 +1,55 @@
+# Defines and orchestrates the Whisper service container for the Therascript application.
+# This is the primary compose file used for managing the Whisper service lifecycle.
+# Ollama is managed by a separate compose file in `packages/ollama/docker-compose.yml`.
+
 services:
+  # Whisper Transcription Service
   whisper:
+    # Build context: Specifies the directory containing the Dockerfile and related files.
     build:
-      context: ./packages/whisper # Path relative to this compose file
-      dockerfile: Dockerfile
-    image: therascript/whisper # Optional: name the image built by compose
+      context: ./packages/whisper # Path relative to this docker-compose.yml file
+      dockerfile: Dockerfile      # Name of the Dockerfile within the context directory
+    # Optional: Assign a name to the image built by this compose file.
+    image: therascript/whisper
+    # Assign a fixed, predictable name to the running container for easier management.
     container_name: therascript_whisper_service
+    # Port mapping: Expose the container's port 8000 only on the host's loopback interface (127.0.0.1).
+    # This prevents the Whisper service from being directly accessible from outside the host machine.
+    # The API service (running on the host or in another container) connects to `localhost:8000`.
     ports:
-      - "127.0.0.1:8000:8000" # Map localhost only port 8000 to container port 8000
+      - "127.0.0.1:8000:8000" # Format: HOST_IP:HOST_PORT:CONTAINER_PORT
+    # Volumes: Persist data between container runs.
     volumes:
-      # Mount a volume to cache downloaded Whisper models on the host
-      # This prevents re-downloading on every container start
+      # Mount a named volume 'whisper_models' to the default Whisper cache directory inside the container.
+      # This prevents needing to re-download models every time the container starts.
       - whisper_models:/root/.cache
-      # Keep internal temp dirs, mounting from host usually not needed
+      # Internal temporary directories are handled within the container's Dockerfile.
+      # Mounting host directories here is usually not needed unless for specific debugging.
       # - ./whisper_temp_inputs:/app/temp_inputs
       # - ./whisper_temp_outputs:/app/temp_outputs
+    # GPU Resource Allocation (Optional):
+    # Requires NVIDIA Container Toolkit on the host.
+    # Allocates GPU resources to the container for accelerated transcription.
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              count: all # Or 1 if you want to limit it
-              capabilities: [gpu] # Ensure GPU access
-    restart: unless-stopped # Restart policy
-    healthcheck: # Added basic healthcheck
+              count: all # Use 'all' available GPUs, or specify a number like '1'.
+              capabilities: [gpu] # Request GPU capabilities.
+    # Restart Policy: Automatically restart the container unless it was explicitly stopped.
+    restart: unless-stopped
+    # Health Check: Periodically checks if the service inside the container is responsive.
+    healthcheck:
+      # Command to run inside the container for the health check. `curl --fail` exits non-zero on HTTP errors.
       test: ["CMD", "curl", "--fail", "http://localhost:8000/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 30s # Give time for GPU model loading
+      interval: 15s      # How often to run the check.
+      timeout: 5s        # Maximum time to wait for the check command to complete.
+      retries: 3         # Number of consecutive failures before marking the container as unhealthy.
+      start_period: 30s  # Grace period after container starts before failures count towards retries (allows model loading).
 
+# Named Volumes Definition: Defines the volumes used by the services above.
 volumes:
-  whisper_models: # Define the named volume for caching models
+  # Volume for caching Whisper models. `driver: local` uses the default Docker volume driver.
+  whisper_models:
     driver: local
