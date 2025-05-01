@@ -7,6 +7,7 @@
     "packages/*"
   ],
   "scripts": {
+    "prepare": "husky install",
     "build": "lerna run build",
     "build:api": "lerna run build --scope=api",
     "build:ui": "lerna run build --scope=ui",
