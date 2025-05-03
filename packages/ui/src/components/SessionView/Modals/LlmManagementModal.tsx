@@ -55,21 +55,15 @@ import type {
   UIPullJobStatusState,
 } from '../../../types';
 import { cn } from '../../../utils';
+import prettyBytes from 'pretty-bytes'; // <-- Import pretty-bytes
 
 interface LlmManagementModalProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
-// Helper to format model size
-const formatBytes = (bytes: number, decimals = 2): string => {
-  if (!bytes || bytes === 0) return '0 Bytes';
-  const k = 1024;
-  const dm = decimals < 0 ? 0 : decimals;
-  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
-};
+// REMOVED formatBytes helper function
+// const formatBytes = (bytes: number, decimals = 2): string => { ... };
 
 export function LlmManagementModal({
   isOpen,
@@ -555,7 +549,7 @@ export function LlmManagementModal({
   const loadedModelFullName = ollamaStatus?.details?.name;
   const activeConfiguredContextSize = ollamaStatus?.configuredContextSize;
 
-  // Render list item function (Unchanged)
+  // Render list item function (Changed)
   const renderModelListItem = (model: OllamaModelInfo) => {
     const isCurrentlyLoadingThis =
       (isLoadingSelectedModel || isDeletingSelectedModel) &&
@@ -605,9 +599,9 @@ export function LlmManagementModal({
           </Flex>
           {/* Right Block: Size Badge + Status/Actions */}
           <Flex align="center" gap="2" flexShrink="0">
-            {/* Size Badge */}
+            {/* Size Badge - Use prettyBytes */}
             <Badge variant="soft" color="gray">
-              {formatBytes(model.size)}
+              {prettyBytes(model.size)} {/* <-- USE PRETTY BYTES HERE */}
             </Badge>
 
             {/* Status Badge or Actions Menu */}
