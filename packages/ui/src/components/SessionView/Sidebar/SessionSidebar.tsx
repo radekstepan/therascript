@@ -1,17 +1,21 @@
 /* packages/ui/src/components/SessionView/Sidebar/SessionSidebar.tsx */
 import React, { useState, useRef, useEffect } from 'react';
-import { NavLink, useParams, useNavigate } from 'react-router-dom';
-import { useAtomValue } from 'jotai';
+// --- Add Missing Imports ---
+import { useParams, useNavigate } from 'react-router-dom';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { activeChatIdAtom, toastMessageAtom } from '../../../store';
+import { activeChatIdAtom, toastMessageAtom } from '../../../store'; // Correct store import path
 import {
-  deleteSessionChat as deleteChatApi, // Use specific API
-  renameSessionChat as renameChatApi, // Use specific API
-  startSessionChat as startNewChatApi, // Use specific API
-  fetchSessionChatDetails, // Use specific API
+  deleteSessionChat as deleteChatApi,
+  renameSessionChat as renameChatApi,
+  startSessionChat as startNewChatApi,
+  fetchSessionChatDetails,
 } from '../../../api/api';
+import { formatTimestamp } from '../../../helpers'; // Correct helpers import path
+import type { ChatSession, Session } from '../../../types'; // Correct types import path
+// --- End Missing Imports ---
+
 import {
-  DotsHorizontalIcon,
   Pencil1Icon,
   TrashIcon,
   PlusCircledIcon,
@@ -26,15 +30,18 @@ import {
   Button,
   IconButton,
   TextField,
-  DropdownMenu,
   AlertDialog,
   ScrollArea,
   Spinner,
 } from '@radix-ui/themes';
-import { useSetAtom } from 'jotai';
-import { formatTimestamp } from '../../../helpers';
-import type { ChatSession, Session } from '../../../types';
 import { cn } from '../../../utils';
+import { ChatSidebarListItem } from '../../Shared/ChatSidebarListItem';
+
+// Define the type for the chat metadata used in the list
+type ChatSessionMetadata = Pick<
+  ChatSession,
+  'id' | 'sessionId' | 'timestamp' | 'name'
+>;
 
 interface SessionSidebarProps {
   session: Session | null;
@@ -49,29 +56,32 @@ export function SessionSidebar({
   error: sessionError,
   hideHeader = false,
 }: SessionSidebarProps) {
+  // --- Use imported hooks ---
   const { chatId: chatIdParam } = useParams<{
     sessionId: string;
     chatId?: string;
   }>();
   const navigate = useNavigate();
   const setToast = useSetAtom(toastMessageAtom);
-
   const activeChatIdFromAtom = useAtomValue(activeChatIdAtom);
+  const queryClient = useQueryClient();
+  // --- End Use imported hooks ---
+
   const currentActiveChatId = chatIdParam
     ? parseInt(chatIdParam, 10)
     : activeChatIdFromAtom;
 
-  const queryClient = useQueryClient();
-
   const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
-  const [renamingChat, setRenamingChat] = useState<ChatSession | null>(null);
+  const [renamingChat, setRenamingChat] = useState<ChatSessionMetadata | null>(
+    null
+  );
   const [currentRenameValue, setCurrentRenameValue] = useState('');
-  // Ref for auto-focus rename input
   const renameInputRef = useRef<HTMLInputElement>(null);
 
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
-  const [deletingChat, setDeletingChat] = useState<ChatSession | null>(null);
-  // Ref for delete confirm button
+  const [deletingChat, setDeletingChat] = useState<ChatSessionMetadata | null>(
+    null
+  );
   const deleteConfirmButtonRef = useRef<HTMLButtonElement>(null);
 
   const sessionId = session?.id ?? null;
@@ -81,7 +91,7 @@ export function SessionSidebar({
     if (isRenameModalOpen) {
       const timer = setTimeout(() => {
         renameInputRef.current?.focus();
-      }, 50); // Small delay ensures element is ready
+      }, 50);
       return () => clearTimeout(timer);
     }
   }, [isRenameModalOpen]);
@@ -96,27 +106,28 @@ export function SessionSidebar({
     }
   }, [isDeleteConfirmOpen]);
 
-  // Mutation: Start New Chat (unchanged)
+  // Mutation: Start New Chat
   const startNewChatMutation = useMutation<ChatSession, Error>({
     mutationFn: () => {
       if (!sessionId) throw new Error('Session ID missing');
       return startNewChatApi(sessionId);
     },
-    onSuccess: (newChat) => {
+    onSuccess: (newChat: ChatSession) => {
+      // Add type annotation
       setToast('New chat started.');
       queryClient.setQueryData<Session>(
         ['sessionMeta', sessionId],
-        (oldData) => {
+        (oldData: Session | undefined) => {
+          // Add type annotation
           if (!oldData) return oldData;
           const existingChats = Array.isArray(oldData.chats)
             ? oldData.chats
             : [];
-          const newChatMetadata: ChatSession = {
+          const newChatMetadata: ChatSessionMetadata = {
             id: newChat.id,
             sessionId: newChat.sessionId,
             timestamp: newChat.timestamp,
             name: newChat.name,
-            messages: [],
           };
           return { ...oldData, chats: [...existingChats, newChatMetadata] };
         }
@@ -131,13 +142,14 @@ export function SessionSidebar({
         console.error('Cannot prefetch or navigate: sessionId is null');
       }
     },
-    onError: (error) => {
+    onError: (error: Error) => {
+      // Add type annotation
       console.error('Failed to start new chat:', error);
       setToast(`Error starting chat: ${error.message}`);
     },
   });
 
-  // Mutation: Rename Chat (unchanged)
+  // Mutation: Rename Chat
   const renameChatMutation = useMutation<
     ChatSession,
     Error,
@@ -147,46 +159,49 @@ export function SessionSidebar({
       if (!sessionId) throw new Error('Session ID missing');
       return renameChatApi(sessionId, variables.chatId, variables.newName);
     },
-    onSuccess: (updatedChatMetadata) => {
+    onSuccess: (updatedChatMetadata: ChatSession) => {
+      // Add type annotation
       setToast('Chat renamed successfully.');
       queryClient.setQueryData<Session>(
         ['sessionMeta', sessionId],
-        (oldData) => {
+        (oldData: Session | undefined) => {
+          // Add type annotation
           if (!oldData) return oldData;
           return {
             ...oldData,
-            chats: (oldData.chats || []).map((chat) =>
-              chat.id === updatedChatMetadata.id
-                ? { ...chat, name: updatedChatMetadata.name }
-                : chat
+            chats: (oldData.chats || []).map(
+              (
+                chat // Add null check for chat
+              ) =>
+                chat.id === updatedChatMetadata.id
+                  ? { ...chat, name: updatedChatMetadata.name }
+                  : chat
             ),
           };
         }
       );
       if (sessionId !== null) {
-        queryClient.setQueryData<ChatSession>(
-          ['chat', sessionId, updatedChatMetadata.id],
-          (oldChatData) => {
-            if (!oldChatData) return oldChatData;
-            return { ...oldChatData, name: updatedChatMetadata.name };
-          }
-        );
+        queryClient.invalidateQueries({
+          queryKey: ['chat', sessionId, updatedChatMetadata.id],
+        });
       }
       cancelRename();
     },
-    onError: (error) => {
+    onError: (error: Error) => {
+      // Add type annotation
       console.error('Failed to rename chat:', error);
       setToast(`Error renaming chat: ${error.message}`);
     },
   });
 
-  // Mutation: Delete Chat (unchanged)
+  // Mutation: Delete Chat
   const deleteChatMutation = useMutation<{ message: string }, Error, number>({
     mutationFn: (chatId: number) => {
       if (!sessionId) throw new Error('Session ID missing');
       return deleteChatApi(sessionId, chatId);
     },
-    onSuccess: (data, deletedChatId) => {
+    onSuccess: (data: { message: string }, deletedChatId: number) => {
+      // Add type annotations
       setToast(`Chat deleted successfully.`);
       let nextChatId: number | null = null;
       const sessionDataBeforeDelete = queryClient.getQueryData<Session>([
@@ -208,11 +223,12 @@ export function SessionSidebar({
 
       queryClient.setQueryData<Session>(
         ['sessionMeta', sessionId],
-        (oldData) => {
+        (oldData: Session | undefined) => {
+          // Add type annotation
           if (!oldData) return oldData;
           return {
             ...oldData,
-            chats: oldData.chats?.filter((c) => c.id !== deletedChatId) || [],
+            chats: oldData.chats?.filter((c) => c.id !== deletedChatId) || [], // Add null check for chat
           };
         }
       );
@@ -222,23 +238,28 @@ export function SessionSidebar({
       });
 
       if (currentActiveChatId === deletedChatId) {
-        if (nextChatId !== null) {
+        if (nextChatId !== null && sessionId !== null) {
+          // Add null check for sessionId
           navigate(`/sessions/${sessionId}/chats/${nextChatId}`, {
             replace: true,
           });
-        } else {
+        } else if (sessionId !== null) {
+          // Add null check for sessionId
           navigate(`/sessions/${sessionId}`, { replace: true });
+        } else {
+          navigate(`/`, { replace: true }); // Fallback if session ID is somehow null
         }
       }
       cancelDelete();
     },
-    onError: (error) => {
+    onError: (error: Error) => {
+      // Add type annotation
       console.error('Failed to delete chat:', error);
       setToast(`Error deleting chat: ${error.message}`);
     },
   });
 
-  // Loading/Error checks (unchanged)
+  // Loading/Error checks
   if (isLoadingSession) {
     return (
       <Box
@@ -267,21 +288,23 @@ export function SessionSidebar({
     );
   }
 
-  // Ensure chats is an array before sorting/mapping
   const chatsDefinedAndIsArray = Array.isArray(session?.chats);
-  const sortedChats = chatsDefinedAndIsArray
-    ? [...session.chats].sort((a, b) => b.timestamp - a.timestamp)
+  const sortedChats: ChatSessionMetadata[] = chatsDefinedAndIsArray
+    ? [...session.chats]
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .map((c) => ({
+          id: c.id,
+          sessionId: c.sessionId,
+          timestamp: c.timestamp,
+          name: c.name,
+        }))
     : [];
 
-  // Helper function (unchanged)
-  const getChatDisplayTitle = (chat: ChatSession | null): string => {
-    if (!chat) return 'Unknown Chat';
-    return chat.name || `Chat (${formatTimestamp(chat.timestamp)})`;
-  };
-
-  // Handlers (unchanged)
+  // --- Define handlers before use ---
   const handleNewChatClick = () => startNewChatMutation.mutate();
-  const handleRenameClick = (chat: ChatSession) => {
+
+  // Update handlers to accept ChatSessionMetadata
+  const handleRenameClick = (chat: ChatSessionMetadata) => {
     setRenamingChat(chat);
     setCurrentRenameValue(chat.name || '');
     setIsRenameModalOpen(true);
@@ -300,7 +323,7 @@ export function SessionSidebar({
     renameChatMutation.reset();
   };
 
-  const handleDeleteClick = (chat: ChatSession) => {
+  const handleDeleteClick = (chat: ChatSessionMetadata) => {
     setDeletingChat(chat);
     setIsDeleteConfirmOpen(true);
   };
@@ -314,7 +337,6 @@ export function SessionSidebar({
     deleteChatMutation.reset();
   };
 
-  // Handle Enter key in rename modal
   const handleRenameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -322,14 +344,13 @@ export function SessionSidebar({
     }
   };
 
-  // NavLink class helper (unchanged)
-  const getNavLinkClass = ({ isActive }: { isActive: boolean }): string => {
-    const base = 'block w-full px-2 py-1.5 rounded-md group';
-    const inactive =
-      'text-[--gray-a11] hover:bg-[--gray-a3] focus:outline-none focus:ring-2 focus:ring-[--accent-7]';
-    const active = 'bg-[--accent-a4] text-[--accent-11] font-medium';
-    return cn(base, isActive ? active : inactive);
+  // Navigation handler
+  const handleChatSelect = (chatId: number) => {
+    if (sessionId) {
+      navigate(`/sessions/${sessionId}/chats/${chatId}`);
+    }
   };
+  // --- End Handlers ---
 
   return (
     <>
@@ -345,7 +366,7 @@ export function SessionSidebar({
               Chats
             </Heading>
             <Button
-              onClick={handleNewChatClick}
+              onClick={handleNewChatClick} // Use defined handler
               variant="soft"
               size="1"
               highContrast
@@ -365,7 +386,7 @@ export function SessionSidebar({
         {hideHeader && (
           <Flex justify="end" align="center" flexShrink="0" mb="2">
             <Button
-              onClick={handleNewChatClick}
+              onClick={handleNewChatClick} // Use defined handler
               variant="soft"
               size="1"
               highContrast
@@ -400,68 +421,15 @@ export function SessionSidebar({
             <Flex direction="column" gap="1" asChild className="mt-1 mb-1">
               <nav>
                 {sortedChats.map((chat) => (
-                  <Box key={chat.id} className="relative mx-1">
-                    <NavLink
-                      to={`/sessions/${session.id}/chats/${chat.id}`}
-                      className={getNavLinkClass}
-                      title={getChatDisplayTitle(chat)}
-                      end
-                    >
-                      <Flex
-                        align="center"
-                        justify="between"
-                        gap="1"
-                        width="100%"
-                      >
-                        <Text size="2" truncate className="flex-grow pr-1">
-                          {getChatDisplayTitle(chat)}
-                        </Text>
-                        <DropdownMenu.Root>
-                          <DropdownMenu.Trigger>
-                            <IconButton
-                              variant="ghost"
-                              color="gray"
-                              size="1"
-                              className="flex-shrink-0 p-1 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 data-[state=open]:bg-[--accent-a4] transition-opacity"
-                              aria-label="Chat options"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                              }}
-                              onMouseDown={(e) => e.stopPropagation()}
-                            >
-                              <DotsHorizontalIcon />
-                            </IconButton>
-                          </DropdownMenu.Trigger>
-                          <DropdownMenu.Content
-                            size="1"
-                            align="end"
-                            sideOffset={2}
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                            }}
-                            onMouseDown={(e) => e.stopPropagation()}
-                          >
-                            <DropdownMenu.Item
-                              onSelect={() => handleRenameClick(chat)}
-                              disabled={renameChatMutation.isPending}
-                            >
-                              <Pencil1Icon className="mr-2 h-4 w-4" />
-                              Rename
-                            </DropdownMenu.Item>
-                            <DropdownMenu.Item
-                              color="red"
-                              onSelect={() => handleDeleteClick(chat)}
-                              disabled={deleteChatMutation.isPending}
-                            >
-                              <TrashIcon className="mr-2 h-4 w-4" />
-                              Delete
-                            </DropdownMenu.Item>
-                          </DropdownMenu.Content>
-                        </DropdownMenu.Root>
-                      </Flex>
-                    </NavLink>
+                  <Box key={chat.id} className="mx-1">
+                    <ChatSidebarListItem<ChatSessionMetadata>
+                      item={chat}
+                      isActive={currentActiveChatId === chat.id}
+                      onSelect={handleChatSelect}
+                      onEditRequest={handleRenameClick}
+                      onDeleteRequest={handleDeleteClick}
+                      editLabel="Rename"
+                    />
                   </Box>
                 ))}
               </nav>
@@ -479,18 +447,21 @@ export function SessionSidebar({
           <AlertDialog.Title>Rename Chat</AlertDialog.Title>
           {renamingChat && (
             <AlertDialog.Description size="2" color="gray" mt="1" mb="4">
-              Enter a new name for "{getChatDisplayTitle(renamingChat)}". Leave
-              empty to remove the name.
+              Enter a new name for "
+              {renamingChat.name ||
+                `Chat (${formatTimestamp(renamingChat.timestamp)})`}{' '}
+              {/* Use defined helper */}
+              ". Leave empty to remove the name.
             </AlertDialog.Description>
           )}
           <Flex direction="column" gap="3">
             <TextField.Root
-              ref={renameInputRef} // Attach ref for focus
+              ref={renameInputRef}
               size="2"
               value={currentRenameValue}
               onChange={(e) => setCurrentRenameValue(e.target.value)}
               placeholder="Enter new name (optional)"
-              onKeyDown={handleRenameKeyDown} // Add keydown handler
+              onKeyDown={handleRenameKeyDown}
               disabled={renameChatMutation.isPending}
             />
             {renameChatMutation.isError && (
@@ -514,13 +485,11 @@ export function SessionSidebar({
             >
               {renameChatMutation.isPending ? (
                 <>
-                  {' '}
-                  <Spinner size="2" /> <Text ml="1">Saving...</Text>{' '}
+                  <Spinner size="2" /> <Text ml="1">Saving...</Text>
                 </>
               ) : (
                 <>
-                  {' '}
-                  <CheckIcon /> Save{' '}
+                  <CheckIcon /> Save
                 </>
               )}
             </Button>
@@ -538,8 +507,10 @@ export function SessionSidebar({
           {deletingChat && (
             <AlertDialog.Description size="2" color="gray" mt="1" mb="4">
               Are you sure you want to delete "
-              {getChatDisplayTitle(deletingChat)}"? This action cannot be
-              undone.
+              {deletingChat.name ||
+                `Chat (${formatTimestamp(deletingChat.timestamp)})`}{' '}
+              {/* Use defined helper */}
+              "? This action cannot be undone.
             </AlertDialog.Description>
           )}
           {deleteChatMutation.isError && (
@@ -557,20 +528,18 @@ export function SessionSidebar({
               <Cross2Icon /> Cancel
             </Button>
             <Button
-              ref={deleteConfirmButtonRef} // Attach ref for focus
+              ref={deleteConfirmButtonRef}
               color="red"
               onClick={confirmDelete}
               disabled={deleteChatMutation.isPending}
             >
               {deleteChatMutation.isPending ? (
                 <>
-                  {' '}
-                  <Spinner size="2" /> <Text ml="1">Deleting...</Text>{' '}
+                  <Spinner size="2" /> <Text ml="1">Deleting...</Text>
                 </>
               ) : (
                 <>
-                  {' '}
-                  <TrashIcon /> Delete{' '}
+                  <TrashIcon /> Delete
                 </>
               )}
             </Button>

@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react'; // Added useRef, useEffect
+/* packages/ui/src/components/StandaloneChatView/StandaloneChatSidebar.tsx */
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -23,7 +24,7 @@ import {
 } from '../../api/api';
 import { activeChatIdAtom, toastMessageAtom } from '../../store';
 import type { ChatSession, StandaloneChatListItem } from '../../types';
-import { formatTimestamp } from '../../helpers'; // Keep formatTimestamp
+import { formatTimestamp } from '../../helpers';
 import { cn } from '../../utils';
 
 interface StandaloneChatSidebarProps {
@@ -62,7 +63,7 @@ export function StandaloneChatSidebar({
     }
   }, [isDeleteConfirmOpen]);
 
-  // Queries & Mutations (Unchanged)
+  // Queries & Mutations
   const {
     data: standaloneChats,
     isLoading: isLoadingChatsQuery,
@@ -144,7 +145,7 @@ export function StandaloneChatSidebar({
     },
   });
 
-  // Handlers (Unchanged)
+  // Handlers
   const handleNewChatClick = () => {
     createStandaloneChatMutation.mutate();
   };
@@ -174,7 +175,7 @@ export function StandaloneChatSidebar({
     deleteChatMutation.reset();
   };
 
-  // Derived State (Unchanged)
+  // Derived State
   const isLoading = isLoadingParent || isLoadingChatsQuery;
   const error = parentError || chatsError;
 
@@ -239,9 +240,10 @@ export function StandaloneChatSidebar({
             scrollbars="vertical"
             style={{ flexGrow: 1, marginLeft: '-4px', marginRight: '-4px' }}
           >
+            {/* Pass onEditChatRequest prop with the correct name */}
             <StandaloneChatSidebarList
               chats={chatsToShow}
-              onRenameChatRequest={handleEditDetailsRequest}
+              onEditChatRequest={handleEditDetailsRequest}
               onDeleteChatRequest={handleDeleteRequest}
               activeChatId={activeChatId}
             />
@@ -278,7 +280,7 @@ export function StandaloneChatSidebar({
           )}
           <Flex gap="3" mt="4" justify="end">
             <AlertDialog.Cancel>
-              <Button // Wrap content
+              <Button
                 variant="soft"
                 color="gray"
                 onClick={handleCancelDelete}
@@ -288,8 +290,8 @@ export function StandaloneChatSidebar({
               </Button>
             </AlertDialog.Cancel>
             <AlertDialog.Action>
-              <Button // Wrap content
-                ref={deleteConfirmButtonRef} // Attach ref
+              <Button
+                ref={deleteConfirmButtonRef}
                 color="red"
                 onClick={handleConfirmDelete}
                 disabled={deleteChatMutation.isPending}

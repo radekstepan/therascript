@@ -1,9 +1,5 @@
 **1. Code Duplication:**
 
-*   **UI Sidebar List Rendering:**
-    *   Files: `packages/ui/src/components/SessionView/Sidebar/SessionSidebar.tsx` (specifically the chat list part), `packages/ui/src/components/StandaloneChatView/StandaloneChatSidebarList.tsx`
-    *   Description: Both components render lists of chat items, handle selection/navigation, and include dropdown menus with similar actions (Rename/Edit, Delete). The core pattern for rendering the list, handling clicks/keyboard navigation, and displaying the dropdown is similar.
-
 *   **UI Modal Form Handling:**
     *   Files: `packages/ui/src/components/SessionView/Modals/EditDetailsModal.tsx`, `packages/ui/src/components/StandaloneChatView/EditStandaloneChatModal.tsx`
     *   Description: Both components implement modal dialogs with forms for editing entity details (Session vs. Standalone Chat). They share patterns for managing form state (`useState`), handling input changes, performing validation, and using a mutation hook (`useMutation`) to save changes upon submission.
