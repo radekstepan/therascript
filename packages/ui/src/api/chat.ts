@@ -1,3 +1,4 @@
+/* packages/ui/src/api/chat.ts */
 // Purpose: Contains API call functions related to chat sessions (both session-based and standalone).
 // =========================================
 import axios from 'axios';
@@ -73,28 +74,25 @@ export const startSessionChat = async (
   };
 };
 
+// --- Refactored Streaming Logic ---
 /**
- * Adds a user message to a session chat and initiates a streaming response from the AI.
- * POST /api/sessions/{sessionId}/chats/{chatId}/messages
- * Uses the Fetch API directly to handle the ReadableStream response.
- * @param sessionId - The ID of the parent session.
- * @param chatId - The ID of the chat to add the message to.
+ * Reusable function to send a chat message and handle the streaming response.
+ * @param url - The API endpoint URL to POST the message to.
  * @param text - The user's message text.
- * @returns A promise resolving to an object containing the actual user message ID (from header) and the response stream.
+ * @returns A promise resolving to an object containing the user message ID and the response stream.
  * @throws If the request fails or the response body is not a stream.
  */
-export const addSessionChatMessageStream = async (
-  sessionId: number,
-  chatId: number,
+const sendMessageAndStreamResponse = async (
+  url: string,
   text: string
 ): Promise<{ userMessageId: number; stream: ReadableStream<Uint8Array> }> => {
-  const url = `${API_BASE_URL}/api/sessions/${sessionId}/chats/${chatId}/messages`;
   // Use Fetch API for streaming response
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text }),
   });
+
   // Check for successful response and presence of a response body
   if (!response.ok || !response.body) {
     let errTxt = `HTTP error ${response.status}`;
@@ -107,11 +105,32 @@ export const addSessionChatMessageStream = async (
     }
     throw new Error(`Failed to initialize stream: ${errTxt}`);
   }
+
   // Get the actual user message ID from the custom header set by the backend
   const uid = response.headers.get('X-User-Message-Id');
   const userMessageId = uid ? parseInt(uid, 10) : -1; // Use -1 if header is missing
+
   // Return the ID and the stream
   return { userMessageId, stream: response.body };
+};
+// --- End Refactored Streaming Logic ---
+
+/**
+ * Adds a user message to a session chat and initiates a streaming response from the AI.
+ * POST /api/sessions/{sessionId}/chats/{chatId}/messages
+ * Uses the refactored streaming function.
+ * @param sessionId - The ID of the parent session.
+ * @param chatId - The ID of the chat to add the message to.
+ * @param text - The user's message text.
+ * @returns A promise resolving to an object containing the user message ID and the response stream.
+ */
+export const addSessionChatMessageStream = async (
+  sessionId: number,
+  chatId: number,
+  text: string
+): Promise<{ userMessageId: number; stream: ReadableStream<Uint8Array> }> => {
+  const url = `${API_BASE_URL}/api/sessions/${sessionId}/chats/${chatId}/messages`;
+  return sendMessageAndStreamResponse(url, text);
 };
 
 /**
@@ -205,37 +224,17 @@ export const fetchStandaloneChatDetails = async (
 /**
  * Adds a user message to a standalone chat and initiates a streaming response from the AI.
  * POST /api/chats/{chatId}/messages
- * Uses the Fetch API directly to handle the ReadableStream response.
+ * Uses the refactored streaming function.
  * @param chatId - The ID of the standalone chat.
  * @param text - The user's message text.
- * @returns A promise resolving to an object containing the actual user message ID (from header) and the response stream.
- * @throws If the request fails or the response body is not a stream.
+ * @returns A promise resolving to an object containing the user message ID and the response stream.
  */
 export const addStandaloneChatMessageStream = async (
   chatId: number,
   text: string
 ): Promise<{ userMessageId: number; stream: ReadableStream<Uint8Array> }> => {
   const url = `${API_BASE_URL}/api/chats/${chatId}/messages`;
-  // Use Fetch API for streaming response
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text }),
-  });
-  // Check for successful response and presence of a response body
-  if (!response.ok || !response.body) {
-    let errTxt = `HTTP error ${response.status}`;
-    try {
-      const e = await response.json();
-      errTxt = e?.message || JSON.stringify(e);
-    } catch {}
-    throw new Error(`Failed to initialize stream: ${errTxt}`);
-  }
-  // Get user message ID from header
-  const uid = response.headers.get('X-User-Message-Id');
-  const userMessageId = uid ? parseInt(uid, 10) : -1;
-  // Return ID and stream
-  return { userMessageId, stream: response.body };
+  return sendMessageAndStreamResponse(url, text);
 };
 
 /**

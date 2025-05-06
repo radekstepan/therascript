@@ -1,10 +1,5 @@
 **1. Code Duplication:**
 
-*   **API Client Stream Handling:**
-    *   File: `packages/ui/src/api/chat.ts`
-    *   Functions: `addSessionChatMessageStream`, `addStandaloneChatMessageStream`
-    *   Description: These two functions use the `fetch` API to handle streaming responses from the backend. Their implementation is nearly identical, differing primarily in the API endpoint URL they target. This logic could be abstracted into a reusable streaming function.
-
 *   **UI Sidebar List Rendering:**
     *   Files: `packages/ui/src/components/SessionView/Sidebar/SessionSidebar.tsx` (specifically the chat list part), `packages/ui/src/components/StandaloneChatView/StandaloneChatSidebarList.tsx`
     *   Description: Both components render lists of chat items, handle selection/navigation, and include dropdown menus with similar actions (Rename/Edit, Delete). The core pattern for rendering the list, handling clicks/keyboard navigation, and displaying the dropdown is similar.
