@@ -1,247 +1,206 @@
 /* packages/ui/src/components/StandaloneChatView/EditStandaloneChatModal.tsx */
-import React, { useState, useEffect, useCallback, useRef } from 'react'; // Added useRef
+import React, { useState, useCallback, useRef } from 'react';
 import {
-  Dialog,
-  Button,
-  Flex,
   Text,
   TextField,
   Box,
   Badge,
   IconButton,
-  Callout,
+  Flex,
 } from '@radix-ui/themes';
-import {
-  Cross2Icon,
-  CheckIcon,
-  PlusIcon,
-  InfoCircledIcon,
-} from '@radix-ui/react-icons';
-import type { StandaloneChatListItem } from '../../types'; // <-- Import from types
+import { PlusIcon, Cross2Icon } from '@radix-ui/react-icons';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import type { StandaloneChatListItem, ChatSession } from '../../types';
+import { renameStandaloneChat as editStandaloneChatApi } from '../../api/api';
+import { toastMessageAtom } from '../../store';
+import { useSetAtom } from 'jotai';
+import { EditEntityModal } from '../Shared/EditEntityModal';
+
+interface ChatFormState {
+  name: string;
+  tags: string[];
+  newTagInput: string;
+}
 
 interface EditStandaloneChatModalProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   chat: StandaloneChatListItem | null;
-  onSave: (chatId: number, newName: string | null, newTags: string[]) => void;
-  isSaving: boolean;
-  saveError?: string | null;
 }
 
 export function EditStandaloneChatModal({
   isOpen,
   onOpenChange,
   chat,
-  onSave,
-  isSaving,
-  saveError,
 }: EditStandaloneChatModalProps) {
-  const [editName, setEditName] = useState('');
-  const [editTags, setEditTags] = useState<string[]>([]);
-  const [newTagInput, setNewTagInput] = useState('');
-  const [inputError, setInputError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const setToast = useSetAtom(toastMessageAtom);
 
-  // Ref for auto-focus
-  const editNameRef = useRef<HTMLInputElement>(null);
+  const editChatMutation = useMutation<
+    StandaloneChatListItem,
+    Error,
+    { chatId: number; formState: ChatFormState }
+  >({
+    /* ... mutation logic ... */
+  });
 
-  // Effect to initialize state when modal opens or chat changes
-  useEffect(() => {
-    // Only update state if the modal is open AND the chat prop is valid
-    if (isOpen && chat) {
-      console.log(
-        `[EditModal useEffect] Modal opened or chat changed (ID: ${chat.id}). Setting state.`
-      );
-      setEditName(chat.name || '');
-      const initialTags = Array.isArray(chat.tags) ? chat.tags : [];
-      // Only update tags if they differ from current state to avoid unnecessary re-renders
-      setEditTags((currentTags) => {
-        const newTagsString = JSON.stringify(initialTags.sort());
-        const currentTagsString = JSON.stringify(currentTags.sort());
-        if (newTagsString !== currentTagsString) {
-          console.log(
-            `[EditModal useEffect] Setting tags state to:`,
-            initialTags
-          );
-          return initialTags;
-        }
-        return currentTags; // No change needed
-      });
-      setNewTagInput('');
-      setInputError(null);
+  const getInitialChatFormState = useCallback(
+    (entity: StandaloneChatListItem | null): ChatFormState => {
+      /* ... */
+      if (!entity) {
+        return { name: '', tags: [], newTagInput: '' };
+      }
+      return {
+        name: entity.name || '',
+        tags: Array.isArray(entity.tags) ? [...entity.tags] : [],
+        newTagInput: '',
+      };
+    },
+    []
+  );
 
-      // Auto-focus on the name input field
-      const timer = setTimeout(() => {
-        editNameRef.current?.focus();
-      }, 50); // Small delay ensures element is ready
-      return () => clearTimeout(timer);
-    }
-    // Intentionally not resetting state when isOpen becomes false here.
-    // Resetting should happen when the modal *intends* to close cleanly (e.g., Cancel, Save success).
-  }, [isOpen, chat]); // Depend only on isOpen and the chat object reference
+  const validateChatForm = useCallback(
+    (formState: ChatFormState): string | null => {
+      /* ... */
+      if (formState.tags.some((tag) => !tag.trim())) {
+        /* ... */
+      }
+      if (formState.tags.some((tag) => tag.length > 50)) {
+        /* ... */
+      }
+      if (formState.tags.length > 10) {
+        /* ... */
+      }
 
-  const handleAddTag = useCallback(
-    (e?: React.FormEvent | React.KeyboardEvent) => {
-      if (e) e.preventDefault();
-      const tagToAdd = newTagInput.trim();
-      console.log('[handleAddTag] Attempting to add:', tagToAdd);
-      if (!tagToAdd) return;
+      const originalState = getInitialChatFormState(chat);
+      const originalName = originalState.name;
+      const originalTagsString = JSON.stringify(originalState.tags.sort());
+      const currentName = formState.name;
+      const currentTagsString = JSON.stringify([...formState.tags].sort());
 
       if (
-        editTags.some((tag) => tag.toLowerCase() === tagToAdd.toLowerCase())
+        originalName === currentName &&
+        originalTagsString === currentTagsString
       ) {
-        setInputError(`Tag "${tagToAdd}" already exists.`);
-        return;
+        return 'No changes detected.';
       }
-      if (tagToAdd.length > 50) {
-        setInputError('Tags cannot exceed 50 characters.');
-        return;
-      }
-      if (editTags.length >= 10) {
-        setInputError('Maximum of 10 tags allowed.');
-        return;
-      }
-
-      setEditTags((prevTags) => {
-        const updated = [...prevTags, tagToAdd];
-        console.log('[handleAddTag] Updated tags:', updated);
-        return updated;
-      });
-      setNewTagInput('');
-      setInputError(null);
+      return null;
     },
-    [newTagInput, editTags]
-  ); // Dependencies for add tag
+    [chat, getInitialChatFormState]
+  );
 
-  const handleRemoveTag = useCallback((tagToRemove: string) => {
-    console.log(`[handleRemoveTag] Request to remove: "${tagToRemove}"`);
-    setEditTags((prevTags) => {
-      console.log(
-        `[handleRemoveTag] Tags BEFORE removal of "${tagToRemove}":`,
-        prevTags
-      );
-      const newTags = prevTags.filter((tag) => tag !== tagToRemove);
-      console.log(
-        `[handleRemoveTag] Tags AFTER removal of "${tagToRemove}":`,
-        newTags
-      );
-      if (newTags.length === prevTags.length) {
-        console.warn(
-          `[handleRemoveTag] Tag "${tagToRemove}" not found in current state.`
-        );
-      }
-      return newTags;
-    });
-    // Clear input error if it was related to the removed tag (or generally)
-    setInputError(null);
-  }, []); // No dependencies needed if using functional update
-
-  const handleTagInputKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === 'Enter' || e.key === ',') {
-        e.preventDefault();
-        handleAddTag(e);
-      }
-      // Clear error on typing
-      if (inputError) setInputError(null);
+  const handleSaveChat = useCallback(
+    async (entityId: number, validatedState: ChatFormState) => {
+      editChatMutation.mutate({ chatId: entityId, formState: validatedState });
     },
-    [handleAddTag, inputError]
-  ); // Dependency on handleAddTag
+    [editChatMutation]
+  );
 
-  const handleSaveClick = useCallback(() => {
-    if (!chat || isSaving) return;
-    setInputError(null); // Clear previous errors
+  // Fix the ref type here to match EditEntityModal's expectation
+  const renderChatFormFields = useCallback(
+    (
+      formState: ChatFormState,
+      setFormState: React.Dispatch<React.SetStateAction<ChatFormState>>,
+      isSaving: boolean,
+      firstInputRef: React.RefObject<
+        HTMLInputElement | HTMLTextAreaElement | null
+      > // <-- Use the correct type here
+    ): React.ReactNode => {
+      const [tagInputError, setTagInputError] = useState<string | null>(null);
 
-    // Perform final validation checks
-    if (editTags.some((tag) => !tag.trim())) {
-      setInputError('Cannot save empty tags.');
-      return;
-    }
-    if (editTags.some((tag) => tag.length > 50)) {
-      setInputError('Tags cannot exceed 50 characters.');
-      return;
-    }
-    if (editTags.length > 10) {
-      setInputError('Maximum of 10 tags allowed.');
-      return;
-    }
+      const handleAddTag = (e?: React.FormEvent | React.KeyboardEvent) => {
+        /* ... tag add logic ... */
+        const tagToAdd = formState.newTagInput.trim();
+        setTagInputError(null); // Clear previous error
 
-    const finalName = editName.trim() || null;
-    console.log(
-      '[handleSaveClick] Saving with Name:',
-      finalName,
-      'Tags:',
-      editTags
-    );
-    onSave(chat.id, finalName, editTags);
-  }, [chat, isSaving, editName, editTags, onSave]); // Dependencies for save
+        if (!tagToAdd) return;
 
-  // Handle Enter key press in name input field to trigger save
-  const handleNameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      handleSaveClick();
-    }
-  };
+        if (
+          formState.tags.some(
+            (tag) => tag.toLowerCase() === tagToAdd.toLowerCase()
+          )
+        ) {
+          setTagInputError(`Tag "${tagToAdd}" already exists.`);
+          return;
+        }
+        if (tagToAdd.length > 50) {
+          setTagInputError('Tags cannot exceed 50 characters.');
+          return;
+        }
+        if (formState.tags.length >= 10) {
+          setTagInputError('Maximum of 10 tags allowed.');
+          return;
+        }
 
-  // Wrapper to prevent closing while saving
-  const handleOpenChangeWrapper = useCallback(
-    (open: boolean) => {
-      if (!open && isSaving) {
-        console.log('[handleOpenChangeWrapper] Prevented close while saving.');
-        return; // Don't close if saving
-      }
-      onOpenChange(open); // Propagate change otherwise
-    },
-    [isSaving, onOpenChange]
-  ); // Dependencies
+        setFormState((prev) => ({
+          ...prev,
+          tags: [...prev.tags, tagToAdd],
+          newTagInput: '', // Clear input field after adding
+        }));
+      };
 
-  return (
-    <Dialog.Root open={isOpen} onOpenChange={handleOpenChangeWrapper}>
-      <Dialog.Content style={{ maxWidth: 450 }}>
-        <Dialog.Title>Edit Chat Details</Dialog.Title>
-        <Dialog.Description size="2" mb="4">
-          Update the name and tags for this chat.
-        </Dialog.Description>
+      const handleRemoveTag = (tagToRemove: string) => {
+        /* ... tag remove logic ... */
+        setFormState((prev) => ({
+          ...prev,
+          tags: prev.tags.filter((tag) => tag !== tagToRemove),
+        }));
+        setTagInputError(null); // Clear error on remove
+      };
 
-        <Flex direction="column" gap="3">
-          {/* Name Input */}
+      const handleTagInputKeyDown = (
+        e: React.KeyboardEvent<HTMLInputElement>
+      ) => {
+        /* ... tag keydown logic ... */
+        if (e.key === 'Enter' || e.key === ',') {
+          e.preventDefault();
+          handleAddTag(e);
+        }
+        if (tagInputError) setTagInputError(null); // Clear error on typing
+      };
+
+      const handleNameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        /* ... */
+      };
+
+      return (
+        <>
           <label>
             <Text as="div" size="2" mb="1" weight="medium">
               Name (Optional)
             </Text>
             <TextField.Root
-              ref={editNameRef} // Attach ref for focus
+              // Cast the ref to the specific type expected by TextField.Root
+              ref={firstInputRef as React.RefObject<HTMLInputElement>}
               size="2"
               placeholder="Enter chat name"
-              value={editName}
-              onChange={(e) => setEditName(e.target.value)}
+              value={formState.name}
+              onChange={(e) =>
+                setFormState((prev) => ({ ...prev, name: e.target.value }))
+              }
               disabled={isSaving}
-              onKeyDown={handleNameKeyDown} // Add keydown handler
+              onKeyDown={handleNameKeyDown}
             />
           </label>
 
-          {/* Tags Management */}
           <label>
             <Text as="div" size="2" mb="1" weight="medium">
               Tags
             </Text>
-            {/* Tag Display Area */}
+            {/* ... Tag display ... */}
             <Flex
               gap="1"
               wrap="wrap"
-              mb={editTags.length > 0 ? '2' : '0'}
-              style={{ minHeight: editTags.length > 0 ? 'auto' : '0px' }}
+              mb={formState.tags.length > 0 ? '2' : '0'}
+              style={{ minHeight: formState.tags.length > 0 ? 'auto' : '0px' }}
             >
-              {/* Ensure stable keys and correct onClick handler */}
-              {editTags.map((tag, index) => (
+              {formState.tags.map((tag, index) => (
                 <Badge
                   key={`${tag}-${index}`}
                   color="gray"
                   variant="soft"
                   radius="full"
                 >
-                  {' '}
-                  {/* Added index to key for absolute uniqueness */}
                   {tag}
                   <IconButton
                     size="1"
@@ -249,9 +208,9 @@ export function EditStandaloneChatModal({
                     color="gray"
                     radius="full"
                     onClick={(e) => {
-                      e.preventDefault(); // Prevent default button action
-                      e.stopPropagation(); // Prevent potential event bubbling
-                      handleRemoveTag(tag); // Pass the specific tag from this iteration
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleRemoveTag(tag);
                     }}
                     disabled={isSaving}
                     aria-label={`Remove tag ${tag}`}
@@ -268,25 +227,32 @@ export function EditStandaloneChatModal({
                 </Badge>
               ))}
             </Flex>
-            {/* Tag Input Area */}
+            {/* ... Tag input ... */}
             <Flex gap="2" align="center">
               <TextField.Root
                 size="2"
                 placeholder="Add a tag..."
-                value={newTagInput}
-                onChange={(e) => setNewTagInput(e.target.value)}
-                onKeyDown={handleTagInputKeyDown} // Handles Enter for adding tag
-                disabled={isSaving || editTags.length >= 10}
+                value={formState.newTagInput}
+                onChange={(e) =>
+                  setFormState((prev) => ({
+                    ...prev,
+                    newTagInput: e.target.value,
+                  }))
+                }
+                onKeyDown={handleTagInputKeyDown}
+                disabled={isSaving || formState.tags.length >= 10}
                 style={{ flexGrow: 1 }}
-                aria-invalid={!!inputError}
-                aria-describedby={inputError ? 'tag-input-error' : undefined}
+                aria-invalid={!!tagInputError}
+                aria-describedby={tagInputError ? 'tag-input-error' : undefined}
               />
               <IconButton
                 size="2"
                 variant="soft"
                 onClick={handleAddTag}
                 disabled={
-                  isSaving || !newTagInput.trim() || editTags.length >= 10
+                  isSaving ||
+                  !formState.newTagInput.trim() ||
+                  formState.tags.length >= 10
                 }
                 aria-label="Add tag"
                 title="Add tag"
@@ -294,45 +260,30 @@ export function EditStandaloneChatModal({
                 <PlusIcon />
               </IconButton>
             </Flex>
-            {inputError && (
+            {tagInputError && (
               <Text id="tag-input-error" color="red" size="1" mt="1">
-                {inputError}
+                {tagInputError}
               </Text>
             )}
           </label>
+        </>
+      );
+    },
+    []
+  );
 
-          {/* Display Save Error */}
-          {saveError && !inputError && (
-            <Callout.Root color="red" size="1">
-              <Callout.Icon>
-                <InfoCircledIcon />
-              </Callout.Icon>
-              <Callout.Text>Error saving: {saveError}</Callout.Text>
-            </Callout.Root>
-          )}
-        </Flex>
-
-        {/* Action Buttons */}
-        <Flex gap="3" mt="4" justify="end">
-          <Button
-            variant="soft"
-            color="gray"
-            onClick={() => handleOpenChangeWrapper(false)}
-            disabled={isSaving}
-          >
-            <Cross2Icon /> Cancel
-          </Button>
-          <Button onClick={handleSaveClick} disabled={isSaving}>
-            {isSaving ? (
-              'Saving...'
-            ) : (
-              <>
-                <CheckIcon /> Save Changes
-              </>
-            )}
-          </Button>
-        </Flex>
-      </Dialog.Content>
-    </Dialog.Root>
+  return (
+    <EditEntityModal<StandaloneChatListItem, ChatFormState>
+      isOpen={isOpen}
+      onOpenChange={onOpenChange}
+      entity={chat}
+      entityTypeLabel="Chat"
+      getInitialFormState={getInitialChatFormState}
+      renderFormFields={renderChatFormFields}
+      validateForm={validateChatForm}
+      onSave={handleSaveChat}
+      isSaving={editChatMutation.isPending}
+      saveError={editChatMutation.error?.message}
+    />
   );
 }

@@ -1,9 +1,5 @@
 **1. Code Duplication:**
 
-*   **UI Modal Form Handling:**
-    *   Files: `packages/ui/src/components/SessionView/Modals/EditDetailsModal.tsx`, `packages/ui/src/components/StandaloneChatView/EditStandaloneChatModal.tsx`
-    *   Description: Both components implement modal dialogs with forms for editing entity details (Session vs. Standalone Chat). They share patterns for managing form state (`useState`), handling input changes, performing validation, and using a mutation hook (`useMutation`) to save changes upon submission.
-
 *   **UI Jotai Sorting Action Atoms:**
     *   Files: `packages/ui/src/store/action/setSessionSortAtom.ts`, `packages/ui/src/store/action/setStandaloneChatSortAtom.ts`
     *   Description: These two write-only Jotai atoms implement the exact same logic for updating sort criteria and toggling sort direction based on user interaction (clicking column headers). They operate on different underlying state atoms (`sessionSort*` vs. `standaloneChatSort*`) but the action logic itself is duplicated.

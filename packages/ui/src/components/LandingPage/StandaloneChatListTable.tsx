@@ -1,22 +1,13 @@
-// =========================================
-// File: packages/ui/src/components/LandingPage/StandaloneChatListTable.tsx
-// =========================================
-/*
- * packages/ui/src/components/LandingPage/StandaloneChatListTable.tsx
- *
- * This file contains the StandaloneChatListTable component, which displays a list of standalone chats
- * in a table format, similar to the session history table. It includes columns for the chat name,
- * creation date, tags, and actions like editing or deleting.
- */
-import React, { useCallback } from 'react'; // <-- Added useCallback
+/* packages/ui/src/components/LandingPage/StandaloneChatListTable.tsx */
+import React, { useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ChatBubbleIcon,
   DotsHorizontalIcon,
   Pencil1Icon,
-  TrashIcon,
-  ChevronUpIcon, // <-- Added sort icon
-  ChevronDownIcon, // <-- Added sort icon
+  // TrashIcon removed - delete action moved to sidebar
+  ChevronUpIcon,
+  ChevronDownIcon,
 } from '@radix-ui/react-icons';
 import {
   Table,
@@ -26,35 +17,29 @@ import {
   DropdownMenu,
   Badge,
 } from '@radix-ui/themes';
-import type { StandaloneChatListItem } from '../../types'; // <-- Import from types
-import type { StandaloneChatSortCriteria, SortDirection } from '../../store'; // <-- Import sort types
+import type { StandaloneChatListItem } from '../../types';
+import type { StandaloneChatSortCriteria, SortDirection } from '../../store';
 import { formatTimestamp } from '../../helpers';
 
 interface StandaloneChatListTableProps {
   chats: StandaloneChatListItem[];
   onEditChatRequest: (chat: StandaloneChatListItem) => void;
-  onDeleteChatRequest: (chat: StandaloneChatListItem) => void;
+  // onDeleteChatRequest prop removed
   activeChatId?: number | null;
-  // --- Add Sort Props ---
   sortCriteria: StandaloneChatSortCriteria;
   sortDirection: SortDirection;
   onSort: (criteria: StandaloneChatSortCriteria) => void;
-  // --- End Sort Props ---
 }
 
-// --- Add AriaSort type ---
 type AriaSort = 'none' | 'ascending' | 'descending' | 'other' | undefined;
-// --- End Add ---
 
 export function StandaloneChatListTable({
   chats,
   onEditChatRequest,
-  onDeleteChatRequest,
-  // --- Destructure Sort Props ---
+  // onDeleteChatRequest removed from props destructuring
   sortCriteria,
   sortDirection,
   onSort,
-  // --- End Destructure ---
 }: StandaloneChatListTableProps) {
   const navigate = useNavigate();
 
@@ -63,7 +48,6 @@ export function StandaloneChatListTable({
     chatId: number
   ) => {
     const target = e.target as HTMLElement;
-    // --- FIX: Check for button AND its parent if icon is clicked ---
     if (
       target.closest(
         'button[aria-label="Standalone chat options"], th[aria-sort]'
@@ -74,14 +58,12 @@ export function StandaloneChatListTable({
     if (target.closest('[role="menu"]')) {
       return;
     }
-    // --- END FIX ---
     navigate(`/chats/${chatId}`);
   };
   const handleKeyDown = (
     e: React.KeyboardEvent<HTMLTableRowElement>,
     chatId: number
   ) => {
-    // --- FIX: Check for button AND header ---
     if (
       e.key === 'Enter' &&
       !(e.target as HTMLElement).closest(
@@ -90,23 +72,19 @@ export function StandaloneChatListTable({
     ) {
       navigate(`/chats/${chatId}`);
     }
-    // --- END FIX ---
   };
 
   const getChatDisplayTitle = (chat: StandaloneChatListItem): string => {
     return chat.name || `Chat (${formatTimestamp(chat.timestamp)})`;
   };
 
-  // --- Add Sort Icon Rendering ---
   const renderSortIcon = useCallback(
     (criteria: StandaloneChatSortCriteria) => {
       if (sortCriteria !== criteria) {
-        // Show dimmed down arrow on hover for non-active columns
         return (
           <ChevronDownIcon className="h-3 w-3 ml-1 text-[--gray-a9] opacity-0 group-hover:opacity-100 transition-opacity" />
         );
       }
-      // Show active sort icon
       if (sortDirection === 'asc') {
         return <ChevronUpIcon className="h-4 w-4 ml-1 text-[--gray-a11]" />;
       }
@@ -114,9 +92,7 @@ export function StandaloneChatListTable({
     },
     [sortCriteria, sortDirection]
   );
-  // --- End Sort Icon Rendering ---
 
-  // --- Add Header Cell Props Getter ---
   const getHeaderCellProps = useCallback(
     (
       criteria: StandaloneChatSortCriteria
@@ -131,13 +107,12 @@ export function StandaloneChatListTable({
       return {
         onClick: () => onSort(criteria),
         'aria-sort': sortValue,
-        style: { cursor: 'pointer', whiteSpace: 'nowrap' }, // Add cursor pointer
-        className: 'group', // Add group for hover effect on icon
+        style: { cursor: 'pointer', whiteSpace: 'nowrap' },
+        className: 'group',
       };
     },
     [sortCriteria, sortDirection, onSort]
   );
-  // --- End Header Cell Props Getter ---
 
   return (
     <div className="flex-grow overflow-y-auto">
@@ -152,7 +127,6 @@ export function StandaloneChatListTable({
           }}
         >
           <Table.Row>
-            {/* --- Apply Sort Props to Headers --- */}
             <Table.ColumnHeaderCell
               {...getHeaderCellProps('name')}
               justify="start"
@@ -165,7 +139,6 @@ export function StandaloneChatListTable({
             <Table.ColumnHeaderCell {...getHeaderCellProps('tags')}>
               <Flex align="center">Tags {renderSortIcon('tags')}</Flex>
             </Table.ColumnHeaderCell>
-            {/* --- End Sort Props Application --- */}
             <Table.ColumnHeaderCell
               align="right"
               style={{ width: '1%', whiteSpace: 'nowrap' }}
@@ -175,14 +148,14 @@ export function StandaloneChatListTable({
           </Table.Row>
         </Table.Header>
 
-        {/* Table Body (Content Unchanged) */}
+        {/* Table Body */}
         <Table.Body>
           {chats.map((chat) => (
             <Table.Row
               key={chat.id}
               onClick={(e) => handleRowClick(e, chat.id)}
               onKeyDown={(e) => handleKeyDown(e, chat.id)}
-              className="cursor-pointer hover:bg-[--gray-a3] transition-colors duration-150" // Removed group, button always visible
+              className="cursor-pointer hover:bg-[--gray-a3] transition-colors duration-150"
               aria-label={`Load chat: ${getChatDisplayTitle(chat)}`}
               tabIndex={0}
             >
@@ -205,21 +178,17 @@ export function StandaloneChatListTable({
               <Table.Cell>
                 <Flex gap="1" wrap="wrap">
                   {chat.tags && chat.tags.length > 0 ? (
-                    chat.tags.slice(0, 3).map(
-                      (
-                        tag: string // <-- Added type annotation
-                      ) => (
-                        <Badge
-                          key={tag}
-                          color="gray"
-                          variant="soft"
-                          radius="full"
-                          size="1"
-                        >
-                          {tag}
-                        </Badge>
-                      )
-                    )
+                    chat.tags.slice(0, 3).map((tag: string) => (
+                      <Badge
+                        key={tag}
+                        color="gray"
+                        variant="soft"
+                        radius="full"
+                        size="1"
+                      >
+                        {tag}
+                      </Badge>
+                    ))
                   ) : (
                     <Text
                       color="gray"
@@ -227,7 +196,7 @@ export function StandaloneChatListTable({
                         fontStyle: 'italic',
                         fontSize: 'var(--font-size-1)',
                       }}
-                    ></Text> // Empty text if no tags
+                    ></Text>
                   )}
                   {chat.tags && chat.tags.length > 3 && (
                     <Badge color="gray" variant="soft" radius="full" size="1">
@@ -266,14 +235,7 @@ export function StandaloneChatListTable({
                       <Pencil1Icon width="14" height="14" className="mr-2" />{' '}
                       Edit Details
                     </DropdownMenu.Item>
-                    <DropdownMenu.Separator />
-                    <DropdownMenu.Item
-                      color="red"
-                      onSelect={() => onDeleteChatRequest(chat)}
-                    >
-                      <TrashIcon width="14" height="14" className="mr-2" />{' '}
-                      Delete Chat
-                    </DropdownMenu.Item>
+                    {/* Delete Option Removed */}
                   </DropdownMenu.Content>
                 </DropdownMenu.Root>
               </Table.Cell>
@@ -284,5 +246,3 @@ export function StandaloneChatListTable({
     </div>
   );
 }
-
-// TODO comments should not be removed

@@ -1,5 +1,5 @@
 /* packages/ui/src/components/StandaloneChatView/StandaloneChatSidebar.tsx */
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -11,21 +11,19 @@ import {
   Button,
   ScrollArea,
   Spinner,
-  AlertDialog,
+  AlertDialog, // Added AlertDialog import
 } from '@radix-ui/themes';
-import { PlusCircledIcon, TrashIcon } from '@radix-ui/react-icons';
+import { PlusCircledIcon, TrashIcon } from '@radix-ui/react-icons'; // Added TrashIcon
 import { StandaloneChatSidebarList } from './StandaloneChatSidebarList';
 import { EditStandaloneChatModal } from './EditStandaloneChatModal';
 import {
   fetchStandaloneChats,
   createStandaloneChat as createStandaloneChatApi,
-  renameStandaloneChat as editStandaloneChatApi,
-  deleteStandaloneChat as deleteStandaloneChatApi,
+  deleteStandaloneChat as deleteStandaloneChatApi, // Added delete API
 } from '../../api/api';
 import { activeChatIdAtom, toastMessageAtom } from '../../store';
 import type { ChatSession, StandaloneChatListItem } from '../../types';
-import { formatTimestamp } from '../../helpers';
-import { cn } from '../../utils';
+import { cn } from '../../utils'; // cn might be needed if styling added back
 
 interface StandaloneChatSidebarProps {
   isLoading?: boolean;
@@ -41,16 +39,15 @@ export function StandaloneChatSidebar({
   const activeChatId = useAtomValue(activeChatIdAtom);
   const queryClient = useQueryClient();
 
-  // Modal State
+  // Edit Modal State
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [chatToEdit, setChatToEdit] = useState<StandaloneChatListItem | null>(
     null
   );
+  // Delete Modal State
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [chatToDelete, setChatToDelete] =
     useState<StandaloneChatListItem | null>(null);
-
-  // Ref for delete confirm button focus
   const deleteConfirmButtonRef = useRef<HTMLButtonElement>(null);
 
   // Auto-focus on delete confirm modal open
@@ -63,7 +60,7 @@ export function StandaloneChatSidebar({
     }
   }, [isDeleteConfirmOpen]);
 
-  // Queries & Mutations
+  // Queries
   const {
     data: standaloneChats,
     isLoading: isLoadingChatsQuery,
@@ -73,6 +70,8 @@ export function StandaloneChatSidebar({
     queryFn: fetchStandaloneChats,
     staleTime: 5 * 60 * 1000,
   });
+
+  // Mutations
   const createStandaloneChatMutation = useMutation<
     StandaloneChatListItem,
     Error
@@ -87,35 +86,11 @@ export function StandaloneChatSidebar({
       setToast(`Error creating chat: ${e.message}`);
     },
   });
-  const editChatMutation = useMutation<
-    StandaloneChatListItem,
-    Error,
-    { chatId: number; newName: string | null; tags: string[] }
-  >({
-    mutationFn: (v) => editStandaloneChatApi(v.chatId, v.newName, v.tags),
-    onSuccess: (d) => {
-      setToast('Chat details updated.');
-      queryClient.setQueryData<StandaloneChatListItem[]>(
-        ['standaloneChats'],
-        (old) =>
-          old?.map((c) =>
-            c.id === d.id ? { ...c, name: d.name, tags: d.tags } : c
-          )
-      );
-      queryClient.setQueryData<ChatSession>(['standaloneChat', d.id], (old) =>
-        old ? { ...old, name: d.name ?? undefined, tags: d.tags ?? null } : old
-      );
-      setIsEditModalOpen(false);
-      setChatToEdit(null);
-    },
-    onError: (e) => {
-      setToast(`Error updating chat: ${e.message}`);
-    },
-  });
+
   const deleteChatMutation = useMutation<{ message: string }, Error, number>({
     mutationFn: deleteStandaloneChatApi,
-    onSuccess: (d, delId) => {
-      setToast(d.message || `Chat deleted.`);
+    onSuccess: (data, delId) => {
+      setToast(data.message || `Chat ${delId} deleted.`);
       let nextId: number | null = null;
       const before = queryClient.getQueryData<StandaloneChatListItem[]>([
         'standaloneChats',
@@ -153,14 +128,6 @@ export function StandaloneChatSidebar({
     setChatToEdit(chat);
     setIsEditModalOpen(true);
   };
-  const handleConfirmEdit = (
-    chatId: number,
-    newName: string | null,
-    newTags: string[]
-  ) => {
-    if (editChatMutation.isPending) return;
-    editChatMutation.mutate({ chatId, newName, tags: newTags });
-  };
   const handleDeleteRequest = (chat: StandaloneChatListItem) => {
     setChatToDelete(chat);
     setIsDeleteConfirmOpen(true);
@@ -178,11 +145,8 @@ export function StandaloneChatSidebar({
   // Derived State
   const isLoading = isLoadingParent || isLoadingChatsQuery;
   const error = parentError || chatsError;
-
-  // Filter chats (or don't filter if search is removed)
   const chatsToShow = standaloneChats || [];
 
-  // Render
   return (
     <>
       <Box
@@ -210,23 +174,20 @@ export function StandaloneChatSidebar({
             )}
           </Button>
         </Flex>
-        {/* End Header Section */}
 
         {/* List Area */}
         {isLoading ? (
           <Flex flexGrow="1" align="center" justify="center">
-            {' '}
-            <Spinner size="2" />{' '}
+            <Spinner size="2" />
             <Text color="gray" size="1" ml="2">
               Loading chats...
-            </Text>{' '}
+            </Text>
           </Flex>
         ) : error ? (
           <Flex flexGrow="1" align="center" justify="center" p="4">
-            {' '}
             <Text color="red" size="1">
               Error loading chats: {error.message}
-            </Text>{' '}
+            </Text>
           </Flex>
         ) : chatsToShow.length === 0 ? (
           <Flex flexGrow="1" align="center" justify="center">
@@ -240,11 +201,10 @@ export function StandaloneChatSidebar({
             scrollbars="vertical"
             style={{ flexGrow: 1, marginLeft: '-4px', marginRight: '-4px' }}
           >
-            {/* Pass onEditChatRequest prop with the correct name */}
             <StandaloneChatSidebarList
               chats={chatsToShow}
               onEditChatRequest={handleEditDetailsRequest}
-              onDeleteChatRequest={handleDeleteRequest}
+              onDeleteChatRequest={handleDeleteRequest} // Pass delete handler
               activeChatId={activeChatId}
             />
           </ScrollArea>
@@ -256,9 +216,6 @@ export function StandaloneChatSidebar({
         isOpen={isEditModalOpen}
         onOpenChange={setIsEditModalOpen}
         chat={chatToEdit}
-        onSave={handleConfirmEdit}
-        isSaving={editChatMutation.isPending}
-        saveError={editChatMutation.error?.message}
       />
 
       {/* Delete Confirmation Modal */}
@@ -269,9 +226,8 @@ export function StandaloneChatSidebar({
         <AlertDialog.Content style={{ maxWidth: 450 }}>
           <AlertDialog.Title>Delete Chat</AlertDialog.Title>
           <AlertDialog.Description size="2">
-            {' '}
             Are you sure you want to permanently delete this chat? This action
-            cannot be undone.{' '}
+            cannot be undone.
           </AlertDialog.Description>
           {deleteChatMutation.isError && (
             <Text color="red" size="1" my="2">

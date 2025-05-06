@@ -5,6 +5,8 @@ import React, {
   useEffect,
   useCallback,
   useRef,
+  Dispatch,
+  SetStateAction,
 } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -21,7 +23,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { SessionListTable } from './SessionListTable';
 import { StandaloneChatListTable } from './StandaloneChatListTable';
 import { SearchResultList } from '../Search/SearchResultList';
-import { FilterControls } from './FilterControls'; // <-- Import FilterControls
+import { FilterControls } from './FilterControls';
 import {
   Button,
   Card,
@@ -43,10 +45,8 @@ import {
   deleteSession as deleteSessionApi,
   fetchStandaloneChats,
   createStandaloneChat as createStandaloneChatApi,
-  renameStandaloneChat as editStandaloneChatApi,
-  deleteStandaloneChat as deleteStandaloneChatApi,
   searchMessages,
-} from '../../api/api'; // <-- Use the barrel file
+} from '../../api/api';
 import {
   openUploadModalAtom,
   sessionSortCriteriaAtom,
@@ -66,7 +66,7 @@ import type {
   SearchApiResponse,
   SearchResultItem,
   StandaloneChatListItem,
-} from '../../types'; // <-- Import StandaloneChatListItem from types
+} from '../../types';
 import { formatTimestamp } from '../../helpers';
 
 export function LandingPage() {
@@ -76,14 +76,14 @@ export function LandingPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // --- Search State ---
+  // Search State
   const [searchInput, setSearchInput] = useState(searchParams.get('q') || '');
   const [activeSearchQuery, setActiveSearchQuery] = useState(
     searchParams.get('q') || ''
   );
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // --- Filter State ---
+  // Filter State
   const [clientFilter, setClientFilter] = useState('');
   const [filterTags, setFilterTags] = useState<string[]>([]);
   const [newFilterTagInput, setNewFilterTagInput] = useState('');
@@ -103,15 +103,13 @@ export function LandingPage() {
   // Modal States
   const [isEditingModalOpen, setIsEditingModalOpen] = useState(false);
   const [sessionToEdit, setSessionToEdit] = useState<Session | null>(null);
-  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false); // For Sessions
   const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null);
   const [isEditChatModalOpen, setIsEditChatModalOpen] = useState(false);
   const [chatToEdit, setChatToEdit] = useState<StandaloneChatListItem | null>(
     null
   );
-  const [isDeleteChatConfirmOpen, setIsDeleteChatConfirmOpen] = useState(false);
-  const [chatToDelete, setChatToDelete] =
-    useState<StandaloneChatListItem | null>(null);
+  // Standalone Chat Delete state/logic removed from here
 
   // Queries
   const {
@@ -132,8 +130,6 @@ export function LandingPage() {
     queryKey: ['standaloneChats'],
     queryFn: fetchStandaloneChats,
   });
-
-  // --- Search Query (Triggers when activeSearchQuery changes) ---
   const {
     data: searchResultsData,
     isLoading: isLoadingSearch,
@@ -152,19 +148,19 @@ export function LandingPage() {
     enabled: !!activeSearchQuery,
     staleTime: 5 * 60 * 1000,
   });
-  // Accurate Client-Side Filtering
+
+  // Client-Side Filtering for Search Results
   const filteredSearchResults = useMemo(() => {
-    // Filter logic remains here
     if (!searchResultsData?.results) return [];
+
     const lowerClientFilter = clientFilter.toLowerCase().trim();
     const lowerFilterTags = filterTags.map((tag) => tag.toLowerCase());
 
     if (!lowerClientFilter && lowerFilterTags.length === 0) {
-      return searchResultsData.results; // No filters applied
+      return searchResultsData.results;
     }
 
-    return searchResultsData.results.filter((item) => {
-      // Adjusted filtering logic
+    const filtered = searchResultsData.results.filter((item) => {
       const clientMatch = lowerClientFilter
         ? item.clientName?.toLowerCase() === lowerClientFilter
         : true;
@@ -178,9 +174,10 @@ export function LandingPage() {
 
       return clientMatch && tagsMatch;
     });
+    return filtered;
   }, [searchResultsData, clientFilter, filterTags]);
 
-  // Mutations (Unchanged)
+  // Mutations
   const deleteSessionMutation = useMutation<{ message: string }, Error, number>(
     {
       mutationFn: deleteSessionApi,
@@ -211,54 +208,14 @@ export function LandingPage() {
       setToast(`Error creating chat: ${e.message}`);
     },
   });
-  const editChatMutation = useMutation<
-    StandaloneChatListItem,
-    Error,
-    { chatId: number; newName: string | null; tags: string[] }
-  >({
-    mutationFn: (v) => editStandaloneChatApi(v.chatId, v.newName, v.tags),
-    onSuccess: (d) => {
-      setToast('Chat details updated.');
-      queryClient.setQueryData<StandaloneChatListItem[]>(
-        ['standaloneChats'],
-        (old) =>
-          old?.map((c) =>
-            c.id === d.id ? { ...c, name: d.name, tags: d.tags } : c
-          )
-      );
-      queryClient.setQueryData<ChatSession>(['standaloneChat', d.id], (old) =>
-        old ? { ...old, name: d.name ?? undefined, tags: d.tags ?? null } : old
-      );
-      setIsEditChatModalOpen(false);
-      setChatToEdit(null);
-    },
-    onError: (e) => {
-      setToast(`Error updating chat: ${e.message}`);
-    },
-  });
-  const deleteChatMutation = useMutation<{ message: string }, Error, number>({
-    mutationFn: deleteStandaloneChatApi,
-    onSuccess: (d, id) => {
-      setToast(d.message || `Chat ${id} deleted.`);
-      queryClient.invalidateQueries({ queryKey: ['standaloneChats'] });
-    },
-    onError: (e, id) => {
-      setToast(`Error deleting chat ${id}: ${e.message}`);
-    },
-    onSettled: () => {
-      setIsDeleteChatConfirmOpen(false);
-      setChatToDelete(null);
-    },
-  });
 
-  // Session Sorting Logic (Unchanged)
+  // Session Sorting Logic
   const sortedSessions = useMemo(() => {
-    /* ... */
     if (!sessions) return [];
     const criteria = currentSessionSortCriteria;
     const direction = currentSessionSortDirection;
     const getString = (value: string | null | undefined): string => value ?? '';
-    return [...sessions].sort((a, b) => {
+    const sorted = [...sessions].sort((a, b) => {
       let compareResult = 0;
       try {
         switch (criteria) {
@@ -298,7 +255,6 @@ export function LandingPage() {
             compareResult = (a.id ?? 0) - (b.id ?? 0);
             break;
           default:
-            const _exhaustiveCheck: never = criteria;
             console.warn(`[sortedSessions] Unknown sort criteria: ${criteria}`);
             return 0;
         }
@@ -318,11 +274,11 @@ export function LandingPage() {
       }
       return compareResult;
     });
+    return sorted;
   }, [sessions, currentSessionSortCriteria, currentSessionSortDirection]);
 
-  // Standalone Chat Sorting (Unchanged)
+  // Standalone Chat Sorting
   const sortedStandaloneChats = useMemo(() => {
-    /* ... */
     if (!standaloneChats) return [];
     const criteria = currentStandaloneChatSortCriteria;
     const direction = currentStandaloneChatSortDirection;
@@ -330,7 +286,7 @@ export function LandingPage() {
     const getString = (value: string | null | undefined): string => value ?? '';
     const getTagsString = (tags: string[] | null | undefined): string =>
       (tags ?? []).join(', ');
-    return [...chatsToSort].sort((a, b) => {
+    const sorted = [...chatsToSort].sort((a, b) => {
       let compareResult = 0;
       try {
         switch (criteria) {
@@ -355,7 +311,6 @@ export function LandingPage() {
             );
             break;
           default:
-            const _exhaustiveCheck: never = criteria;
             console.warn(
               `[sortedStandaloneChats] Unknown sort criteria: ${criteria}`
             );
@@ -375,24 +330,28 @@ export function LandingPage() {
       }
       return compareResult;
     });
+    return sorted;
   }, [
     standaloneChats,
     currentStandaloneChatSortCriteria,
     currentStandaloneChatSortDirection,
-  ]); // Dependencies unchanged
+  ]);
 
-  // Handlers (Unchanged)
+  // --- Handlers ---
   const handleSessionSort = (criteria: SessionSortCriteria) =>
     setSessionSort(criteria);
   const handleStandaloneChatSort = (criteria: StandaloneChatSortCriteria) =>
     setStandaloneChatSort(criteria);
+
   const handleEditSession = (session: Session) => {
     setSessionToEdit(session);
     setIsEditingModalOpen(true);
   };
-  const handleEditSaveSuccess = () => {
+
+  const handleEditSaveSuccess = (updatedMetadata: Partial<SessionMetadata>) => {
     setIsEditingModalOpen(false);
     setSessionToEdit(null);
+    setToast('Session details updated successfully.');
   };
   const handleDeleteSessionRequest = (session: Session) => {
     setSessionToDelete(session);
@@ -402,6 +361,8 @@ export function LandingPage() {
     if (!sessionToDelete || deleteSessionMutation.isPending) return;
     deleteSessionMutation.mutate(sessionToDelete.id);
   };
+
+  // Standalone Chat Handlers
   const handleNewStandaloneChat = () => {
     createStandaloneChatMutation.mutate();
   };
@@ -409,28 +370,12 @@ export function LandingPage() {
     setChatToEdit(chat);
     setIsEditChatModalOpen(true);
   };
-  const handleConfirmEditChat = (
-    chatId: number,
-    newName: string | null,
-    newTags: string[]
-  ) => {
-    if (editChatMutation.isPending) return;
-    editChatMutation.mutate({ chatId, newName, tags: newTags });
-  };
-  const handleDeleteChatRequest = (chat: StandaloneChatListItem) => {
-    setChatToDelete(chat);
-    setIsDeleteChatConfirmOpen(true);
-  };
-  const handleConfirmDeleteChat = () => {
-    if (!chatToDelete || deleteChatMutation.isPending) return;
-    deleteChatMutation.mutate(chatToDelete.id);
-  };
+  // Removed handleDeleteChatRequest as it's now handled in the sidebar
 
-  // --- Search Handlers (Unchanged) ---
+  // --- Search/Filter Handlers ---
   const handleSearchInputChange = (
     event: React.ChangeEvent<HTMLInputElement>
   ) => {
-    // Logic unchanged
     setSearchInput(event.target.value);
   };
 
@@ -439,7 +384,6 @@ export function LandingPage() {
       | React.FormEvent<HTMLFormElement>
       | React.KeyboardEvent<HTMLInputElement>
   ) => {
-    // Logic unchanged
     if (event) event.preventDefault();
     const trimmedQuery = searchInput.trim();
     setActiveSearchQuery(trimmedQuery);
@@ -454,7 +398,6 @@ export function LandingPage() {
   };
 
   const handleClearSearch = useCallback(() => {
-    // Logic unchanged
     setSearchInput('');
     setActiveSearchQuery('');
     setClientFilter('');
@@ -468,18 +411,14 @@ export function LandingPage() {
   const handleSearchKeyDown = (
     event: React.KeyboardEvent<HTMLInputElement>
   ) => {
-    // Logic unchanged
     if (event.key === 'Enter') {
       handleSearchSubmit(event);
     } else if (event.key === 'Escape') {
       handleClearSearch();
     }
   };
-  // --- End Search Handlers ---
 
-  // --- Tag Filter Handlers (Unchanged) ---
   const handleAddFilterTag = useCallback(() => {
-    // Logic unchanged
     const tagToAdd = newFilterTagInput.trim();
     if (
       tagToAdd &&
@@ -496,12 +435,11 @@ export function LandingPage() {
   }, [newFilterTagInput, filterTags, setToast]);
 
   const handleRemoveFilterTag = useCallback((tagToRemove: string) => {
-    setFilterTags((prev) => prev.filter((tag) => tag !== tagToRemove)); // Logic unchanged
+    setFilterTags((prev) => prev.filter((tag) => tag !== tagToRemove));
   }, []);
 
   const handleFilterTagInputKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
-      // Logic unchanged
       if (e.key === 'Enter' || e.key === ',') {
         e.preventDefault();
         handleAddFilterTag();
@@ -509,11 +447,9 @@ export function LandingPage() {
     },
     [handleAddFilterTag]
   );
-  // --- End Tag Filter Handlers ---
 
-  // --- Escape Key Listener (Unchanged) ---
+  // Effects
   useEffect(() => {
-    // Logic unchanged
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && !!activeSearchQuery) {
         handleClearSearch();
@@ -528,21 +464,16 @@ export function LandingPage() {
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [activeSearchQuery, handleClearSearch]);
-  // --- End Escape Key Listener ---
 
-  // --- Auto Focus Effect (Unchanged) ---
   useEffect(() => {
-    // Logic unchanged
     if (activeSearchQuery && searchInputRef.current) {
       requestAnimationFrame(() => {
         searchInputRef.current?.focus();
       });
     }
-    // No change needed here
   }, [activeSearchQuery]);
-  // --- End Auto Focus Effect ---
 
-  // Loading and Error States (Unchanged)
+  // Loading and Error States
   const isLoading = isLoadingSessions || isLoadingStandaloneChats;
   const error = sessionsError || standaloneChatsError;
 
@@ -578,15 +509,13 @@ export function LandingPage() {
     );
   }
 
-  // Show search results if an active search query exists
   const showSearchResults = !!activeSearchQuery;
-  const hasInitialResults =
+  const hasFilteredResults = filteredSearchResults.length > 0;
+  const hasInitialSearchResults =
     searchResultsData?.results && searchResultsData.results.length > 0;
 
   return (
     <>
-      {' '}
-      {/* Fragment for content + modals */}
       <Box className="w-full flex-grow flex flex-col">
         {/* Header Bar */}
         <Box
@@ -599,8 +528,8 @@ export function LandingPage() {
           }}
         >
           <Container>
-            {/* Search Input */}
             <Flex justify="between" align="center" gap="4">
+              {/* Search Input */}
               <Box style={{ flexGrow: 1 }}>
                 <TextField.Root
                   ref={searchInputRef}
@@ -635,7 +564,7 @@ export function LandingPage() {
                   )}
                 </TextField.Root>
               </Box>
-              {/* Right side buttons (unchanged) */}
+              {/* Right side buttons */}
               <Flex gap="3" align="center" flexShrink="0">
                 <Button
                   variant="outline"
@@ -653,7 +582,7 @@ export function LandingPage() {
                 <UserThemeDropdown />
               </Flex>
             </Flex>
-            {/* --- Render FilterControls Component --- */}
+            {/* Filter Controls */}
             {showSearchResults && (
               <FilterControls
                 sessions={sessions}
@@ -674,7 +603,6 @@ export function LandingPage() {
         {/* Main Content Area */}
         <Box className="flex-grow flex flex-col py-4 md:py-6 lg:py-8 overflow-y-auto">
           <Container size="4" className="flex-grow flex flex-col">
-            {/* Conditional Rendering: Search Results or Default View */}
             {showSearchResults ? (
               <>
                 {(isLoadingSearch || isFetchingSearch) && !searchError && (
@@ -692,41 +620,30 @@ export function LandingPage() {
                     </Text>
                   </Card>
                 )}
-                {/* Render SearchResultList only if initial results exist */}
-                {hasInitialResults && !isLoadingSearch && !isFetchingSearch && (
-                  <SearchResultList
-                    results={filteredSearchResults}
-                    query={activeSearchQuery}
-                  />
-                )}
-                {/* Show "No results found" if initial fetch returned empty */}
-                {!searchError &&
-                  !isLoadingSearch &&
+                {!isLoadingSearch &&
                   !isFetchingSearch &&
-                  !hasInitialResults && (
-                    <Card size="2" mb="4">
-                      <Text color="gray">
-                        No results found for "{activeSearchQuery}".
-                      </Text>
-                    </Card>
+                  hasFilteredResults && (
+                    <SearchResultList
+                      results={filteredSearchResults}
+                      query={activeSearchQuery}
+                    />
                   )}
-                {/* Show "No results match filters" only if initial results existed but filters hide them all */}
                 {!searchError &&
                   !isLoadingSearch &&
                   !isFetchingSearch &&
-                  hasInitialResults &&
-                  filteredSearchResults.length === 0 && (
+                  !hasFilteredResults && (
                     <Card size="2" mb="4">
                       <Text color="gray">
-                        No results match the current filters for "
-                        {activeSearchQuery}".
+                        {hasInitialSearchResults
+                          ? `No results match the current filters for "${activeSearchQuery}".`
+                          : `No results found for "${activeSearchQuery}".`}
                       </Text>
                     </Card>
                   )}
               </>
             ) : (
               <>
-                {/* Standalone Chats Section (Original) */}
+                {/* Standalone Chats Section */}
                 <Card size="3" className="flex flex-col overflow-hidden mb-6">
                   <Flex
                     justify="between"
@@ -755,7 +672,7 @@ export function LandingPage() {
                         sortDirection={currentStandaloneChatSortDirection}
                         onSort={handleStandaloneChatSort}
                         onEditChatRequest={handleEditChatRequest}
-                        onDeleteChatRequest={handleDeleteChatRequest}
+                        // onDeleteChatRequest removed
                       />
                     ) : (
                       <Flex flexGrow="1" align="center" justify="center" p="6">
@@ -767,7 +684,7 @@ export function LandingPage() {
                   </Box>
                 </Card>
 
-                {/* Session History Section (Original) */}
+                {/* Session History Section */}
                 <Card
                   size="3"
                   className="flex-grow flex flex-col overflow-hidden h-full"
@@ -780,13 +697,12 @@ export function LandingPage() {
                     pb="3"
                     style={{ borderBottom: '1px solid var(--gray-a6)' }}
                   >
-                    {' '}
                     <Heading as="h2" size="5" weight="medium">
                       <Flex align="center" gap="2">
                         <CounterClockwiseClockIcon />
                         Session History
                       </Flex>
-                    </Heading>{' '}
+                    </Heading>
                   </Flex>
                   <Box className="flex-grow flex flex-col overflow-hidden">
                     {sortedSessions.length === 0 ? (
@@ -810,45 +726,37 @@ export function LandingPage() {
           </Container>
         </Box>
       </Box>
-      {/* Modals */}
+
+      {/* Session Edit Modal */}
       <EditDetailsModal
         isOpen={isEditingModalOpen}
-        onOpenChange={(open) => {
+        onOpenChange={(open: boolean) => {
           setIsEditingModalOpen(open);
           if (!open) setSessionToEdit(null);
         }}
         session={sessionToEdit}
         onSaveSuccess={handleEditSaveSuccess}
       />
+
+      {/* Delete Session Confirmation */}
       <AlertDialog.Root
         open={isDeleteConfirmOpen}
         onOpenChange={setIsDeleteConfirmOpen}
       >
-        {' '}
         <AlertDialog.Content style={{ maxWidth: 450 }}>
-          {' '}
-          <AlertDialog.Title>Delete Session</AlertDialog.Title>{' '}
+          <AlertDialog.Title>Delete Session</AlertDialog.Title>
           <AlertDialog.Description size="2">
-            {' '}
             Are you sure you want to permanently delete the session "
             <Text weight="bold">
               {sessionToDelete?.sessionName ||
                 sessionToDelete?.fileName ||
                 'this session'}
             </Text>
-            "?
-            <br />
-            <br /> This will remove the session record, original audio file,
-            transcript, and all associated chats.{' '}
-            <Text weight="bold" color="red">
-              {' '}
-              This action cannot be undone.
-            </Text>{' '}
-          </AlertDialog.Description>{' '}
+            "? ... This action cannot be undone.
+          </AlertDialog.Description>
           <Flex gap="3" mt="4" justify="end">
-            {' '}
             <AlertDialog.Cancel>
-              <Button // Wrap children in button
+              <Button
                 variant="soft"
                 color="gray"
                 disabled={deleteSessionMutation.isPending}
@@ -857,90 +765,33 @@ export function LandingPage() {
               </Button>
             </AlertDialog.Cancel>
             <AlertDialog.Action>
-              <Button // Wrap children in button
+              <Button
                 color="red"
                 onClick={handleConfirmDeleteSession}
                 disabled={deleteSessionMutation.isPending}
               >
-                {/* Wrap icon and text in fragment */}
                 <>
                   {deleteSessionMutation.isPending ? (
                     <Spinner size="1" />
                   ) : (
                     <TrashIcon />
-                  )}{' '}
-                  <Text ml="1">Delete Session</Text>{' '}
+                  )}
+                  <Text ml="1">Delete Session</Text>
                 </>
               </Button>
             </AlertDialog.Action>
           </Flex>
         </AlertDialog.Content>
       </AlertDialog.Root>
+
+      {/* Standalone Chat Edit Modal */}
       <EditStandaloneChatModal
         isOpen={isEditChatModalOpen}
         onOpenChange={setIsEditChatModalOpen}
         chat={chatToEdit}
-        onSave={handleConfirmEditChat}
-        isSaving={editChatMutation.isPending}
-        saveError={editChatMutation.error?.message}
       />
-      <AlertDialog.Root
-        open={isDeleteChatConfirmOpen}
-        onOpenChange={setIsDeleteChatConfirmOpen}
-      >
-        {' '}
-        <AlertDialog.Content style={{ maxWidth: 450 }}>
-          {' '}
-          <AlertDialog.Title>Delete Chat</AlertDialog.Title>{' '}
-          <AlertDialog.Description size="2">
-            {' '}
-            Are you sure you want to permanently delete the chat "
-            <Text weight="bold">
-              {chatToDelete?.name ||
-                `Chat (${formatTimestamp(chatToDelete?.timestamp || 0)})`}
-            </Text>
-            "?{' '}
-            <Text weight="bold" color="red">
-              {' '}
-              This action cannot be undone.
-            </Text>{' '}
-          </AlertDialog.Description>{' '}
-          {deleteChatMutation.isError && (
-            <Text color="red" size="1" my="2">
-              Error: {deleteChatMutation.error.message}
-            </Text>
-          )}{' '}
-          <Flex gap="3" mt="4" justify="end">
-            {' '}
-            <AlertDialog.Cancel>
-              <Button // Wrap children in button
-                variant="soft"
-                color="gray"
-                disabled={deleteChatMutation.isPending}
-              >
-                Cancel
-              </Button>
-            </AlertDialog.Cancel>
-            <AlertDialog.Action>
-              <Button // Wrap children in button
-                color="red"
-                onClick={handleConfirmDeleteChat}
-                disabled={deleteChatMutation.isPending}
-              >
-                {/* Wrap icon and text in fragment */}
-                <>
-                  {deleteChatMutation.isPending ? (
-                    <Spinner size="1" />
-                  ) : (
-                    <TrashIcon />
-                  )}{' '}
-                  <Text ml="1">Delete Chat</Text>{' '}
-                </>
-              </Button>
-            </AlertDialog.Action>
-          </Flex>
-        </AlertDialog.Content>
-      </AlertDialog.Root>
+
+      {/* Standalone Chat Delete Confirmation Dialog Removed */}
     </>
   );
 }
