@@ -71,23 +71,23 @@ async def run_transcription_process(job_id: str, input_path: str, output_path: s
             line_bytes = None # Initialize line_bytes
             try: line_bytes = await asyncio.wait_for(process.stdout.readline(), timeout=0.1)
             except asyncio.TimeoutError:
-                 if process.returncode is not None: break
-                 try:
-                      err_line_bytes = await asyncio.wait_for(process.stderr.readline(), timeout=0.1)
-                      if err_line_bytes:
-                           err_line = err_line_bytes.decode('utf-8', errors='ignore').strip()
-                           logger.warning(f"Job {job_id} STDERR (during stdout wait): {err_line}")
-                           try: # Check for JSON errors in stderr
-                                err_status = json.loads(err_line)
-                                if err_status.get("status") == "error":
-                                    jobs[job_id].update(status="failed", error=err_status.get("message", "Unknown stderr error"), end_time=time.time())
-                                    logger.error(f"Job {job_id} failed via stderr JSON: {jobs[job_id]['error']}")
-                                    if process.returncode is None: process.terminate()
-                                    await process.wait()
-                                    return
-                           except json.JSONDecodeError: pass # Ignore non-JSON stderr
-                 except asyncio.TimeoutError: pass
-                 continue # Continue loop if no output
+                if process.returncode is not None: break
+                try:
+                    err_line_bytes = await asyncio.wait_for(process.stderr.readline(), timeout=0.1)
+                    if err_line_bytes:
+                        err_line = err_line_bytes.decode('utf-8', errors='ignore').strip()
+                        logger.warning(f"Job {job_id} STDERR (during stdout wait): {err_line}")
+                        try: # Check for JSON errors in stderr
+                            err_status = json.loads(err_line)
+                            if err_status.get("status") == "error":
+                                jobs[job_id].update(status="failed", error=err_status.get("message", "Unknown stderr error"), end_time=time.time())
+                                logger.error(f"Job {job_id} failed via stderr JSON: {jobs[job_id]['error']}")
+                                if process.returncode is None: process.terminate()
+                                await process.wait()
+                                return
+                        except json.JSONDecodeError: pass # Ignore non-JSON stderr
+                except asyncio.TimeoutError: pass
+                continue # Continue loop if no output
 
             if not line_bytes: break
             line = line_bytes.decode('utf-8', errors='ignore').strip()
@@ -106,10 +106,10 @@ async def run_transcription_process(job_id: str, input_path: str, output_path: s
                     if process.returncode is None: process.terminate(); await process.wait()
                     return
                 elif status == "canceled":
-                     jobs[job_id].update(status="canceled", error=status_update.get("message", "Job canceled"), end_time=time.time())
-                     logger.info(f"Job {job_id} canceled via stdout JSON")
-                     if process.returncode is None: process.terminate(); await process.wait()
-                     return
+                    jobs[job_id].update(status="canceled", error=status_update.get("message", "Job canceled"), end_time=time.time())
+                    logger.info(f"Job {job_id} canceled via stdout JSON")
+                    if process.returncode is None: process.terminate(); await process.wait()
+                    return
             except json.JSONDecodeError: # Try parsing as Whisper verbose progress
                 match = progress_regex.match(line)
                 if match:

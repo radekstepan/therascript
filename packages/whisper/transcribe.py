@@ -112,8 +112,8 @@ def transcribe_audio(file_path, output_file, model_name):
         # 1. Get Audio Duration
         duration = get_audio_duration(file_path)
         if duration <= 0:
-             # Error getting duration is handled and printed by get_audio_duration
-             raise ValueError("Could not determine audio duration.")
+            # Error getting duration is handled and printed by get_audio_duration
+            raise ValueError("Could not determine audio duration.")
 
         # Print duration info as JSON to stdout
         print(json.dumps({
@@ -172,10 +172,10 @@ def transcribe_audio(file_path, output_file, model_name):
         }), flush=True)
 
     except RuntimeError as e:
-         # Handle specific runtime errors caught during processing
-         if "Transcription canceled" in str(e): # Raised by the (currently unused) hook
-              print(json.dumps({"status": "canceled", "message": "Transcription explicitly canceled by hook"}), flush=True)
-         elif "CUDA" in str(e): # Raised by GPU check or potentially during model execution
+        # Handle specific runtime errors caught during processing
+        if "Transcription canceled" in str(e): # Raised by the (currently unused) hook
+            print(json.dumps({"status": "canceled", "message": "Transcription explicitly canceled by hook"}), flush=True)
+        elif "CUDA" in str(e): # Raised by GPU check or potentially during model execution
             # Print specific CUDA error to stderr
             print(json.dumps({
                 "status": "error",
@@ -183,9 +183,9 @@ def transcribe_audio(file_path, output_file, model_name):
                 "message": str(e),
             }), file=sys.stderr, flush=True)
             sys.exit(1) # Exit with non-zero code for critical errors like CUDA failure
-         else:
-             # Handle other generic runtime errors
-             print(json.dumps({
+        else:
+            # Handle other generic runtime errors
+            print(json.dumps({
                 "status": "error",
                 "code": "runtime_error",
                 "message": f"Runtime error during transcription: {str(e)}"
