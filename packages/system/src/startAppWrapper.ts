@@ -1,8 +1,8 @@
 // Purpose: This script acts as a wrapper to start the main Therascript application
-//          using `yarn start`. It's designed to be the executable target for the
+//          using a specific yarn script. It's designed to be the executable target for the
 //          systemd service defined by `autostartManager.ts`.
 
-import { spawn } from 'node:child_process'; // For spawning the `yarn start` process
+import { spawn } from 'node:child_process'; // For spawning the yarn process
 import path from 'node:path'; // For path manipulation
 import fs from 'node:fs'; // For checking file existence (project root verification)
 import { fileURLToPath } from 'node:url'; // For getting current file path
@@ -39,20 +39,19 @@ if (
 
 // --- Find Yarn Executable ---
 // Use 'yarn' directly, relying on it being in the PATH for the user running the service.
-// This is simpler but less robust than finding the absolute path.
-// Ensure yarn is installed globally or accessible to the service user.
 const yarnPath = 'yarn';
-// Alternative (more complex): Try specific common paths like /usr/local/bin/yarn, /usr/bin/yarn, etc.
-// --- End Find Yarn ---
 
 console.log(
-  `[Autostart Wrapper] Starting 'yarn start' in ${projectRootDir} using executable '${yarnPath}'...`
+  `[Autostart Wrapper] Starting application in ${projectRootDir} using executable '${yarnPath}'...`
 );
 
-// Define the arguments for the `yarn start` command
-const yarnArgs = ['start'];
+// Define the arguments for the yarn command.
+// MODIFIED: Target 'start:api:prod' script specifically for the systemd environment.
+// This script ('start:api:prod') in the root package.json should build the API
+// and run it with production environment variables (e.g., from .env.api.prod).
+const yarnArgs = ['start:api:prod'];
 
-// --- Spawn the `yarn start` Process ---
+// --- Spawn the Yarn Process ---
 // Use `spawn` to create a new child process.
 const child = spawn(yarnPath, yarnArgs, {
   cwd: projectRootDir, // Set the working directory to the project root
@@ -61,7 +60,7 @@ const child = spawn(yarnPath, yarnArgs, {
   env: {
     ...process.env, // Inherit environment variables from the wrapper process (set by systemd)
     NODE_ENV: 'production', // Ensure the application runs in production mode
-    // Add any other necessary environment variables here
+    // Note: The `start:api:prod` script itself should handle loading specific .env files (e.g., .env.api.prod)
   },
 });
 // --- End Spawn Process ---
@@ -69,23 +68,24 @@ const child = spawn(yarnPath, yarnArgs, {
 // --- Child Process Event Handling ---
 child.on('spawn', () => {
   console.log(
-    `[Autostart Wrapper] 'yarn start' process spawned successfully (PID: ${child.pid}).`
+    `[Autostart Wrapper] 'yarn ${yarnArgs.join(' ')}' process spawned successfully (PID: ${child.pid}).`
   );
 });
 
 child.on('error', (error) => {
   // Handle errors during the spawning process itself (e.g., 'yarn' not found)
-  console.error(`[Autostart Wrapper] Error spawning 'yarn start':`, error);
+  console.error(
+    `[Autostart Wrapper] Error spawning 'yarn ${yarnArgs.join(' ')}':`,
+    error
+  );
   process.exit(1); // Exit the wrapper script if spawning fails
 });
 
 child.on('close', (code, signal) => {
   // Handle when the child process exits
   console.log(
-    `[Autostart Wrapper] 'yarn start' process exited with code ${code}, signal ${signal}.`
+    `[Autostart Wrapper] 'yarn ${yarnArgs.join(' ')}' process exited with code ${code}, signal ${signal}.`
   );
-  // Optional: Decide if the wrapper should exit or attempt to restart based on code/signal.
-  // For systemd's `Restart=on-failure`, exiting the wrapper is usually sufficient.
   process.exit(code ?? 1); // Exit wrapper with the child's exit code (or 1 if null)
 });
 // --- End Event Handling ---
@@ -99,9 +99,7 @@ process.on('SIGINT', () => {
   console.log(
     '[Autostart Wrapper] Received SIGINT. Terminating child process...'
   );
-  // Send SIGTERM to the child first for graceful shutdown
   if (child && !child.killed) child.kill('SIGTERM');
-  // Set a timeout to force kill if it doesn't exit gracefully
   setTimeout(() => {
     if (child && !child.killed) {
       console.warn(
@@ -109,8 +107,8 @@ process.on('SIGINT', () => {
       );
       child.kill('SIGKILL');
     }
-    process.exit(0); // Exit wrapper after handling signal
-  }, 2000); // Wait 2 seconds
+    process.exit(0);
+  }, 2000);
 });
 
 process.on('SIGTERM', () => {
@@ -126,7 +124,7 @@ process.on('SIGTERM', () => {
       );
       child.kill('SIGKILL');
     }
-    process.exit(0); // Exit wrapper after handling signal
+    process.exit(0);
   }, 2000);
 });
 // --- End Wrapper Signal Handling ---

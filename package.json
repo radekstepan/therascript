@@ -16,12 +16,12 @@
     "build:system": "lerna run build --scope=@therascript/system",
     "build:docker-utils": "lerna run build --scope=@therascript/docker-utils",
     "dev": "node ./scripts/run-dev.js",
-    "dev:api": "node --env-file=.env.api.dev packages/api/dist/server.js",
     "dev:ui": "lerna run dev --scope=@therascript/ui",
-    "dev:mock:api": "node --env-file=.env.api.mock packages/api/dist/server.js",
-    "dev:mock": "concurrently --kill-others-on-fail --names API,UI,WHISPER \"yarn build:api && yarn dev:mock:api\" \"yarn dev:ui\" \"echo [MOCK MODE] Whisper process not needed\"",
-    "start": "yarn app:start:wrapper",
-    "start:api": "yarn build:api && node --env-file=.env.api.prod packages/api/dist/server.js",
+    "dev:api": "yarn build:api && node --env-file=.env.api.dev packages/api/dist/server.js",
+    "dev:mock:api": "yarn build:api && node --env-file=.env.api.mock packages/api/dist/server.js",
+    "dev:mock": "concurrently --kill-others-on-fail --names API,UI,WHISPER \"yarn dev:mock:api\" \"yarn dev:ui\" \"echo [MOCK MODE] Whisper process not needed\"",
+    "start": "concurrently --kill-others-on-fail --names API,UI,WHISPER \"yarn workspace @therascript/api dev\" \"yarn dev:ui\" \"yarn start:whisper\"",
+    "start:api:prod": "yarn build:api && node --env-file=.env.api.prod packages/api/dist/server.js",
     "start:ollama": "lerna run start --scope=@therascript/ollama",
     "start:whisper": "yarn build:whisper && node packages/whisper/dist/index.js",
     "lint": "lerna run lint --parallel",
@@ -30,10 +30,10 @@
     "clean": "lerna run clean --parallel && rm -rf node_modules",
     "clean:dist": "lerna run clean --parallel",
     "_node_path_linux": "echo /home/radek/.nvm/versions/node/v23.10.0/bin/node",
+    "app:start:wrapper": "yarn build:system && $(yarn run -s _node_path_linux) packages/system/dist/startAppWrapper.js",
     "autostart:setup": "yarn build:system && sudo $(yarn run -s _node_path_linux) packages/system/dist/setupAutostart.js",
     "autostart:remove": "yarn build:system && sudo $(yarn run -s _node_path_linux) packages/system/dist/removeAutostartScript.js",
-    "autostart:status": "yarn build:system && sudo $(yarn run -s _node_path_linux) packages/system/dist/checkAutostartStatus.js",
-    "app:start:wrapper": "yarn build:system && $(yarn run -s _node_path_linux) packages/system/dist/startAppWrapper.js"
+    "autostart:status": "yarn build:system && sudo $(yarn run -s _node_path_linux) packages/system/dist/checkAutostartStatus.js"
   },
   "keywords": [],
   "author": "",
@@ -46,5 +46,6 @@
     "prettier": "^3.5.3",
     "ts-node": "^10.9.2",
     "typescript": "^5.5.4"
-  }
+  },
+  "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
 }
