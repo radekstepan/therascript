@@ -20,7 +20,7 @@
     "dev:api": "yarn build:api && node --env-file=.env.api.dev packages/api/dist/server.js",
     "dev:mock:api": "yarn build:api && node --env-file=.env.api.mock packages/api/dist/server.js",
     "dev:mock": "concurrently --kill-others-on-fail --names API,UI,WHISPER \"yarn dev:mock:api\" \"yarn dev:ui\" \"echo [MOCK MODE] Whisper process not needed\"",
-    "start": "concurrently --kill-others-on-fail --names API,UI,WHISPER \"yarn workspace @therascript/api dev\" \"yarn dev:ui\" \"yarn start:whisper\"",
+    "start": "node ./scripts/run-prod.js",
     "start:api:prod": "yarn build:api && node --env-file=.env.api.prod packages/api/dist/server.js",
     "start:ollama": "lerna run start --scope=@therascript/ollama",
     "start:whisper": "yarn build:whisper && node packages/whisper/dist/index.js",
