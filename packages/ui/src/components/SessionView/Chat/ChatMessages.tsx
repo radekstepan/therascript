@@ -36,6 +36,22 @@ interface ChatMessagesProps {
   isAiResponding: boolean;
 }
 
+// Helper function to strip HTML tags for plain text fallback
+function stripHtmlTags(html: string): string {
+  const SCRIPT_REGEX = /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi;
+  // Remove script tags
+  let scriptless = html.replace(SCRIPT_REGEX, '');
+  // Remove style tags
+  const STYLE_REGEX = /<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi;
+  scriptless = scriptless.replace(STYLE_REGEX, '');
+  // Create a temporary div element
+  const div = document.createElement('div');
+  // Set its innerHTML to the scriptless HTML
+  div.innerHTML = scriptless;
+  // Return the text content
+  return div.textContent || div.innerText || '';
+}
+
 export function ChatMessages({
   messages,
   activeChatId,
@@ -165,17 +181,43 @@ export function ChatMessages({
     }
   };
 
-  // handleCopyClick unchanged
-  const handleCopyClick = (textToCopy: string) => {
-    navigator.clipboard
-      .writeText(textToCopy)
-      .then(() => {
-        setToast('Copied to clipboard!');
-      })
-      .catch((err) => {
-        console.error('Failed to copy text: ', err);
-        setToast('Error copying text.');
-      });
+  // Updated handleCopyClick
+  const handleCopyClick = async (copyPayload: {
+    text: string;
+    html?: string;
+  }) => {
+    const { text, html } = copyPayload;
+
+    if (html && navigator.clipboard && navigator.clipboard.write) {
+      try {
+        const plainTextBlob = new Blob([stripHtmlTags(html)], {
+          type: 'text/plain',
+        });
+        const htmlBlob = new Blob([html], { type: 'text/html' });
+        const clipboardItem = new ClipboardItem({
+          'text/html': htmlBlob,
+          'text/plain': plainTextBlob,
+        });
+        await navigator.clipboard.write([clipboardItem]);
+        setToast('Formatted message copied to clipboard!');
+        return;
+      } catch (err) {
+        console.warn(
+          'Failed to copy HTML to clipboard, falling back to plain text:',
+          err
+        );
+        // Fall through to plain text copying
+      }
+    }
+
+    // Fallback to copying plain text (original Markdown source or plain text)
+    try {
+      await navigator.clipboard.writeText(text);
+      setToast('Message text copied to clipboard!');
+    } catch (err) {
+      console.error('Failed to copy text to clipboard:', err);
+      setToast('Error copying text.');
+    }
   };
 
   return (
@@ -197,10 +239,6 @@ export function ChatMessages({
             />
           );
         })}
-
-        {/* ===================== CHANGE START ===================== */}
-        {/* REMOVED the redundant "Thinking..." indicator */}
-        {/* ===================== CHANGE END ===================== */}
       </Flex>
 
       {/* Star Naming Modal (unchanged) */}

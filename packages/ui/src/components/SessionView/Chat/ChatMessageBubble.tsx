@@ -1,5 +1,5 @@
 // packages/ui/src/components/SessionView/Chat/ChatMessageBubble.tsx
-import React from 'react';
+import React, { useRef } from 'react'; // Added useRef
 import {
   Box,
   Flex,
@@ -20,7 +20,8 @@ interface ChatMessageBubbleProps {
   isAiResponding: boolean; // Pass this down
   renderMd: boolean;
   onStarClick: (message: ChatMessage) => void; // Callback for starring
-  onCopyClick: (text: string) => void; // Callback for copying
+  // Updated onCopyClick prop signature
+  onCopyClick: (payload: { text: string; html?: string }) => void;
   isStarMutationPending: boolean; // Pass mutation state
 }
 
@@ -33,23 +34,31 @@ export function ChatMessageBubble({
   onCopyClick,
   isStarMutationPending,
 }: ChatMessageBubbleProps) {
-  // Call the hook unconditionally at the top level
   const animatedText = useAnimatedText(
     message.text,
     message.sender === 'ai' && isCurrentlyStreaming // Enable only for streaming AI message
   );
 
-  // Determine display text
   const displayText = isCurrentlyStreaming ? animatedText : message.text;
-  // ===================== CHANGE START =====================
-  // REMOVED: const showBlinkingCursor = isCurrentlyStreaming;
-  // ===================== CHANGE END =====================
-
-  // Show spinner *only* if AI is responding AND this is the streaming message AND no text has arrived yet
   const showWaitingIndicator =
     isAiResponding && isCurrentlyStreaming && displayText === '';
-  // Copy button logic remains the same
+
+  // Ref for the Markdown content container
+  const markdownContainerRef = useRef<HTMLDivElement>(null);
+
+  // Copy button logic
   const showCopyButton = message.sender === 'ai' && !isCurrentlyStreaming;
+
+  const handleCopy = () => {
+    if (message.sender === 'ai' && renderMd && markdownContainerRef.current) {
+      onCopyClick({
+        html: markdownContainerRef.current.innerHTML,
+        text: message.text, // Original Markdown source as fallback
+      });
+    } else {
+      onCopyClick({ text: message.text });
+    }
+  };
 
   return (
     <Flex
@@ -64,7 +73,6 @@ export function ChatMessageBubble({
           message.sender === 'user'
             ? 'bg-[--accent-a3] text-[--accent-a11]'
             : 'bg-[--gray-a3] text-[--gray-a12]',
-          // Add min-height when showing the waiting indicator
           showWaitingIndicator && 'min-h-[3rem]'
         )}
       >
@@ -108,7 +116,7 @@ export function ChatMessageBubble({
               color="gray"
               size="1"
               className="absolute top-1 right-1 p-0.5 transition-opacity opacity-0 group-hover:opacity-100 focus-visible:opacity-100 z-10"
-              onClick={() => onCopyClick(message.text)}
+              onClick={handleCopy} // Use the new handleCopy function
               aria-label="Copy message text"
             >
               <CopyIcon width={14} height={14} />
@@ -117,8 +125,6 @@ export function ChatMessageBubble({
         )}
 
         {/* Message Content */}
-        {/* ===================== CHANGE START ===================== */}
-        {/* Show waiting indicator instead of just spinner */}
         {showWaitingIndicator ? (
           <Flex
             align="center"
@@ -133,11 +139,11 @@ export function ChatMessageBubble({
           </Flex>
         ) : (
           <>
-            {/* Render text or markdown */}
             {message.sender === 'ai' && renderMd ? (
-              <Box className="markdown-ai-message">
+              <Box className="markdown-ai-message" ref={markdownContainerRef}>
+                {' '}
+                {/* Assign ref here */}
                 <ReactMarkdown>{displayText}</ReactMarkdown>
-                {/* Removed cursor span */}
               </Box>
             ) : (
               <Text
@@ -148,14 +154,10 @@ export function ChatMessageBubble({
                 }}
               >
                 {displayText}
-                {/* Removed cursor span */}
               </Text>
             )}
-            {/* REMOVED: Blinking cursor span */}
-            {/* {showBlinkingCursor && (<span ...></span>)} */}
           </>
         )}
-        {/* ===================== CHANGE END ===================== */}
 
         {/* Display Starred Name */}
         {message.starred && message.starredName && (
