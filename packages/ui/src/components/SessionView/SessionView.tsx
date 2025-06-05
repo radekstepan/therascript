@@ -1,3 +1,4 @@
+// packages/ui/src/components/SessionView/SessionView.tsx
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -8,7 +9,10 @@ import { UserThemeDropdown } from '../User/UserThemeDropdown';
 import { SessionSidebar } from './Sidebar/SessionSidebar';
 import { SessionContent } from './SessionContent';
 import { EditDetailsModal } from './Modals/EditDetailsModal';
-import { LlmManagementModal } from './Modals/LlmManagementModal';
+// Import the new SelectActiveModelModal
+import { SelectActiveModelModal } from './Modals/SelectActiveModelModal';
+// LlmManagementModal will now be opened from SelectActiveModelModal
+// import { LlmManagementModal } from './Modals/LlmManagementModal';
 import {
   fetchSession,
   fetchTranscript,
@@ -28,6 +32,7 @@ import {
   activeChatIdAtom,
   clampedSidebarWidthAtom,
   sidebarWidthAtom,
+  toastMessageAtom, // Import toast atom
 } from '../../store';
 
 export function SessionView() {
@@ -38,11 +43,15 @@ export function SessionView() {
   const navigate = useNavigate();
   const setActiveSessionId = useSetAtom(activeSessionIdAtom);
   const setActiveChatId = useSetAtom(activeChatIdAtom);
-  const activeChatId = useAtomValue(activeChatIdAtom);
+  const activeChatIdAtomValue = useAtomValue(activeChatIdAtom); // Renamed for clarity
   const [sidebarWidth, setSidebarWidth] = useAtom(sidebarWidthAtom);
   const clampedSidebarWidth = useAtomValue(clampedSidebarWidthAtom);
   const [isEditingMetadata, setIsEditingMetadata] = useState(false);
-  const [isLlmModalOpen, setIsLlmModalOpen] = useState(false);
+
+  // State for the new SelectActiveModelModal
+  const [isSelectModelModalOpen, setIsSelectModelModalOpen] = useState(false);
+  const setToast = useSetAtom(toastMessageAtom); // For toast notifications
+
   const sidebarRef = useRef<HTMLDivElement>(null);
   const isResizing = useRef(false);
   const previousSessionIdRef = useRef<number | null>(null);
@@ -50,9 +59,7 @@ export function SessionView() {
 
   const sessionIdNum = sessionIdParam ? parseInt(sessionIdParam, 10) : null;
 
-  // --- Tanstack Query Hooks ---
-
-  // Fetch Session Metadata
+  // --- Tanstack Query Hooks --- (Largely unchanged)
   const {
     data: sessionMetadata,
     isLoading: isLoadingSessionMeta,
@@ -62,14 +69,12 @@ export function SessionView() {
     queryKey: ['sessionMeta', sessionIdNum],
     queryFn: () => {
       if (!sessionIdNum) return Promise.reject(new Error('Invalid Session ID'));
-      console.log(`[SessionView] Fetching sessionMeta for ID: ${sessionIdNum}`);
       return fetchSession(sessionIdNum);
     },
     enabled: !!sessionIdNum,
     staleTime: 5 * 60 * 1000,
   });
 
-  // Fetch Transcript Content
   const {
     data: transcriptContent,
     isLoading: isLoadingTranscript,
@@ -78,35 +83,30 @@ export function SessionView() {
     queryKey: ['transcript', sessionIdNum],
     queryFn: () => {
       if (!sessionIdNum) return Promise.reject(new Error('Invalid Session ID'));
-      console.log(`[SessionView] Fetching transcript for ID: ${sessionIdNum}`);
       return fetchTranscript(sessionIdNum);
     },
     enabled: !!sessionIdNum,
     staleTime: Infinity,
   });
 
-  // Fetch Ollama Status (Default model)
   const {
     data: ollamaStatus,
     isLoading: isLoadingOllamaStatus,
     error: ollamaError,
   } = useQuery<OllamaStatus, Error>({
     queryKey: ['ollamaStatus'],
-    queryFn: () => fetchOllamaStatus(), // Call without args for default status
-    staleTime: 60 * 1000,
+    queryFn: () => fetchOllamaStatus(),
+    staleTime: 60 * 1000, // Consider reducing if status changes often due to model loads
     refetchOnWindowFocus: true,
-    refetchInterval: false,
+    refetchInterval: 5000, // Poll status more frequently
   });
 
-  // Start Chat Mutation
   const startChatMutation = useMutation<ChatSession, Error>({
-    // Explicit types
     mutationFn: () => {
       if (!sessionIdNum) throw new Error('Session ID is missing');
       return startSessionChat(sessionIdNum);
-    }, // Use correct API
+    },
     onSuccess: (newChat) => {
-      // Type newChat
       queryClient.setQueryData<Session>(
         ['sessionMeta', sessionIdNum],
         (oldData) => {
@@ -124,11 +124,10 @@ export function SessionView() {
           return { ...oldData, chats: [...existingChats, newChatMetadata] };
         }
       );
-      // FIX: Ensure sessionIdNum is not null before using it
       if (sessionIdNum !== null) {
         queryClient.prefetchQuery({
           queryKey: ['chat', sessionIdNum, newChat.id],
-          queryFn: () => fetchSessionChatDetails(sessionIdNum!, newChat.id), // Assert non-null
+          queryFn: () => fetchSessionChatDetails(sessionIdNum!, newChat.id),
         });
         navigate(`/sessions/${sessionIdNum}/chats/${newChat.id}`);
       } else {
@@ -136,10 +135,8 @@ export function SessionView() {
       }
     },
     onError: (error) => {
-      console.error(
-        'Failed to start new chat:',
-        error
-      ); /* TODO: add user feedback */
+      console.error('Failed to start new chat:', error);
+      setToast(`Error starting chat: ${error.message}`);
     },
   });
 
@@ -155,6 +152,7 @@ export function SessionView() {
     },
     [setSidebarWidth]
   );
+
   const handleMouseUp = useCallback(() => {
     if (isResizing.current) {
       isResizing.current = false;
@@ -164,6 +162,7 @@ export function SessionView() {
       document.removeEventListener('mouseup', handleMouseUp);
     }
   }, [handleMouseMove]);
+
   const handleMouseDown = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       e.preventDefault();
@@ -176,9 +175,7 @@ export function SessionView() {
     [handleMouseMove, handleMouseUp]
   );
 
-  // --- Effects ---
-
-  // Effect to set active Session/Chat ID
+  // --- Effects (Largely unchanged) ---
   useEffect(() => {
     const currentSessionIdNum = sessionIdParam
       ? parseInt(sessionIdParam, 10)
@@ -204,6 +201,7 @@ export function SessionView() {
         urlChatId !== null &&
         !isNaN(urlChatId) &&
         chats.some((c) => c.id === urlChatId);
+
       if (chatExistsInSession && urlChatId !== null) {
         targetChatId = urlChatId;
       } else if (chats.length > 0) {
@@ -216,22 +214,21 @@ export function SessionView() {
           navigateTo = `/sessions/${currentSessionIdNum}/chats/${targetChatId}`;
         }
       } else if (chatIdParam) {
+        // If URL has chatId but no chats exist in session
         shouldNavigate = true;
         navigateTo = `/sessions/${currentSessionIdNum}`;
       }
-      if (targetChatId !== activeChatId) {
-        console.log(
-          `[SessionView Effect] Setting activeChatId to ${targetChatId} (was ${activeChatId})`
-        );
+
+      if (targetChatId !== activeChatIdAtomValue) {
         setActiveChatId(targetChatId);
       }
       if (shouldNavigate && navigateTo) {
-        console.log(`[SessionView Effect] Navigating to ${navigateTo}`);
         navigate(navigateTo, { replace: true });
       }
     } else {
+      // If no sessionMetadata yet
       if (isNewSession) {
-        setActiveChatId(null);
+        setActiveChatId(null); // Reset active chat if session changes and no metadata yet
         previousSessionIdRef.current = currentSessionIdNum;
       }
     }
@@ -239,14 +236,14 @@ export function SessionView() {
     sessionIdParam,
     chatIdParam,
     sessionMetadata,
-    activeChatId,
+    activeChatIdAtomValue,
     navigate,
     setActiveSessionId,
     setActiveChatId,
   ]);
 
-  // Cleanup Resizer Listeners (unchanged)
   useEffect(() => {
+    // Cleanup Resizer Listeners
     return () => {
       if (isResizing.current) {
         document.removeEventListener('mousemove', handleMouseMove);
@@ -262,19 +259,31 @@ export function SessionView() {
     if (startChatMutation.isPending) return;
     startChatMutation.mutate();
   }, [startChatMutation]);
+
   const handleOpenEditMetadataModal = () => setIsEditingMetadata(true);
-  const handleOpenLlmModal = () => setIsLlmModalOpen(true);
+
+  // This will now open the new SelectActiveModelModal
+  const handleOpenConfigureLlmModal = () => setIsSelectModelModalOpen(true);
+
   const handleNavigateBack = () => navigate('/');
   const handleMetadataSaveSuccess = (
     updatedMetadata: Partial<SessionMetadata>
   ) => {
-    console.log(
-      '[SessionView] Metadata save successful (via callback):',
-      updatedMetadata
-    );
+    // Toast is handled by EditDetailsModal now
   };
 
-  // --- Render Logic ---
+  // --- Callback for when model is successfully set from SelectActiveModelModal ---
+  const handleModelSuccessfullySet = () => {
+    // In a real app, if there was a pending message to send, you'd trigger it here.
+    // For now, just log and potentially show a toast.
+    console.log(
+      '[SessionView] Model successfully set via SelectActiveModelModal.'
+    );
+    setToast('AI Model configured successfully.');
+    // Input field will re-check status on next submit attempt
+  };
+
+  // --- Render Logic (Mostly Unchanged) ---
   if (isLoadingSessionMeta && !sessionMetadata) {
     return (
       <Flex
@@ -282,7 +291,7 @@ export function SessionView() {
         align="center"
         style={{ height: '100vh', backgroundColor: 'var(--color-panel-solid)' }}
       >
-        <Spinner size="3" />
+        <Spinner size="3" />{' '}
         <Text ml="2" color="gray">
           Loading session data...
         </Text>
@@ -306,23 +315,17 @@ export function SessionView() {
       </Flex>
     );
   }
-  if (ollamaError) {
-    console.error(
-      'Ollama status check failed:',
-      ollamaError
-    ); /* TODO: Maybe show a non-blocking warning */
-  }
+  // Non-blocking error for Ollama status
+  if (ollamaError) console.error('Ollama status check failed:', ollamaError);
 
   const displayTitle = sessionMetadata.sessionName || sessionMetadata.fileName;
   const hasChats = sessionMetadata.chats && sessionMetadata.chats.length > 0;
-  // Use the ID derived from URL param first, then fallback to atom value
   const currentActiveChatId = chatIdParam
     ? parseInt(chatIdParam, 10)
-    : (activeChatId ?? null);
+    : (activeChatIdAtomValue ?? null);
 
   return (
     <Flex flexGrow="1" style={{ height: '100vh', overflow: 'hidden' }}>
-      {/* Sidebar */}
       <Box
         ref={sidebarRef}
         className="relative flex-shrink-0 hidden lg:flex flex-col"
@@ -339,7 +342,6 @@ export function SessionView() {
         />
       </Box>
 
-      {/* Resizer */}
       <Box
         className="hidden lg:block flex-shrink-0 w-1.5 cursor-col-resize group hover:bg-[--gray-a4]"
         onMouseDown={handleMouseDown}
@@ -348,13 +350,11 @@ export function SessionView() {
         <Box className="h-full w-[1px] bg-[--gray-a5] group-hover:bg-[--accent-9] mx-auto" />
       </Box>
 
-      {/* Main Content Area */}
       <Flex
         direction="column"
         flexGrow="1"
         style={{ minWidth: 0, height: '100vh', overflow: 'hidden' }}
       >
-        {/* Header */}
         <Box
           px={{ initial: '5', md: '7', lg: '8' }}
           py="3"
@@ -392,40 +392,42 @@ export function SessionView() {
             <UserThemeDropdown />
           </Flex>
         </Box>
-        {/* Content Body */}
+
         <Box flexGrow="1" style={{ minHeight: 0, overflow: 'hidden' }}>
           <SessionContent
             session={sessionMetadata}
             transcriptContent={transcriptContent}
             onEditDetailsClick={handleOpenEditMetadataModal}
-            activeChatId={currentActiveChatId} // Pass derived activeChatId
+            activeChatId={currentActiveChatId}
             hasChats={hasChats}
             onStartFirstChat={handleStartFirstChat}
             isLoadingSessionMeta={isLoadingSessionMeta || isFetchingSessionMeta}
             sessionMetaError={sessionMetaError}
             isLoadingTranscript={isLoadingTranscript}
             transcriptError={transcriptError}
-            // --- Pass LLM props down ---
             ollamaStatus={ollamaStatus}
             isLoadingOllamaStatus={isLoadingOllamaStatus}
-            onOpenLlmModal={handleOpenLlmModal}
-            // --- End LLM props ---
+            onOpenLlmModal={handleOpenConfigureLlmModal} // Changed to open new modal
           />
         </Box>
       </Flex>
-      {/* Edit Metadata Modal */}
+
       <EditDetailsModal
         isOpen={isEditingMetadata}
         onOpenChange={setIsEditingMetadata}
         session={sessionMetadata}
         onSaveSuccess={handleMetadataSaveSuccess}
       />
-      {/* --- LLM Management Modal --- */}
-      <LlmManagementModal
-        isOpen={isLlmModalOpen}
-        onOpenChange={setIsLlmModalOpen}
+
+      {/* New SelectActiveModelModal */}
+      <SelectActiveModelModal
+        isOpen={isSelectModelModalOpen}
+        onOpenChange={setIsSelectModelModalOpen}
+        onModelSuccessfullySet={handleModelSuccessfullySet}
+        currentActiveModelName={ollamaStatus?.activeModel}
+        currentConfiguredContextSize={ollamaStatus?.configuredContextSize}
       />
-      {/* --- End LLM Modal --- */}
+      {/* LlmManagementModal is now opened from SelectActiveModelModal if needed */}
     </Flex>
   );
 }
