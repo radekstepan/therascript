@@ -26,8 +26,8 @@ import {
 import {
   SESSION_TYPES,
   THERAPY_TYPES,
-  ALLOWED_AUDIO_MIME_TYPES,
-  ALLOWED_AUDIO_EXTENSIONS,
+  ALLOWED_AUDIO_VIDEO_MIME_TYPES, // Use updated constant
+  ALLOWED_AUDIO_VIDEO_EXTENSIONS_DISPLAY, // Use updated constant
 } from '../../constants';
 import { getTodayDateString } from '../../helpers';
 import {
@@ -246,7 +246,8 @@ export function UploadModal({ isOpen }: UploadModalProps) {
   };
 
   const handleFileSelection = (file: File | null) => {
-    if (file && ALLOWED_AUDIO_MIME_TYPES.includes(file.type)) {
+    if (file && ALLOWED_AUDIO_VIDEO_MIME_TYPES.includes(file.type)) {
+      // Use updated constant
       setModalFile(file);
       setFormError(null);
       if (!sessionNameInput)
@@ -255,7 +256,7 @@ export function UploadModal({ isOpen }: UploadModalProps) {
       setModalFile(null);
       if (file)
         setFormError(
-          `Invalid file type. Please upload an audio file (${ALLOWED_AUDIO_EXTENSIONS.join(', ')}).`
+          `Invalid file type. Please upload an audio/video file (${ALLOWED_AUDIO_VIDEO_EXTENSIONS_DISPLAY.join(', ')}).` // Use updated constant
         );
       else setFormError(null);
     }
@@ -288,7 +289,9 @@ export function UploadModal({ isOpen }: UploadModalProps) {
     finalizeMutation.reset();
     let missingFields = [];
     if (!modalFile)
-      missingFields.push(`Audio File (${ALLOWED_AUDIO_EXTENSIONS.join(', ')})`);
+      missingFields.push(
+        `Audio/Video File (${ALLOWED_AUDIO_VIDEO_EXTENSIONS_DISPLAY.join(', ')})`
+      ); // Use updated constant
     if (!clientNameInput.trim()) missingFields.push('Client Name');
     if (!sessionNameInput.trim()) missingFields.push('Session Name');
     if (!sessionDate) missingFields.push('Date');
@@ -314,7 +317,7 @@ export function UploadModal({ isOpen }: UploadModalProps) {
       }
     } else {
       setFormError(
-        `Please select an audio file (${ALLOWED_AUDIO_EXTENSIONS.join(', ')}).`
+        `Please select an audio/video file (${ALLOWED_AUDIO_VIDEO_EXTENSIONS_DISPLAY.join(', ')}).` // Use updated constant
       );
     }
   };
@@ -397,7 +400,7 @@ export function UploadModal({ isOpen }: UploadModalProps) {
         Selected: <Strong>{modalFile.name}</Strong>
       </>
     ) : dragActive ? (
-      `Drop file (${ALLOWED_AUDIO_EXTENSIONS.join(', ')}) here`
+      `Drop file (${ALLOWED_AUDIO_VIDEO_EXTENSIONS_DISPLAY.join(', ')}) here` // Use updated constant
     ) : (
       `Drag & drop or click to choose file`
     );
@@ -415,8 +418,9 @@ export function UploadModal({ isOpen }: UploadModalProps) {
       <Dialog.Content style={{ maxWidth: 550 }}>
         <Dialog.Title>Upload New Session</Dialog.Title>
         <Dialog.Description size="2" mb="4" color="gray">
-          Add session details and upload an audio file (
-          {ALLOWED_AUDIO_EXTENSIONS.join(', ')}) to start analysis.
+          Add session details and upload an audio/video file (
+          {ALLOWED_AUDIO_VIDEO_EXTENSIONS_DISPLAY.join(', ')}) to start
+          analysis. {/* Use updated constant */}
         </Dialog.Description>
         <Flex direction="column" gap="4">
           <label
@@ -430,13 +434,13 @@ export function UploadModal({ isOpen }: UploadModalProps) {
             aria-label={
               modalFile
                 ? `Selected file: ${modalFile.name}. Click to change.`
-                : `Drag and drop audio file (${ALLOWED_AUDIO_EXTENSIONS.join(', ')}) or click here to upload`
+                : `Drag and drop audio/video file (${ALLOWED_AUDIO_VIDEO_EXTENSIONS_DISPLAY.join(', ')}) or click here to upload` // Use updated constant
             }
           >
             <input
               ref={fileInputRef}
               type="file"
-              accept={ALLOWED_AUDIO_MIME_TYPES.join(',')}
+              accept={ALLOWED_AUDIO_VIDEO_MIME_TYPES.join(',')} // Use updated constant
               className="hidden"
               id="audio-upload-input"
               onChange={handleFileChange}

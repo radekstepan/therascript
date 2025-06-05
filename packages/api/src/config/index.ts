@@ -48,14 +48,32 @@ const ollamaModel = getEnvVar('OLLAMA_MODEL', 'llama3');
 const ollamaKeepAlive = getEnvVar('OLLAMA_CHAT_KEEP_ALIVE', '5m');
 const whisperApiURL = getEnvVar('WHISPER_API_URL', 'http://localhost:8000');
 const whisperModel = getEnvVar('WHISPER_MODEL', 'tiny');
+
+// Updated list of allowed MIME types for Whisper, matching the UI constants
 const allowedAudioMimeTypes = [
-  'audio/mpeg',
-  'audio/mp3',
-  'audio/wav',
-  'audio/x-m4a',
-  'audio/ogg',
-  'audio/aac',
+  // Common Audio Formats
+  'audio/mpeg', // .mp3, .mpga
+  'audio/mp3', // .mp3 (often used as an alias)
+  'audio/mp4', // .m4a (often used for this), .mp4 (audio only)
+  'audio/wav', // .wav
+  'audio/x-wav', // .wav (common alternative)
+  'audio/aac', // .aac
+  'audio/ogg', // .ogg (can contain Vorbis, Opus, Speex)
+  'audio/webm', // .webm (audio only)
+  'audio/flac', // .flac
+  'audio/x-m4a', // .m4a (alternative MIME type)
+  'audio/x-flac', // .flac (alternative MIME type, less common)
+
+  // Common Video Formats (Whisper can extract audio from these via FFmpeg)
+  'video/mp4', // .mp4
+  'video/mpeg', // .mpeg, .mpg
+  'video/webm', // .webm
+  'video/quicktime', // .mov
+  'video/x-msvideo', // .avi
+  'video/x-matroska', // .mkv
+  'video/x-flv', // .flv
 ];
+
 const maxUploadFileSize = getEnvVar('UPLOAD_MAX_FILE_SIZE', '100m');
 
 // --- Resolve DB and data paths relative to the *API package* directory ---
@@ -96,7 +114,7 @@ const config = {
     uploadsDir: resolvedUploadsDir,
   },
   upload: {
-    allowedMimeTypes: allowedAudioMimeTypes,
+    allowedMimeTypes: allowedAudioMimeTypes, // Use the updated comprehensive list
     maxFileSize: maxUploadFileSize,
   },
 };
@@ -138,5 +156,8 @@ console.log(`  - Whisper Model: ${config.whisper.model}`);
 console.log(`  - DB Path: ${config.db.sqlitePath}`);
 console.log(`  - Transcripts Path: ${config.db.transcriptsDir}`);
 console.log(`  - Uploads Path: ${config.db.uploadsDir}`);
+console.log(
+  `  - Allowed MIME Types for Upload: ${config.upload.allowedMimeTypes.length} types configured.`
+);
 
 export default config;
