@@ -1,8 +1,4 @@
-// =========================================
-// File: packages/ui/src/types.ts
-// =========================================
 // packages/ui/src/types.ts
-// TODO can we infer these from the API?
 
 export interface TranscriptParagraphData {
   id: number;
@@ -13,37 +9,37 @@ export type StructuredTranscript = TranscriptParagraphData[];
 
 export interface ChatMessage {
   id: number;
-  chatId: number; // Added chatId for consistency
+  chatId: number;
   sender: 'user' | 'ai';
   text: string;
-  timestamp: number; // Added timestamp
-  starred?: boolean; // Changed from optional 0/1 to optional boolean
-  starredName?: string;
-  promptTokens?: number;
-  completionTokens?: number;
+  timestamp: number;
+  starred?: boolean; // Optional boolean
+  starredName?: string | null; // Can be string, null, or undefined (UI preference)
+  promptTokens?: number | null; // Can be number, null, or undefined
+  completionTokens?: number | null; // Can be number, null, or undefined
 }
 
 export interface ChatSession {
   id: number;
-  sessionId: number | null; // Session ID can be null for standalone chats
+  sessionId: number | null;
   timestamp: number;
-  name?: string;
+  name?: string | null; // Can be string, null, or undefined (UI preference)
   messages?: ChatMessage[];
-  tags?: string[] | null; // <-- Added tags for standalone chats
+  tags?: string[] | null; // Can be string array, null, or undefined
 }
 
 export interface SessionMetadata {
   clientName: string;
   sessionName: string;
   date: string; // Expects YYYY-MM-DD format for input, backend stores ISO
-  sessionType: string; // TODO this is an enum
+  sessionType: string;
   therapy: string;
 }
 
 export interface Session extends SessionMetadata {
   id: number;
   fileName: string;
-  audioPath: string | null; // Path/Identifier to the original uploaded audio file
+  audioPath: string | null;
   status: 'pending' | 'transcribing' | 'completed' | 'failed';
   whisperJobId: string | null;
   date: string; // ISO string from backend
@@ -51,11 +47,12 @@ export interface Session extends SessionMetadata {
   chats: Pick<ChatSession, 'id' | 'sessionId' | 'timestamp' | 'name'>[];
 }
 
+// Backend types (can be useful for understanding API responses before mapping)
 export interface BackendChatSession {
   id: number;
-  sessionId: number | null; // Important: can be null
+  sessionId: number | null;
   timestamp: number;
-  name?: string;
+  name?: string | null;
   messages?: BackendChatMessage[];
   tags?: string[] | null;
 }
@@ -66,16 +63,17 @@ export interface BackendChatMessage {
   sender: 'user' | 'ai';
   text: string;
   timestamp: number;
-  promptTokens?: number;
-  completionTokens?: number;
+  promptTokens?: number | null;
+  completionTokens?: number | null;
   starred?: number; // 0 or 1 from DB
   starredName?: string | null;
 }
 
+// Ollama related types
 export interface OllamaModelInfo {
   name: string;
-  modified_at: string;
-  size: number;
+  modified_at: string; // ISO Date string
+  size: number; // in bytes
   digest: string;
   details: {
     format: string;
@@ -85,15 +83,15 @@ export interface OllamaModelInfo {
     quantization_level: string;
   };
   size_vram?: number;
-  expires_at?: string;
-  size_total?: number;
+  expires_at?: string | null; // ISO Date string or null
+  size_total?: number; // Deprecated, use size
 }
 
 export interface OllamaStatus {
   activeModel: string;
-  modelChecked: string;
-  loaded: boolean;
-  details?: OllamaModelInfo;
+  modelChecked: string; // The model whose 'loaded' status is being reported
+  loaded: boolean; // Is modelChecked loaded?
+  details?: OllamaModelInfo | null; // Details of modelChecked if loaded, can be null
   configuredContextSize?: number | null;
 }
 
@@ -110,23 +108,25 @@ export type UIPullJobStatusState =
   | 'failed'
   | 'canceling'
   | 'canceled';
+
 export interface UIPullJobStatus {
   jobId: string;
   modelName: string;
   status: UIPullJobStatusState;
   message: string;
-  progress?: number;
-  error?: string;
-  completedBytes?: number;
-  totalBytes?: number;
+  progress?: number | null; // 0-100
+  error?: string | null;
+  completedBytes?: number | null;
+  totalBytes?: number | null;
 }
 
+// Docker related types
 export interface DockerContainerStatus {
   id: string;
   name: string;
   image: string;
   state: string;
-  status: string;
+  status: string; // Human-readable status
   ports: {
     PrivatePort: number;
     PublicPort?: number;
@@ -135,46 +135,48 @@ export interface DockerContainerStatus {
   }[];
 }
 
-// --- UPDATED: Search Result Type (UI) ---
+// Search related types
 export interface SearchResultItem {
-  id: number;
+  id: number; // Message ID or Paragraph Index
   type: 'chat' | 'transcript';
   chatId: number | null;
   sessionId: number | null;
   sender: 'user' | 'ai' | null;
   timestamp: number;
-  snippet: string; // The text content that matched the search
+  snippet: string;
   rank: number;
-  // Add fields needed for accurate filtering
-  clientName?: string | null; // Added from backend
-  tags?: string[] | null; // Added from backend
+  clientName?: string | null;
+  tags?: string[] | null;
 }
 
 export interface SearchApiResponse {
   query: string;
   results: SearchResultItem[];
 }
-// --- END: Search Result Type ---
 
-// --- ADDED: UI Transcription Status Type ---
+// UI Transcription Status
 export interface UITranscriptionStatus {
   job_id: string;
-  status: 'queued' | 'processing' | 'completed' | 'failed' | 'canceled';
-  progress?: number;
-  error?: string;
-  duration?: number;
+  status:
+    | 'queued'
+    | 'model_loading'
+    | 'model_downloading'
+    | 'processing'
+    | 'transcribing'
+    | 'completed'
+    | 'failed'
+    | 'canceled';
+  progress?: number | null; // Percentage (0-100)
+  error?: string | null;
+  duration?: number | null;
+  message?: string | null;
 }
-// --- END: UI Transcription Status Type ---
 
-// --- ADDED: Standalone Chat List Item Type ---
-// Define type for standalone chat list item (metadata only)
+// Standalone Chat List Item
 export interface StandaloneChatListItem {
   id: number;
-  sessionId: null; // Should always be null
+  sessionId: null; // Should always be null for standalone chats
   timestamp: number;
-  name?: string;
-  tags?: string[] | null; // <-- Added tags
+  name?: string | null; // Can be string, null, or undefined
+  tags?: string[] | null;
 }
-// --- END: Standalone Chat List Item Type ---
-
-// TODO comments should not be removed

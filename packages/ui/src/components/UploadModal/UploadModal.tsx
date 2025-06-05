@@ -34,8 +34,12 @@ import {
   uploadSession,
   fetchTranscriptionStatus,
   finalizeSession,
-} from '../../api/api'; // <-- Use barrel file
-import type { SessionMetadata, UITranscriptionStatus } from '../../types'; // <-- Import UITranscriptionStatus from types
+} from '../../api/api';
+import type {
+  SessionMetadata,
+  UITranscriptionStatus,
+  Session,
+} from '../../types'; // Added Session type
 import { closeUploadModalAtom } from '../../store';
 import { cn } from '../../utils';
 
@@ -61,13 +65,10 @@ export function UploadModal({ isOpen }: UploadModalProps) {
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
   const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
 
-  // Ref for auto-focus
   const sessionNameRef = useRef<HTMLInputElement>(null);
 
-  // Auto-focus effect
   useEffect(() => {
     if (isOpen && !currentJobId) {
-      // Only focus if open and not already processing
       const timer = setTimeout(() => {
         sessionNameRef.current?.focus();
       }, 50);
@@ -75,7 +76,6 @@ export function UploadModal({ isOpen }: UploadModalProps) {
     }
   }, [isOpen, currentJobId]);
 
-  // --- Mutations and Queries (logic unchanged) ---
   const uploadMutation = useMutation({
     mutationFn: ({
       file,
@@ -92,13 +92,14 @@ export function UploadModal({ isOpen }: UploadModalProps) {
       setCurrentJobId(data.jobId);
       setFormError(null);
     },
-    onError: (error) => {
+    onError: (error: Error) => {
       console.error('Upload failed:', error);
       setFormError(`Upload failed: ${error.message}`);
       setCurrentJobId(null);
       setCurrentSessionId(null);
     },
   });
+
   const { data: transcriptionStatus, error: pollingError } = useQuery<
     UITranscriptionStatus,
     Error
@@ -119,34 +120,46 @@ export function UploadModal({ isOpen }: UploadModalProps) {
     },
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: false,
-    retry: (c, e) => (e.message.includes('not found') ? false : c < 3),
+    retry: (failureCount: number, error: Error) => {
+      // Explicitly type error
+      if (
+        error.message.includes('not found') ||
+        error.message.includes('404')
+      ) {
+        return false; // Don't retry if job not found
+      }
+      return failureCount < 3; // Default retry for other errors
+    },
   });
+
   const finalizeMutation = useMutation({
     mutationFn: () => {
       if (!currentSessionId) throw new Error('No Session ID to finalize');
       return finalizeSession(currentSessionId);
     },
-    onSuccess: (finalizedSession) => {
+    onSuccess: (finalizedSession: Session) => {
+      // Type for finalizedSession
       console.log(
         `[UploadModal] Finalization successful for SessionID: ${finalizedSession.id}`
       );
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
-      const f = finalizedSession.chats?.[0]?.id;
-      if (f) {
-        navigate(`/sessions/${finalizedSession.id}/chats/${f}`);
+      const firstChatId = finalizedSession.chats?.[0]?.id;
+      if (firstChatId) {
+        navigate(`/sessions/${finalizedSession.id}/chats/${firstChatId}`);
       } else {
         navigate(`/sessions/${finalizedSession.id}`);
       }
       closeModal();
-      resetModal(); // Reset after navigation and closing
+      resetModal();
     },
-    onError: (error) => {
+    onError: (error: Error) => {
       console.error('Finalization failed:', error);
       setFormError(
         `Failed to finalize session: ${error.message}. Please check server logs.`
       );
     },
   });
+
   useEffect(() => {
     if (
       transcriptionStatus?.status === 'completed' &&
@@ -160,33 +173,43 @@ export function UploadModal({ isOpen }: UploadModalProps) {
     }
   }, [
     transcriptionStatus,
-    currentJobId,
+    currentJobId, // Keep for logging consistency
     finalizeMutation,
-    finalizeMutation.isPending,
-    finalizeMutation.isSuccess,
   ]);
 
-  // --- Combined State (unchanged) ---
   const isUploading = uploadMutation.isPending;
   const isPolling = !!currentJobId && !transcriptionStatus && !pollingError;
-  const isProcessing =
-    transcriptionStatus?.status === 'queued' ||
-    transcriptionStatus?.status === 'processing';
+  const isModelLoadingOrDownloading =
+    transcriptionStatus?.status === 'model_loading' ||
+    transcriptionStatus?.status === 'model_downloading';
+  const isProcessingTranscription =
+    transcriptionStatus?.status === 'processing' ||
+    transcriptionStatus?.status === 'transcribing';
   const isFinalizing = finalizeMutation.isPending;
+
   const hasFailed =
+    uploadMutation.isError ||
     transcriptionStatus?.status === 'failed' ||
     transcriptionStatus?.status === 'canceled' ||
     !!pollingError ||
     finalizeMutation.isError;
+
   const overallIsLoading =
-    isUploading || isPolling || isProcessing || isFinalizing;
+    isUploading ||
+    isPolling ||
+    isModelLoadingOrDownloading ||
+    isProcessingTranscription ||
+    isFinalizing;
+
   const overallError =
     formError ||
+    (uploadMutation.isError ? uploadMutation.error.message : null) ||
     pollingError?.message ||
-    transcriptionStatus?.error ||
-    finalizeMutation.error?.message;
+    (transcriptionStatus?.status === 'failed' && transcriptionStatus.error
+      ? transcriptionStatus.error
+      : null) ||
+    (finalizeMutation.isError ? finalizeMutation.error.message : null);
 
-  // --- Event Handlers ---
   const resetModal = useCallback(() => {
     setModalFile(null);
     setClientNameInput('');
@@ -196,16 +219,21 @@ export function UploadModal({ isOpen }: UploadModalProps) {
     setTherapyInput(THERAPY_TYPES[0]);
     setDragActive(false);
     setFormError(null);
+
+    const L_currentJobId = currentJobId; // Capture before resetting
     setCurrentJobId(null);
     setCurrentSessionId(null);
+
     if (fileInputRef.current) fileInputRef.current.value = '';
     uploadMutation.reset();
     finalizeMutation.reset();
-    if (currentJobId)
+    if (L_currentJobId) {
+      // Use captured value for query removal
       queryClient.removeQueries({
-        queryKey: ['transcriptionStatus', currentJobId],
+        queryKey: ['transcriptionStatus', L_currentJobId],
       });
-  }, [uploadMutation, finalizeMutation, queryClient, currentJobId]); // Added currentJobId dependency
+    }
+  }, [uploadMutation, finalizeMutation, queryClient, currentJobId]); // currentJobId is needed to capture its value
 
   const handleDrag = (
     e: React.DragEvent<HTMLDivElement | HTMLLabelElement>
@@ -302,7 +330,6 @@ export function UploadModal({ isOpen }: UploadModalProps) {
     }
   };
 
-  // --- Styling and Progress Text (unchanged) ---
   const dropAreaClasses = cn(
     'rounded-md p-6 text-center transition-colors duration-200 ease-in-out',
     'flex flex-col items-center justify-center space-y-2 min-h-[10rem]',
@@ -318,17 +345,53 @@ export function UploadModal({ isOpen }: UploadModalProps) {
           ? 'border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500'
           : ''
   );
+
   const getProgressText = () => {
     if (isUploading) return 'Uploading file...';
-    if (isPolling) return 'Waiting for transcription to start...';
-    if (transcriptionStatus?.status === 'queued')
-      return 'Transcription queued...';
-    if (transcriptionStatus?.status === 'processing')
-      return `Transcribing (${transcriptionStatus.progress?.toFixed(0) ?? 0}%)`;
+
+    if (transcriptionStatus) {
+      const { status, progress, message: jobMessage } = transcriptionStatus;
+      const progressPercent = progress?.toFixed(0) ?? '0';
+
+      if (
+        jobMessage &&
+        (status === 'model_loading' ||
+          status === 'model_downloading' ||
+          status === 'processing' ||
+          status === 'transcribing')
+      ) {
+        return jobMessage;
+      }
+      switch (status) {
+        case 'queued':
+          return jobMessage || 'Transcription queued...';
+        case 'model_loading':
+          return jobMessage || 'Loading transcription model...';
+        case 'model_downloading':
+          return jobMessage || `Downloading model (${progressPercent}%)...`;
+        case 'processing':
+          return (
+            jobMessage || `Preparing to transcribe (${progressPercent}%)...`
+          );
+        case 'transcribing':
+          return jobMessage || `Transcribing (${progressPercent}%)...`;
+        case 'completed':
+          if (!isFinalizing) return jobMessage || 'Transcription Complete!';
+          break;
+        case 'failed':
+        case 'canceled':
+          return (
+            jobMessage ||
+            transcriptionStatus.error ||
+            'Processing Failed/Canceled'
+          );
+      }
+    }
+    if (isPolling && !transcriptionStatus)
+      return 'Waiting for transcription to start...';
     if (isFinalizing) return 'Finalizing session...';
-    if (hasFailed) return 'Processing Failed';
-    if (transcriptionStatus?.status === 'completed' && !isFinalizing)
-      return 'Transcription Complete!';
+    if (hasFailed) return overallError || 'Processing Failed';
+
     return modalFile ? (
       <>
         Selected: <Strong>{modalFile.name}</Strong>
@@ -340,7 +403,6 @@ export function UploadModal({ isOpen }: UploadModalProps) {
     );
   };
 
-  // Handle Enter key press in input fields to trigger save/upload
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !overallIsLoading && !currentJobId) {
       e.preventDefault();
@@ -357,7 +419,6 @@ export function UploadModal({ isOpen }: UploadModalProps) {
           {ALLOWED_AUDIO_EXTENSIONS.join(', ')}) to start analysis.
         </Dialog.Description>
         <Flex direction="column" gap="4">
-          {/* Upload Area */}
           <label
             htmlFor="audio-upload-input"
             className={dropAreaClasses}
@@ -382,7 +443,6 @@ export function UploadModal({ isOpen }: UploadModalProps) {
               disabled={overallIsLoading}
             />
             <Flex direction="column" align="center" gap="1">
-              {/* Icon */}
               {hasFailed ? (
                 <ExclamationTriangleIcon
                   width="32"
@@ -408,24 +468,19 @@ export function UploadModal({ isOpen }: UploadModalProps) {
                   )}
                 />
               )}
-              {/* Progress Text */}
               <Text size="2" color="gray" mt="2">
                 {getProgressText()}
               </Text>
-              {/* Progress Bar */}
-              {isProcessing && transcriptionStatus?.progress !== undefined && (
-                <Box width="100%" mt="2">
-                  {' '}
-                  <Progress
-                    value={transcriptionStatus.progress}
-                    size="2"
-                  />{' '}
-                </Box>
-              )}
-              {/* Remove Button */}
+              {(isProcessingTranscription || isModelLoadingOrDownloading) &&
+                transcriptionStatus?.progress !== null && // Check for null explicitly
+                transcriptionStatus?.progress !== undefined &&
+                transcriptionStatus.status !== 'queued' && (
+                  <Box width="100%" mt="2">
+                    <Progress value={transcriptionStatus.progress} size="2" />
+                  </Box>
+                )}
               {modalFile && !overallIsLoading && !hasFailed && (
                 <Box mt="3" onClick={(e) => e.stopPropagation()}>
-                  {' '}
                   <Button
                     type="button"
                     variant="ghost"
@@ -445,21 +500,20 @@ export function UploadModal({ isOpen }: UploadModalProps) {
             </Flex>
           </label>
 
-          {/* Metadata Fields */}
           <Flex direction="column" gap="3">
             <label>
               <Text as="div" size="2" mb="1" weight="medium">
                 Session Name / Title
               </Text>
               <TextField.Root
-                ref={sessionNameRef} // Attach ref for focus
+                ref={sessionNameRef}
                 size="2"
                 placeholder="e.g., Weekly Check-in"
                 value={sessionNameInput}
                 onChange={(e) => setSessionNameInput(e.target.value)}
                 disabled={overallIsLoading}
                 required
-                onKeyDown={handleKeyDown} // Add keydown handler
+                onKeyDown={handleKeyDown}
               />
             </label>
             <Box className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -474,7 +528,7 @@ export function UploadModal({ isOpen }: UploadModalProps) {
                   onChange={(e) => setClientNameInput(e.target.value)}
                   disabled={overallIsLoading}
                   required
-                  onKeyDown={handleKeyDown} // Add keydown handler
+                  onKeyDown={handleKeyDown}
                 />
               </label>
               <label>
@@ -487,11 +541,12 @@ export function UploadModal({ isOpen }: UploadModalProps) {
                   onChange={(e) => setSessionDate(e.target.value)}
                   disabled={overallIsLoading}
                   required
-                  onKeyDown={handleKeyDown} // Add keydown handler
+                  onKeyDown={handleKeyDown}
                   className={cn(
                     'flex w-full rounded-md border border-[--gray-a7] bg-[--gray-1] focus:border-[--accent-8] focus:shadow-[0_0_0_1px_var(--accent-8)]',
                     'h-8 px-2 py-1 text-sm text-[--gray-12] placeholder:text-[--gray-a9] focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50'
                   )}
+                  style={{ lineHeight: 'normal' }}
                 />
               </label>
             </Box>
@@ -547,18 +602,20 @@ export function UploadModal({ isOpen }: UploadModalProps) {
             </Box>
           </Flex>
 
-          {/* Error display */}
           {overallError && (
             <Callout.Root color="red" role="alert" size="1" mt="2">
               <Callout.Icon>
                 <InfoCircledIcon />
               </Callout.Icon>
-              <Callout.Text>{overallError}</Callout.Text>
+              <Callout.Text>
+                {typeof overallError === 'string'
+                  ? overallError
+                  : 'An unexpected error occurred.'}
+              </Callout.Text>
             </Callout.Root>
           )}
         </Flex>
 
-        {/* Footer buttons */}
         <Flex gap="3" mt="5" justify="end">
           <Button
             type="button"
@@ -570,7 +627,7 @@ export function UploadModal({ isOpen }: UploadModalProps) {
             <Cross2Icon />{' '}
             {overallIsLoading && !hasFailed ? 'Processing...' : 'Cancel'}
           </Button>
-          {!currentJobId && (
+          {!currentJobId && !uploadMutation.isSuccess && (
             <Button
               type="button"
               onClick={handleStartClick}
