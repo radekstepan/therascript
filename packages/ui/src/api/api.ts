@@ -16,3 +16,5 @@ export * from './docker';
 export * from './search';
 // Re-export all functions from meta.ts (Health checks, Starred message fetch)
 export * from './meta';
+// Re-export all functions from system.ts (Application shutdown)
+export * from './system';

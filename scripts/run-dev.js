@@ -3,40 +3,51 @@
 //          Also handles graceful shutdown by stopping related Docker containers.
 
 const { spawn } = require('child_process'); // For running `concurrently`
-const { exec } = require('node:child_process'); // For running docker commands during cleanup
+const { exec } = require('node:child_process'); // For running docker commands and port killing
 const util = require('node:util'); // For promisify
+const http = require('node:http'); // For the shutdown service
 
 // Promisify exec for async/await usage with docker commands
 const execPromise = util.promisify(exec);
 
 // --- Configuration: Docker Container Names ---
-// These names MUST match the `container_name` defined in the docker-compose files.
-const OLLAMA_CONTAINER_NAME = 'ollama_server_managed'; // From packages/ollama/docker-compose.yml
-const WHISPER_CONTAINER_NAME = 'therascript_whisper_service'; // From root docker-compose.yml
+const OLLAMA_CONTAINER_NAME = 'ollama_server_managed';
+const WHISPER_CONTAINER_NAME = 'therascript_whisper_service';
 // --- End Configuration ---
+
+// --- UI Port for Cleanup ---
+// Read CORS_ORIGIN from environment. If not set, default (less ideal but provides a fallback).
+const UI_ORIGIN_FROM_ENV = process.env.CORS_ORIGIN || 'http://localhost:3002';
+let UI_PORT;
+try {
+  UI_PORT = new URL(UI_ORIGIN_FROM_ENV).port || 3002;
+} catch (e) {
+  console.warn(
+    `[RunDev] Could not parse CORS_ORIGIN "${UI_ORIGIN_FROM_ENV}" for port. Defaulting UI_PORT to 3002.`
+  );
+  UI_PORT = 3002;
+}
+console.log(
+  `[RunDev] Using UI_ORIGIN: ${UI_ORIGIN_FROM_ENV} and derived UI_PORT: ${UI_PORT} for cleanup/CORS.`
+);
+// --- End UI Port ---
+
+// --- Shutdown Service Configuration ---
+const SHUTDOWN_PORT = 9999;
+let shutdownHttpServer = null;
+// --- End Shutdown Service Configuration ---
 
 console.log('[RunDev] Starting development environment...');
 
 // --- Docker Cleanup Function ---
-/**
- * Attempts to gracefully stop and then remove a specified Docker container.
- * Handles common errors like the container not existing or already being stopped.
- *
- * @param {string} containerName - The name of the container to stop and remove.
- */
 async function stopAndRemoveContainer(containerName) {
   console.log(
     `[RunDev Cleanup] Attempting to stop and remove container: ${containerName}...`
   );
-
-  // 1. Attempt to stop the container
   try {
-    console.log(`[RunDev Cleanup] Sending stop command to ${containerName}...`);
-    // Use `docker stop` with a timeout (e.g., 5 seconds) for graceful shutdown
     await execPromise(`docker stop -t 5 ${containerName}`);
     console.log(`[RunDev Cleanup] Container ${containerName} stopped.`);
   } catch (error) {
-    // Check stderr/message for common errors indicating the container is already stopped or gone
     const errMsg =
       error.stderr?.toLowerCase() || error.message?.toLowerCase() || '';
     if (
@@ -47,22 +58,16 @@ async function stopAndRemoveContainer(containerName) {
         `[RunDev Cleanup] Container ${containerName} was not running or already stopped.`
       );
     } else {
-      // Log other errors but proceed to removal attempt
       console.error(
         `[RunDev Cleanup] Failed to stop container ${containerName}:`,
         error.stderr || error.message
       );
     }
   }
-
-  // 2. Attempt to remove the container (whether stop succeeded or failed)
   try {
-    console.log(`[RunDev Cleanup] Removing container ${containerName}...`);
-    // Use `docker rm`
     await execPromise(`docker rm ${containerName}`);
     console.log(`[RunDev Cleanup] Container ${containerName} removed.`);
   } catch (error) {
-    // Check stderr/message for common errors indicating the container is already removed
     const errMsg =
       error.stderr?.toLowerCase() || error.message?.toLowerCase() || '';
     if (errMsg.includes('no such container')) {
@@ -70,7 +75,6 @@ async function stopAndRemoveContainer(containerName) {
         `[RunDev Cleanup] Container ${containerName} already removed or never existed.`
       );
     } else {
-      // Log other removal errors
       console.error(
         `[RunDev Cleanup] Error removing ${containerName}:`,
         error.stderr || error.message
@@ -79,13 +83,8 @@ async function stopAndRemoveContainer(containerName) {
   }
 }
 
-/**
- * Runs the cleanup process for all relevant Docker containers.
- * Calls `stopAndRemoveContainer` for each container.
- */
 async function cleanupDocker() {
   console.log('[RunDev Cleanup] Running Docker container cleanup...');
-  // Run cleanup tasks in parallel for speed
   await Promise.allSettled([
     stopAndRemoveContainer(OLLAMA_CONTAINER_NAME),
     stopAndRemoveContainer(WHISPER_CONTAINER_NAME),
@@ -94,106 +93,211 @@ async function cleanupDocker() {
 }
 // --- End Docker Cleanup Function ---
 
-// --- Concurrently Command Setup ---
-// Define the arguments for the `concurrently` command.
-const concurrentlyArgs = [
-  'concurrently', // The command itself
-  '--kill-others-on-fail', // Attempt to kill other processes if one fails
-  // '--handle-input', // Optionally handle input across processes (usually not needed here)
-  '--names',
-  'API,UI,WHISPER', // Names for prefixing output lines
-  '--prefix-colors',
-  'bgBlue.bold,bgMagenta.bold,bgCyan.bold', // Colors for prefixes
+// --- UI Process Cleanup Function (Improved) ---
+async function cleanupUiProcess(port) {
+  console.log(
+    `[RunDev Cleanup] Attempting to stop UI process on port ${port}...`
+  );
+  try {
+    if (process.platform === 'win32') {
+      console.warn(
+        `[RunDev Cleanup] Automatic UI process cleanup on port ${port} for Windows is not fully implemented. Please manually stop if needed.`
+      );
+      return;
+    } else {
+      // For Linux/macOS
+      const findPidCmd = `lsof -ti tcp:${port}`;
+      let pidsToKill = '';
+      try {
+        const { stdout } = await execPromise(findPidCmd);
+        pidsToKill = stdout.trim();
+      } catch (lsofError) {
+        console.log(
+          `[RunDev Cleanup] No process found by lsof on port ${port}. Assuming stopped.`
+        );
+        return;
+      }
 
-  // Commands to run concurrently. MUST be quoted correctly for the shell.
-  // These correspond to scripts defined in the root package.json.
-  '"yarn:dev:api"', // Starts the API server in dev mode (with watch)
-  '"yarn:dev:ui"', // Starts the UI dev server (webpack serve)
-  '"yarn:start:whisper"', // Starts the Whisper service manager script
+      if (pidsToKill) {
+        const killCmd = `kill -9 ${pidsToKill.split('\n').join(' ')}`;
+        console.log(
+          `[RunDev Cleanup] Found PIDs ${pidsToKill.replace('\n', ' ')} for port ${port}. Executing: ${killCmd}`
+        );
+        await execPromise(killCmd);
+        console.log(
+          `[RunDev Cleanup] UI process(es) on port ${port} terminated.`
+        );
+      } else {
+        console.log(
+          `[RunDev Cleanup] No UI process found listening on port ${port}.`
+        );
+      }
+    }
+  } catch (error) {
+    console.warn(
+      `[RunDev Cleanup] Error trying to stop UI process on port ${port}: ${error.message}`
+    );
+  }
+}
+// --- End UI Process Cleanup Function ---
+
+// --- Concurrently Command Setup ---
+const concurrentlyArgs = [
+  'concurrently',
+  '--kill-others-on-fail',
+  '--names',
+  'API,UI,WHISPER',
+  '--prefix-colors',
+  'bgBlue.bold,bgMagenta.bold,bgCyan.bold',
+  '"yarn dev:api"',
+  '"yarn dev:ui"',
+  '"yarn start:whisper"',
 ];
 // --- End Concurrently Command Setup ---
 
 // --- Spawn Concurrently Process ---
-// Spawn the `concurrently` command.
-// Use `{ shell: true }` for better cross-platform compatibility (handles path resolution, quoting).
 const devProcess = spawn(concurrentlyArgs[0], concurrentlyArgs.slice(1), {
-  stdio: 'inherit', // Pass stdin, stdout, stderr directly to/from the parent process
+  stdio: 'inherit',
   shell: true,
+  detached: process.platform !== 'win32',
 });
 // --- End Spawn Concurrently Process ---
 
 // --- Process Event Handling ---
 devProcess.on('spawn', () => {
-  // Logged when the `concurrently` process starts successfully.
   console.log('[RunDev] Concurrently process spawned successfully.');
 });
 
 devProcess.on('error', (error) => {
-  // Log errors related to *spawning* `concurrently` itself (e.g., command not found).
   console.error('[RunDev] Error spawning concurrently:', error);
-  // Attempt cleanup and exit with error code if spawning fails.
-  cleanupDocker().finally(() => process.exit(1));
+  cleanupDocker()
+    .then(() => cleanupUiProcess(UI_PORT))
+    .finally(() => process.exit(1));
 });
 
+let isShuttingDown = false;
+
 devProcess.on('close', (code, signal) => {
-  // Logged when the `concurrently` process exits.
   console.log(
     `[RunDev] Concurrently process exited with code ${code}, signal ${signal}.`
   );
-  // If the exit was unexpected (not triggered by our shutdown handler), run cleanup.
   if (!isShuttingDown) {
     console.log(
       '[RunDev] Concurrently closed unexpectedly, running cleanup...'
     );
-    cleanupDocker().finally(() => {
-      // Exit this script with the exit code from `concurrently`.
-      process.exit(code ?? 1);
-    });
+    cleanupDocker()
+      .then(() => cleanupUiProcess(UI_PORT))
+      .finally(() => {
+        process.exit(code ?? 1);
+      });
   }
 });
 // --- End Process Event Handling ---
 
-// --- Graceful Shutdown Handling for this Wrapper Script ---
-// Flag to prevent duplicate shutdown logic execution.
-let isShuttingDown = false;
-
-/**
- * Handles shutdown signals (SIGINT, SIGTERM) for the run-dev.js script.
- * Attempts to kill the `concurrently` process and then cleans up Docker containers.
- * @param {string} signal - The signal received (e.g., 'SIGINT', 'SIGTERM').
- */
-async function handleShutdown(signal) {
-  if (isShuttingDown) return; // Prevent re-entry
+// --- Graceful Shutdown Handling ---
+async function handleShutdown(reason) {
+  if (isShuttingDown) return;
   isShuttingDown = true;
-  console.log(`\n[RunDev] Received ${signal}. Initiating shutdown...`);
+  console.log(`\n[RunDev] Received ${reason}. Initiating shutdown...`);
 
-  // 1. Terminate the `concurrently` process.
-  //    We send SIGKILL because `concurrently` might not reliably pass SIGTERM/SIGINT
-  //    down to all its child processes (especially those started via yarn/nodemon).
-  //    SIGKILL provides a more forceful termination.
-  console.log('[RunDev] Terminating concurrently process...');
+  if (shutdownHttpServer) {
+    console.log('[RunDev] Closing shutdown HTTP service...');
+    await new Promise((resolve) => shutdownHttpServer.close(resolve));
+    console.log('[RunDev] Shutdown HTTP service closed.');
+    shutdownHttpServer = null;
+  }
+
+  console.log('[RunDev] Terminating concurrently process and its group...');
   if (devProcess && !devProcess.killed) {
-    const killed = devProcess.kill('SIGKILL'); // Use SIGKILL
-    console.log(
-      `[RunDev] Kill signal sent to concurrently process (PID: ${devProcess.pid}). Success: ${killed}`
-    );
+    try {
+      if (process.platform === 'win32') {
+        await execPromise(`taskkill /PID ${devProcess.pid} /T /F`);
+        console.log(
+          `[RunDev] Sent taskkill to concurrently process (PID: ${devProcess.pid}) and its children.`
+        );
+      } else {
+        process.kill(-devProcess.pid, 'SIGKILL');
+        console.log(
+          `[RunDev] Kill signal sent to concurrently process group (PGID: ${devProcess.pid}).`
+        );
+      }
+    } catch (killError) {
+      console.warn(
+        `[RunDev] Error sending kill signal to concurrently process/group: ${killError.message}`
+      );
+      if (!devProcess.killed) devProcess.kill('SIGKILL');
+    }
   } else {
     console.log('[RunDev] Concurrently process already exited or not running.');
   }
 
-  // 2. Wait briefly for processes to terminate after sending kill signal.
-  //    Adjust delay if needed.
-  await new Promise((resolve) => setTimeout(resolve, 1500));
+  await new Promise((resolve) => setTimeout(resolve, 2000));
 
-  // 3. Run Docker cleanup *after* attempting to kill the child processes.
   await cleanupDocker();
+  await cleanupUiProcess(UI_PORT);
 
   console.log('[RunDev] Shutdown complete. Exiting wrapper script.');
-  // Exit the wrapper script cleanly.
   process.exit(0);
 }
 
-// Register signal handlers
-process.on('SIGINT', () => handleShutdown('SIGINT')); // Ctrl+C
-process.on('SIGTERM', () => handleShutdown('SIGTERM')); // kill command
+process.on('SIGINT', () => handleShutdown('SIGINT'));
+process.on('SIGTERM', () => handleShutdown('SIGTERM'));
 // --- End Graceful Shutdown Handling ---
+
+// --- Shutdown Service (with CORS from env) ---
+function createShutdownService(shutdownHandlerCallback) {
+  const server = http.createServer((req, res) => {
+    // Set CORS headers for all responses from this server
+    res.setHeader('Access-Control-Allow-Origin', UI_ORIGIN_FROM_ENV); // Use value from environment
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    if (req.method === 'OPTIONS') {
+      // Handle preflight request
+      res.writeHead(204); // No Content
+      res.end();
+      return;
+    }
+
+    if (req.method === 'POST' && req.url === '/shutdown') {
+      console.log(
+        `[RunDev ShutdownService] Received /shutdown request. Initiating shutdown...`
+      );
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({ message: 'Shutdown initiated via API for dev server' })
+      );
+      setTimeout(() => {
+        shutdownHandlerCallback('API_REQUEST');
+      }, 100);
+    } else {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Not Found');
+    }
+  });
+
+  server.listen(SHUTDOWN_PORT, 'localhost', () => {
+    console.log(
+      `[RunDev ShutdownService] Listening on http://localhost:${SHUTDOWN_PORT}/shutdown (allowing origin: ${UI_ORIGIN_FROM_ENV})`
+    );
+  });
+
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(
+        `[RunDev ShutdownService] Port ${SHUTDOWN_PORT} is already in use.`
+      );
+    } else {
+      console.error('[RunDev ShutdownService] Error:', err);
+    }
+  });
+  return server;
+}
+
+if (devProcess && !devProcess.killed) {
+  shutdownHttpServer = createShutdownService(handleShutdown);
+} else {
+  console.warn(
+    '[RunDev] Concurrently process failed to start or exited prematurely. Shutdown service not started.'
+  );
+}
