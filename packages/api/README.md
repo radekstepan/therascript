@@ -13,7 +13,7 @@ This package contains the backend API server for the Therascript application, bu
     *   Manage LLMs (list, pull, delete, set active model, unload).
 *   Provides Full-Text Search (FTS5) capabilities across chat messages and transcript paragraphs.
 *   Exposes a RESTful API for the `ui` frontend.
-*   Includes API endpoints for managing Docker container status (`docker` service) and triggering system shutdown (`system` service) via helper services.
+*   Includes API endpoints for managing Docker container status (`docker` service).
 *   Uses a structured error handling approach (`ApiError` subclasses).
 *   Provides API documentation via Swagger UI (`@elysiajs/swagger`).
 *   Supports a "mock" mode (`APP_MODE=mock` in `.env`) for frontend development without running real Ollama/Whisper services.
@@ -99,6 +99,5 @@ Once the server is running, API documentation is available via Swagger UI at: `h
 *   `POST /api/ollama/pull-model`: Start downloading an Ollama model.
 *   `GET /api/ollama/pull-status/:jobId`: Check download status.
 *   `GET /api/docker/status`: Get status of project Docker containers.
-*   `POST /api/system/shutdown`: Initiate system shutdown (requires sudo setup).
 
 Refer to the Swagger UI for a complete and detailed list of endpoints, parameters, and schemas.

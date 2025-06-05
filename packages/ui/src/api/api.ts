@@ -12,8 +12,6 @@ export * from './ollama';
 export * from './transcription';
 // Re-export all functions from docker.ts (Docker container status)
 export * from './docker';
-// Re-export all functions from system.ts (System actions like shutdown)
-export * from './system';
 // Re-export all functions from search.ts (Full-text search)
 export * from './search';
 // Re-export all functions from meta.ts (Health checks, Starred message fetch)

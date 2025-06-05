@@ -13,7 +13,6 @@
     "build:ui": "lerna run build --scope=@therascript/ui",
     "build:ollama": "lerna run build --scope=@therascript/ollama",
     "build:whisper": "lerna run build --scope=@therascript/whisper",
-    "build:system": "lerna run build --scope=@therascript/system",
     "build:docker-utils": "lerna run build --scope=@therascript/docker-utils",
     "dev": "node ./scripts/run-dev.js",
     "dev:ui": "lerna run dev --scope=@therascript/ui",
@@ -28,12 +27,7 @@
     "format": "yarn prettier --write .",
     "preload:db": "yarn build:api && node --env-file=.env.api.dev packages/api/dist/preloadDb.js",
     "clean": "lerna run clean --parallel && rm -rf node_modules",
-    "clean:dist": "lerna run clean --parallel",
-    "_node_path_linux": "echo /home/radek/.nvm/versions/node/v23.10.0/bin/node",
-    "app:start:wrapper": "yarn build:system && $(yarn run -s _node_path_linux) packages/system/dist/startAppWrapper.js",
-    "autostart:setup": "yarn build:system && sudo $(yarn run -s _node_path_linux) packages/system/dist/setupAutostart.js",
-    "autostart:remove": "yarn build:system && sudo $(yarn run -s _node_path_linux) packages/system/dist/removeAutostartScript.js",
-    "autostart:status": "yarn build:system && sudo $(yarn run -s _node_path_linux) packages/system/dist/checkAutostartStatus.js"
+    "clean:dist": "lerna run clean --parallel"
   },
   "keywords": [],
   "author": "",

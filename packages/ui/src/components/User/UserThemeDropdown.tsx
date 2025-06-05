@@ -1,64 +1,36 @@
 // packages/ui/src/components/User/UserThemeDropdown.tsx
 import React, { useState } from 'react';
-import { useAtom } from 'jotai';
-import {
-  Button,
-  DropdownMenu,
-  Text,
-  Flex,
-  Switch,
-  AlertDialog,
-  Spinner,
-} from '@radix-ui/themes'; // Import AlertDialog, Spinner
+import { useAtom, useSetAtom } from 'jotai';
+import { Button, DropdownMenu, Text, Flex, Switch } from '@radix-ui/themes';
 import {
   SunIcon,
   MoonIcon,
   DesktopIcon,
   ExitIcon,
   PersonIcon,
-  ChatBubbleIcon, // Optional: Use a different icon for markdown setting
-  CubeIcon, // <-- Added icon for Docker status
-  ExclamationTriangleIcon, // For delete warning
+  ChatBubbleIcon,
+  CubeIcon,
 } from '@radix-ui/react-icons';
 import {
   themeAtom,
   renderMarkdownAtom,
   Theme as ThemeType,
   toastMessageAtom,
-} from '../../store'; // Import renderMarkdownAtom, toastMessageAtom
+} from '../../store';
 import { DockerStatusModal } from './DockerStatusModal';
-import { triggerShutdown } from '../../api/api'; // Import the new API call
-import { useSetAtom } from 'jotai'; // Import useSetAtom for toast
 
 export function UserThemeDropdown() {
   const [theme, setTheme] = useAtom(themeAtom);
   const [renderMarkdown, setRenderMarkdown] = useAtom(renderMarkdownAtom);
   const [isDockerModalOpen, setIsDockerModalOpen] = useState(false);
-  const [isShutdownConfirmOpen, setIsShutdownConfirmOpen] = useState(false); // State for shutdown confirm
-  const [isShuttingDown, setIsShuttingDown] = useState(false); // Loading state for shutdown
   const setToast = useSetAtom(toastMessageAtom);
 
-  const handleShutdownRequest = () => {
-    setIsShutdownConfirmOpen(true); // Open confirmation dialog
+  const handleNewShutdownLinkClick = () => {
+    setToast('Waiting for app ports to all close...');
+    // For now, this link does nothing else.
+    console.log('[UI] "Shutdown" link clicked. Showing placeholder message.');
   };
 
-  const handleConfirmShutdown = async () => {
-    setIsShuttingDown(true);
-    try {
-      const result = await triggerShutdown();
-      setToast(result.message || 'Shutdown initiated.');
-      // Optionally disable UI further or show a persistent "Shutting down..." message
-      // The system should shut down shortly after this.
-      setIsShutdownConfirmOpen(false); // Close confirm dialog
-      // No need to setIsShuttingDown(false) as the app/system will likely terminate
-    } catch (error: any) {
-      setToast(`Error: ${error.message || 'Failed to initiate shutdown.'}`);
-      setIsShuttingDown(false); // Allow retry if it failed
-      setIsShutdownConfirmOpen(false);
-    }
-  };
-
-  // Prevent dropdown from closing when clicking the switch
   const handleMarkdownSwitchClick = (e: React.MouseEvent) => {
     e.preventDefault();
     setRenderMarkdown(!renderMarkdown);
@@ -66,8 +38,6 @@ export function UserThemeDropdown() {
 
   return (
     <>
-      {' '}
-      {/* Fragment to hold dropdown and modals */}
       <DropdownMenu.Root>
         <DropdownMenu.Trigger>
           <Button
@@ -147,62 +117,25 @@ export function UserThemeDropdown() {
 
           <DropdownMenu.Separator />
 
-          {/* Shutdown PC */}
-          <DropdownMenu.Item color="red" onSelect={handleShutdownRequest}>
+          {/* New Shutdown Link */}
+          <DropdownMenu.Item
+            color="orange"
+            onSelect={handleNewShutdownLinkClick}
+          >
             <ExitIcon
               width="16"
               height="16"
               style={{ marginRight: 'var(--space-2)' }}
             />{' '}
-            Shutdown PC...
+            Shutdown
           </DropdownMenu.Item>
         </DropdownMenu.Content>
       </DropdownMenu.Root>
-      {/* Docker Status Modal */}
+
       <DockerStatusModal
         isOpen={isDockerModalOpen}
         onOpenChange={setIsDockerModalOpen}
       />
-      {/* Shutdown Confirmation Modal */}
-      <AlertDialog.Root
-        open={isShutdownConfirmOpen}
-        onOpenChange={setIsShutdownConfirmOpen}
-      >
-        <AlertDialog.Content style={{ maxWidth: 450 }}>
-          <AlertDialog.Title>Confirm Shutdown</AlertDialog.Title>
-          <AlertDialog.Description size="2">
-            Are you sure you want to shut down the entire computer?
-            <br />
-            <br />
-            <Text weight="bold" color="red">
-              <ExclamationTriangleIcon
-                style={{ verticalAlign: 'middle', marginRight: '4px' }}
-              />{' '}
-              Unsaved work in other applications will be lost.
-            </Text>
-          </AlertDialog.Description>
-          <Flex gap="3" mt="4" justify="end">
-            <Button
-              variant="soft"
-              color="gray"
-              onClick={() => setIsShutdownConfirmOpen(false)}
-              disabled={isShuttingDown}
-            >
-              Cancel
-            </Button>
-            <Button
-              color="red"
-              onClick={handleConfirmShutdown}
-              disabled={isShuttingDown}
-            >
-              {isShuttingDown ? <Spinner size="1" /> : <ExitIcon />}
-              <Text ml="1">
-                {isShuttingDown ? 'Shutting Down...' : 'Shutdown Now'}
-              </Text>
-            </Button>
-          </Flex>
-        </AlertDialog.Content>
-      </AlertDialog.Root>
     </>
   );
 }
