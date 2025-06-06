@@ -5,14 +5,11 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Flex, Box, Button, Text, Spinner } from '@radix-ui/themes';
 import { ArrowLeftIcon } from '@radix-ui/react-icons';
-import { UserThemeDropdown } from '../User/UserThemeDropdown';
+// import { UserThemeDropdown } from '../User/UserThemeDropdown'; // REMOVED
 import { SessionSidebar } from './Sidebar/SessionSidebar';
 import { SessionContent } from './SessionContent';
 import { EditDetailsModal } from './Modals/EditDetailsModal';
-// Import the new SelectActiveModelModal
 import { SelectActiveModelModal } from './Modals/SelectActiveModelModal';
-// LlmManagementModal will now be opened from SelectActiveModelModal
-// import { LlmManagementModal } from './Modals/LlmManagementModal';
 import {
   fetchSession,
   fetchTranscript,
@@ -32,7 +29,7 @@ import {
   activeChatIdAtom,
   clampedSidebarWidthAtom,
   sidebarWidthAtom,
-  toastMessageAtom, // Import toast atom
+  toastMessageAtom,
 } from '../../store';
 
 export function SessionView() {
@@ -43,14 +40,12 @@ export function SessionView() {
   const navigate = useNavigate();
   const setActiveSessionId = useSetAtom(activeSessionIdAtom);
   const setActiveChatId = useSetAtom(activeChatIdAtom);
-  const activeChatIdAtomValue = useAtomValue(activeChatIdAtom); // Renamed for clarity
+  const activeChatIdAtomValue = useAtomValue(activeChatIdAtom);
   const [sidebarWidth, setSidebarWidth] = useAtom(sidebarWidthAtom);
   const clampedSidebarWidth = useAtomValue(clampedSidebarWidthAtom);
   const [isEditingMetadata, setIsEditingMetadata] = useState(false);
-
-  // State for the new SelectActiveModelModal
   const [isSelectModelModalOpen, setIsSelectModelModalOpen] = useState(false);
-  const setToast = useSetAtom(toastMessageAtom); // For toast notifications
+  const setToast = useSetAtom(toastMessageAtom);
 
   const sidebarRef = useRef<HTMLDivElement>(null);
   const isResizing = useRef(false);
@@ -59,7 +54,6 @@ export function SessionView() {
 
   const sessionIdNum = sessionIdParam ? parseInt(sessionIdParam, 10) : null;
 
-  // --- Tanstack Query Hooks --- (Largely unchanged)
   const {
     data: sessionMetadata,
     isLoading: isLoadingSessionMeta,
@@ -96,9 +90,9 @@ export function SessionView() {
   } = useQuery<OllamaStatus, Error>({
     queryKey: ['ollamaStatus'],
     queryFn: () => fetchOllamaStatus(),
-    staleTime: 60 * 1000, // Consider reducing if status changes often due to model loads
+    staleTime: 60 * 1000,
     refetchOnWindowFocus: true,
-    refetchInterval: 5000, // Poll status more frequently
+    refetchInterval: 5000,
   });
 
   const startChatMutation = useMutation<ChatSession, Error>({
@@ -140,7 +134,6 @@ export function SessionView() {
     },
   });
 
-  // Resizing Logic (unchanged)
   const handleMouseMove = useCallback(
     (e: MouseEvent) => {
       if (!isResizing.current || !sidebarRef.current) return;
@@ -175,7 +168,6 @@ export function SessionView() {
     [handleMouseMove, handleMouseUp]
   );
 
-  // --- Effects (Largely unchanged) ---
   useEffect(() => {
     const currentSessionIdNum = sessionIdParam
       ? parseInt(sessionIdParam, 10)
@@ -214,7 +206,6 @@ export function SessionView() {
           navigateTo = `/sessions/${currentSessionIdNum}/chats/${targetChatId}`;
         }
       } else if (chatIdParam) {
-        // If URL has chatId but no chats exist in session
         shouldNavigate = true;
         navigateTo = `/sessions/${currentSessionIdNum}`;
       }
@@ -226,9 +217,8 @@ export function SessionView() {
         navigate(navigateTo, { replace: true });
       }
     } else {
-      // If no sessionMetadata yet
       if (isNewSession) {
-        setActiveChatId(null); // Reset active chat if session changes and no metadata yet
+        setActiveChatId(null);
         previousSessionIdRef.current = currentSessionIdNum;
       }
     }
@@ -243,7 +233,6 @@ export function SessionView() {
   ]);
 
   useEffect(() => {
-    // Cleanup Resizer Listeners
     return () => {
       if (isResizing.current) {
         document.removeEventListener('mousemove', handleMouseMove);
@@ -261,29 +250,20 @@ export function SessionView() {
   }, [startChatMutation]);
 
   const handleOpenEditMetadataModal = () => setIsEditingMetadata(true);
-
-  // This will now open the new SelectActiveModelModal
   const handleOpenConfigureLlmModal = () => setIsSelectModelModalOpen(true);
-
   const handleNavigateBack = () => navigate('/');
   const handleMetadataSaveSuccess = (
     updatedMetadata: Partial<SessionMetadata>
   ) => {
-    // Toast is handled by EditDetailsModal now
+    // Toast handled by EditDetailsModal
   };
-
-  // --- Callback for when model is successfully set from SelectActiveModelModal ---
   const handleModelSuccessfullySet = () => {
-    // In a real app, if there was a pending message to send, you'd trigger it here.
-    // For now, just log and potentially show a toast.
     console.log(
       '[SessionView] Model successfully set via SelectActiveModelModal.'
     );
     setToast('AI Model configured successfully.');
-    // Input field will re-check status on next submit attempt
   };
 
-  // --- Render Logic (Mostly Unchanged) ---
   if (isLoadingSessionMeta && !sessionMetadata) {
     return (
       <Flex
@@ -315,7 +295,6 @@ export function SessionView() {
       </Flex>
     );
   }
-  // Non-blocking error for Ollama status
   if (ollamaError) console.error('Ollama status check failed:', ollamaError);
 
   const displayTitle = sessionMetadata.sessionName || sessionMetadata.fileName;
@@ -331,8 +310,8 @@ export function SessionView() {
         className="relative flex-shrink-0 hidden lg:flex flex-col"
         style={{
           width: `${clampedSidebarWidth}px`,
-          backgroundColor: 'var(--color-panel-solid)',
-          borderRight: '1px solid var(--gray-a6)',
+          backgroundColor: 'var(--color-panel-solid)', // This will use Radix slate
+          borderRight: '1px solid var(--gray-a6)', // Radix slate border
         }}
       >
         <SessionSidebar
@@ -343,11 +322,12 @@ export function SessionView() {
       </Box>
 
       <Box
-        className="hidden lg:block flex-shrink-0 w-1.5 cursor-col-resize group hover:bg-[--gray-a4]"
+        className="hidden lg:block flex-shrink-0 w-1.5 cursor-col-resize group hover:bg-[var(--gray-a4)]" // Radix hover
         onMouseDown={handleMouseDown}
         title="Resize sidebar"
       >
-        <Box className="h-full w-[1px] bg-[--gray-a5] group-hover:bg-[--accent-9] mx-auto" />
+        <Box className="h-full w-[1px] bg-[var(--gray-a5)] group-hover:bg-[var(--accent-9)] mx-auto" />{' '}
+        {/* Radix accent */}
       </Box>
 
       <Flex
@@ -360,24 +340,25 @@ export function SessionView() {
           py="3"
           flexShrink="0"
           style={{
-            backgroundColor: 'var(--color-panel-solid)',
-            borderBottom: '1px solid var(--gray-a6)',
+            // This is a custom header bar, not directly a Radix component.
+            // Keep Tailwind for its background and border for now, or convert to Radix Box with props.
+            backgroundColor: 'var(--color-panel-solid)', // Will use Radix slate
+            borderBottom: '1px solid var(--gray-a6)', // Radix slate border
           }}
         >
           <Flex justify="between" align="center">
             <Flex align="center" gap="2" style={{ minWidth: 0 }}>
               <Button
                 onClick={handleNavigateBack}
-                variant="ghost"
-                color="gray"
+                variant="ghost" // Radix variant, will use accent color on hover
+                color="gray" // Keeps it subtle, accent on hover
                 size="2"
                 style={{ flexShrink: 0 }}
               >
                 <ArrowLeftIcon /> Sessions
               </Button>
               <Text color="gray" size="2" style={{ flexShrink: 0 }}>
-                {' '}
-                /{' '}
+                {' / '}
               </Text>
               <Text
                 size="2"
@@ -385,11 +366,12 @@ export function SessionView() {
                 truncate
                 title={displayTitle}
                 style={{ flexShrink: 1 }}
+                className="text-slate-800 dark:text-slate-200"
               >
                 {displayTitle}
               </Text>
             </Flex>
-            <UserThemeDropdown />
+            {/* UserThemeDropdown removed from here */}
           </Flex>
         </Box>
 
@@ -407,7 +389,7 @@ export function SessionView() {
             transcriptError={transcriptError}
             ollamaStatus={ollamaStatus}
             isLoadingOllamaStatus={isLoadingOllamaStatus}
-            onOpenLlmModal={handleOpenConfigureLlmModal} // Changed to open new modal
+            onOpenLlmModal={handleOpenConfigureLlmModal}
           />
         </Box>
       </Flex>
@@ -419,7 +401,6 @@ export function SessionView() {
         onSaveSuccess={handleMetadataSaveSuccess}
       />
 
-      {/* New SelectActiveModelModal */}
       <SelectActiveModelModal
         isOpen={isSelectModelModalOpen}
         onOpenChange={setIsSelectModelModalOpen}
@@ -427,7 +408,6 @@ export function SessionView() {
         currentActiveModelName={ollamaStatus?.activeModel}
         currentConfiguredContextSize={ollamaStatus?.configuredContextSize}
       />
-      {/* LlmManagementModal is now opened from SelectActiveModelModal if needed */}
     </Flex>
   );
 }

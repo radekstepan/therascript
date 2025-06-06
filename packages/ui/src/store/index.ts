@@ -22,10 +22,11 @@ export * from './standaloneChatSortCriteriaAtom';
 export * from './standaloneChatSortDirectionAtom';
 
 export * from './ui/clampedSidebarWidthAtom';
-export * from './ui/effectiveThemeAtom';
+export * from './ui/effectiveThemeAtom'; // This will now correctly point to the dedicated file
 export * from './ui/isUploadModalOpenAtom';
 export * from './ui/renderMarkdownAtom';
 export * from './ui/sidebarWidthAtom';
-export * from './ui/themeAtom';
+export * from './ui/themeAtom'; // This exports themeAtom and Theme type from its dedicated file
+export * from './ui/isPersistentSidebarOpenAtom'; // Added in previous step
 
-// TODO comments should not be removed
+export * from './navigation/currentPageAtom'; // Added in previous step

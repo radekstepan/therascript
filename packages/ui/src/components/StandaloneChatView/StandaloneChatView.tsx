@@ -5,12 +5,9 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Flex, Box, Button, Text, Spinner } from '@radix-ui/themes';
 import { ArrowLeftIcon } from '@radix-ui/react-icons';
-import { UserThemeDropdown } from '../User/UserThemeDropdown';
+// import { UserThemeDropdown } from '../User/UserThemeDropdown'; // REMOVED
 import { ChatInterface } from '../SessionView/Chat/ChatInterface';
-// Import the new SelectActiveModelModal
 import { SelectActiveModelModal } from '../SessionView/Modals/SelectActiveModelModal';
-// LlmManagementModal will now be opened from SelectActiveModelModal
-// import { LlmManagementModal } from '../SessionView/Modals/LlmManagementModal';
 import { StandaloneChatSidebar } from './StandaloneChatSidebar';
 import { fetchStandaloneChatDetails, fetchOllamaStatus } from '../../api/api';
 import type { ChatSession, OllamaStatus } from '../../types';
@@ -26,12 +23,10 @@ export function StandaloneChatView() {
   const { chatId: chatIdParam } = useParams<{ chatId: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [activeChatIdState, setActiveChatIdState] = useAtom(activeChatIdAtom); // Renamed for clarity
+  const [activeChatIdState, setActiveChatIdState] = useAtom(activeChatIdAtom);
   const setToast = useSetAtom(toastMessageAtom);
   const [sidebarWidth, setSidebarWidth] = useAtom(sidebarWidthAtom);
   const clampedSidebarWidth = useAtomValue(clampedSidebarWidthAtom);
-
-  // State for the new SelectActiveModelModal
   const [isSelectModelModalOpen, setIsSelectModelModalOpen] = useState(false);
 
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -40,7 +35,6 @@ export function StandaloneChatView() {
 
   const chatIdNum = chatIdParam ? parseInt(chatIdParam, 10) : null;
 
-  // --- Tanstack Query Hooks (Largely unchanged) ---
   const {
     data: chatData,
     isLoading: isLoadingChat,
@@ -63,12 +57,11 @@ export function StandaloneChatView() {
   } = useQuery<OllamaStatus, Error>({
     queryKey: ['ollamaStatus'],
     queryFn: () => fetchOllamaStatus(),
-    staleTime: 60 * 1000, // Consider reducing
+    staleTime: 60 * 1000,
     refetchOnWindowFocus: true,
-    refetchInterval: 5000, // Poll status more frequently
+    refetchInterval: 5000,
   });
 
-  // --- Effects (Largely unchanged) ---
   useEffect(() => {
     const currentChatIdNum = chatIdParam ? parseInt(chatIdParam, 10) : null;
     if (!currentChatIdNum || isNaN(currentChatIdNum)) {
@@ -78,7 +71,7 @@ export function StandaloneChatView() {
     }
     if (currentChatIdNum !== activeChatIdState) {
       setActiveChatIdState(currentChatIdNum);
-      previousChatIdRef.current = currentChatIdNum; // Track for sidebar update logic if needed
+      previousChatIdRef.current = currentChatIdNum;
     }
   }, [chatIdParam, activeChatIdState, navigate, setActiveChatIdState]);
 
@@ -89,35 +82,51 @@ export function StandaloneChatView() {
     }
   }, [isLoadingChat, isFetchingChat, chatData, chatIdNum, navigate, setToast]);
 
-  // Resizing Logic (unchanged)
   const handleMouseMove = useCallback(
     (e: MouseEvent) => {
-      /* ... */
+      if (!isResizing.current || !sidebarRef.current) return;
+      const containerRect =
+        sidebarRef.current.parentElement?.getBoundingClientRect();
+      if (!containerRect) return;
+      let newWidth = e.clientX - containerRect.left;
+      setSidebarWidth(newWidth);
     },
     [setSidebarWidth]
   );
   const handleMouseUp = useCallback(() => {
-    /* ... */
+    if (isResizing.current) {
+      isResizing.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    }
   }, [handleMouseMove]);
   const handleMouseDown = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
-      /* ... */
+      e.preventDefault();
+      isResizing.current = true;
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
     },
     [handleMouseMove, handleMouseUp]
   );
   useEffect(() => {
-    // Cleanup Resizer Listeners
     return () => {
-      /* ... */
+      if (isResizing.current) {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        isResizing.current = false;
+      }
     };
   }, [handleMouseMove, handleMouseUp]);
 
-  // --- Handlers ---
-  // This will now open the new SelectActiveModelModal
   const handleOpenConfigureLlmModal = () => setIsSelectModelModalOpen(true);
   const handleNavigateBack = () => navigate('/');
-
-  // --- Callback for when model is successfully set from SelectActiveModelModal ---
   const handleModelSuccessfullySet = () => {
     console.log(
       '[StandaloneChatView] Model successfully set via SelectActiveModelModal.'
@@ -125,7 +134,6 @@ export function StandaloneChatView() {
     setToast('AI Model configured successfully.');
   };
 
-  // --- Render Logic ---
   if (isLoadingChat && !chatData) {
     return (
       <Flex
@@ -140,7 +148,6 @@ export function StandaloneChatView() {
       </Flex>
     );
   }
-  // Error handled by useEffect navigation
 
   const displayTitle =
     chatData?.name ||
@@ -155,8 +162,8 @@ export function StandaloneChatView() {
         className="relative flex-shrink-0 hidden lg:flex flex-col"
         style={{
           width: `${clampedSidebarWidth}px`,
-          backgroundColor: 'var(--color-panel-solid)',
-          borderRight: '1px solid var(--gray-a6)',
+          backgroundColor: 'var(--color-panel-solid)', // Radix slate
+          borderRight: '1px solid var(--gray-a6)', // Radix slate border
         }}
       >
         <StandaloneChatSidebar
@@ -165,11 +172,12 @@ export function StandaloneChatView() {
         />
       </Box>
       <Box
-        className="hidden lg:block flex-shrink-0 w-1.5 cursor-col-resize group hover:bg-[--gray-a4]"
+        className="hidden lg:block flex-shrink-0 w-1.5 cursor-col-resize group hover:bg-[var(--gray-a4)]" // Radix hover
         onMouseDown={handleMouseDown}
         title="Resize sidebar"
       >
-        <Box className="h-full w-[1px] bg-[--gray-a5] group-hover:bg-[--accent-9] mx-auto" />
+        <Box className="h-full w-[1px] bg-[var(--gray-a5)] group-hover:bg-[var(--accent-9)] mx-auto" />{' '}
+        {/* Radix accent */}
       </Box>
       <Flex
         direction="column"
@@ -181,8 +189,8 @@ export function StandaloneChatView() {
           py="3"
           flexShrink="0"
           style={{
-            backgroundColor: 'var(--color-panel-solid)',
-            borderBottom: '1px solid var(--gray-a6)',
+            backgroundColor: 'var(--color-panel-solid)', // Radix slate
+            borderBottom: '1px solid var(--gray-a6)', // Radix slate border
           }}
         >
           <Flex justify="between" align="center">
@@ -197,8 +205,7 @@ export function StandaloneChatView() {
                 <ArrowLeftIcon /> Home
               </Button>
               <Text color="gray" size="2" style={{ flexShrink: 0 }}>
-                {' '}
-                /{' '}
+                {' / '}
               </Text>
               <Text
                 size="2"
@@ -206,11 +213,12 @@ export function StandaloneChatView() {
                 truncate
                 title={displayTitle}
                 style={{ flexShrink: 1 }}
+                className="text-slate-800 dark:text-slate-200"
               >
                 {displayTitle}
               </Text>
             </Flex>
-            <UserThemeDropdown />
+            {/* UserThemeDropdown removed */}
           </Flex>
         </Box>
         <Box
@@ -218,21 +226,20 @@ export function StandaloneChatView() {
           style={{
             minHeight: 0,
             overflow: 'hidden',
-            padding: 'var(--space-3)',
+            padding: 'var(--space-3)', // Radix space variable
           }}
         >
           <ChatInterface
             activeChatId={chatIdNum}
             isStandalone={true}
-            isLoadingSessionMeta={false} // Not applicable for standalone
+            isLoadingSessionMeta={false}
             ollamaStatus={ollamaStatus}
             isLoadingOllamaStatus={isLoadingOllamaStatus}
-            onOpenLlmModal={handleOpenConfigureLlmModal} // Changed to open new modal
+            onOpenLlmModal={handleOpenConfigureLlmModal}
           />
         </Box>
       </Flex>
 
-      {/* New SelectActiveModelModal */}
       <SelectActiveModelModal
         isOpen={isSelectModelModalOpen}
         onOpenChange={setIsSelectModelModalOpen}
@@ -240,7 +247,6 @@ export function StandaloneChatView() {
         currentActiveModelName={ollamaStatus?.activeModel}
         currentConfiguredContextSize={ollamaStatus?.configuredContextSize}
       />
-      {/* LlmManagementModal is now opened from SelectActiveModelModal if needed */}
     </Flex>
   );
 }
