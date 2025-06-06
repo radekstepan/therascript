@@ -159,11 +159,10 @@ export function StandaloneChatView() {
     <Flex flexGrow="1" style={{ height: '100vh', overflow: 'hidden' }}>
       <Box
         ref={sidebarRef}
-        className="relative flex-shrink-0 hidden lg:flex flex-col"
+        className="relative flex-shrink-0 hidden lg:flex flex-col bg-white dark:bg-gray-800" // MODIFIED: slate to gray
         style={{
           width: `${clampedSidebarWidth}px`,
-          backgroundColor: 'var(--color-panel-solid)', // Radix slate
-          borderRight: '1px solid var(--gray-a6)', // Radix slate border
+          borderRight: '1px solid var(--gray-a6)',
         }}
       >
         <StandaloneChatSidebar
@@ -172,12 +171,11 @@ export function StandaloneChatView() {
         />
       </Box>
       <Box
-        className="hidden lg:block flex-shrink-0 w-1.5 cursor-col-resize group hover:bg-[var(--gray-a4)]" // Radix hover
+        className="hidden lg:block flex-shrink-0 w-1.5 cursor-col-resize group hover:bg-[var(--gray-a4)]"
         onMouseDown={handleMouseDown}
         title="Resize sidebar"
       >
         <Box className="h-full w-[1px] bg-[var(--gray-a5)] group-hover:bg-[var(--accent-9)] mx-auto" />{' '}
-        {/* Radix accent */}
       </Box>
       <Flex
         direction="column"
@@ -189,8 +187,8 @@ export function StandaloneChatView() {
           py="3"
           flexShrink="0"
           style={{
-            backgroundColor: 'var(--color-panel-solid)', // Radix slate
-            borderBottom: '1px solid var(--gray-a6)', // Radix slate border
+            backgroundColor: 'var(--color-panel-solid)',
+            borderBottom: '1px solid var(--gray-a6)',
           }}
         >
           <Flex justify="between" align="center">
@@ -213,7 +211,7 @@ export function StandaloneChatView() {
                 truncate
                 title={displayTitle}
                 style={{ flexShrink: 1 }}
-                className="text-slate-800 dark:text-slate-200"
+                className="text-gray-800 dark:text-gray-200" // MODIFIED: slate to gray
               >
                 {displayTitle}
               </Text>
@@ -226,7 +224,7 @@ export function StandaloneChatView() {
           style={{
             minHeight: 0,
             overflow: 'hidden',
-            padding: 'var(--space-3)', // Radix space variable
+            padding: 'var(--space-3)',
           }}
         >
           <ChatInterface

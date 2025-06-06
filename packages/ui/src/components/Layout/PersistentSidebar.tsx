@@ -7,7 +7,6 @@ import {
   LayoutDashboard,
   ListOrdered,
   MessageSquare,
-  // Star, // Removed Star icon
   Settings,
   PanelLeftClose,
   PanelLeftOpen,
@@ -41,7 +40,6 @@ interface NavItemType {
   page: string;
 }
 
-// Updated navItems: "Starred Templates" removed
 const navItems: NavItemType[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, page: '/' },
   {
@@ -51,7 +49,6 @@ const navItems: NavItemType[] = [
     page: '/sessions-list',
   },
   { id: 'chats', label: 'All Chats', icon: MessageSquare, page: '/chats-list' },
-  // { id: 'templates', label: 'Starred Templates', icon: Star, page: '/templates' }, // REMOVED
   { id: 'settings', label: 'Settings', icon: Settings, page: '/settings' },
 ];
 
@@ -115,8 +112,8 @@ export function PersistentSidebar() {
       <div
         className={cn(
           'fixed top-0 left-0 h-full flex flex-col shadow-lg z-40 transition-all duration-300 ease-in-out',
-          'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200',
-          'border-r border-slate-200 dark:border-slate-700',
+          'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200',
+          'border-r border-gray-200 dark:border-gray-700',
           isSidebarOpen ? 'w-64' : 'w-20'
         )}
         aria-label="Main sidebar"
@@ -124,18 +121,20 @@ export function PersistentSidebar() {
         {/* Top Section */}
         <div
           className={cn(
-            'flex items-center h-16 p-4 border-b border-slate-200 dark:border-slate-700',
+            'flex items-center h-16 p-4 border-b border-gray-200 dark:border-gray-700',
             isSidebarOpen ? 'justify-between' : 'justify-center'
           )}
         >
           {isSidebarOpen && (
-            <h1 className="text-xl font-semibold text-teal-600 dark:text-teal-400">
+            // MODIFIED: Changed "Therascript" brand text color from teal to gray
+            <h1 className="text-xl font-semibold text-gray-700 dark:text-gray-300">
               Therascript
             </h1>
           )}
           <button
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className="p-2 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500"
+            // MODIFIED: Changed focus ring from teal to gray
+            className="p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500"
             aria-label={isSidebarOpen ? 'Close sidebar' : 'Open sidebar'}
             aria-expanded={isSidebarOpen}
           >
@@ -157,12 +156,15 @@ export function PersistentSidebar() {
                   title={item.label}
                   className={cn(
                     'flex items-center w-full py-3 text-left transition-colors duration-150 ease-in-out',
-                    'hover:bg-teal-100 dark:hover:bg-teal-700 hover:text-teal-600 dark:hover:text-teal-300',
-                    'focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-teal-500',
+                    // MODIFIED: Hover states from teal to gray
+                    'hover:bg-gray-200 dark:hover:bg-gray-600 hover:text-gray-800 dark:hover:text-gray-100',
+                    // MODIFIED: Focus ring from teal to gray
+                    'focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-gray-500',
                     isSidebarOpen ? 'px-6' : 'px-0 justify-center',
                     isActive(item.page)
-                      ? 'bg-teal-50 dark:bg-teal-800 text-teal-600 dark:text-teal-300 border-r-4 border-teal-500'
-                      : 'text-slate-700 dark:text-slate-200'
+                      ? // MODIFIED: Active states from teal to gray
+                        'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-50 border-r-4 border-gray-500 dark:border-gray-400'
+                      : 'text-gray-700 dark:text-gray-200'
                   )}
                   aria-current={isActive(item.page) ? 'page' : undefined}
                 >
@@ -181,7 +183,7 @@ export function PersistentSidebar() {
         {/* Bottom Section */}
         <div
           className={cn(
-            'absolute bottom-0 w-full p-4 border-t border-slate-200 dark:border-slate-700',
+            'absolute bottom-0 w-full p-4 border-t border-gray-200 dark:border-gray-700',
             !isSidebarOpen && 'flex flex-col items-center space-y-2'
           )}
         >
@@ -189,7 +191,8 @@ export function PersistentSidebar() {
             <select
               value={theme}
               onChange={(e) => setTheme(e.target.value as Theme)}
-              className="w-full p-2 text-sm bg-slate-50 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+              // MODIFIED: Focus ring from teal to gray
+              className="w-full p-2 text-sm bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
               aria-label="Select theme"
             >
               <option value="light">Light Mode</option>
@@ -206,10 +209,12 @@ export function PersistentSidebar() {
                 <button
                   onClick={() => setTheme('light')}
                   className={cn(
-                    'p-2 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500',
+                    // MODIFIED: Focus ring from teal to gray
+                    'p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500',
+                    // MODIFIED: Active theme icon color from teal to gray
                     effectiveTheme === 'light' &&
                       theme !== 'system' &&
-                      'text-teal-500'
+                      'text-gray-600 dark:text-gray-400' // Using a general "active-looking" gray
                   )}
                   aria-label="Set light theme"
                   aria-pressed={
@@ -223,10 +228,12 @@ export function PersistentSidebar() {
                 <button
                   onClick={() => setTheme('dark')}
                   className={cn(
-                    'p-2 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500',
+                    // MODIFIED: Focus ring from teal to gray
+                    'p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500',
+                    // MODIFIED: Active theme icon color from teal to gray
                     effectiveTheme === 'dark' &&
                       theme !== 'system' &&
-                      'text-teal-500'
+                      'text-gray-600 dark:text-gray-400'
                   )}
                   aria-label="Set dark theme"
                   aria-pressed={effectiveTheme === 'dark' && theme !== 'system'}
@@ -238,8 +245,10 @@ export function PersistentSidebar() {
                 <button
                   onClick={() => setTheme('system')}
                   className={cn(
-                    'p-2 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500',
-                    theme === 'system' && 'text-teal-500'
+                    // MODIFIED: Focus ring from teal to gray
+                    'p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500',
+                    // MODIFIED: Active theme icon color from teal to gray
+                    theme === 'system' && 'text-gray-600 dark:text-gray-400'
                   )}
                   aria-label="Set system theme"
                   aria-pressed={theme === 'system'}
@@ -254,7 +263,8 @@ export function PersistentSidebar() {
             title="Docker Status"
             onClick={handleDockerStatusClick}
             className={cn(
-              'flex items-center mt-2 w-full py-2 text-left text-sm hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500',
+              // MODIFIED: Focus ring from teal to gray
+              'flex items-center mt-2 w-full py-2 text-left text-sm hover:bg-gray-200 dark:hover:bg-gray-700 rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500',
               isSidebarOpen ? 'px-3' : 'justify-center px-0'
             )}
           >
@@ -349,7 +359,7 @@ const TooltipWrapper: React.FC<{
     <div className="relative group">
       {children}
       <div
-        className="absolute left-full ml-3 top-1/2 -translate-y-1/2 px-2 py-1 text-xs text-white bg-slate-900 dark:bg-slate-700 rounded-md opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50"
+        className="absolute left-full ml-3 top-1/2 -translate-y-1/2 px-2 py-1 text-xs text-white bg-gray-900 dark:bg-gray-700 rounded-md opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50"
         role="tooltip"
       >
         {content}

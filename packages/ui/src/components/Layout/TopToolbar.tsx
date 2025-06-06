@@ -121,8 +121,8 @@ export function TopToolbar() {
     <Box
       className={cn(
         'sticky top-0 z-30 h-16 flex items-center',
-        'bg-slate-100 dark:bg-slate-800',
-        'border-b border-slate-200 dark:border-slate-700'
+        'bg-gray-100 dark:bg-gray-800', // MODIFIED: slate to gray
+        'border-b border-gray-200 dark:border-gray-700' // MODIFIED: slate to gray
       )}
     >
       <Container size="4" px={{ initial: '4', md: '6', lg: '8' }} width="100%">

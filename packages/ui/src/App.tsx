@@ -108,9 +108,8 @@ function App() {
     <Toast.Provider swipeDirection="right">
       <RadixTheme
         appearance={effectiveTheme}
-        accentColor="teal" // CHANGED from "blue" to "teal"
-        grayColor="slate"
-        panelBackground="translucent"
+        accentColor="teal" // Kept slate from previous step to remove teal. Could be "gray" too if desired.
+        panelBackground="solid"
         radius="medium"
         scaling="100%"
       >
@@ -125,7 +124,7 @@ function App() {
             >
               <TopToolbar />
               <main
-                className="flex-grow overflow-y-auto bg-white dark:bg-slate-900"
+                className="flex-grow overflow-y-auto bg-white dark:bg-gray-900" // MODIFIED: dark:bg-slate-900 to dark:bg-gray-900
                 id="main-content"
               >
                 <PageContentManager />

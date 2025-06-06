@@ -307,11 +307,10 @@ export function SessionView() {
     <Flex flexGrow="1" style={{ height: '100vh', overflow: 'hidden' }}>
       <Box
         ref={sidebarRef}
-        className="relative flex-shrink-0 hidden lg:flex flex-col"
+        className="relative flex-shrink-0 hidden lg:flex flex-col bg-white dark:bg-gray-800" // MODIFIED: slate to gray
         style={{
           width: `${clampedSidebarWidth}px`,
-          backgroundColor: 'var(--color-panel-solid)', // This will use Radix slate
-          borderRight: '1px solid var(--gray-a6)', // Radix slate border
+          borderRight: '1px solid var(--gray-a6)',
         }}
       >
         <SessionSidebar
@@ -322,12 +321,11 @@ export function SessionView() {
       </Box>
 
       <Box
-        className="hidden lg:block flex-shrink-0 w-1.5 cursor-col-resize group hover:bg-[var(--gray-a4)]" // Radix hover
+        className="hidden lg:block flex-shrink-0 w-1.5 cursor-col-resize group hover:bg-[var(--gray-a4)]"
         onMouseDown={handleMouseDown}
         title="Resize sidebar"
       >
         <Box className="h-full w-[1px] bg-[var(--gray-a5)] group-hover:bg-[var(--accent-9)] mx-auto" />{' '}
-        {/* Radix accent */}
       </Box>
 
       <Flex
@@ -340,18 +338,16 @@ export function SessionView() {
           py="3"
           flexShrink="0"
           style={{
-            // This is a custom header bar, not directly a Radix component.
-            // Keep Tailwind for its background and border for now, or convert to Radix Box with props.
-            backgroundColor: 'var(--color-panel-solid)', // Will use Radix slate
-            borderBottom: '1px solid var(--gray-a6)', // Radix slate border
+            backgroundColor: 'var(--color-panel-solid)',
+            borderBottom: '1px solid var(--gray-a6)',
           }}
         >
           <Flex justify="between" align="center">
             <Flex align="center" gap="2" style={{ minWidth: 0 }}>
               <Button
                 onClick={handleNavigateBack}
-                variant="ghost" // Radix variant, will use accent color on hover
-                color="gray" // Keeps it subtle, accent on hover
+                variant="ghost"
+                color="gray"
                 size="2"
                 style={{ flexShrink: 0 }}
               >
@@ -366,7 +362,7 @@ export function SessionView() {
                 truncate
                 title={displayTitle}
                 style={{ flexShrink: 1 }}
-                className="text-slate-800 dark:text-slate-200"
+                className="text-gray-800 dark:text-gray-200" // MODIFIED: slate to gray
               >
                 {displayTitle}
               </Text>

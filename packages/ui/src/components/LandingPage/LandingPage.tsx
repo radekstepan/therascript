@@ -435,7 +435,7 @@ export function LandingPage() {
                     as="h2"
                     size="5"
                     weight="medium"
-                    className="text-slate-800 dark:text-slate-200"
+                    className="text-gray-800 dark:text-gray-200" // MODIFIED: slate to gray
                   >
                     <Flex align="center" gap="2">
                       {' '}
@@ -482,7 +482,7 @@ export function LandingPage() {
                     as="h2"
                     size="5"
                     weight="medium"
-                    className="text-slate-800 dark:text-slate-200"
+                    className="text-gray-800 dark:text-gray-200" // MODIFIED: slate to gray
                   >
                     <Flex align="center" gap="2">
                       {' '}

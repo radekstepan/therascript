@@ -151,8 +151,7 @@ export function StandaloneChatSidebar({
     <>
       <Box
         p="4"
-        className="flex flex-col h-full w-full overflow-hidden"
-        style={{ backgroundColor: 'var(--color-panel-solid)' }}
+        className="flex flex-col h-full w-full overflow-hidden bg-white dark:bg-gray-800" // MODIFIED: slate to gray
       >
         {/* Header Section */}
         <Flex justify="between" align="center" flexShrink="0" mb="2">

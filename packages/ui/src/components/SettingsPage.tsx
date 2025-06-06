@@ -35,7 +35,7 @@ export function SettingsPage() {
           as="h1"
           size="7"
           mb="6"
-          className="text-slate-900 dark:text-slate-100"
+          className="text-gray-900 dark:text-gray-100" // MODIFIED: slate to gray
         >
           Application Settings
         </Heading>
@@ -46,7 +46,7 @@ export function SettingsPage() {
               as="h2"
               size="5"
               mb="4"
-              className="text-slate-800 dark:text-slate-200"
+              className="text-gray-800 dark:text-gray-200" // MODIFIED: slate to gray
             >
               Appearance
             </Heading>
@@ -55,9 +55,11 @@ export function SettingsPage() {
                 <RadixLayoutIcon // Using Radix icon
                   width="20"
                   height="20"
-                  className="text-slate-600 dark:text-slate-400"
+                  className="text-gray-600 dark:text-gray-400" // MODIFIED: slate to gray
                 />
-                <Text size="3" className="text-slate-700 dark:text-slate-300">
+                <Text size="3" className="text-gray-700 dark:text-gray-300">
+                  {' '}
+                  {/* MODIFIED: slate to gray */}
                   Render AI messages as Markdown
                 </Text>
               </Flex>
@@ -82,7 +84,7 @@ export function SettingsPage() {
               as="h2"
               size="5"
               mb="4"
-              className="text-slate-800 dark:text-slate-200"
+              className="text-gray-800 dark:text-gray-200" // MODIFIED: slate to gray
             >
               Language Model Management
             </Heading>
@@ -91,9 +93,11 @@ export function SettingsPage() {
                 <MixerVerticalIcon // Corrected: from @radix-ui/react-icons
                   width="20"
                   height="20"
-                  className="text-slate-600 dark:text-slate-400"
+                  className="text-gray-600 dark:text-gray-400" // MODIFIED: slate to gray
                 />
-                <Text size="3" className="text-slate-700 dark:text-slate-300">
+                <Text size="3" className="text-gray-700 dark:text-gray-300">
+                  {' '}
+                  {/* MODIFIED: slate to gray */}
                   Manage AI Models
                 </Text>
               </Flex>

@@ -9,13 +9,15 @@ export function TemplatesPage() {
         as="h1"
         size="7"
         mb="6"
-        className="text-slate-900 dark:text-slate-100"
+        className="text-gray-900 dark:text-gray-100" // MODIFIED: slate to gray
       >
         Starred Templates
       </Heading>
       <Card>
         <Box p="4">
-          <Text className="text-slate-700 dark:text-slate-300">
+          <Text className="text-gray-700 dark:text-gray-300">
+            {' '}
+            {/* MODIFIED: slate to gray */}
             This page will display your starred messages/templates.
             Functionality to manage them here (view, edit, delete) can be added.
           </Text>

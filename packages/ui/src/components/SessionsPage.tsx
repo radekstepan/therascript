@@ -177,7 +177,7 @@ export function SessionsPage() {
           <Heading
             as="h1"
             size="7"
-            className="text-slate-900 dark:text-slate-100"
+            className="text-gray-900 dark:text-gray-100" // MODIFIED: slate to gray
           >
             All Sessions
           </Heading>
