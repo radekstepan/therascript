@@ -1,24 +1,24 @@
-export { SessionView } from './SessionView'; // Explicitly export SessionView
-export { SessionContent } from './SessionContent'; // Explicitly export SessionContent
+// packages/ui/src/components/SessionView/index.ts
+export { SessionView } from './SessionView';
+export { SessionContent } from './SessionContent';
 
 // Chat Components
-// export * from './Chat/ChatHeader'; // Keep commented or remove old header
 export * from './Chat/ChatPanelHeader'; // Export new header
 export * from './Chat/ChatInput';
 export * from './Chat/ChatMessages';
 export * from './Chat/ChatInterface';
-export * from './Chat/StarredTemplates';
+export * from './Chat/StarredTemplatesList'; // Corrected path
 export * from './Chat/StartChatPrompt';
+export * from './Chat/ChatMessageBubble';
 
 // Sidebar Components
-export * from './Sidebar/SessionSidebar';
-// Removed PastChatsList export as it seems integrated into SessionSidebar
+// SessionSidebar is removed
+// PastChatsList is removed/integrated
 
 // Transcription Components
 export * from './Transcription/Transcription';
-// Assuming TranscriptParagraph lives in its own folder now
-// export * from '../Transcription/TranscriptParagraph';
 
 // Modal Components
 export * from './Modals/EditDetailsModal';
-export * from './Modals/LlmManagementModal'; // Export new modal
+export * from './Modals/LlmManagementModal';
+export * from './Modals/SelectActiveModelModal';

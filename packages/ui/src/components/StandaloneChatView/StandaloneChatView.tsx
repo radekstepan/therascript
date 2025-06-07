@@ -3,21 +3,13 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Flex, Box, Button, Text, Spinner } from '@radix-ui/themes';
-import { ArrowLeftIcon } from '@radix-ui/react-icons';
-// import { UserThemeDropdown } from '../User/UserThemeDropdown'; // REMOVED
+import { Flex, Box, Text, Spinner } from '@radix-ui/themes'; // Removed Button and ArrowLeftIcon
 import { ChatInterface } from '../SessionView/Chat/ChatInterface';
 import { SelectActiveModelModal } from '../SessionView/Modals/SelectActiveModelModal';
-import { StandaloneChatSidebar } from './StandaloneChatSidebar';
-import { fetchStandaloneChatDetails, fetchOllamaStatus } from '../../api/api';
-import type { ChatSession, OllamaStatus } from '../../types';
-import {
-  activeChatIdAtom,
-  toastMessageAtom,
-  clampedSidebarWidthAtom,
-  sidebarWidthAtom,
-} from '../../store';
-import { formatTimestamp } from '../../helpers';
+import { StandaloneChatHeader } from './StandaloneChatHeader';
+import { fetchOllamaStatus } from '../../api/api';
+import type { OllamaStatus } from '../../types';
+import { activeChatIdAtom, toastMessageAtom } from '../../store';
 
 export function StandaloneChatView() {
   const { chatId: chatIdParam } = useParams<{ chatId: string }>();
@@ -25,30 +17,11 @@ export function StandaloneChatView() {
   const queryClient = useQueryClient();
   const [activeChatIdState, setActiveChatIdState] = useAtom(activeChatIdAtom);
   const setToast = useSetAtom(toastMessageAtom);
-  const [sidebarWidth, setSidebarWidth] = useAtom(sidebarWidthAtom);
-  const clampedSidebarWidth = useAtomValue(clampedSidebarWidthAtom);
   const [isSelectModelModalOpen, setIsSelectModelModalOpen] = useState(false);
 
-  const sidebarRef = useRef<HTMLDivElement>(null);
-  const isResizing = useRef(false);
   const previousChatIdRef = useRef<number | null>(null);
 
   const chatIdNum = chatIdParam ? parseInt(chatIdParam, 10) : null;
-
-  const {
-    data: chatData,
-    isLoading: isLoadingChat,
-    error: chatError,
-    isFetching: isFetchingChat,
-  } = useQuery<ChatSession | null, Error>({
-    queryKey: ['standaloneChat', chatIdNum],
-    queryFn: () => {
-      if (!chatIdNum) return Promise.resolve(null);
-      return fetchStandaloneChatDetails(chatIdNum);
-    },
-    enabled: !!chatIdNum,
-    staleTime: 5 * 60 * 1000,
-  });
 
   const {
     data: ollamaStatus,
@@ -75,58 +48,7 @@ export function StandaloneChatView() {
     }
   }, [chatIdParam, activeChatIdState, navigate, setActiveChatIdState]);
 
-  useEffect(() => {
-    if (!isLoadingChat && !isFetchingChat && !chatData && chatIdNum) {
-      setToast(`Error: Standalone chat ${chatIdNum} not found.`);
-      navigate('/', { replace: true });
-    }
-  }, [isLoadingChat, isFetchingChat, chatData, chatIdNum, navigate, setToast]);
-
-  const handleMouseMove = useCallback(
-    (e: MouseEvent) => {
-      if (!isResizing.current || !sidebarRef.current) return;
-      const containerRect =
-        sidebarRef.current.parentElement?.getBoundingClientRect();
-      if (!containerRect) return;
-      let newWidth = e.clientX - containerRect.left;
-      setSidebarWidth(newWidth);
-    },
-    [setSidebarWidth]
-  );
-  const handleMouseUp = useCallback(() => {
-    if (isResizing.current) {
-      isResizing.current = false;
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    }
-  }, [handleMouseMove]);
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      e.preventDefault();
-      isResizing.current = true;
-      document.body.style.cursor = 'col-resize';
-      document.body.style.userSelect = 'none';
-      document.addEventListener('mousemove', handleMouseMove);
-      document.addEventListener('mouseup', handleMouseUp);
-    },
-    [handleMouseMove, handleMouseUp]
-  );
-  useEffect(() => {
-    return () => {
-      if (isResizing.current) {
-        document.removeEventListener('mousemove', handleMouseMove);
-        document.removeEventListener('mouseup', handleMouseUp);
-        document.body.style.cursor = '';
-        document.body.style.userSelect = '';
-        isResizing.current = false;
-      }
-    };
-  }, [handleMouseMove, handleMouseUp]);
-
   const handleOpenConfigureLlmModal = () => setIsSelectModelModalOpen(true);
-  const handleNavigateBack = () => navigate('/');
   const handleModelSuccessfullySet = () => {
     console.log(
       '[StandaloneChatView] Model successfully set via SelectActiveModelModal.'
@@ -134,91 +56,20 @@ export function StandaloneChatView() {
     setToast('AI Model configured successfully.');
   };
 
-  if (isLoadingChat && !chatData) {
-    return (
-      <Flex
-        justify="center"
-        align="center"
-        style={{ height: '100vh', backgroundColor: 'var(--color-panel-solid)' }}
-      >
-        <Spinner size="3" />{' '}
-        <Text ml="2" color="gray">
-          Loading chat...
-        </Text>
-      </Flex>
-    );
-  }
-
-  const displayTitle =
-    chatData?.name ||
-    (chatData
-      ? `Chat (${formatTimestamp(chatData.timestamp)})`
-      : 'Standalone Chat');
+  const currentActiveChatId = activeChatIdState;
 
   return (
     <Flex flexGrow="1" style={{ height: '100vh', overflow: 'hidden' }}>
-      <Box
-        ref={sidebarRef}
-        className="relative flex-shrink-0 hidden lg:flex flex-col bg-white dark:bg-gray-800" // MODIFIED: slate to gray
-        style={{
-          width: `${clampedSidebarWidth}px`,
-          borderRight: '1px solid var(--gray-a6)',
-        }}
-      >
-        <StandaloneChatSidebar
-          isLoading={isLoadingChat || isFetchingChat}
-          error={chatError}
-        />
-      </Box>
-      <Box
-        className="hidden lg:block flex-shrink-0 w-1.5 cursor-col-resize group hover:bg-[var(--gray-a4)]"
-        onMouseDown={handleMouseDown}
-        title="Resize sidebar"
-      >
-        <Box className="h-full w-[1px] bg-[var(--gray-a5)] group-hover:bg-[var(--accent-9)] mx-auto" />{' '}
-      </Box>
       <Flex
         direction="column"
         flexGrow="1"
         style={{ minWidth: 0, height: '100vh', overflow: 'hidden' }}
       >
-        <Box
-          px={{ initial: '5', md: '7', lg: '8' }}
-          py="3"
-          flexShrink="0"
-          style={{
-            backgroundColor: 'var(--color-panel-solid)',
-            borderBottom: '1px solid var(--gray-a6)',
-          }}
-        >
-          <Flex justify="between" align="center">
-            <Flex align="center" gap="2" style={{ minWidth: 0 }}>
-              <Button
-                onClick={handleNavigateBack}
-                variant="ghost"
-                color="gray"
-                size="2"
-                style={{ flexShrink: 0 }}
-              >
-                <ArrowLeftIcon /> Home
-              </Button>
-              <Text color="gray" size="2" style={{ flexShrink: 0 }}>
-                {' / '}
-              </Text>
-              <Text
-                size="2"
-                weight="bold"
-                truncate
-                title={displayTitle}
-                style={{ flexShrink: 1 }}
-                className="text-gray-800 dark:text-gray-200" // MODIFIED: slate to gray
-              >
-                {displayTitle}
-              </Text>
-            </Flex>
-            {/* UserThemeDropdown removed */}
-          </Flex>
-        </Box>
+        {/* Top bar within the view - REMOVED the backlink and container */}
+        {/* The "All Chats" link is now part of PersistentSidebar */}
+
+        <StandaloneChatHeader activeChatId={currentActiveChatId} />
+
         <Box
           flexGrow="1"
           style={{
@@ -227,14 +78,21 @@ export function StandaloneChatView() {
             padding: 'var(--space-3)',
           }}
         >
-          <ChatInterface
-            activeChatId={chatIdNum}
-            isStandalone={true}
-            isLoadingSessionMeta={false}
-            ollamaStatus={ollamaStatus}
-            isLoadingOllamaStatus={isLoadingOllamaStatus}
-            onOpenLlmModal={handleOpenConfigureLlmModal}
-          />
+          {currentActiveChatId ? (
+            <ChatInterface
+              activeChatId={currentActiveChatId}
+              isStandalone={true}
+              ollamaStatus={ollamaStatus}
+              isLoadingOllamaStatus={isLoadingOllamaStatus}
+              onOpenLlmModal={handleOpenConfigureLlmModal}
+            />
+          ) : (
+            <Flex align="center" justify="center" style={{ height: '100%' }}>
+              <Text color="gray" size="3">
+                Select a chat to view or start a new one.
+              </Text>
+            </Flex>
+          )}
         </Box>
       </Flex>
 

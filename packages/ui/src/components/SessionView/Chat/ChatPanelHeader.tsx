@@ -1,5 +1,7 @@
 // packages/ui/src/components/SessionView/Chat/ChatPanelHeader.tsx
-import React from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Flex,
   Text,
@@ -8,61 +10,238 @@ import {
   Tooltip,
   Box,
   Spinner,
+  DropdownMenu,
+  IconButton,
+  AlertDialog,
+  TextField,
+  Callout,
 } from '@radix-ui/themes';
 import {
-  MixerVerticalIcon, // Kept for familiarity, but consider CogIcon or similar if "Configure"
+  MixerVerticalIcon,
   InfoCircledIcon,
   CheckCircledIcon,
   SymbolIcon,
   LightningBoltIcon,
   ArchiveIcon,
+  DotsHorizontalIcon,
+  PlusCircledIcon,
+  Pencil1Icon,
+  TrashIcon,
+  Cross1Icon,
+  CheckIcon,
 } from '@radix-ui/react-icons';
-import type { OllamaStatus } from '../../../types';
+import type { OllamaStatus, Session, ChatSession } from '../../../types';
 import { cn } from '../../../utils';
+import { EntitySelectorDropdown } from '../../Shared/EntitySelectorDropdown';
+import { EditEntityModal } from '../../Shared/EditEntityModal'; // For renaming
+import {
+  startSessionChat,
+  renameSessionChat,
+  deleteSessionChat,
+  fetchSessionChatDetails,
+} from '../../../api/api';
+import { useSetAtom } from 'jotai';
+import { toastMessageAtom } from '../../../store';
+import { formatTimestamp } from '../../../helpers';
 
 interface ChatPanelHeaderProps {
+  session: Session;
+  activeChatId: number | null;
   ollamaStatus: OllamaStatus | undefined;
-  isLoadingStatus: boolean;
+  isLoadingOllamaStatus: boolean;
   latestPromptTokens: number | null;
   latestCompletionTokens: number | null;
-  onOpenLlmModal: () => void; // This prop will now trigger SelectActiveModelModal
+  onOpenLlmModal: () => void;
+}
+
+// Form state for renaming a chat
+interface ChatRenameFormState {
+  name: string;
 }
 
 export function ChatPanelHeader({
+  session,
+  activeChatId,
   ollamaStatus,
-  isLoadingStatus,
+  isLoadingOllamaStatus,
   latestPromptTokens,
   latestCompletionTokens,
-  onOpenLlmModal, // Renamed for clarity if desired, but functionally it just opens a modal
+  onOpenLlmModal,
 }: ChatPanelHeaderProps) {
-  const modelName = ollamaStatus?.activeModel ?? 'No Model Selected'; // Updated default
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const setToast = useSetAtom(toastMessageAtom);
+
+  const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
+  const [chatToEdit, setChatToEdit] = useState<ChatSession | null>(null);
+
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [chatToDelete, setChatToDelete] = useState<ChatSession | null>(null);
+
+  const activeChat = session.chats.find((c) => c.id === activeChatId);
+
+  const startNewChatMutation = useMutation<ChatSession, Error>({
+    mutationFn: () => startSessionChat(session.id),
+    onSuccess: (newChat) => {
+      setToast('New chat started.');
+      queryClient.setQueryData<Session>(
+        ['sessionMeta', session.id],
+        (oldData) => {
+          if (!oldData) return oldData;
+          return { ...oldData, chats: [...(oldData.chats || []), newChat] };
+        }
+      );
+      queryClient.prefetchQuery({
+        queryKey: ['chat', session.id, newChat.id],
+        queryFn: () => fetchSessionChatDetails(session.id, newChat.id),
+      });
+      navigate(`/sessions/${session.id}/chats/${newChat.id}`);
+    },
+    onError: (error) => setToast(`Error starting chat: ${error.message}`),
+  });
+
+  const renameChatMutation = useMutation<
+    ChatSession,
+    Error,
+    { chatId: number; formState: ChatRenameFormState }
+  >({
+    mutationFn: ({ chatId, formState }) =>
+      renameSessionChat(session.id, chatId, formState.name.trim() || null),
+    onSuccess: (updatedChat) => {
+      setToast('Chat renamed successfully.');
+      queryClient.invalidateQueries({ queryKey: ['sessionMeta', session.id] });
+      queryClient.invalidateQueries({
+        queryKey: ['chat', session.id, updatedChat.id],
+      });
+      setIsRenameModalOpen(false);
+      setChatToEdit(null);
+    },
+    onError: (error) => {
+      console.error('Rename chat failed:', error);
+    },
+  });
+
+  const deleteChatMutation = useMutation<{ message: string }, Error, number>({
+    mutationFn: (chatId) => deleteSessionChat(session.id, chatId),
+    onSuccess: (data, deletedChatId) => {
+      setToast(data.message || `Chat ${deletedChatId} deleted.`);
+      queryClient.invalidateQueries({ queryKey: ['sessionMeta', session.id] });
+      queryClient.removeQueries({
+        queryKey: ['chat', session.id, deletedChatId],
+      });
+      setIsDeleteConfirmOpen(false);
+      setChatToDelete(null);
+      // Navigate to the session page (list of sessions) if the active chat was deleted
+      navigate(`/sessions/${session.id}`, { replace: true });
+    },
+    onError: (error) => setToast(`Error deleting chat: ${error.message}`),
+  });
+
+  const handleChatSelect = (chatId: number) => {
+    navigate(`/sessions/${session.id}/chats/${chatId}`);
+  };
+
+  const handleNewChat = () => {
+    if (startNewChatMutation.isPending) return;
+    startNewChatMutation.mutate();
+  };
+
+  const handleOpenRenameModal = () => {
+    if (activeChat) {
+      setChatToEdit(activeChat);
+      setIsRenameModalOpen(true);
+    }
+  };
+
+  const handleOpenDeleteConfirm = () => {
+    if (activeChat) {
+      setChatToDelete(activeChat);
+      setIsDeleteConfirmOpen(true);
+    }
+  };
+
+  const getInitialRenameFormState = useCallback(
+    (entity: ChatSession | null): ChatRenameFormState => ({
+      name: entity?.name || '',
+    }),
+    []
+  );
+
+  const validateRenameForm = useCallback(
+    (formState: ChatRenameFormState): string | null => {
+      if (!formState.name.trim() && activeChat?.name) {
+        return null;
+      }
+      if (!formState.name.trim() && !activeChat?.name) {
+        return 'No changes detected.';
+      }
+      if (formState.name.trim() === activeChat?.name) {
+        return 'No changes detected.';
+      }
+      return null;
+    },
+    [activeChat]
+  );
+
+  const handleSaveRename = async (
+    entityId: number,
+    formState: ChatRenameFormState
+  ) => {
+    renameChatMutation.mutate({ chatId: entityId, formState });
+  };
+
+  const renderRenameFormFields = useCallback(
+    (
+      formState: ChatRenameFormState,
+      setFormState: React.Dispatch<React.SetStateAction<ChatRenameFormState>>,
+      isSaving: boolean,
+      firstInputRef: React.RefObject<
+        HTMLInputElement | HTMLTextAreaElement | null
+      >
+    ): React.ReactNode => (
+      <label>
+        <Text as="div" size="2" mb="1" weight="medium">
+          Chat Name (Optional)
+        </Text>
+        <TextField.Root
+          ref={firstInputRef as React.RefObject<HTMLInputElement>}
+          size="2"
+          placeholder="Enter new chat name"
+          value={formState.name}
+          onChange={(e) => setFormState({ name: e.target.value })}
+          disabled={isSaving}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              if (chatToEdit && !validateRenameForm(formState)) {
+                handleSaveRename(chatToEdit.id, formState);
+              }
+            }
+          }}
+        />
+      </label>
+    ),
+    [chatToEdit, validateRenameForm, handleSaveRename]
+  );
+
+  const modelName = ollamaStatus?.activeModel ?? 'No Model Selected';
   const isLoaded = ollamaStatus?.loaded ?? false;
-  // Ensure modelChecked is for the activeModel to confirm *it* is loaded
   const isActiveModelLoaded =
     isLoaded && ollamaStatus?.modelChecked === ollamaStatus?.activeModel;
   const configuredContextSize = ollamaStatus?.configuredContextSize;
 
   const renderStatusBadge = () => {
-    if (isLoadingStatus) {
-      return <Spinner size="1" />;
-    }
-    // Check if an active model is set first
-    if (!ollamaStatus?.activeModel) {
-      return <SymbolIcon className="text-yellow-500" width="14" height="14" />; // Icon for no model selected
-    }
-    if (isActiveModelLoaded) {
+    if (isLoadingOllamaStatus) return <Spinner size="1" />;
+    if (!ollamaStatus?.activeModel)
+      return <SymbolIcon className="text-yellow-500" width="14" height="14" />;
+    if (isActiveModelLoaded)
       return (
         <CheckCircledIcon className="text-green-600" width="14" height="14" />
       );
-    }
-    // Model selected but not loaded or status unknown for it
     return <SymbolIcon className="text-gray-500" width="14" height="14" />;
   };
-
-  const totalTokens = (latestPromptTokens ?? 0) + (latestCompletionTokens ?? 0);
-
   let statusTooltipContent = 'Loading status...';
-  if (!isLoadingStatus) {
+  if (!isLoadingOllamaStatus) {
     if (!ollamaStatus?.activeModel) {
       statusTooltipContent =
         'No AI model selected. Click "Configure Model" to choose one.';
@@ -72,97 +251,209 @@ export function ChatPanelHeader({
       statusTooltipContent = `Active Model: ${modelName} (Not loaded or unavailable)`;
     }
   }
+  const totalTokens = (latestPromptTokens ?? 0) + (latestCompletionTokens ?? 0);
+  const isAnyActionInProgress =
+    startNewChatMutation.isPending ||
+    renameChatMutation.isPending ||
+    deleteChatMutation.isPending;
 
   return (
-    <Flex
-      align="center"
-      justify="between"
-      py="2"
-      px="3"
-      gap="3"
-      style={{
-        borderBottom: '1px solid var(--gray-a6)',
-        backgroundColor: 'var(--color-panel-solid)',
-        flexShrink: 0,
-      }}
-    >
-      {/* Left Side: Model Info & Context Size */}
-      <Flex align="center" gap="2" style={{ minWidth: 0 }}>
-        <Tooltip content={statusTooltipContent}>
-          <Flex align="center" gap="1">
-            {renderStatusBadge()}
-          </Flex>
-        </Tooltip>
-        <Text size="1" weight="medium" truncate title={modelName}>
-          {modelName}
-        </Text>
-        {ollamaStatus?.activeModel && ( // Only show context if a model is active
-          <Tooltip content={`Configured Context Size (num_ctx)`}>
-            <Badge
-              variant="soft"
-              color={configuredContextSize ? 'blue' : 'gray'}
-              size="1"
-              className={cn(isLoadingStatus ? 'opacity-50' : '')}
-            >
-              <LightningBoltIcon
-                width="14"
-                height="14"
-                style={{ marginRight: '2px' }}
-              />
-              {isLoadingStatus
-                ? '...'
-                : configuredContextSize
-                  ? configuredContextSize.toLocaleString()
-                  : 'Default'}
-            </Badge>
+    <>
+      <Flex
+        align="center"
+        justify="between"
+        py="2"
+        px="3"
+        gap="2"
+        style={{
+          borderBottom: '1px solid var(--gray-a6)',
+          backgroundColor: 'var(--color-panel-solid)',
+          flexShrink: 0,
+        }}
+      >
+        <Flex align="center" gap="2" style={{ minWidth: 0, flexGrow: 1 }}>
+          <EntitySelectorDropdown
+            items={session.chats}
+            activeItemId={activeChatId}
+            onItemSelect={handleChatSelect}
+            placeholderText="Select a Chat..."
+            entityTypeLabel="Chat"
+            disabled={isAnyActionInProgress}
+          />
+          <IconButton
+            variant="soft"
+            size="1"
+            onClick={handleNewChat}
+            disabled={startNewChatMutation.isPending || isAnyActionInProgress}
+            title="Start New Chat"
+          >
+            {startNewChatMutation.isPending ? (
+              <Spinner size="1" />
+            ) : (
+              <PlusCircledIcon />
+            )}
+          </IconButton>
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger>
+              <IconButton
+                variant="ghost"
+                color="gray"
+                size="1"
+                disabled={!activeChat || isAnyActionInProgress}
+                title="Chat Actions"
+              >
+                <DotsHorizontalIcon />
+              </IconButton>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Content align="start">
+              <DropdownMenu.Item
+                onSelect={handleOpenRenameModal}
+                disabled={!activeChat || renameChatMutation.isPending}
+              >
+                <Pencil1Icon className="mr-1" /> Rename Chat
+              </DropdownMenu.Item>
+              <DropdownMenu.Separator />
+              <DropdownMenu.Item
+                color="red"
+                onSelect={handleOpenDeleteConfirm}
+                disabled={!activeChat || deleteChatMutation.isPending}
+              >
+                <TrashIcon className="mr-1" /> Delete Chat
+              </DropdownMenu.Item>
+            </DropdownMenu.Content>
+          </DropdownMenu.Root>
+        </Flex>
+
+        <Flex align="center" gap="2" flexShrink="0">
+          <Tooltip content={statusTooltipContent}>
+            <Flex align="center" gap="1">
+              {renderStatusBadge()}
+            </Flex>
           </Tooltip>
-        )}
-        {/* Info icon if a different model is loaded than active (less relevant with new flow but kept for now) */}
-        {isLoaded &&
-          ollamaStatus?.details?.name &&
-          ollamaStatus.details.name !== ollamaStatus.activeModel && (
-            <Tooltip
-              content={`A different model (${ollamaStatus.details.name}) is currently in memory.`}
-            >
-              <InfoCircledIcon
-                className="text-blue-500 flex-shrink-0"
-                width="14"
-                height="14"
-              />
+          {ollamaStatus?.activeModel && (
+            <Tooltip content={`Configured Context Size (num_ctx)`}>
+              <Badge
+                variant="soft"
+                color={configuredContextSize ? 'blue' : 'gray'}
+                size="1"
+                className={cn(isLoadingOllamaStatus ? 'opacity-50' : '')}
+              >
+                <LightningBoltIcon
+                  width="14"
+                  height="14"
+                  style={{ marginRight: '2px' }}
+                />
+                {isLoadingOllamaStatus
+                  ? '...'
+                  : configuredContextSize
+                    ? configuredContextSize.toLocaleString()
+                    : 'Default'}
+              </Badge>
             </Tooltip>
           )}
+          {(latestPromptTokens !== null || latestCompletionTokens !== null) && (
+            <Tooltip
+              content={`Last Interaction: ${latestPromptTokens?.toLocaleString() ?? '?'} Input + ${latestCompletionTokens?.toLocaleString() ?? '?'} Output Tokens`}
+            >
+              <Badge variant="soft" color="gray" highContrast>
+                <ArchiveIcon
+                  width="14"
+                  height="14"
+                  style={{ marginRight: '4px', opacity: 0.8 }}
+                />
+                <Text size="1">{totalTokens.toLocaleString()} Tokens</Text>
+              </Badge>
+            </Tooltip>
+          )}
+          <Button
+            variant="soft"
+            size="1"
+            onClick={onOpenLlmModal}
+            title="Configure AI Model"
+          >
+            <MixerVerticalIcon width="14" height="14" />
+          </Button>
+        </Flex>
       </Flex>
 
-      {/* Right Side: Tokens & Manage Button */}
-      <Flex align="center" gap="3" flexShrink="0">
-        {(latestPromptTokens !== null || latestCompletionTokens !== null) && (
-          <Tooltip
-            content={`Last Interaction: ${latestPromptTokens?.toLocaleString() ?? '?'} Input + ${latestCompletionTokens?.toLocaleString() ?? '?'} Output Tokens`}
-          >
-            <Badge variant="soft" color="gray" highContrast>
-              <ArchiveIcon
-                width="14"
-                height="14"
-                style={{ marginRight: '4px', opacity: 0.8 }}
-              />
-              <Text size="1">{totalTokens.toLocaleString()} Tokens</Text>
-            </Badge>
-          </Tooltip>
-        )}
-        <Button
-          variant="soft"
-          size="1"
-          onClick={onOpenLlmModal} // This will now open SelectActiveModelModal
-          title="Configure AI Model"
-          aria-label="Configure AI model"
-        >
-          <MixerVerticalIcon width="14" height="14" />
-          {/* Updated Button Text */}
-          <Text size="1" ml="1">
-            Configure Model
-          </Text>
-        </Button>
-      </Flex>
-    </Flex>
+      {chatToEdit && (
+        <EditEntityModal<ChatSession, ChatRenameFormState>
+          isOpen={isRenameModalOpen}
+          onOpenChange={(open) => {
+            if (!open) {
+              setIsRenameModalOpen(false);
+              setChatToEdit(null);
+              renameChatMutation.reset();
+            }
+          }}
+          entity={chatToEdit}
+          entityTypeLabel="Chat"
+          getInitialFormState={getInitialRenameFormState}
+          renderFormFields={renderRenameFormFields}
+          validateForm={validateRenameForm}
+          onSave={handleSaveRename}
+          isSaving={renameChatMutation.isPending}
+          saveError={renameChatMutation.error?.message}
+        />
+      )}
+
+      <AlertDialog.Root
+        open={isDeleteConfirmOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setIsDeleteConfirmOpen(false);
+            setChatToDelete(null);
+            deleteChatMutation.reset();
+          }
+        }}
+      >
+        <AlertDialog.Content style={{ maxWidth: 450 }}>
+          <AlertDialog.Title>Delete Chat</AlertDialog.Title>
+          <AlertDialog.Description size="2">
+            Are you sure you want to delete "
+            <Text weight="bold">
+              {chatToDelete?.name ||
+                `Chat (${formatTimestamp(chatToDelete?.timestamp || 0)})`}
+            </Text>
+            "? This action cannot be undone.
+          </AlertDialog.Description>
+          {deleteChatMutation.isError && (
+            <Callout.Root color="red" size="1" my="2">
+              <Callout.Icon>
+                <InfoCircledIcon />
+              </Callout.Icon>
+              <Callout.Text>{deleteChatMutation.error.message}</Callout.Text>
+            </Callout.Root>
+          )}
+          <Flex gap="3" mt="4" justify="end">
+            <AlertDialog.Cancel>
+              <Button
+                variant="soft"
+                color="gray"
+                disabled={deleteChatMutation.isPending}
+              >
+                Cancel
+              </Button>
+            </AlertDialog.Cancel>
+            <AlertDialog.Action>
+              <Button
+                color="red"
+                onClick={() =>
+                  chatToDelete && deleteChatMutation.mutate(chatToDelete.id)
+                }
+                disabled={deleteChatMutation.isPending}
+              >
+                {deleteChatMutation.isPending ? (
+                  <Spinner size="1" />
+                ) : (
+                  <TrashIcon />
+                )}
+                <Text ml="1">Delete</Text>
+              </Button>
+            </AlertDialog.Action>
+          </Flex>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
+    </>
   );
 }

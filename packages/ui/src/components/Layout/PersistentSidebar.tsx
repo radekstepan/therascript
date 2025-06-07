@@ -79,7 +79,7 @@ export function PersistentSidebar() {
     mutationFn: requestAppShutdown,
     onSuccess: (data) => {
       setToast(
-        `? Shutdown initiated: ${data.message}. The application will now close.`
+        `✅ Shutdown initiated: ${data.message}. The application will now close.`
       );
     },
     onError: (error: Error) => {
@@ -88,11 +88,11 @@ export function PersistentSidebar() {
         error.message.toLowerCase().includes('network error')
       ) {
         setToast(
-          `? Shutdown Error: Could not reach the shutdown service. Is the main script (run-dev/run-prod) running?`
+          `❌ Shutdown Error: Could not reach the shutdown service. Is the main script (run-dev/run-prod) running?`
         );
       } else {
         setToast(
-          `? Shutdown Error: ${error.message}. Please check the console for details.`
+          `❌ Shutdown Error: ${error.message}. Please check the console for details.`
         );
       }
       setIsShutdownConfirmOpen(false);
@@ -112,8 +112,9 @@ export function PersistentSidebar() {
       <div
         className={cn(
           'fixed top-0 left-0 h-full flex flex-col shadow-lg z-40 transition-all duration-300 ease-in-out',
-          'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200',
-          'border-r border-gray-200 dark:border-gray-700',
+          // MODIFIED: Use Radix accent variables for background, text, and border
+          'bg-[var(--accent-2)] text-[var(--accent-11)]',
+          'border-r border-[var(--accent-6)]',
           isSidebarOpen ? 'w-64' : 'w-20'
         )}
         aria-label="Main sidebar"
@@ -121,20 +122,22 @@ export function PersistentSidebar() {
         {/* Top Section */}
         <div
           className={cn(
-            'flex items-center h-16 p-4 border-b border-gray-200 dark:border-gray-700',
+            'flex items-center h-16 p-4',
+            // MODIFIED: Use Radix accent variable for border
+            'border-b border-[var(--accent-6)]',
             isSidebarOpen ? 'justify-between' : 'justify-center'
           )}
         >
           {isSidebarOpen && (
-            // MODIFIED: Changed "Therascript" brand text color from teal to gray
-            <h1 className="text-xl font-semibold text-gray-700 dark:text-gray-300">
+            // MODIFIED: Use Radix accent variable for brand text color
+            <h1 className="text-xl font-semibold text-[var(--accent-12)]">
               Therascript
             </h1>
           )}
           <button
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            // MODIFIED: Changed focus ring from teal to gray
-            className="p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500"
+            // MODIFIED: Use Radix accent variables for hover and focus ring
+            className="p-2 rounded-md hover:bg-[var(--accent-a4)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-8)]"
             aria-label={isSidebarOpen ? 'Close sidebar' : 'Open sidebar'}
             aria-expanded={isSidebarOpen}
           >
@@ -156,15 +159,14 @@ export function PersistentSidebar() {
                   title={item.label}
                   className={cn(
                     'flex items-center w-full py-3 text-left transition-colors duration-150 ease-in-out',
-                    // MODIFIED: Hover states from teal to gray
-                    'hover:bg-gray-200 dark:hover:bg-gray-600 hover:text-gray-800 dark:hover:text-gray-100',
-                    // MODIFIED: Focus ring from teal to gray
-                    'focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-gray-500',
+                    // MODIFIED: Use Radix accent variables for hover, focus, active states
+                    !isActive(item.page) &&
+                      'hover:bg-[var(--accent-a3)] hover:text-[var(--accent-12)]',
+                    'focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent-8)]',
                     isSidebarOpen ? 'px-6' : 'px-0 justify-center',
                     isActive(item.page)
-                      ? // MODIFIED: Active states from teal to gray
-                        'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-50 border-r-4 border-gray-500 dark:border-gray-400'
-                      : 'text-gray-700 dark:text-gray-200'
+                      ? 'bg-[var(--accent-4)] text-[var(--accent-12)] border-r-4 border-[var(--accent-9)] font-medium'
+                      : 'text-[var(--accent-11)]'
                   )}
                   aria-current={isActive(item.page) ? 'page' : undefined}
                 >
@@ -183,7 +185,9 @@ export function PersistentSidebar() {
         {/* Bottom Section */}
         <div
           className={cn(
-            'absolute bottom-0 w-full p-4 border-t border-gray-200 dark:border-gray-700',
+            'absolute bottom-0 w-full p-4',
+            // MODIFIED: Use Radix accent variable for border
+            'border-t border-[var(--accent-6)]',
             !isSidebarOpen && 'flex flex-col items-center space-y-2'
           )}
         >
@@ -191,8 +195,8 @@ export function PersistentSidebar() {
             <select
               value={theme}
               onChange={(e) => setTheme(e.target.value as Theme)}
-              // MODIFIED: Focus ring from teal to gray
-              className="w-full p-2 text-sm bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-500 focus:border-gray-500"
+              // MODIFIED: Use Radix accent variables for theme select styling
+              className="w-full p-2 text-sm bg-[var(--accent-3)] border border-[var(--accent-7)] text-[var(--accent-12)] rounded-md focus:outline-none focus:ring-2 focus:ring-[var(--accent-8)] focus:border-[var(--accent-8)]"
               aria-label="Select theme"
             >
               <option value="light">Light Mode</option>
@@ -209,12 +213,11 @@ export function PersistentSidebar() {
                 <button
                   onClick={() => setTheme('light')}
                   className={cn(
-                    // MODIFIED: Focus ring from teal to gray
-                    'p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500',
-                    // MODIFIED: Active theme icon color from teal to gray
+                    // MODIFIED: Use Radix accent variables for theme buttons
+                    'p-2 rounded-md hover:bg-[var(--accent-a4)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-8)]',
                     effectiveTheme === 'light' &&
                       theme !== 'system' &&
-                      'text-gray-600 dark:text-gray-400' // Using a general "active-looking" gray
+                      'text-[var(--accent-9)]' // Active theme icon color
                   )}
                   aria-label="Set light theme"
                   aria-pressed={
@@ -228,12 +231,11 @@ export function PersistentSidebar() {
                 <button
                   onClick={() => setTheme('dark')}
                   className={cn(
-                    // MODIFIED: Focus ring from teal to gray
-                    'p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500',
-                    // MODIFIED: Active theme icon color from teal to gray
+                    // MODIFIED: Use Radix accent variables
+                    'p-2 rounded-md hover:bg-[var(--accent-a4)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-8)]',
                     effectiveTheme === 'dark' &&
                       theme !== 'system' &&
-                      'text-gray-600 dark:text-gray-400'
+                      'text-[var(--accent-9)]' // Active theme icon color
                   )}
                   aria-label="Set dark theme"
                   aria-pressed={effectiveTheme === 'dark' && theme !== 'system'}
@@ -245,10 +247,9 @@ export function PersistentSidebar() {
                 <button
                   onClick={() => setTheme('system')}
                   className={cn(
-                    // MODIFIED: Focus ring from teal to gray
-                    'p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500',
-                    // MODIFIED: Active theme icon color from teal to gray
-                    theme === 'system' && 'text-gray-600 dark:text-gray-400'
+                    // MODIFIED: Use Radix accent variables
+                    'p-2 rounded-md hover:bg-[var(--accent-a4)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-8)]',
+                    theme === 'system' && 'text-[var(--accent-9)]' // Active theme icon color
                   )}
                   aria-label="Set system theme"
                   aria-pressed={theme === 'system'}
@@ -263,8 +264,8 @@ export function PersistentSidebar() {
             title="Docker Status"
             onClick={handleDockerStatusClick}
             className={cn(
-              // MODIFIED: Focus ring from teal to gray
-              'flex items-center mt-2 w-full py-2 text-left text-sm hover:bg-gray-200 dark:hover:bg-gray-700 rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-500',
+              // MODIFIED: Use Radix accent variables. Base text color inherited.
+              'flex items-center mt-2 w-full py-2 text-left text-sm hover:bg-[var(--accent-a3)] rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-8)]',
               isSidebarOpen ? 'px-3' : 'justify-center px-0'
             )}
           >
@@ -276,6 +277,7 @@ export function PersistentSidebar() {
             {isSidebarOpen && 'Docker Status'}
           </button>
 
+          {/* Shutdown button - kept red styling for destructive action */}
           <button
             title="Shutdown App"
             onClick={handleShutdownAppClick}

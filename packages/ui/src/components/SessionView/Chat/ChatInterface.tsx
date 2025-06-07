@@ -1,4 +1,4 @@
-/* packages/ui/src/components/SessionView/Chat/ChatInterface.tsx */
+// packages/ui/src/components/SessionView/Chat/ChatInterface.tsx
 import React, {
   useRef,
   useEffect,
@@ -10,17 +10,17 @@ import { Box, Flex, ScrollArea, Spinner, Text } from '@radix-ui/themes';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChatInput } from './ChatInput';
 import { ChatMessages } from './ChatMessages';
-import { ChatPanelHeader } from './ChatPanelHeader';
+import { ChatPanelHeader } from './ChatPanelHeader'; // Ensure this is correctly imported
 import {
   fetchSessionChatDetails,
-  addSessionChatMessageStream, // Session APIs
+  addSessionChatMessageStream,
   fetchStandaloneChatDetails,
-  addStandaloneChatMessageStream, // Standalone APIs
+  addStandaloneChatMessageStream,
 } from '../../../api/api';
 import { debounce } from '../../../helpers';
 import type {
   ChatSession,
-  Session,
+  Session, // Added Session type
   ChatMessage,
   OllamaStatus,
 } from '../../../types';
@@ -28,10 +28,10 @@ import { currentQueryAtom } from '../../../store';
 import { useAtom } from 'jotai';
 
 interface ChatInterfaceProps {
-  session?: Session | null;
+  session?: Session | null; // Make session prop available, optional for standalone
   activeChatId: number | null;
   isStandalone: boolean;
-  isLoadingSessionMeta?: boolean;
+  isLoadingSessionMeta?: boolean; // Only relevant for session chats
   ollamaStatus: OllamaStatus | undefined;
   isLoadingOllamaStatus: boolean;
   onOpenLlmModal: () => void;
@@ -43,7 +43,7 @@ interface ChatInterfaceProps {
 const createTemporaryId = (): number => -Math.floor(Math.random() * 1000000);
 
 export function ChatInterface({
-  session,
+  session, // Use this prop
   activeChatId,
   isStandalone,
   isLoadingSessionMeta,
@@ -54,8 +54,7 @@ export function ChatInterface({
   initialScrollTop = 0,
   onScrollUpdate,
 }: ChatInterfaceProps) {
-  // Get activeSessionId from the session prop IF it exists
-  const activeSessionId = session?.id ?? null;
+  const activeSessionId = session?.id ?? null; // Get activeSessionId from session prop
 
   const restoreScrollRef = useRef(false);
   const chatContentRef = useRef<HTMLDivElement | null>(null);
@@ -113,7 +112,6 @@ export function ChatInterface({
   const latestCompletionTokens =
     lastAiMessageWithTokens?.completionTokens ?? null;
 
-  // Process Stream Function
   const processStream = async (
     stream: ReadableStream<Uint8Array>,
     tempUserMsgId: number | undefined,
@@ -124,7 +122,6 @@ export function ChatInterface({
     const decoder = new TextDecoder();
     let buffer = '';
     let actualUserMessageId = receivedUserMsgId;
-    // Use the memoized key
     const currentChatQueryKey = chatQueryKey;
     let streamErrored = false;
 
@@ -144,10 +141,6 @@ export function ChatInterface({
               const data = JSON.parse(dataStr);
               if (data.userMessageId && actualUserMessageId === -1) {
                 actualUserMessageId = data.userMessageId;
-                console.log(
-                  'Received user message ID via SSE:',
-                  actualUserMessageId
-                );
                 if (
                   tempUserMsgId &&
                   activeChatId &&
@@ -170,7 +163,6 @@ export function ChatInterface({
                   );
                 }
               } else if (data.chunk) {
-                // Update the temporary AI message in the query cache
                 queryClient.setQueryData<ChatSession>(
                   currentChatQueryKey,
                   (oldData) => {
@@ -187,25 +179,14 @@ export function ChatInterface({
                   }
                 );
               } else if (data.done) {
-                console.log(
-                  'Stream processing received done signal. Tokens:',
-                  data
-                );
-                // Clear the streaming ID *before* invalidating
                 setStreamingAiMessageId(null);
-
                 if (activeChatId && !streamErrored) {
-                  console.log(
-                    '[Stream Done] Stream completed without error. Invalidating chat query.'
-                  );
-                  // Invalidate query to fetch the final message with tokens
                   setTimeout(() => {
                     queryClient.invalidateQueries({
                       queryKey: currentChatQueryKey,
                     });
                   }, 100);
                 }
-                // Stop processing further chunks after 'done'
                 return;
               } else if (data.error) {
                 console.error(
@@ -220,36 +201,19 @@ export function ChatInterface({
           }
         }
       }
-      console.log(
-        "Stream processing loop complete (no 'done' event received?)."
-      );
     } catch (error) {
       console.error('Error reading stream:', error);
       streamErrored = true;
     } finally {
-      // --- Final Cleanup ---
-      console.log(
-        `[Stream Finally] Clearing streaming message ID: ${tempAiMessageId}. Stream Errored: ${streamErrored}`
-      );
-      setStreamingAiMessageId(null); // Ensure it's cleared even if loop finishes without 'done'
-
-      // Invalidate only if the stream didn't error AND didn't receive a 'done' event (unlikely)
+      setStreamingAiMessageId(null);
       if (activeChatId && !streamErrored) {
-        console.warn(
-          "[Stream Finally] Stream ended without 'done' signal and no error. Invalidating query as fallback."
-        );
         setTimeout(() => {
           queryClient.invalidateQueries({ queryKey: currentChatQueryKey });
         }, 100);
-      } else if (streamErrored) {
-        console.warn(
-          '[Stream Finally] Stream ended with an error. Skipping final query invalidation.'
-        );
       }
     }
   };
 
-  // Add Message Mutation
   const addMessageMutation = useMutation({
     mutationFn: async (text: string) => {
       if (!activeChatId) throw new Error('Chat ID missing');
@@ -263,7 +227,6 @@ export function ChatInterface({
     },
     onMutate: async (newMessageText) => {
       if (!activeChatId) return;
-      // Use memoized key
       const currentChatQueryKey = chatQueryKey;
       await queryClient.cancelQueries({ queryKey: currentChatQueryKey });
       const previousChatData =
@@ -281,7 +244,7 @@ export function ChatInterface({
         id: tempAiMessageId,
         chatId: activeChatId,
         sender: 'ai',
-        text: '', // Start AI message as empty
+        text: '',
         timestamp: Date.now(),
         starred: false,
       };
@@ -300,18 +263,7 @@ export function ChatInterface({
           temporaryAiMessage,
         ],
       }));
-
-      setStreamingAiMessageId(tempAiMessageId); // Set the streaming ID
-
-      console.log(
-        '[Optimistic ChatInterface] Added temporary user message ID:',
-        temporaryUserMessage.id
-      );
-      console.log(
-        '[Optimistic ChatInterface] Added temporary AI message ID:',
-        tempAiMessageId
-      );
-
+      setStreamingAiMessageId(tempAiMessageId);
       return {
         previousChatData,
         temporaryUserMessageId: temporaryUserMessage.id,
@@ -319,15 +271,10 @@ export function ChatInterface({
       };
     },
     onSuccess: (data, variables, context) => {
-      console.log(
-        'Stream initiated successfully. Header User Msg ID:',
-        data.userMessageId
-      );
       if (!context?.tempAiMessageId) {
         console.error('Missing temporary AI message ID in mutation context!');
         throw new Error('Mutation context missing tempAiMessageId');
       }
-      // Start processing the stream
       processStream(
         data.stream,
         context.temporaryUserMessageId,
@@ -338,14 +285,12 @@ export function ChatInterface({
           'Caught error from processStream in onSuccess:',
           streamError
         );
-        setStreamingAiMessageId(null); // Clear streaming ID on error
-        // Re-throw or handle as needed, mutation's onError will also catch it
+        setStreamingAiMessageId(null);
         throw streamError;
       });
     },
     onError: (error, newMessageText, context) => {
       console.error('Mutation failed (Initiation or Stream Error):', error);
-      // Use memoized key
       const currentChatQueryKey = chatQueryKey;
       if (
         context?.previousChatData &&
@@ -353,14 +298,11 @@ export function ChatInterface({
         (isStandalone || activeSessionId)
       ) {
         queryClient.setQueryData(currentChatQueryKey, context.previousChatData);
-        console.log('[Mutation Error] Reverted optimistic user message.');
       }
-      setStreamingAiMessageId(null); // Ensure streaming ID is cleared on error
+      setStreamingAiMessageId(null);
     },
     onSettled: () => {
-      console.log('[Mutation Settled] Clearing input.');
-      setCurrentQuery(''); // Clear input after mutation settles (success or error)
-      console.log('[ChatInterface Settled] Invalidating ollamaStatus query.');
+      setCurrentQuery('');
       queryClient.invalidateQueries({ queryKey: ['ollamaStatus'] });
     },
   });
@@ -369,7 +311,6 @@ export function ChatInterface({
   const combinedIsLoading =
     (!isStandalone && isLoadingSessionMeta) || (isLoadingMessages && !chatData);
 
-  // Scroll logic
   const debouncedScrollSave = useCallback(
     debounce((scrollTop: number) => {
       if (onScrollUpdate) {
@@ -435,7 +376,6 @@ export function ChatInterface({
     streamingAiMessageId,
   ]);
 
-  // Determine if AI is actively responding (mutation pending OR streaming in progress)
   const isAiResponding =
     addMessageMutation.isPending || streamingAiMessageId !== null;
 
@@ -450,13 +390,19 @@ export function ChatInterface({
         overflow: 'hidden',
       }}
     >
-      <ChatPanelHeader
-        ollamaStatus={ollamaStatus}
-        isLoadingStatus={isLoadingOllamaStatus}
-        latestPromptTokens={latestPromptTokens}
-        latestCompletionTokens={latestCompletionTokens}
-        onOpenLlmModal={onOpenLlmModal}
-      />
+      {/* Render ChatPanelHeader only if it's not a standalone chat AND session is defined */}
+      {!isStandalone && session && (
+        <ChatPanelHeader
+          session={session} // Pass the session prop
+          activeChatId={activeChatId}
+          ollamaStatus={ollamaStatus}
+          isLoadingOllamaStatus={isLoadingOllamaStatus}
+          latestPromptTokens={latestPromptTokens}
+          latestCompletionTokens={latestCompletionTokens}
+          onOpenLlmModal={onOpenLlmModal}
+        />
+      )}
+      {/* For standalone chats, the header is handled by StandaloneChatHeader in StandaloneChatView */}
 
       <ScrollArea
         type="auto"
@@ -500,10 +446,10 @@ export function ChatInterface({
           <ChatMessages
             messages={chatMessages}
             activeChatId={activeChatId}
-            activeSessionId={activeSessionId} // Pass activeSessionId down
+            activeSessionId={activeSessionId}
             isStandalone={isStandalone}
             streamingMessageId={streamingAiMessageId}
-            isAiResponding={addMessageMutation.isPending} // Pass down the mutation pending state
+            isAiResponding={addMessageMutation.isPending}
           />
         </Box>
       </ScrollArea>
@@ -522,11 +468,10 @@ export function ChatInterface({
       >
         <ChatInput
           isStandalone={isStandalone}
-          disabled={combinedIsLoading || !activeChatId || isAiResponding} // Disable input while AI is responding
+          disabled={combinedIsLoading || !activeChatId || isAiResponding}
           addMessageMutation={addMessageMutation}
         />
       </Box>
     </Flex>
   );
 }
-// TODO comments should not be removed

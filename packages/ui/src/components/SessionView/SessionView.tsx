@@ -5,8 +5,6 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Flex, Box, Button, Text, Spinner } from '@radix-ui/themes';
 import { ArrowLeftIcon } from '@radix-ui/react-icons';
-// import { UserThemeDropdown } from '../User/UserThemeDropdown'; // REMOVED
-import { SessionSidebar } from './Sidebar/SessionSidebar';
 import { SessionContent } from './SessionContent';
 import { EditDetailsModal } from './Modals/EditDetailsModal';
 import { SelectActiveModelModal } from './Modals/SelectActiveModelModal';
@@ -27,8 +25,6 @@ import type {
 import {
   activeSessionIdAtom,
   activeChatIdAtom,
-  clampedSidebarWidthAtom,
-  sidebarWidthAtom,
   toastMessageAtom,
 } from '../../store';
 
@@ -41,14 +37,14 @@ export function SessionView() {
   const setActiveSessionId = useSetAtom(activeSessionIdAtom);
   const setActiveChatId = useSetAtom(activeChatIdAtom);
   const activeChatIdAtomValue = useAtomValue(activeChatIdAtom);
-  const [sidebarWidth, setSidebarWidth] = useAtom(sidebarWidthAtom);
-  const clampedSidebarWidth = useAtomValue(clampedSidebarWidthAtom);
   const [isEditingMetadata, setIsEditingMetadata] = useState(false);
   const [isSelectModelModalOpen, setIsSelectModelModalOpen] = useState(false);
   const setToast = useSetAtom(toastMessageAtom);
 
-  const sidebarRef = useRef<HTMLDivElement>(null);
-  const isResizing = useRef(false);
+  // Removed sidebarWidth, clampedSidebarWidth, resizablePanelRef, isResizing, and related resizing handlers
+  // as the specific sidebar being resized (SessionSidebar for chats) is removed.
+  // If another panel needs resizing, that logic would be specific to it.
+
   const previousSessionIdRef = useRef<number | null>(null);
   const queryClient = useQueryClient();
 
@@ -105,17 +101,7 @@ export function SessionView() {
         ['sessionMeta', sessionIdNum],
         (oldData) => {
           if (!oldData) return oldData;
-          const existingChats = Array.isArray(oldData.chats)
-            ? oldData.chats
-            : [];
-          const newChatMetadata: ChatSession = {
-            id: newChat.id,
-            sessionId: newChat.sessionId,
-            timestamp: newChat.timestamp,
-            name: newChat.name,
-            messages: [],
-          };
-          return { ...oldData, chats: [...existingChats, newChatMetadata] };
+          return { ...oldData, chats: [...(oldData.chats || []), newChat] };
         }
       );
       if (sessionIdNum !== null) {
@@ -134,39 +120,7 @@ export function SessionView() {
     },
   });
 
-  const handleMouseMove = useCallback(
-    (e: MouseEvent) => {
-      if (!isResizing.current || !sidebarRef.current) return;
-      const containerRect =
-        sidebarRef.current.parentElement?.getBoundingClientRect();
-      if (!containerRect) return;
-      let newWidth = e.clientX - containerRect.left;
-      setSidebarWidth(newWidth);
-    },
-    [setSidebarWidth]
-  );
-
-  const handleMouseUp = useCallback(() => {
-    if (isResizing.current) {
-      isResizing.current = false;
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    }
-  }, [handleMouseMove]);
-
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      e.preventDefault();
-      isResizing.current = true;
-      document.body.style.cursor = 'col-resize';
-      document.body.style.userSelect = 'none';
-      document.addEventListener('mousemove', handleMouseMove);
-      document.addEventListener('mouseup', handleMouseUp);
-    },
-    [handleMouseMove, handleMouseUp]
-  );
+  // Removed resizing useEffect handlers
 
   useEffect(() => {
     const currentSessionIdNum = sessionIdParam
@@ -206,6 +160,7 @@ export function SessionView() {
           navigateTo = `/sessions/${currentSessionIdNum}/chats/${targetChatId}`;
         }
       } else if (chatIdParam) {
+        // If URL has a chatId but there are no chats (e.g., after deletion), redirect to base session
         shouldNavigate = true;
         navigateTo = `/sessions/${currentSessionIdNum}`;
       }
@@ -232,18 +187,6 @@ export function SessionView() {
     setActiveChatId,
   ]);
 
-  useEffect(() => {
-    return () => {
-      if (isResizing.current) {
-        document.removeEventListener('mousemove', handleMouseMove);
-        document.removeEventListener('mouseup', handleMouseUp);
-        document.body.style.cursor = '';
-        document.body.style.userSelect = '';
-        isResizing.current = false;
-      }
-    };
-  }, [handleMouseMove, handleMouseUp]);
-
   const handleStartFirstChat = useCallback(async () => {
     if (startChatMutation.isPending) return;
     startChatMutation.mutate();
@@ -251,7 +194,7 @@ export function SessionView() {
 
   const handleOpenEditMetadataModal = () => setIsEditingMetadata(true);
   const handleOpenConfigureLlmModal = () => setIsSelectModelModalOpen(true);
-  const handleNavigateBack = () => navigate('/');
+  const handleNavigateBack = () => navigate('/sessions-list');
   const handleMetadataSaveSuccess = (
     updatedMetadata: Partial<SessionMetadata>
   ) => {
@@ -305,28 +248,8 @@ export function SessionView() {
 
   return (
     <Flex flexGrow="1" style={{ height: '100vh', overflow: 'hidden' }}>
-      <Box
-        ref={sidebarRef}
-        className="relative flex-shrink-0 hidden lg:flex flex-col bg-white dark:bg-gray-800" // MODIFIED: slate to gray
-        style={{
-          width: `${clampedSidebarWidth}px`,
-          borderRight: '1px solid var(--gray-a6)',
-        }}
-      >
-        <SessionSidebar
-          session={sessionMetadata ?? null}
-          isLoading={isLoadingSessionMeta || isFetchingSessionMeta}
-          error={sessionMetaError ?? null}
-        />
-      </Box>
-
-      <Box
-        className="hidden lg:block flex-shrink-0 w-1.5 cursor-col-resize group hover:bg-[var(--gray-a4)]"
-        onMouseDown={handleMouseDown}
-        title="Resize sidebar"
-      >
-        <Box className="h-full w-[1px] bg-[var(--gray-a5)] group-hover:bg-[var(--accent-9)] mx-auto" />{' '}
-      </Box>
+      {/* The left sidebar that was for SessionSidebar (chat list) is removed */}
+      {/* The resizable handle is also removed as its primary purpose was for that sidebar */}
 
       <Flex
         direction="column"
@@ -344,30 +267,18 @@ export function SessionView() {
         >
           <Flex justify="between" align="center">
             <Flex align="center" gap="2" style={{ minWidth: 0 }}>
-              <Button
-                onClick={handleNavigateBack}
-                variant="ghost"
-                color="gray"
-                size="2"
-                style={{ flexShrink: 0 }}
-              >
-                <ArrowLeftIcon /> Sessions
-              </Button>
-              <Text color="gray" size="2" style={{ flexShrink: 0 }}>
-                {' / '}
-              </Text>
+              {/* "All Sessions" backlink and "/" divider removed */}
               <Text
                 size="2"
                 weight="bold"
                 truncate
                 title={displayTitle}
                 style={{ flexShrink: 1 }}
-                className="text-gray-800 dark:text-gray-200" // MODIFIED: slate to gray
+                className="text-gray-800 dark:text-gray-200"
               >
                 {displayTitle}
               </Text>
             </Flex>
-            {/* UserThemeDropdown removed from here */}
           </Flex>
         </Box>
 

@@ -6,21 +6,17 @@ import {
   Box,
   Heading,
   Flex,
-  // Button, // Button removed
   Text,
   Spinner,
   Card,
-  Container,
   AlertDialog,
   Button,
 } from '@radix-ui/themes';
-// import { PlusCircledIcon } from '@radix-ui/react-icons'; // Icon removed
-import { TrashIcon } from '@radix-ui/react-icons'; // Keep TrashIcon
+import { TrashIcon } from '@radix-ui/react-icons';
 import { SessionListTable } from './LandingPage/SessionListTable';
 import { EditDetailsModal } from './SessionView/Modals/EditDetailsModal';
 import { fetchSessions, deleteSession as deleteSessionApi } from '../api/api';
 import {
-  // openUploadModalAtom, // Atom no longer needed here
   sessionSortCriteriaAtom,
   sessionSortDirectionAtom,
   setSessionSortAtom,
@@ -28,9 +24,9 @@ import {
   toastMessageAtom,
 } from '../store';
 import type { Session, SessionMetadata } from '../types';
+import { cn } from '../utils'; // Corrected import path
 
 export function SessionsPage() {
-  // const openUploadModal = useSetAtom(openUploadModalAtom); // Removed
   const setToast = useSetAtom(toastMessageAtom);
   const queryClient = useQueryClient();
 
@@ -149,43 +145,45 @@ export function SessionsPage() {
 
   if (isLoading) {
     return (
-      <Container size="3" px="4" py="6">
+      <Box className={cn('px-4 md:px-6 lg:px-8', 'py-6')}>
         <Flex justify="center" align="center" style={{ minHeight: '200px' }}>
           <Spinner size="3" /> <Text ml="2">Loading sessions...</Text>
         </Flex>
-      </Container>
+      </Box>
     );
   }
 
   if (error) {
     return (
-      <Container size="3" px="4" py="6">
-        <Card>
+      <Box className={cn('px-4 md:px-6 lg:px-8', 'py-6')}>
+        <Card style={{ width: '100%' }}>
           <Text color="red">Error loading sessions: {error.message}</Text>
           <Button onClick={() => refetch()} mt="2">
             Retry
           </Button>
         </Card>
-      </Container>
+      </Box>
     );
   }
 
   return (
     <>
-      <Container size="3" px="4" py="6">
+      <Box className={cn('px-4 md:px-6 lg:px-8', 'py-6')}>
         <Flex justify="between" align="center" mb="6">
           <Heading
             as="h1"
             size="7"
-            className="text-gray-900 dark:text-gray-100" // MODIFIED: slate to gray
+            className="text-gray-900 dark:text-gray-100"
           >
             All Sessions
           </Heading>
-          {/* "New Session" Button Removed */}
         </Flex>
 
         {sortedSessions && sortedSessions.length > 0 ? (
-          <Card className="flex flex-col overflow-hidden">
+          <Card
+            className="flex flex-col overflow-hidden"
+            style={{ width: '100%' }}
+          >
             <Box
               className="flex-grow flex flex-col overflow-hidden"
               style={{ minHeight: '300px' }}
@@ -201,7 +199,7 @@ export function SessionsPage() {
             </Box>
           </Card>
         ) : (
-          <Card>
+          <Card style={{ width: '100%' }}>
             <Flex justify="center" align="center" p="6">
               <Text color="gray">
                 No sessions found. Click "New Session" in the toolbar to upload
@@ -210,7 +208,7 @@ export function SessionsPage() {
             </Flex>
           </Card>
         )}
-      </Container>
+      </Box>
 
       <EditDetailsModal
         isOpen={isEditingModalOpen}

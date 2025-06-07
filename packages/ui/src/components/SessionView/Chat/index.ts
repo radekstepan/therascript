@@ -3,6 +3,7 @@ export * from './ChatPanelHeader';
 export * from './ChatInput';
 export * from './ChatMessages';
 export * from './ChatInterface';
-export * from './StarredTemplatesList'; // Keep if separate
+export * from './StarredTemplatesList'; // Corrected this path from StarredTemplates
 export * from './StartChatPrompt';
-export * from './ChatMessageBubble'; // <-- Add export for the new component
+export * from './ChatMessageBubble';
+// ChatHeader.tsx (old one) is likely unused, can be removed from exports / project

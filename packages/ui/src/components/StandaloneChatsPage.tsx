@@ -1,43 +1,30 @@
 // packages/ui/src/components/StandaloneChatsPage.tsx
 import React, { useMemo, useState } from 'react';
-// useNavigate and createStandaloneChatApi are no longer needed here as button is in TopToolbar
-// import { useNavigate } from 'react-router-dom';
-// import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { useQuery } from '@tanstack/react-query'; // Keep useQuery
+import { useQuery } from '@tanstack/react-query';
 import {
   Box,
   Heading,
   Flex,
-  // Button, // Button removed
   Text,
   Spinner,
   Card,
-  Container,
   Button,
 } from '@radix-ui/themes';
-// import { ChatBubbleIcon } from '@radix-ui/react-icons'; // Icon removed
 import { StandaloneChatListTable } from './LandingPage/StandaloneChatListTable';
 import { EditStandaloneChatModal } from './StandaloneChatView/EditStandaloneChatModal';
-import {
-  fetchStandaloneChats,
-  // createStandaloneChat as createStandaloneChatApi, // API call removed
-} from '../api/api';
+import { fetchStandaloneChats } from '../api/api';
 import {
   standaloneChatSortCriteriaAtom,
   standaloneChatSortDirectionAtom,
   setStandaloneChatSortAtom,
   StandaloneChatSortCriteria,
-  // toastMessageAtom, // Not needed if create button is gone
 } from '../store';
 import type { StandaloneChatListItem } from '../types';
 import { formatTimestamp } from '../helpers';
+import { cn } from '../utils'; // Corrected import path
 
 export function StandaloneChatsPage() {
-  // const navigate = useNavigate(); // Removed
-  // const setToast = useSetAtom(toastMessageAtom); // Removed
-  // const queryClient = useQueryClient(); // Removed unless other mutations are added
-
   const currentSortCriteria = useAtomValue(standaloneChatSortCriteriaAtom);
   const currentSortDirection = useAtomValue(standaloneChatSortDirectionAtom);
   const setSort = useSetAtom(setStandaloneChatSortAtom);
@@ -56,8 +43,6 @@ export function StandaloneChatsPage() {
     queryKey: ['standaloneChats'],
     queryFn: fetchStandaloneChats,
   });
-
-  // createChatMutation removed
 
   const sortedChats = useMemo(() => {
     if (!standaloneChats) return [];
@@ -104,8 +89,6 @@ export function StandaloneChatsPage() {
     });
   }, [standaloneChats, currentSortCriteria, currentSortDirection]);
 
-  // handleNewChat removed
-
   const handleEditChatRequest = (chat: StandaloneChatListItem) => {
     setChatToEdit(chat);
     setIsEditChatModalOpen(true);
@@ -113,18 +96,18 @@ export function StandaloneChatsPage() {
 
   if (isLoading) {
     return (
-      <Container size="3" px="4" py="6">
+      <Box className={cn('px-4 md:px-6 lg:px-8', 'py-6')}>
         <Flex justify="center" align="center" style={{ minHeight: '200px' }}>
           <Spinner size="3" /> <Text ml="2">Loading standalone chats...</Text>
         </Flex>
-      </Container>
+      </Box>
     );
   }
 
   if (error) {
     return (
-      <Container size="3" px="4" py="6">
-        <Card>
+      <Box className={cn('px-4 md:px-6 lg:px-8', 'py-6')}>
+        <Card style={{ width: '100%' }}>
           <Text color="red">
             Error loading standalone chats: {error.message}
           </Text>
@@ -132,26 +115,28 @@ export function StandaloneChatsPage() {
             Retry
           </Button>
         </Card>
-      </Container>
+      </Box>
     );
   }
 
   return (
     <>
-      <Container size="3" px="4" py="6">
+      <Box className={cn('px-4 md:px-6 lg:px-8', 'py-6')}>
         <Flex justify="between" align="center" mb="6">
           <Heading
             as="h1"
             size="7"
-            className="text-gray-900 dark:text-gray-100" // MODIFIED: slate to gray
+            className="text-gray-900 dark:text-gray-100"
           >
             Standalone Chats
           </Heading>
-          {/* "New Standalone Chat" Button Removed */}
         </Flex>
 
         {sortedChats && sortedChats.length > 0 ? (
-          <Card className="flex flex-col overflow-hidden">
+          <Card
+            className="flex flex-col overflow-hidden"
+            style={{ width: '100%' }}
+          >
             <Box
               className="flex-grow flex flex-col overflow-hidden"
               style={{ minHeight: '300px' }}
@@ -166,7 +151,7 @@ export function StandaloneChatsPage() {
             </Box>
           </Card>
         ) : (
-          <Card>
+          <Card style={{ width: '100%' }}>
             <Flex justify="center" align="center" p="6">
               <Text color="gray">
                 No standalone chats yet. Click "New Chat" in the toolbar to
@@ -175,7 +160,7 @@ export function StandaloneChatsPage() {
             </Flex>
           </Card>
         )}
-      </Container>
+      </Box>
 
       <EditStandaloneChatModal
         isOpen={isEditChatModalOpen}

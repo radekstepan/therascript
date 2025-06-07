@@ -10,7 +10,7 @@ import {
   IconButton,
   Button as RadixButton,
   Spinner,
-  Container,
+  // Container, // Container removed for full-width behavior
   Text,
 } from '@radix-ui/themes';
 import {
@@ -19,7 +19,6 @@ import {
   ChatBubbleIcon,
   PlusCircledIcon,
 } from '@radix-ui/react-icons';
-// import { UserThemeDropdown } from '../User/UserThemeDropdown'; // REMOVED
 import { openUploadModalAtom, toastMessageAtom } from '../../store';
 import { createStandaloneChat as createStandaloneChatApi } from '../../api/api';
 import type { StandaloneChatListItem } from '../../types';
@@ -121,69 +120,74 @@ export function TopToolbar() {
     <Box
       className={cn(
         'sticky top-0 z-30 h-16 flex items-center',
-        'bg-gray-100 dark:bg-gray-800', // MODIFIED: slate to gray
-        'border-b border-gray-200 dark:border-gray-700' // MODIFIED: slate to gray
+        'bg-gray-100 dark:bg-gray-800',
+        'border-b border-gray-200 dark:border-gray-700',
+        'px-4 md:px-6 lg:px-8' // Add padding directly to the Box
       )}
+      style={{ width: '100%' }} // Ensure the Box takes full width
     >
-      <Container size="4" px={{ initial: '4', md: '6', lg: '8' }} width="100%">
-        <Flex justify="between" align="center" gap="4">
-          <form onSubmit={handleSearchSubmit} style={{ flexGrow: 1 }}>
-            <TextField.Root
-              ref={searchInputRef}
-              size="2"
-              placeholder="Search all messages and transcripts..."
-              value={searchInput}
-              onChange={handleSearchInputChange}
-              onKeyDown={handleSearchKeyDown}
-              disabled={
-                isFetchingSearch || createStandaloneChatMutation.isPending
-              }
-              name="q"
-            >
+      {/* Removed Radix Container, Flex now handles full width layout */}
+      <Flex justify="between" align="center" gap="4" width="100%">
+        {/* Search Form - takes up available space */}
+        <form
+          onSubmit={handleSearchSubmit}
+          style={{ flexGrow: 1, maxWidth: '600px' }} // Allow search to grow but not excessively
+        >
+          <TextField.Root
+            ref={searchInputRef}
+            size="2"
+            placeholder="Search all messages and transcripts..."
+            value={searchInput}
+            onChange={handleSearchInputChange}
+            onKeyDown={handleSearchKeyDown}
+            disabled={
+              isFetchingSearch || createStandaloneChatMutation.isPending
+            }
+            name="q"
+          >
+            <TextField.Slot>
+              <MagnifyingGlassIcon height="16" width="16" />
+            </TextField.Slot>
+            {isFetchingSearch && (
               <TextField.Slot>
-                <MagnifyingGlassIcon height="16" width="16" />
+                <Spinner size="1" />
               </TextField.Slot>
-              {isFetchingSearch && (
-                <TextField.Slot>
-                  <Spinner size="1" />
-                </TextField.Slot>
-              )}
-              {searchInput && !isFetchingSearch && (
-                <TextField.Slot pr="2">
-                  <IconButton
-                    size="1"
-                    variant="ghost"
-                    color="gray"
-                    onClick={handleClearSearch}
-                    aria-label="Clear search"
-                    title="Clear search (Esc)"
-                    type="button"
-                  >
-                    <Cross1Icon />
-                  </IconButton>
-                </TextField.Slot>
-              )}
-            </TextField.Root>
-          </form>
+            )}
+            {searchInput && !isFetchingSearch && (
+              <TextField.Slot pr="2">
+                <IconButton
+                  size="1"
+                  variant="ghost"
+                  color="gray"
+                  onClick={handleClearSearch}
+                  aria-label="Clear search"
+                  title="Clear search (Esc)"
+                  type="button"
+                >
+                  <Cross1Icon />
+                </IconButton>
+              </TextField.Slot>
+            )}
+          </TextField.Root>
+        </form>
 
-          <Flex gap="3" align="center" flexShrink="0">
-            <RadixButton
-              variant="outline"
-              size="2"
-              onClick={handleNewStandaloneChat}
-              disabled={createStandaloneChatMutation.isPending}
-            >
-              <ChatBubbleIcon width="16" height="16" />
-              <Text ml="2">New Chat</Text>
-            </RadixButton>
-            <RadixButton variant="soft" size="2" onClick={openUploadModal}>
-              <PlusCircledIcon width="16" height="16" />
-              <Text ml="2">New Session</Text>
-            </RadixButton>
-            {/* <UserThemeDropdown /> REMOVED */}
-          </Flex>
+        {/* Action Buttons - aligned to the right */}
+        <Flex gap="3" align="center" flexShrink="0">
+          <RadixButton
+            variant="outline"
+            size="2"
+            onClick={handleNewStandaloneChat}
+            disabled={createStandaloneChatMutation.isPending}
+          >
+            <ChatBubbleIcon width="16" height="16" />
+            <Text ml="2">New Chat</Text>
+          </RadixButton>
+          <RadixButton variant="soft" size="2" onClick={openUploadModal}>
+            <PlusCircledIcon width="16" height="16" />
+            <Text ml="2">New Session</Text>
+          </RadixButton>
         </Flex>
-      </Container>
+      </Flex>
     </Box>
   );
 }
