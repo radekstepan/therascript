@@ -1,6 +1,7 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react'; // Removed useMemo
+// packages/ui/src/components/SessionView/Transcription/Transcription.tsx
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import type { Session, StructuredTranscript } from '../../../types'; // Removed TranscriptParagraphData
+import type { Session, StructuredTranscript } from '../../../types';
 import { TranscriptParagraph } from '../../Transcription/TranscriptParagraph';
 import {
   Box,
@@ -14,31 +15,28 @@ import {
   IconButton,
   DropdownMenu,
   AlertDialog,
-} from '@radix-ui/themes'; // <-- Added IconButton, DropdownMenu, AlertDialog
+} from '@radix-ui/themes';
 import {
   Pencil1Icon,
   BookmarkIcon,
   CalendarIcon,
   PersonIcon,
   BadgeIcon as SessionTypeIcon,
-  LightningBoltIcon,
-  // Removed Play/Pause imports from here, handled in paragraph
-  ArchiveIcon, // <-- Use ArchiveIcon for token count
-  DotsHorizontalIcon, // <-- Added Dots icon
-  TrashIcon, // <-- Added Trash icon
+  ArchiveIcon,
+  DotsHorizontalIcon,
+  TrashIcon,
 } from '@radix-ui/react-icons';
 import { cn } from '../../../utils';
 import {
   updateTranscriptParagraph,
   deleteSessionAudio,
-} from '../../../api/api'; // <-- Added deleteSessionAudio
+} from '../../../api/api';
 import { sessionColorMap, therapyColorMap } from '../../../constants';
 import { debounce, formatIsoDateToYMD } from '../../../helpers';
-import axios from 'axios'; // Need axios for base URL
-import { useSetAtom } from 'jotai'; // <-- Added for toast
-import { toastMessageAtom } from '../../../store'; // <-- Added for toast
+import axios from 'axios';
+import { useSetAtom } from 'jotai';
+import { toastMessageAtom } from '../../../store';
 
-// Base URL for audio requests
 const API_BASE_URL = axios.defaults.baseURL || 'http://localhost:3001';
 
 type BadgeCategory = 'session' | 'therapy';
@@ -51,25 +49,21 @@ const getBadgeColor = (
   return type ? map[type.toLowerCase()] || map['default'] : map['default'];
 };
 
-// --- Modified renderHeaderDetail ---
 const renderHeaderDetail = (
   IconComponent: React.ElementType,
-  value: string | undefined | number | null, // Allow null for token count initially
+  value: string | undefined | number | null,
   label: string,
   category?: BadgeCategory,
   isDateValue?: boolean,
-  isTokenValue?: boolean // <-- New flag for token type
+  isTokenValue?: boolean
 ) => {
-  // Format based on type
   let displayValue: string | number | undefined | null = value;
   if (isDateValue && typeof value === 'string') {
     displayValue = formatIsoDateToYMD(value);
   } else if (isTokenValue && typeof value === 'number') {
-    // Format with thousand separators
     displayValue = value.toLocaleString();
   }
 
-  // Check if value is valid for display (not null, undefined, or empty string)
   if (
     displayValue === undefined ||
     displayValue === null ||
@@ -86,7 +80,6 @@ const renderHeaderDetail = (
   return (
     <Tooltip content={label}>
       <Flex align="center" gap="1" title={label}>
-        {/* Use ArchiveIcon specifically for token count */}
         <IconComponent
           className={cn(
             'flex-shrink-0',
@@ -102,7 +95,7 @@ const renderHeaderDetail = (
         ) : isTokenValue ? (
           <Badge color="gray" variant="soft" radius="full" size="1">
             {displayValue}
-          </Badge> // Render as badge
+          </Badge>
         ) : (
           <Text size="1" color="gray">
             {displayValue}
@@ -112,7 +105,6 @@ const renderHeaderDetail = (
     </Tooltip>
   );
 };
-// --- End Modification ---
 
 interface TranscriptionProps {
   session: Session;
@@ -139,39 +131,31 @@ export function Transcription({
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const restoreScrollRef = useRef(false);
   const queryClient = useQueryClient();
-  const audioRef = useRef<HTMLAudioElement>(null); // Ref for the audio element
+  const audioRef = useRef<HTMLAudioElement>(null);
   const setToast = useSetAtom(toastMessageAtom);
 
-  // State for audio playback
   const [isPlaying, setIsPlaying] = useState(false);
   const [playingParagraphIndex, setPlayingParagraphIndex] = useState<
     number | null
   >(null);
   const [audioError, setAudioError] = useState<string | null>(null);
   const [audioReady, setAudioReady] = useState(false);
-  const [isAudioLoading, setIsAudioLoading] = useState(false); // Track initial load
-
-  // State for Delete Audio Confirmation Modal
+  const [isAudioLoading, setIsAudioLoading] = useState(false);
   const [isDeleteAudioConfirmOpen, setIsDeleteAudioConfirmOpen] =
     useState(false);
 
-  // Token count now comes directly from the session prop
-  const transcriptTokenCount = session?.transcriptTokenCount; // Use optional chaining
-
-  // Determine if audio is available based on session.audioPath
+  const transcriptTokenCount = session?.transcriptTokenCount;
   const isAudioAvailable = !!session?.audioPath;
 
-  // Audio Handlers (unchanged)
   const handleAudioCanPlay = useCallback(() => {
-    /* ... */
     console.log('[Audio] Ready to play');
     setAudioReady(true);
-    setIsAudioLoading(false); // Loading finished
+    setIsAudioLoading(false);
     setAudioError(null);
   }, []);
+
   const handleAudioError = useCallback(
     (e: React.SyntheticEvent<HTMLAudioElement>) => {
-      /* ... */
       const error = (e.target as HTMLAudioElement).error;
       console.error('[Audio] Error:', error);
       let errorMessage = 'Unknown audio error';
@@ -201,64 +185,52 @@ export function Transcription({
     },
     []
   );
+
   const handleAudioEnded = useCallback(() => {
-    /* ... */
     console.log('[Audio] Playback ended');
     setIsPlaying(false);
     setPlayingParagraphIndex(null);
   }, []);
+
   const handleAudioPause = useCallback(() => {
-    /* ... */
     console.log('[Audio] Playback paused');
-    // Only set isPlaying to false if the pause wasn't triggered by seeking
-    // This requires tracking if a seek is in progress, maybe too complex.
-    // Simpler: Let onPlay handle setting isPlaying back to true.
     if (audioRef.current && !audioRef.current.seeking) {
       setIsPlaying(false);
     }
-    // Keep playingParagraphIndex to potentially resume
   }, []);
+
   const handleAudioPlay = useCallback(() => {
-    /* ... */
     console.log('[Audio] Playback started/resumed');
     setIsPlaying(true);
-    setAudioError(null); // Clear error on successful play
-    setIsAudioLoading(false); // No longer loading once playing starts
+    setAudioError(null);
+    setIsAudioLoading(false);
   }, []);
-  const handleAudioWaiting = useCallback(() => {
-    /* ... */
-    console.log('[Audio] Waiting for data (buffering)...');
-    setIsAudioLoading(true); // Show loading indicator while buffering
-  }, []);
-  const handleAudioPlaying = useCallback(() => {
-    /* ... */
-    console.log('[Audio] Buffering complete, playback continuing.');
-    setIsAudioLoading(false); // Buffering finished
-  }, []);
-  const handleAudioTimeUpdate = useCallback(() => {
-    /* ... */
-    if (!audioRef.current || !transcriptContent || audioRef.current.seeking)
-      return; // Ignore updates while seeking
-    const currentTimeMs = audioRef.current.currentTime * 1000;
 
-    // Find the paragraph that *contains* the current time
+  const handleAudioWaiting = useCallback(() => {
+    console.log('[Audio] Waiting for data (buffering)...');
+    setIsAudioLoading(true);
+  }, []);
+
+  const handleAudioPlaying = useCallback(() => {
+    console.log('[Audio] Buffering complete, playback continuing.');
+    setIsAudioLoading(false);
+  }, []);
+
+  const handleAudioTimeUpdate = useCallback(() => {
+    if (!audioRef.current || !transcriptContent || audioRef.current.seeking)
+      return;
+    const currentTimeMs = audioRef.current.currentTime * 1000;
     let currentParagraphIdx = -1;
     for (let i = 0; i < transcriptContent.length; i++) {
       const p = transcriptContent[i];
-      // Find the start time of the *next* paragraph to define the end boundary
       const nextP = transcriptContent[i + 1];
       const pStartTime = p.timestamp;
-      // Use next paragraph's start time or infinity if it's the last one
       const pEndTime = nextP ? nextP.timestamp : Infinity;
-
-      // Check if current time falls within this paragraph's range
       if (currentTimeMs >= pStartTime && currentTimeMs < pEndTime) {
         currentParagraphIdx = i;
         break;
       }
     }
-
-    // Update playing index only if it changes AND we are actually playing
     if (
       isPlaying &&
       currentParagraphIdx !== -1 &&
@@ -266,39 +238,33 @@ export function Transcription({
     ) {
       setPlayingParagraphIndex(currentParagraphIdx);
     }
-  }, [transcriptContent, playingParagraphIndex, isPlaying]); // Add isPlaying dependency
+  }, [transcriptContent, playingParagraphIndex, isPlaying]);
 
   const audioSrc = session?.audioPath
     ? `${API_BASE_URL}/api/sessions/${session.id}/audio`
     : null;
 
-  // Playback Control Functions (unchanged)
   const playAudioFromTimestamp = useCallback(
     (timestampMs: number, index: number) => {
-      /* ... */
       if (!audioRef.current || !audioSrc) {
         setAudioError('Audio element or source not available.');
         return;
       }
-      // Ensure audio src is set if not already
       if (audioRef.current.currentSrc !== audioSrc) {
         console.log(`[Audio] Setting src to ${audioSrc}`);
         audioRef.current.src = audioSrc;
-        audioRef.current.load(); // Explicitly load the new source
-        setIsAudioLoading(true); // Expect loading state
+        audioRef.current.load();
+        setIsAudioLoading(true);
       }
-
       const seekTimeSeconds = timestampMs / 1000;
       console.log(
         `[Audio] Attempting to play paragraph ${index} from ${seekTimeSeconds.toFixed(2)}s`
       );
-
       const playAction = () => {
         const playPromise = audioRef.current!.play();
         if (playPromise !== undefined) {
           playPromise
             .then(() => {
-              // Set playing index immediately for UI feedback
               setPlayingParagraphIndex(index);
             })
             .catch((err) => {
@@ -312,27 +278,18 @@ export function Transcription({
             });
         }
       };
-
-      // If paused at the same paragraph, just resume
       if (!isPlaying && playingParagraphIndex === index) {
         console.log('[Audio] Resuming playback');
         playAction();
       } else {
-        // Seek and play
-        // Need to handle readyState. If not ready, wait for 'canplay' or 'canplaythrough'
         if (
           audioRef.current.readyState >=
           (HTMLMediaElement.HAVE_FUTURE_DATA || 3)
         ) {
-          // Only seek if the time difference is significant to avoid jitter
           if (Math.abs(audioRef.current.currentTime - seekTimeSeconds) > 0.2) {
             console.log(`[Audio] Seeking to ${seekTimeSeconds.toFixed(2)}s`);
-            // Set seek time, play will happen after seek completes (handle in onseeked event)
             audioRef.current.currentTime = seekTimeSeconds;
-            // Set target index immediately for UI feedback
             setPlayingParagraphIndex(index);
-            // Play might be triggered by onseeked, or call playAction() directly if seek is fast
-            // For simplicity, let's try playing directly after setting currentTime
             playAction();
           } else {
             console.log(
@@ -344,28 +301,23 @@ export function Transcription({
           console.log(
             `[Audio] Audio not ready (state ${audioRef.current.readyState}), seeking to ${seekTimeSeconds.toFixed(2)}s and waiting for canplay.`
           );
-          // Set the time, the 'canplay' event or subsequent interaction should trigger play
           audioRef.current.currentTime = seekTimeSeconds;
-          setPlayingParagraphIndex(index); // Set index for UI highlight
-          setIsAudioLoading(true); // Show loading
-          // Don't call play() yet, let 'canplay' handle it if src was just set, or rely on subsequent toggle if already loaded
-          // If audio was already loaded but paused, we might need to call play() after a delay or on canplay event.
+          setPlayingParagraphIndex(index);
+          setIsAudioLoading(true);
         }
       }
     },
     [audioSrc, isPlaying, playingParagraphIndex]
   );
+
   const pauseAudio = useCallback(() => {
-    /* ... */
     if (audioRef.current) {
       audioRef.current.pause();
-      // State update handled by 'onPause' event
     }
   }, []);
+
   const togglePlayback = useCallback(
     (timestampMs: number, index: number) => {
-      /* ... */
-      // Only allow toggle if audio is available
       if (!isAudioAvailable) return;
       if (playingParagraphIndex === index && isPlaying) {
         pauseAudio();
@@ -380,9 +332,8 @@ export function Transcription({
       playAudioFromTimestamp,
       isAudioAvailable,
     ]
-  ); // Add isAudioAvailable
+  );
 
-  // Mutation for saving paragraph
   const saveParagraphMutation = useMutation({
     mutationFn: ({ index, newText }: { index: number; newText: string }) => {
       return updateTranscriptParagraph(session.id, index, newText);
@@ -396,17 +347,16 @@ export function Transcription({
       console.log(
         `[Transcription Save Success] Paragraph ${variables.index} saved. Invalidated sessionMeta query.`
       );
-      setToast('Paragraph saved successfully.'); // Added toast
+      setToast('Paragraph saved successfully.');
       setActiveEditIndex(null);
     },
     onError: (error, variables) => {
       console.error(`Error saving paragraph ${variables.index}:`, error);
-      setToast(`Error saving paragraph: ${error.message}`); // Added toast
-      setActiveEditIndex(null); // Close edit mode even on error for now
+      setToast(`Error saving paragraph: ${error.message}`);
+      setActiveEditIndex(null);
     },
   });
 
-  // Mutation for Deleting Audio
   const deleteAudioMutation = useMutation({
     mutationFn: () => {
       if (!session?.id) throw new Error('Session ID is missing');
@@ -415,13 +365,11 @@ export function Transcription({
     onSuccess: (data) => {
       console.log(`[Delete Audio Success] ${data.message}`);
       setToast(data.message || 'Audio file deleted.');
-      // Invalidate session metadata queries to reflect the removed audioPath
       queryClient.invalidateQueries({ queryKey: ['sessionMeta', session.id] });
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
-      // Reset audio player state as the source is gone
       if (audioRef.current) {
-        audioRef.current.src = ''; // Clear source
-        audioRef.current.load(); // Attempt to reset fully
+        audioRef.current.src = '';
+        audioRef.current.load();
       }
       setIsPlaying(false);
       setPlayingParagraphIndex(null);
@@ -437,11 +385,10 @@ export function Transcription({
       setToast(`Error deleting audio: ${error.message}`);
     },
     onSettled: () => {
-      setIsDeleteAudioConfirmOpen(false); // Close the modal regardless of outcome
+      setIsDeleteAudioConfirmOpen(false);
     },
   });
 
-  // Scroll handling (unchanged)
   const debouncedScrollSave = useCallback(
     debounce((scrollTop: number) => {
       if (onScrollUpdate) {
@@ -450,6 +397,7 @@ export function Transcription({
     }, 150),
     [onScrollUpdate]
   );
+
   const handleScroll = (event: React.UIEvent<HTMLDivElement>) => {
     if (!restoreScrollRef.current && event.currentTarget) {
       debouncedScrollSave(event.currentTarget.scrollTop);
@@ -458,6 +406,7 @@ export function Transcription({
       restoreScrollRef.current = false;
     }
   };
+
   useEffect(() => {
     if (isTabActive) {
       restoreScrollRef.current = true;
@@ -465,6 +414,7 @@ export function Transcription({
       restoreScrollRef.current = false;
     }
   }, [isTabActive]);
+
   useEffect(() => {
     if (restoreScrollRef.current && viewportRef.current) {
       requestAnimationFrame(() => {
@@ -479,7 +429,6 @@ export function Transcription({
     }
   }, [isTabActive, initialScrollTop]);
 
-  // Effect to load audio source (unchanged)
   useEffect(() => {
     if (
       audioRef.current &&
@@ -488,18 +437,17 @@ export function Transcription({
     ) {
       console.log('[Audio Effect] Setting audio source URL:', audioSrc);
       audioRef.current.src = audioSrc;
-      audioRef.current.load(); // Trigger loading metadata
-      setIsAudioLoading(true); // Indicate loading started
-      setAudioReady(false); // Not ready until 'canplay' fires
+      audioRef.current.load();
+      setIsAudioLoading(true);
+      setAudioReady(false);
     } else if (!audioSrc) {
-      // Clear state if audio becomes unavailable
       setAudioReady(false);
       setIsPlaying(false);
       setPlayingParagraphIndex(null);
       setAudioError(null);
       setIsAudioLoading(false);
     }
-  }, [audioSrc]); // Depend only on audioSrc
+  }, [audioSrc]);
 
   if (!session) {
     return (
@@ -517,14 +465,12 @@ export function Transcription({
     index: number,
     newText: string
   ) => {
-    // Pause playback if saving the currently playing paragraph
     if (isPlaying && playingParagraphIndex === index) {
       pauseAudio();
     }
     saveParagraphMutation.mutate({ index, newText });
   };
 
-  // --- Handlers for Dropdown and Delete Confirmation ---
   const handleDeleteAudioClick = () => {
     setIsDeleteAudioConfirmOpen(true);
   };
@@ -533,12 +479,9 @@ export function Transcription({
     if (deleteAudioMutation.isPending) return;
     deleteAudioMutation.mutate();
   };
-  // --- End Handlers ---
 
   return (
     <>
-      {' '}
-      {/* Wrap in fragment for Modal */}
       <Flex
         direction="column"
         style={{
@@ -546,10 +489,9 @@ export function Transcription({
           minHeight: 0,
           border: '1px solid var(--gray-a6)',
           borderRadius: 'var(--radius-3)',
+          backgroundColor: 'var(--color-panel-translucent)', // Apply translucent background
         }}
       >
-        {/* --- Audio Element (Hidden) --- */}
-        {/* Only render if audio is available */}
         {isAudioAvailable && (
           <audio
             ref={audioRef}
@@ -566,18 +508,20 @@ export function Transcription({
             style={{ display: 'none' }}
           />
         )}
-        {/* --- End Audio Element --- */}
 
         <Flex
           align="baseline"
           justify="between"
           px="3"
           py="2"
-          style={{ borderBottom: '1px solid var(--gray-a6)', flexShrink: 0 }}
+          style={{
+            borderBottom: '1px solid var(--gray-a6)',
+            flexShrink: 0,
+            // Removed backgroundColor: 'var(--gray-a2)'
+          }}
           gap="3"
           wrap="wrap"
         >
-          {/* --- Metadata Header --- */}
           <Flex
             align="center"
             gap="3"
@@ -614,9 +558,7 @@ export function Transcription({
                 true
               )}
           </Flex>
-          {/* --- End Metadata --- */}
           <Box flexShrink="0">
-            {/* --- Hamburger Menu --- */}
             <DropdownMenu.Root>
               <DropdownMenu.Trigger>
                 <IconButton
@@ -637,17 +579,15 @@ export function Transcription({
                 <DropdownMenu.Item
                   color="red"
                   onSelect={handleDeleteAudioClick}
-                  disabled={!isAudioAvailable || deleteAudioMutation.isPending} // Disable if no audio or deleting
+                  disabled={!isAudioAvailable || deleteAudioMutation.isPending}
                 >
                   <TrashIcon className="mr-2 h-4 w-4" /> Delete Original Audio
                 </DropdownMenu.Item>
               </DropdownMenu.Content>
             </DropdownMenu.Root>
-            {/* --- End Hamburger Menu --- */}
           </Box>
         </Flex>
 
-        {/* Display Audio Status/Error (unchanged) */}
         <Box
           px="3"
           py="1"
@@ -656,7 +596,7 @@ export function Transcription({
               ? 'var(--red-a3)'
               : isAudioLoading
                 ? 'var(--amber-a3)'
-                : 'transparent',
+                : 'transparent', // Use transparent for normal state
             borderBottom:
               audioError || isAudioLoading
                 ? `1px solid ${audioError ? 'var(--red-a6)' : 'var(--amber-a6)'}`
@@ -665,18 +605,15 @@ export function Transcription({
             transition: 'background-color 0.3s ease',
           }}
         >
-          {' '}
           <Flex align="center" gap="2">
-            {' '}
-            {isAudioLoading && <Spinner size="1" />}{' '}
+            {isAudioLoading && <Spinner size="1" />}
             <Text
               size="1"
               color={audioError ? 'red' : isAudioLoading ? 'amber' : 'gray'}
             >
-              {' '}
-              {audioError || (isAudioLoading ? 'Loading audio...' : '')}{' '}
-            </Text>{' '}
-          </Flex>{' '}
+              {audioError || (isAudioLoading ? 'Loading audio...' : '')}
+            </Text>
+          </Flex>
         </Box>
 
         <ScrollArea
@@ -711,6 +648,8 @@ export function Transcription({
           )}
 
           <Box p="3" className="space-y-3">
+            {' '}
+            {/* This padding is for the content inside scroll area */}
             {!isLoadingTranscript &&
               !transcriptError &&
               paragraphs.length > 0 &&
@@ -728,7 +667,7 @@ export function Transcription({
                   }
                   onPlayToggle={togglePlayback}
                   isPlaying={isPlaying && playingParagraphIndex === index}
-                  isAudioAvailable={isAudioAvailable} // <-- Pass down availability
+                  isAudioAvailable={isAudioAvailable}
                 />
               ))}
             {!isLoadingTranscript &&
@@ -740,13 +679,11 @@ export function Transcription({
                   justify="center"
                   style={{ minHeight: '100px' }}
                 >
-                  {' '}
                   <Text color="gray" style={{ fontStyle: 'italic' }}>
-                    {' '}
                     {session.status === 'completed'
                       ? 'Transcription is empty.'
-                      : 'Transcription not available yet.'}{' '}
-                  </Text>{' '}
+                      : 'Transcription not available yet.'}
+                  </Text>
                 </Flex>
               )}
             {!isLoadingTranscript &&
@@ -757,17 +694,14 @@ export function Transcription({
                   justify="center"
                   style={{ minHeight: '100px' }}
                 >
-                  {' '}
                   <Text color="gray" style={{ fontStyle: 'italic' }}>
-                    {' '}
-                    No transcription content available.{' '}
-                  </Text>{' '}
+                    No transcription content available.
+                  </Text>
                 </Flex>
               )}
           </Box>
         </ScrollArea>
       </Flex>
-      {/* --- Delete Audio Confirmation Modal --- */}
       <AlertDialog.Root
         open={isDeleteAudioConfirmOpen}
         onOpenChange={setIsDeleteAudioConfirmOpen}
@@ -789,8 +723,7 @@ export function Transcription({
               onClick={() => setIsDeleteAudioConfirmOpen(false)}
               disabled={deleteAudioMutation.isPending}
             >
-              {' '}
-              Cancel{' '}
+              Cancel
             </Button>
             <Button
               color="red"
@@ -807,7 +740,6 @@ export function Transcription({
           </Flex>
         </AlertDialog.Content>
       </AlertDialog.Root>
-      {/* --- End Delete Audio Modal --- */}
     </>
   );
 }

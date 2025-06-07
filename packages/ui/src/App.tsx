@@ -14,11 +14,11 @@ import { StandaloneChatView } from './components/StandaloneChatView/StandaloneCh
 import { SettingsPage } from './components/SettingsPage';
 import { StandaloneChatsPage } from './components/StandaloneChatsPage';
 import { SessionsPage } from './components/SessionsPage';
-// TemplatesPage removed
 
 // Layout and Modals
 import { UploadModal } from './components/UploadModal/UploadModal';
 import { PersistentSidebar } from './components/Layout/PersistentSidebar';
+import { GeneratedBackground } from './components/Layout/GeneratedBackground';
 import { TopToolbar } from './components/Layout/TopToolbar';
 
 // Store
@@ -27,7 +27,7 @@ import {
   effectiveThemeAtom,
   toastMessageAtom,
   themeAtom,
-  accentColorAtom, // <-- IMPORT ACCENT COLOR ATOM
+  accentColorAtom,
 } from './store';
 import { isPersistentSidebarOpenAtom } from './store/ui/isPersistentSidebarOpenAtom';
 import { currentPageAtom } from './store/navigation/currentPageAtom';
@@ -80,7 +80,7 @@ function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useAtom(
     isPersistentSidebarOpenAtom
   );
-  const currentAccentColor = useAtomValue(accentColorAtom); // <-- GET ACCENT COLOR
+  const currentAccentColor = useAtomValue(accentColorAtom);
 
   useLayoutEffect(() => {
     const handleResize = () => {
@@ -110,11 +110,12 @@ function App() {
     <Toast.Provider swipeDirection="right">
       <RadixTheme
         appearance={effectiveTheme}
-        accentColor={currentAccentColor} // <-- USE DYNAMIC ACCENT COLOR
+        accentColor={currentAccentColor}
         panelBackground="solid"
         radius="medium"
         scaling="100%"
       >
+        <GeneratedBackground />
         <div className="flex flex-col min-h-screen">
           <div className="flex flex-grow overflow-hidden">
             <PersistentSidebar />
@@ -126,8 +127,10 @@ function App() {
             >
               <TopToolbar />
               <main
-                className="flex-grow overflow-y-auto bg-white dark:bg-gray-900"
+                className="flex-grow overflow-y-auto"
                 id="main-content"
+                // Ensure the main content area itself is transparent so the GeneratedBackground shows
+                style={{ backgroundColor: 'transparent' }}
               >
                 <PageContentManager />
               </main>

@@ -10,7 +10,7 @@ import { Box, Flex, ScrollArea, Spinner, Text } from '@radix-ui/themes';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChatInput } from './ChatInput';
 import { ChatMessages } from './ChatMessages';
-import { ChatPanelHeader } from './ChatPanelHeader'; // Ensure this is correctly imported
+import { ChatPanelHeader } from './ChatPanelHeader';
 import {
   fetchSessionChatDetails,
   addSessionChatMessageStream,
@@ -20,7 +20,7 @@ import {
 import { debounce } from '../../../helpers';
 import type {
   ChatSession,
-  Session, // Added Session type
+  Session,
   ChatMessage,
   OllamaStatus,
 } from '../../../types';
@@ -28,10 +28,10 @@ import { currentQueryAtom } from '../../../store';
 import { useAtom } from 'jotai';
 
 interface ChatInterfaceProps {
-  session?: Session | null; // Make session prop available, optional for standalone
+  session?: Session | null;
   activeChatId: number | null;
   isStandalone: boolean;
-  isLoadingSessionMeta?: boolean; // Only relevant for session chats
+  isLoadingSessionMeta?: boolean;
   ollamaStatus: OllamaStatus | undefined;
   isLoadingOllamaStatus: boolean;
   onOpenLlmModal: () => void;
@@ -43,7 +43,7 @@ interface ChatInterfaceProps {
 const createTemporaryId = (): number => -Math.floor(Math.random() * 1000000);
 
 export function ChatInterface({
-  session, // Use this prop
+  session,
   activeChatId,
   isStandalone,
   isLoadingSessionMeta,
@@ -54,7 +54,7 @@ export function ChatInterface({
   initialScrollTop = 0,
   onScrollUpdate,
 }: ChatInterfaceProps) {
-  const activeSessionId = session?.id ?? null; // Get activeSessionId from session prop
+  const activeSessionId = session?.id ?? null;
 
   const restoreScrollRef = useRef(false);
   const chatContentRef = useRef<HTMLDivElement | null>(null);
@@ -388,12 +388,12 @@ export function ChatInterface({
         border: '1px solid var(--gray-a6)',
         borderRadius: 'var(--radius-3)',
         overflow: 'hidden',
+        backgroundColor: 'var(--color-panel-translucent)', // Apply translucent background
       }}
     >
-      {/* Render ChatPanelHeader only if it's not a standalone chat AND session is defined */}
       {!isStandalone && session && (
         <ChatPanelHeader
-          session={session} // Pass the session prop
+          session={session}
           activeChatId={activeChatId}
           ollamaStatus={ollamaStatus}
           isLoadingOllamaStatus={isLoadingOllamaStatus}
@@ -402,7 +402,6 @@ export function ChatInterface({
           onOpenLlmModal={onOpenLlmModal}
         />
       )}
-      {/* For standalone chats, the header is handled by StandaloneChatHeader in StandaloneChatView */}
 
       <ScrollArea
         type="auto"
@@ -418,7 +417,7 @@ export function ChatInterface({
             style={{
               position: 'absolute',
               inset: 0,
-              backgroundColor: 'var(--color-panel-translucent)',
+              backgroundColor: 'var(--color-panel-translucent)', // Child of translucent will also be translucent
               zIndex: 10,
               borderRadius: 'var(--radius-3)',
             }}
@@ -436,7 +435,7 @@ export function ChatInterface({
         )}
 
         <Box
-          p="4"
+          p="4" // This padding ensures ChatMessages content is inset from the ChatInterface border
           ref={chatContentRef}
           style={{
             opacity: combinedIsLoading ? 0.5 : 1,
@@ -461,7 +460,7 @@ export function ChatInterface({
         style={{
           flexShrink: 0,
           borderTop: '1px solid var(--gray-a6)',
-          backgroundColor: 'var(--color-panel-solid)',
+          // Removed backgroundColor here, it will inherit from parent Flex
           opacity: combinedIsLoading ? 0.6 : 1,
           transition: 'opacity 0.2s ease-in-out',
         }}

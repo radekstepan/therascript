@@ -33,7 +33,7 @@ import {
 import type { OllamaStatus, Session, ChatSession } from '../../../types';
 import { cn } from '../../../utils';
 import { EntitySelectorDropdown } from '../../Shared/EntitySelectorDropdown';
-import { EditEntityModal } from '../../Shared/EditEntityModal'; // For renaming
+import { EditEntityModal } from '../../Shared/EditEntityModal';
 import {
   startSessionChat,
   renameSessionChat,
@@ -54,7 +54,6 @@ interface ChatPanelHeaderProps {
   onOpenLlmModal: () => void;
 }
 
-// Form state for renaming a chat
 interface ChatRenameFormState {
   name: string;
 }
@@ -131,7 +130,6 @@ export function ChatPanelHeader({
       });
       setIsDeleteConfirmOpen(false);
       setChatToDelete(null);
-      // Navigate to the session page (list of sessions) if the active chat was deleted
       navigate(`/sessions/${session.id}`, { replace: true });
     },
     onError: (error) => setToast(`Error deleting chat: ${error.message}`),
@@ -267,7 +265,7 @@ export function ChatPanelHeader({
         gap="2"
         style={{
           borderBottom: '1px solid var(--gray-a6)',
-          backgroundColor: 'var(--color-panel-solid)',
+          // Removed backgroundColor: 'var(--color-panel-solid)',
           flexShrink: 0,
         }}
       >
