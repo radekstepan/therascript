@@ -1,10 +1,7 @@
-// =========================================
-// File: packages/api/src/routes/chatRoutes.ts
-// =========================================
-/* packages/api/src/routes/chatRoutes.ts */
-import { Elysia, t } from 'elysia';
+// packages/api/src/routes/chatRoutes.ts
+import { Elysia, t, type Static, type Cookie } from 'elysia';
 import { chatRepository } from '../repositories/chatRepository.js';
-import { messageRepository } from '../repositories/messageRepository.js'; // <-- Import Message Repo
+import { messageRepository } from '../repositories/messageRepository.js';
 import { sessionRepository } from '../repositories/sessionRepository.js';
 import {
   createSessionChat,
@@ -12,14 +9,15 @@ import {
   renameSessionChat,
   deleteSessionChat,
   getSessionChatDetails,
-  updateSessionChatMessageStarStatus, // <-- Import star handler
-} from '../api/sessionChatHandler.js'; // <-- Use session-specific handlers
+  updateSessionChatMessageStarStatus,
+} from '../api/sessionChatHandler.js';
 import { NotFoundError, BadRequestError, ApiError } from '../errors.js';
 import type {
   BackendChatSession,
   BackendChatMessage,
   ChatMetadata,
-} from '../types/index.js'; // Import types
+  BackendSession,
+} from '../types/index.js';
 
 // --- Schemas ---
 const SessionIdParamSchema = t.Object({
@@ -28,22 +26,26 @@ const SessionIdParamSchema = t.Object({
     error: 'Session ID must be a positive number',
   }),
 });
+
 const ChatIdParamSchema = t.Object({
   chatId: t.String({
     pattern: '^[0-9]+$',
     error: 'Chat ID must be a positive number',
   }),
 });
+
 const MessageIdParamSchema = t.Object({
   messageId: t.String({
     pattern: '^[0-9]+$',
     error: 'Message ID must be a positive number',
   }),
 });
+
 const SessionAndChatParamsSchema = t.Intersect([
   SessionIdParamSchema,
   ChatIdParamSchema,
-]); // Corrected Intersect usage
+]);
+
 const SessionChatAndMessageParamsSchema = t.Intersect([
   SessionIdParamSchema,
   ChatIdParamSchema,
@@ -53,24 +55,23 @@ const SessionChatAndMessageParamsSchema = t.Intersect([
 const ChatMessageBodySchema = t.Object({
   text: t.String({ minLength: 1, error: 'Message text cannot be empty' }),
 });
+
 const ChatRenameBodySchema = t.Object({
   name: t.Optional(t.Union([t.String({ minLength: 1 }), t.Null()])),
 });
-// --- New Schema for Star Update ---
+
 const MessageStarUpdateBodySchema = t.Object({
   starred: t.Boolean({ error: "'starred' field (boolean) is required" }),
   starredName: t.Optional(t.Union([t.String({ minLength: 1 }), t.Null()])),
 });
 
-// Use specific type for Session Chat Metadata response
 const SessionChatMetadataResponseSchema = t.Object({
   id: t.Number(),
-  sessionId: t.Number(), // Session chats always have a non-null sessionId
+  sessionId: t.Number(),
   timestamp: t.Number(),
   name: t.Optional(t.Union([t.String(), t.Null()])),
 });
 
-// Updated message response schema to include starred fields
 const ChatMessageResponseSchema = t.Object({
   id: t.Number(),
   chatId: t.Number(),
@@ -79,182 +80,176 @@ const ChatMessageResponseSchema = t.Object({
   timestamp: t.Number(),
   promptTokens: t.Optional(t.Union([t.Number(), t.Null()])),
   completionTokens: t.Optional(t.Union([t.Number(), t.Null()])),
-  starred: t.Boolean(), // <-- Changed to Boolean
-  starredName: t.Optional(t.Union([t.String(), t.Null()])), // <-- Added
+  starred: t.Boolean(),
+  starredName: t.Optional(t.Union([t.String(), t.Null()])),
 });
 
-// Use specific type for Full Session Chat response
 const FullSessionChatResponseSchema = t.Object({
   id: t.Number(),
-  sessionId: t.Number(), // Must be number
+  sessionId: t.Number(),
   timestamp: t.Number(),
   name: t.Optional(t.Union([t.String(), t.Null()])),
-  // Ensure messages is always an array in the response schema
-  messages: t.Array(ChatMessageResponseSchema), // Uses updated message schema
+  messages: t.Array(ChatMessageResponseSchema),
 });
 
 const DeleteChatResponseSchema = t.Object({ message: t.String() });
 
-// --- Elysia Plugin for Session Chat Routes ---
 export const chatRoutes = new Elysia({
   prefix: '/api/sessions/:sessionId/chats',
 })
   .model({
-    // Keep existing model definitions
     sessionIdParam: SessionIdParamSchema,
     chatIdParam: ChatIdParamSchema,
-    messageIdParam: MessageIdParamSchema, // New
-    sessionAndChatParams: SessionAndChatParamsSchema, // Added combined schema
-    sessionChatAndMessageParams: SessionChatAndMessageParamsSchema, // New
+    messageIdParam: MessageIdParamSchema,
+    sessionAndChatParams: SessionAndChatParamsSchema,
+    sessionChatAndMessageParams: SessionChatAndMessageParamsSchema,
     chatMessageBody: ChatMessageBodySchema,
     chatRenameBody: ChatRenameBodySchema,
-    messageStarUpdateBody: MessageStarUpdateBodySchema, // New
-    sessionChatMetadataResponse: SessionChatMetadataResponseSchema, // Use specific schema name
-    chatMessageResponse: ChatMessageResponseSchema, // Use updated schema
-    fullSessionChatResponse: FullSessionChatResponseSchema, // Use updated schema
+    messageStarUpdateBody: MessageStarUpdateBodySchema,
+    sessionChatMetadataResponse: SessionChatMetadataResponseSchema,
+    chatMessageResponse: ChatMessageResponseSchema,
+    fullSessionChatResponse: FullSessionChatResponseSchema,
     deleteChatResponse: DeleteChatResponseSchema,
   })
-  // Apply session loading and tagging to all routes in this group
   .guard(
-    { params: 'sessionIdParam' },
+    { params: 'sessionIdParam' }, // Ensures params.sessionId is a string and matches pattern
     (app) =>
       app
-        .derive(({ params }) => {
-          console.log(
-            `[Derive Session] Received Session ID Param: ${params.sessionId}`
-          );
-          const sessionId = parseInt(params.sessionId, 10);
-          if (isNaN(sessionId))
-            throw new BadRequestError('Invalid session ID format');
-          const session = sessionRepository.findById(sessionId);
-          console.log(`[Derive Session] Found session? ${!!session}`);
-          if (!session) throw new NotFoundError(`Session with ID ${sessionId}`);
-          return { sessionData: session };
+        // Derive sessionData for all routes within this guard
+        .derive((context) => {
+          // Elysia infers context type
+          const { params } = context;
+          // params.sessionId is guaranteed to be a string by the guard's schema
+          const sessionIdNum = parseInt(params.sessionId!, 10);
+          if (isNaN(sessionIdNum)) {
+            // This case should technically be caught by the param schema regex, but defense in depth
+            throw new BadRequestError('Invalid session ID format in path.');
+          }
+          const session = sessionRepository.findById(sessionIdNum);
+          if (!session) {
+            throw new NotFoundError(`Session with ID ${sessionIdNum}`);
+          }
+          return { sessionData: session }; // Adds sessionData to the context
         })
         .group(
-          '',
+          '', // No additional prefix for this group
           { detail: { tags: ['Chat'] } },
           (app) =>
             app
-              // POST /api/sessions/:sessionId/chats - Create a new chat for this session
-              .post('/', createSessionChat, {
-                response: { 201: 'sessionChatMetadataResponse' }, // Use specific schema
+              .post('/', (context) => createSessionChat(context as any), {
+                // Using 'as any' for context, relying on Elysia's inference
+                response: { 201: 'sessionChatMetadataResponse' },
                 detail: { summary: 'Create a new chat within a session' },
               })
-
-              // --- Routes requiring :chatId ---
               .guard(
-                { params: 'sessionAndChatParams' },
+                { params: 'sessionAndChatParams' }, // Ensures params.sessionId and params.chatId are strings
                 (app) =>
-                  app // *** FIX: Use combined schema name ***
-                    .derive(({ params, sessionData }) => {
-                      console.log(
-                        `[Derive Session Chat] Received Chat ID Param: ${params.chatId} for Session ID: ${params.sessionId}`
-                      );
-                      const chatId = parseInt(params.chatId, 10); // Now chatId is guaranteed
-                      if (isNaN(chatId))
-                        throw new BadRequestError('Invalid chat ID format');
-                      const chat = chatRepository.findChatById(chatId);
-                      console.log(
-                        `[Derive Session Chat] Found chat? ${!!chat}. Does it belong to session ${sessionData.id}? ${chat?.sessionId === sessionData.id}`
-                      );
-                      // Ensure chat exists AND belongs to the correct session
-                      if (!chat || chat.sessionId !== sessionData.id) {
-                        if (!chat)
-                          console.error(
-                            `[Derive Session Chat] Error: Chat ${chatId} not found.`
-                          );
-                        else
-                          console.error(
-                            `[Derive Session Chat] Error: Chat ${chatId} found, but belongs to session ${chat.sessionId}, not ${sessionData.id}.`
-                          );
-                        throw new NotFoundError(
-                          `Chat ${chatId} in session ${sessionData.id}`
+                  app
+                    .derive((context) => {
+                      // Elysia infers context
+                      const { params, sessionData } = context; // sessionData comes from the outer derive
+                      const chatIdNum = parseInt(params.chatId!, 10);
+                      if (isNaN(chatIdNum)) {
+                        throw new BadRequestError(
+                          'Invalid chat ID format in path.'
                         );
                       }
-                      return { chatData: chat };
+                      const chat = chatRepository.findChatById(chatIdNum);
+                      if (!chat || chat.sessionId !== sessionData.id) {
+                        throw new NotFoundError(
+                          `Chat ${chatIdNum} not found in session ${sessionData.id}`
+                        );
+                      }
+                      return { chatData: chat }; // Adds chatData to the context
                     })
-
-                    // GET /:chatId - Get full session chat details
-                    .get('/:chatId', getSessionChatDetails, {
-                      response: { 200: 'fullSessionChatResponse' }, // Use specific schema
-                      detail: {
-                        summary: 'Get full details for a specific session chat',
-                      },
-                    })
-
-                    // POST /:chatId/messages - Add message to session chat (Streaming)
-                    .post('/:chatId/messages', addSessionChatMessage, {
-                      body: 'chatMessageBody',
-                      // No specific 200 body for stream, handler returns Response
-                      detail: {
-                        summary:
-                          'Add user message & get AI response for session chat (stream)',
-                        produces: ['text/event-stream'],
-                      },
-                    })
-
-                    // PATCH /:chatId/name - Rename session chat
-                    .patch('/:chatId/name', renameSessionChat, {
-                      body: 'chatRenameBody',
-                      response: { 200: 'sessionChatMetadataResponse' }, // Use specific schema
-                      detail: { summary: 'Rename a session chat' },
-                    })
-
-                    // DELETE /:chatId - Delete session chat
-                    .delete('/:chatId', deleteSessionChat, {
-                      response: { 200: 'deleteChatResponse' },
-                      detail: {
-                        summary: 'Delete a session chat and its messages',
-                      },
-                    })
-
-                    // --- Routes requiring :messageId ---
-                    .guard({ params: 'sessionChatAndMessageParams' }, (app) =>
-                      app // Nested guard for message ID
-                        .derive(({ params, chatData }) => {
-                          console.log(
-                            `[Derive Session Message] Received Message ID Param: ${params.messageId} for Chat ID: ${params.chatId}`
-                          );
-                          const messageId = parseInt(params.messageId, 10);
-                          if (isNaN(messageId))
-                            throw new BadRequestError(
-                              'Invalid message ID format'
+                    .get(
+                      '/:chatId',
+                      (context) => getSessionChatDetails(context as any),
+                      {
+                        response: { 200: 'fullSessionChatResponse' },
+                        detail: {
+                          summary:
+                            'Get full details for a specific session chat',
+                        },
+                      }
+                    )
+                    .post(
+                      '/:chatId/messages',
+                      (context) => addSessionChatMessage(context as any),
+                      {
+                        body: 'chatMessageBody',
+                        detail: {
+                          summary:
+                            'Add user message & get AI response for session chat (stream)',
+                          produces: ['text/event-stream'],
+                        },
+                      }
+                    )
+                    .patch(
+                      '/:chatId/name',
+                      (context) => renameSessionChat(context as any),
+                      {
+                        body: 'chatRenameBody',
+                        response: { 200: 'sessionChatMetadataResponse' },
+                        detail: { summary: 'Rename a session chat' },
+                      }
+                    )
+                    .delete(
+                      '/:chatId',
+                      (context) => deleteSessionChat(context as any),
+                      {
+                        response: { 200: 'deleteChatResponse' },
+                        detail: {
+                          summary: 'Delete a session chat and its messages',
+                        },
+                      }
+                    )
+                    .guard(
+                      { params: 'sessionChatAndMessageParams' }, // Ensures sessionId, chatId, messageId are strings
+                      (app) =>
+                        app
+                          .derive((context) => {
+                            // Elysia infers context
+                            const { params, chatData } = context; // chatData from parent derive
+                            const messageIdNum = parseInt(
+                              params.messageId!,
+                              10
                             );
-                          // Use the messageRepository function here
-                          const message =
-                            messageRepository.findMessageById(messageId);
-                          console.log(
-                            `[Derive Session Message] Found message? ${!!message}. Does it belong to chat ${chatData.id}? ${message?.chatId === chatData.id}`
-                          );
-                          if (!message || message.chatId !== chatData.id) {
-                            if (!message)
-                              console.error(
-                                `[Derive Session Message] Error: Message ${messageId} not found.`
+                            if (isNaN(messageIdNum)) {
+                              throw new BadRequestError(
+                                'Invalid message ID format in path.'
                               );
-                            else
-                              console.error(
-                                `[Derive Session Message] Error: Message ${messageId} found, but belongs to chat ${message.chatId}, not ${chatData.id}.`
+                            }
+                            const message =
+                              messageRepository.findMessageById(messageIdNum);
+                            if (
+                              !message ||
+                              !chatData ||
+                              message.chatId !== chatData.id
+                            ) {
+                              // Ensure chatData exists
+                              throw new NotFoundError(
+                                `Message ${messageIdNum} not found in chat ${chatData?.id}`
                               );
-                            throw new NotFoundError(
-                              `Message ${messageId} in chat ${chatData.id}`
-                            );
-                          }
-                          return { messageData: message };
-                        })
-                        // PATCH /:chatId/messages/:messageId - Update message star status
-                        .patch(
-                          '/:chatId/messages/:messageId',
-                          updateSessionChatMessageStarStatus,
-                          {
-                            body: 'messageStarUpdateBody',
-                            response: { 200: 'chatMessageResponse' }, // Return the updated message
-                            detail: {
-                              summary: 'Update star status/name for a message',
-                            },
-                          }
-                        )
-                    ) // End message guard
-              ) // End chat guard
-        ) // End /chats group
-  ); // End initial guard
+                            }
+                            return { messageData: message }; // Adds messageData
+                          })
+                          .patch(
+                            '/:chatId/messages/:messageId',
+                            (context) =>
+                              updateSessionChatMessageStarStatus(
+                                context as any
+                              ),
+                            {
+                              body: 'messageStarUpdateBody',
+                              response: { 200: 'chatMessageResponse' },
+                              detail: {
+                                summary:
+                                  'Update star status/name for a message',
+                              },
+                            }
+                          )
+                    ) // End message-specific guard
+              ) // End chat-specific guard
+        ) // End group for /api/sessions/:sessionId/chats
+  ); // End sessionID guard

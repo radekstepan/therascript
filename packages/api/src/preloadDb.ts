@@ -1,68 +1,75 @@
-// =========================================
-// File: packages/api/src/preloadDb.ts
-// =========================================
-// File: packages/api/src/preloadDb.ts
 import Database from 'better-sqlite3';
 import path from 'node:path';
-import fs from 'node:fs/promises'; // <-- Use fs.promises for async operations
+import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { calculateTokenCount } from './services/tokenizerService.js'; // <-- Import from tokenizerService
-// *** Import schema and init/verify functions from sqliteService ***
+import { Client } from '@elastic/elasticsearch';
+import { calculateTokenCount } from './services/tokenizerService.js';
 import {
-  schema, // Import the schema string
-  initializeDatabase, // Import the initialization logic
-  // No need to import verifySchemaVersion or calculateSchemaHash directly
-  // as they are called by the imported initializeDatabase
-} from './db/sqliteService.js';
-// --- Import type for DB paragraph structure ---
-import type { BackendTranscriptParagraph } from './types/index.js';
+  schema as sqliteSchema,
+  initializeDatabase as initializeSqliteDatabase,
+} from './db/sqliteService.js'; // Renamed to avoid conflict
+import type {
+  BackendTranscriptParagraph,
+  TranscriptParagraphData,
+} from './types/index.js';
+import {
+  getElasticsearchClient,
+  initializeIndices as initializeEsIndices, // Renamed ES init
+  deleteIndex as deleteEsIndex, // Renamed ES delete
+  bulkIndexDocuments as bulkIndexEsDocuments, // Renamed ES bulk
+  TRANSCRIPTS_INDEX,
+  MESSAGES_INDEX,
+} from '@therascript/elasticsearch-client';
+import config from './config/index.js';
 
-// Determine paths relative to *this file's* location
 const __filename = fileURLToPath(import.meta.url);
-// Adjust path based on build output location (e.g., 'dist/')
-// If preloadDb.js is in `dist/`, navigate up twice to get to `packages/api`
 const packageApiDir = path.resolve(__filename, '../../');
 
-// --- Read DB_PATH from environment (loaded by --env-file) ---
-// Fallback needed if run directly without --env-file for some reason
 const dbPathFromEnv =
   process.env.DB_PATH || './data/therapy-analyzer-dev.sqlite';
-if (!process.env.DB_PATH) {
-  console.warn(
-    `[Preload] WARN: DB_PATH not found in environment variables. Falling back to default: ${dbPathFromEnv}`
-  );
-} else {
-  console.log(
-    `[Preload] Read DB_PATH from environment: ${process.env.DB_PATH}`
-  );
-}
-// --- Resolve the target DB path relative to the API package directory ---
-const targetDbPath = path.resolve(packageApiDir, dbPathFromEnv);
-const targetDataDir = path.dirname(targetDbPath); // Get the directory from the resolved path
+if (!process.env.DB_PATH)
+  console.warn(`[Preload] WARN: DB_PATH not found. Default: ${dbPathFromEnv}`);
+else console.log(`[Preload] Read DB_PATH from env: ${process.env.DB_PATH}`);
 
-// Sample data interfaces (remain the same)
-interface SessionVerificationData {
-  id: number;
-  status: string;
-  date: string;
-  transcriptTokenCount: number | null;
-}
+const targetDbPath = path.resolve(packageApiDir, dbPathFromEnv);
+const targetDataDir = path.dirname(targetDbPath);
+
 const createIsoTimestamp = (
   dateStr: string,
   offsetMinutes: number = 0
 ): string => {
-  const d = new Date(`${dateStr}T12:00:00Z`);
+  const d = new Date(`${dateStr}T12:00:00Z`); // Use UTC noon
   d.setMinutes(d.getMinutes() + offsetMinutes);
   return d.toISOString();
 };
+
 interface SampleChatMessage {
   sender: 'user' | 'ai';
   text: string;
   starred?: boolean;
   starredName?: string;
 }
-const sampleSessions = [
+interface SampleChat {
+  name?: string;
+  tags?: string[];
+  messages: SampleChatMessage[];
+}
+interface SampleSession {
+  localIdRef: number;
+  fileName: string;
+  clientName: string;
+  sessionName: string;
+  date: string;
+  sessionType: string;
+  therapy: string;
+  transcriptContent: TranscriptParagraphData[];
+  status: 'completed' | 'pending' | 'transcribing' | 'failed';
+  whisperJobId: string | null;
+  chats: SampleChat[];
+}
+
+const sampleSessions: SampleSession[] = [
   {
     localIdRef: 1,
     fileName: 'session1.mp3',
@@ -115,7 +122,7 @@ const sampleSessions = [
             sender: 'ai',
             text: 'Jane mentioned feeling really overwhelmed with work, describing it as constant pressure and feeling like she can never catch up. She also noted that her thoughts race and she finds it hard to focus.',
           },
-        ] as SampleChatMessage[],
+        ],
       },
       {
         name: 'CBT Concepts Introduced',
@@ -126,9 +133,9 @@ const sampleSessions = [
             sender: 'ai',
             text: "Yes, the therapist mentioned exploring CBT techniques to manage Jane's racing thoughts, indicating an introduction to the therapy modality.",
           },
-        ] as SampleChatMessage[],
+        ],
       },
-    ] as { name?: string; tags?: string[]; messages: SampleChatMessage[] }[],
+    ],
   },
   {
     localIdRef: 2,
@@ -177,7 +184,7 @@ const sampleSessions = [
             sender: 'ai',
             text: 'John reported that his week was better in some ways. He noticed his anxiety during a meeting and used a breathing exercise, which helped ground him, although the physical sensations remained strong.',
           },
-        ] as SampleChatMessage[],
+        ],
       },
       {
         name: undefined,
@@ -193,7 +200,7 @@ const sampleSessions = [
             sender: 'ai',
             text: 'The session explicitly mentioned John experiencing anxiety during a meeting.',
           },
-        ] as SampleChatMessage[],
+        ],
       },
       {
         name: 'Therapist Techniques',
@@ -207,16 +214,16 @@ const sampleSessions = [
             sender: 'ai',
             text: "The therapist acknowledged John's use of a breathing exercise and suggested working on acknowledging physical sensations without judgment as a key part of mindfulness.",
           },
-        ] as SampleChatMessage[],
+        ],
       },
-    ] as { name?: string; tags?: string[]; messages: SampleChatMessage[] }[],
+    ],
   },
   {
     localIdRef: 3,
     fileName: 'session3.mp3',
     clientName: 'Jane Doe',
-    sessionName: 'Follow-up CBT',
-    date: createIsoTimestamp('2025-04-01', 60),
+    sessionName: 'CBT Homework Review', // Changed name
+    date: createIsoTimestamp('2025-04-08', 0),
     sessionType: 'Individual',
     therapy: 'CBT',
     transcriptContent: [
@@ -238,66 +245,38 @@ const sampleSessions = [
     ],
     status: 'completed',
     whisperJobId: null,
-    chats: [] as {
-      name?: string;
-      tags?: string[];
-      messages: SampleChatMessage[];
-    }[],
+    chats: [],
   },
 ];
 
 async function preloadDatabase() {
-  console.log(
-    `[Preload] Target DB Path (from env or default): ${targetDbPath}`
-  );
-  console.log(`[Preload] Target Data Directory: ${targetDataDir}`);
-
-  // *** START DELETION LOGIC ***
-  // Delete the entire 'data' directory if it exists
+  console.log(`[Preload] Target DB Path: ${targetDbPath}`);
   let deletionAttempted = false;
   try {
-    await fs.access(targetDataDir); // Check if the directory exists
-    console.log(
-      `[Preload] Existing data directory found at ${targetDataDir}. Attempting deletion...`
-    );
+    await fs.access(targetDataDir);
+    console.log(`[Preload] Existing data dir at ${targetDataDir}. Deleting...`);
     deletionAttempted = true;
-    // Use fs.rm to recursively delete the directory
     await fs.rm(targetDataDir, { recursive: true, force: true });
-    console.log(`[Preload] Successfully deleted directory: ${targetDataDir}`);
-    // Optional: Add a small delay to allow the file system to catch up
+    console.log(`[Preload] Deleted directory: ${targetDataDir}`);
     await new Promise((resolve) => setTimeout(resolve, 100));
   } catch (err: any) {
-    if (err.code === 'ENOENT') {
-      // ENOENT means the directory didn't exist, which is fine
-      console.log(
-        `[Preload] Data directory not found at ${targetDataDir}. No deletion needed.`
-      );
-    } else {
-      // Other errors during deletion are problematic
+    if (err.code !== 'ENOENT') {
       console.error(
         `[Preload] Error deleting data directory ${targetDataDir}:`,
         err
       );
-      // If deletion was attempted but failed, it's critical - exit.
       if (deletionAttempted) {
-        console.error(
-          `[Preload] FATAL: Failed to delete existing data directory. Check permissions or file locks.`
-        );
         process.exit(1);
       }
+    } else {
+      console.log(`[Preload] Data dir not found. No deletion needed.`);
     }
   }
-  // *** END DELETION LOGIC ***
 
   try {
-    // Create the data directory AFTER deleting it
-    console.log(`[Preload] Creating data directory: ${targetDataDir}`);
     await fs.mkdir(targetDataDir, { recursive: true });
-    // Also ensure uploads dir exists within the target data dir
-    // Read UPLOADS_DIR from env, resolve relative to API package dir
     const uploadsDirRelative = process.env.DB_UPLOADS_DIR || './data/uploads';
     const targetUploadsDir = path.resolve(packageApiDir, uploadsDirRelative);
-    console.log(`[Preload] Creating uploads directory: ${targetUploadsDir}`);
     await fs.mkdir(targetUploadsDir, { recursive: true });
   } catch (err) {
     console.error(`[Preload] Failed create data/uploads directory:`, err);
@@ -305,80 +284,50 @@ async function preloadDatabase() {
   }
 
   let db: Database.Database | null = null;
+  let esClientInstance: Client | null = null;
   let success = false;
-  const sessionsToVerify: {
+  const sessionsToVerify: Array<{
     name: string;
     expectedDate: string;
     expectedTokenCount: number | null;
     expectedParagraphCount: number;
-  }[] = [];
+  }> = [];
 
   try {
-    // Connect AFTER ensuring deletion and recreation, using the correct target path
-    console.log(`[Preload] Connecting to database: ${targetDbPath}`);
     db = new Database(targetDbPath, { verbose: console.log });
+    initializeSqliteDatabase(db); // Initializes SQLite schema & verifies hash
 
-    // *** Call the imported initializeDatabase function ***
-    // This will execute the schema, run migrations (if any apply to new db), and verify the hash
-    initializeDatabase(db);
+    esClientInstance = getElasticsearchClient(config.elasticsearch.url);
+    console.log('[Preload ES] Deleting existing Elasticsearch indices...');
+    await deleteEsIndex(esClientInstance, TRANSCRIPTS_INDEX);
+    await deleteEsIndex(esClientInstance, MESSAGES_INDEX);
+    console.log('[Preload ES] Initializing Elasticsearch indices...');
+    await initializeEsIndices(esClientInstance);
 
-    // --- Add Debug Check Here ---
-    console.log(
-      '[Preload] Checking if transcript_paragraphs exists before prepare...'
-    );
-    try {
-      const checkTable = db
-        .prepare(
-          "SELECT name FROM sqlite_master WHERE type='table' AND name='transcript_paragraphs';"
-        )
-        .get();
-      if (checkTable) {
-        console.log(
-          '[Preload] transcript_paragraphs table FOUND before prepare.'
-        );
-      } else {
-        // If this logs, the explicit creation in initializeDatabase also failed.
-        console.error(
-          '[Preload] CRITICAL: transcript_paragraphs table NOT FOUND before prepare!'
-        );
-        throw new Error(
-          'transcript_paragraphs table missing after initialization.'
-        );
-      }
-    } catch (e) {
-      console.error(
-        '[Preload] Error checking for transcript_paragraphs table:',
-        e
-      );
-      throw e; // Re-throw check error
-    }
-    // --- End Debug Check ---
+    const esTranscriptDocsToBulk: Array<{ id: string; document: any }> = [];
+    const esMessageDocsToBulk: Array<{ id: string; document: any }> = [];
 
-    // Prepare statements using the now-initialized db instance
     const insertSession = db.prepare(
-      /* SQL */ `INSERT INTO sessions (fileName, clientName, sessionName, date, sessionType, therapy, audioPath, status, whisperJobId, transcriptTokenCount) VALUES (@fileName, @clientName, @sessionName, @date, @sessionType, @therapy, @audioPath, @status, @whisperJobId, @transcriptTokenCount)`
+      `INSERT INTO sessions (fileName, clientName, sessionName, date, sessionType, therapy, audioPath, status, whisperJobId, transcriptTokenCount) VALUES (@fileName, @clientName, @sessionName, @date, @sessionType, @therapy, @audioPath, @status, @whisperJobId, @transcriptTokenCount)`
     );
     const insertChat = db.prepare(
-      /* SQL */ `INSERT INTO chats (sessionId, timestamp, name, tags) VALUES (?, ?, ?, ?)`
+      `INSERT INTO chats (sessionId, timestamp, name, tags) VALUES (?, ?, ?, ?)`
     );
     const insertMessage = db.prepare(
-      /* SQL */ `INSERT INTO messages (chatId, sender, text, timestamp, promptTokens, completionTokens, starred, starredName) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO messages (chatId, sender, text, timestamp, promptTokens, completionTokens, starred, starredName) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     );
     const insertParagraph = db.prepare(
-      /* SQL */ `INSERT INTO transcript_paragraphs (sessionId, paragraphIndex, timestampMs, text) VALUES (?, ?, ?, ?)`
-    ); // <-- New statement
+      `INSERT INTO transcript_paragraphs (sessionId, paragraphIndex, timestampMs, text) VALUES (?, ?, ?, ?)`
+    );
 
-    console.log('[Preload] Starting DB transaction for sample data...');
     db.transaction(() => {
       for (const session of sampleSessions) {
         const fullTranscriptText = session.transcriptContent
-          .map((p) => p.text)
+          .map((p: TranscriptParagraphData) => p.text)
           .join('\n\n');
         const tokenCount = calculateTokenCount(fullTranscriptText);
-        // Use a relative path for audioPath based on the filename for simplicity in sample data
-        const audioIdentifier = session.fileName; // Simple identifier
+        const audioIdentifier = session.fileName;
 
-        // Insert session without transcriptPath, but with audioPath
         const sessionResult = insertSession.run({
           fileName: session.fileName,
           clientName: session.clientName,
@@ -386,14 +335,13 @@ async function preloadDatabase() {
           date: session.date,
           sessionType: session.sessionType,
           therapy: session.therapy,
-          audioPath: audioIdentifier, // Set audio path here
+          audioPath: audioIdentifier,
           status: session.status,
           whisperJobId: session.whisperJobId,
           transcriptTokenCount: tokenCount,
         });
         const sessionId = sessionResult.lastInsertRowid as number;
 
-        // --- Insert paragraphs into the new table ---
         for (const paragraph of session.transcriptContent) {
           insertParagraph.run(
             sessionId,
@@ -401,10 +349,21 @@ async function preloadDatabase() {
             paragraph.timestamp,
             paragraph.text
           );
+          esTranscriptDocsToBulk.push({
+            id: `${sessionId}_${paragraph.id}`,
+            document: {
+              session_id: sessionId,
+              paragraph_index: paragraph.id,
+              text: paragraph.text,
+              timestamp_ms: paragraph.timestamp,
+              client_name: session.clientName,
+              session_name: session.sessionName,
+              session_date: session.date,
+              session_type: session.sessionType,
+              therapy_type: session.therapy,
+            },
+          });
         }
-        // --- End paragraph insertion ---
-
-        // Store info for verification
         sessionsToVerify.push({
           name: session.sessionName,
           expectedDate: session.date,
@@ -412,10 +371,10 @@ async function preloadDatabase() {
           expectedParagraphCount: session.transcriptContent.length,
         });
 
-        // Insert chats and messages (unchanged)
+        let messageOffset = 0;
         for (const chat of session.chats) {
-          const timestamp = Date.now() + Math.floor(Math.random() * 1000);
-          // Ensure tags are sorted before stringifying (sample data is already sorted)
+          const timestamp = Date.now() + messageOffset;
+          messageOffset += Math.floor(Math.random() * 5000) + 5000; // Increase offset randomness
           const sortedTags = chat.tags
             ? [...chat.tags].sort((a, b) => a.localeCompare(b))
             : null;
@@ -428,12 +387,14 @@ async function preloadDatabase() {
             timestamp,
             chat.name === undefined ? null : chat.name,
             tagsJson
-          ); // Insert tagsJson
+          );
           const chatId = chatResult.lastInsertRowid as number;
+
+          let subMessageOffset = 0;
           for (const message of chat.messages) {
-            const messageTimestamp =
-              timestamp + Math.floor(Math.random() * 100);
-            insertMessage.run(
+            const messageTimestamp = timestamp + subMessageOffset;
+            subMessageOffset += Math.floor(Math.random() * 1000) + 100; // Increase offset
+            const msgResult = insertMessage.run(
               chatId,
               message.sender,
               message.text,
@@ -443,79 +404,107 @@ async function preloadDatabase() {
               message.starred ? 1 : 0,
               message.starredName || null
             );
+            const actualMessageId = msgResult.lastInsertRowid as number;
+            esMessageDocsToBulk.push({
+              id: String(actualMessageId),
+              document: {
+                message_id: String(actualMessageId),
+                chat_id: chatId,
+                session_id: sessionId,
+                sender: message.sender,
+                text: message.text,
+                timestamp: messageTimestamp,
+                client_name: session.clientName,
+                session_name: session.sessionName,
+                chat_name: null,
+                tags: null,
+              },
+            });
           }
         }
       }
-    })(); // End transaction
+    })();
 
-    console.log('[Preload] Sample data DB transaction committed.');
+    if (esTranscriptDocsToBulk.length > 0) {
+      console.log(
+        `[Preload ES] Bulk indexing ${esTranscriptDocsToBulk.length} transcript documents...`
+      );
+      await bulkIndexEsDocuments(
+        esClientInstance,
+        TRANSCRIPTS_INDEX,
+        esTranscriptDocsToBulk
+      );
+    }
+    if (esMessageDocsToBulk.length > 0) {
+      console.log(
+        `[Preload ES] Bulk indexing ${esMessageDocsToBulk.length} message documents...`
+      );
+      await bulkIndexEsDocuments(
+        esClientInstance,
+        MESSAGES_INDEX,
+        esMessageDocsToBulk
+      );
+    }
+
+    console.log(
+      '[Preload] Sample data DB transaction committed and ES data indexed.'
+    );
     success = true;
   } catch (error) {
     console.error('[Preload] Error during preload execution:', error);
     success = false;
   } finally {
-    // Verification logic updated
     if (success && db && db.open) {
       console.log('[Preload Verification] Checking database entries...');
       try {
-        // Verify session table data (excluding transcriptPath)
         const verifySessionStmt = db.prepare(
           'SELECT id, status, date, transcriptTokenCount FROM sessions WHERE sessionName = ?'
         );
-        // Verify paragraph count
         const verifyParagraphCountStmt = db.prepare(
           'SELECT COUNT(*) as count FROM transcript_paragraphs WHERE sessionId = ?'
         );
-
         let verificationPassed = true;
         for (const sessionToVerify of sessionsToVerify) {
-          const dbSession: SessionVerificationData | undefined =
-            verifySessionStmt.get(sessionToVerify.name) as
-              | SessionVerificationData
-              | undefined;
+          const dbSession = verifySessionStmt.get(sessionToVerify.name) as any; // Cast for simplicity
           if (!dbSession) {
+            verificationPassed = false;
             console.error(
               `[PV] FAILED: Session '${sessionToVerify.name}' not found!`
             );
-            verificationPassed = false;
             continue;
           }
-
-          // Verify session fields
           if (dbSession.status !== 'completed') {
+            verificationPassed = false;
             console.error(
               `[PV] FAILED: Session '${sessionToVerify.name}' (ID: ${dbSession.id}) status '${dbSession.status}' != 'completed'.`
             );
-            verificationPassed = false;
           }
           if (dbSession.date !== sessionToVerify.expectedDate) {
+            verificationPassed = false;
             console.error(
               `[PV] FAILED: Session '${sessionToVerify.name}' (ID: ${dbSession.id}) date '${dbSession.date}' != '${sessionToVerify.expectedDate}'.`
             );
-            verificationPassed = false;
           }
           if (
             dbSession.transcriptTokenCount !==
             sessionToVerify.expectedTokenCount
           ) {
+            verificationPassed = false;
             console.error(
               `[PV] FAILED: Session '${sessionToVerify.name}' (ID: ${dbSession.id}) token count '${dbSession.transcriptTokenCount}' != '${sessionToVerify.expectedTokenCount}'.`
             );
-            verificationPassed = false;
           }
-
-          // Verify paragraph count
-          const paraCountResult = verifyParagraphCountStmt.get(dbSession.id) as
-            | { count: number }
-            | undefined;
+          const paraCountResult = verifyParagraphCountStmt.get(
+            dbSession.id
+          ) as any; // Cast
           if (
             !paraCountResult ||
             paraCountResult.count !== sessionToVerify.expectedParagraphCount
           ) {
+            verificationPassed = false;
             console.error(
               `[PV] FAILED: Session '${sessionToVerify.name}' (ID: ${dbSession.id}) paragraph count mismatch. Found: ${paraCountResult?.count}, Expected: ${sessionToVerify.expectedParagraphCount}.`
             );
-            verificationPassed = false;
           }
         }
         if (verificationPassed)

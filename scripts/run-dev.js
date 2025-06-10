@@ -13,6 +13,7 @@ const execPromise = util.promisify(exec);
 // --- Configuration: Docker Container Names ---
 const OLLAMA_CONTAINER_NAME = 'ollama_server_managed';
 const WHISPER_CONTAINER_NAME = 'therascript_whisper_service';
+const ELASTICSEARCH_CONTAINER_NAME = 'therascript_elasticsearch_service'; // Added
 // --- End Configuration ---
 
 // --- UI Port for Cleanup ---
@@ -88,6 +89,7 @@ async function cleanupDocker() {
   await Promise.allSettled([
     stopAndRemoveContainer(OLLAMA_CONTAINER_NAME),
     stopAndRemoveContainer(WHISPER_CONTAINER_NAME),
+    stopAndRemoveContainer(ELASTICSEARCH_CONTAINER_NAME), // Added
   ]);
   console.log('[RunDev Cleanup] Docker cleanup process finished.');
 }
@@ -146,12 +148,13 @@ const concurrentlyArgs = [
   'concurrently',
   '--kill-others-on-fail',
   '--names',
-  'API,UI,WHISPER',
+  'API,UI,WHISPER,ES', // Added ES
   '--prefix-colors',
-  'bgBlue.bold,bgMagenta.bold,bgCyan.bold',
+  'bgBlue.bold,bgMagenta.bold,bgCyan.bold,bgYellow.bold', // Added color for ES
   '"yarn dev:api"',
   '"yarn dev:ui"',
   '"yarn start:whisper"',
+  '"yarn start:elasticsearch-manager"', // Added Elasticsearch manager
 ];
 // --- End Concurrently Command Setup ---
 

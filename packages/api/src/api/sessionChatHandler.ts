@@ -1,7 +1,4 @@
-// =========================================
-// File: packages/api/src/api/sessionChatHandler.ts
-// (Refined processStream function)
-// =========================================
+// packages/api/src/api/sessionChatHandler.ts
 import { chatRepository } from '../repositories/chatRepository.js';
 import { transcriptRepository } from '../repositories/transcriptRepository.js';
 import { messageRepository } from '../repositories/messageRepository.js';
@@ -13,14 +10,23 @@ import {
   BadRequestError,
 } from '../errors.js';
 import type {
-  StructuredTranscript,
   BackendChatMessage,
   ChatMetadata,
-} from '../types/index.js';
+  BackendChatSession,
+  BackendSession,
+} from '../types/index.js'; // Added BackendSession
 import { TransformStream } from 'node:stream/web';
 import { TextEncoder } from 'node:util';
+import {
+  getElasticsearchClient,
+  MESSAGES_INDEX,
+  indexDocument,
+  deleteByQuery,
+} from '@therascript/elasticsearch-client';
+import config from '../config/index.js';
 
-// Define precise return types matching the schemas where needed
+const esClient = getElasticsearchClient(config.elasticsearch.url);
+
 type SessionChatMetadataResponse = Omit<ChatMetadata, 'tags'> & {
   sessionId: number;
 };
@@ -31,21 +37,38 @@ type FullSessionChatApiResponse = SessionChatMetadataResponse & {
   messages: ApiChatMessageResponse[];
 };
 
-// POST /api/sessions/:sessionId/chats - Create a new chat associated with a session
+// Define a type for Elysia context if not already available globally
+// This needs to match what Elysia actually provides to your handlers
+interface ElysiaHandlerContext {
+  body: any; // This will be typed by Elysia based on schema
+  params: Record<string, string | undefined>; // Params are strings initially
+  query: Record<string, string | undefined>;
+  set: { status?: number | string; headers?: Record<string, string> };
+  // These are added by 'derive' hooks
+  sessionData: BackendSession;
+  chatData?: BackendChatSession;
+  messageData?: BackendChatMessage;
+}
+
 export const createSessionChat = ({
   sessionData,
   set,
-}: any): SessionChatMetadataResponse => {
+}: ElysiaHandlerContext): SessionChatMetadataResponse => {
   const sessionId = sessionData.id;
   try {
     const newChat = chatRepository.createChat(sessionId);
     console.log(`[API] Created new chat ${newChat.id} in session ${sessionId}`);
-    const { messages, ...chatMetadata } = newChat;
+    const { messages, ...chatMetadata } = newChat; // messages is an array in BackendChatSession, fine to destructure
     set.status = 201;
-    if (chatMetadata.sessionId === null)
-      throw new InternalServerError('Created session chat has null sessionId');
+    if (chatMetadata.sessionId === null) {
+      // Should not happen for session chats
+      throw new InternalServerError(
+        'Created session chat has null sessionId, which is unexpected.'
+      );
+    }
+    // Session chats do not have their own tags in the current model, so excluding 'tags' property
     const { tags, ...responseMetadata } = chatMetadata;
-    return responseMetadata as SessionChatMetadataResponse;
+    return responseMetadata as SessionChatMetadataResponse; // Cast after ensuring sessionId is not null
   } catch (error) {
     console.error(
       `[API Error] createSessionChat (Session ID: ${sessionId}):`,
@@ -58,24 +81,28 @@ export const createSessionChat = ({
   }
 };
 
-// POST /api/sessions/:sessionId/chats/:chatId/messages - Add message to session chat (Streaming)
 export const addSessionChatMessage = async ({
   sessionData,
   chatData,
   body,
   set,
-}: any): Promise<Response> => {
-  const { text } = body;
+}: ElysiaHandlerContext): Promise<Response> => {
+  const { text } = body as { text: string }; // Type assertion for body
   const trimmedText = text.trim();
   let userMessage: BackendChatMessage;
 
-  if (!chatData)
-    throw new NotFoundError(`Chat not found in context for adding message.`);
-  if (chatData.sessionId !== sessionData.id)
+  if (!chatData) {
+    throw new NotFoundError(
+      `Chat context not found for adding message. This should not happen if derive hook is correct.`
+    );
+  }
+  if (chatData.sessionId !== sessionData.id) {
+    // This check should ideally be redundant if derive hooks are set up correctly
     throw new ApiError(
       403,
       `Chat ${chatData.id} does not belong to session ${sessionData.id}.`
     );
+  }
 
   try {
     userMessage = messageRepository.addMessage(
@@ -83,14 +110,33 @@ export const addSessionChatMessage = async ({
       'user',
       trimmedText
     );
+    // Index user message into Elasticsearch
+    await indexDocument(esClient, MESSAGES_INDEX, String(userMessage.id), {
+      message_id: String(userMessage.id),
+      chat_id: userMessage.chatId,
+      session_id: sessionData.id,
+      sender: userMessage.sender,
+      text: userMessage.text,
+      timestamp: userMessage.timestamp,
+      client_name: sessionData.clientName,
+      session_name: sessionData.sessionName,
+      // chat_name and tags are null for session-based chat messages
+      chat_name: null,
+      tags: null,
+    });
+    console.log(
+      `[API ES] Indexed User message ${userMessage.id} for session chat ${chatData.id}.`
+    );
+
     const transcriptString = transcriptRepository.getTranscriptTextForSession(
       sessionData.id
     );
     const currentMessages = messageRepository.findMessagesByChatId(chatData.id);
-    if (currentMessages.length === 0)
+    if (currentMessages.length === 0) {
       throw new InternalServerError(
         `CRITICAL: Chat ${chatData.id} has no messages immediately after adding one.`
       );
+    }
 
     const ollamaStream = await streamChatResponse(
       transcriptString,
@@ -101,61 +147,53 @@ export const addSessionChatMessage = async ({
       'Content-Type': 'text/event-stream; charset=utf-8',
       'Cache-Control': 'no-cache',
       Connection: 'keep-alive',
-      'X-User-Message-Id': String(userMessage.id),
     });
+    headers.set('X-User-Message-Id', String(userMessage.id)); // Send actual user message ID
+
     const passthrough = new TransformStream<Uint8Array, Uint8Array>();
     const writer = passthrough.writable.getWriter();
     const encoder = new TextEncoder();
 
     const writeSseEvent = async (data: object) => {
       try {
-        // Check if writer is already closed or closing before writing
-        // Note: There isn't a perfect cross-platform way to check if a writer is locked/closed
-        // without potentially causing an error. We rely on catching the error.
         await writer.write(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
       } catch (e) {
-        // If write fails, it likely means the client disconnected or the stream errored.
         console.warn(
           `[API SSE Write Error ${chatData.id}]: Failed to write to stream (client likely disconnected):`,
           e
         );
-        // We should abort further processing if we can't write
         throw new Error('SSE write failed, aborting stream processing.');
       }
     };
 
-    // --- Refined processStream ---
     const processStream = async () => {
       let fullAiText = '';
       let finalPromptTokens: number | undefined;
       let finalCompletionTokens: number | undefined;
       let ollamaStreamError: Error | null = null;
 
-      // Wrap the Ollama stream iteration in its own try/catch
       try {
         console.log(
           `[API ProcessStream ${chatData.id}] Starting Ollama stream processing...`
         );
         for await (const chunk of ollamaStream) {
-          // Send chunk to client
           if (chunk.message?.content) {
             const textChunk = chunk.message.content;
             fullAiText += textChunk;
             await writeSseEvent({ chunk: textChunk });
           }
-          // Check for final 'done' data from Ollama
           if (chunk.done) {
             finalPromptTokens = chunk.prompt_eval_count;
             finalCompletionTokens = chunk.eval_count;
             console.log(
-              `[API ProcessStream ${chatData.id}] Ollama stream 'done' signal received. Tokens: C=${finalCompletionTokens}, P=${finalPromptTokens}`
+              `[API ProcessStream ${chatData.id}] Ollama stream 'done'. Tokens: C=${finalCompletionTokens}, P=${finalPromptTokens}`
             );
-            // Send final 'done' event to client
             await writeSseEvent({
               done: true,
               promptTokens: finalPromptTokens,
               completionTokens: finalCompletionTokens,
             });
+            // Stream from Ollama is done, but we continue in finally to save to DB
           }
         }
         console.log(
@@ -170,7 +208,6 @@ export const addSessionChatMessage = async ({
           `[API ProcessStream ${chatData.id}] Error DURING Ollama stream iteration:`,
           ollamaStreamError
         );
-        // Attempt to inform the client about the error before closing
         try {
           await writeSseEvent({
             error: 'Stream processing failed on server during LLM interaction.',
@@ -180,16 +217,37 @@ export const addSessionChatMessage = async ({
         console.log(
           `[API ProcessStream Finally ${chatData.id}] Cleaning up. Ollama stream errored: ${!!ollamaStreamError}`
         );
-        // --- Database Saving ---
-        // Attempt to save even if Ollama stream errored, as we might have partial text
         if (fullAiText.trim()) {
           try {
-            messageRepository.addMessage(
+            const aiMessage = messageRepository.addMessage(
               chatData.id,
               'ai',
               fullAiText.trim(),
               finalPromptTokens,
               finalCompletionTokens
+            );
+            // Index AI message into Elasticsearch
+            await indexDocument(
+              esClient,
+              MESSAGES_INDEX,
+              String(aiMessage.id),
+              {
+                message_id: String(aiMessage.id),
+                chat_id: aiMessage.chatId,
+                session_id: sessionData.id,
+                sender: aiMessage.sender,
+                text: aiMessage.text,
+                timestamp: aiMessage.timestamp,
+                promptTokens: aiMessage.promptTokens,
+                completionTokens: aiMessage.completionTokens,
+                client_name: sessionData.clientName,
+                session_name: sessionData.sessionName,
+                chat_name: null,
+                tags: null,
+              }
+            );
+            console.log(
+              `[API ES] Indexed AI message ${aiMessage.id} for session chat ${chatData.id}.`
             );
             console.log(
               `[API ProcessStream Finally ${chatData.id}] Saved AI message (length: ${fullAiText.trim().length}) to DB.`
@@ -199,14 +257,12 @@ export const addSessionChatMessage = async ({
               `[API ProcessStream Finally ${chatData.id}] CRITICAL: Failed to save AI message to DB:`,
               dbError
             );
-            // If DB save fails, it's a server error, but we still need to close the client connection.
             ollamaStreamError =
               ollamaStreamError ||
               new InternalServerError(
                 'Failed to save AI response to database.',
                 dbError instanceof Error ? dbError : undefined
               );
-            // Attempt to inform client if possible
             try {
               await writeSseEvent({
                 error: 'Failed to save final AI response.',
@@ -219,31 +275,21 @@ export const addSessionChatMessage = async ({
           );
         }
 
-        // --- Ensure Writer Closure ---
-        // Use abort if there was any error, otherwise close.
         if (ollamaStreamError) {
-          console.log(
-            `[API ProcessStream Finally ${chatData.id}] Aborting writer due to error.`
-          );
-          // Use catch because aborting a potentially already closed writer can throw
           await writer
             .abort(ollamaStreamError)
             .catch((e) =>
               console.warn(
-                `[API ProcessStream Finally ${chatData.id}] Error aborting writer (may be expected):`,
+                `[API ProcessStream Finally ${chatData.id}] Error aborting writer:`,
                 e
               )
             );
         } else {
-          console.log(
-            `[API ProcessStream Finally ${chatData.id}] Closing writer normally.`
-          );
-          // Use catch because closing an already closed writer can throw
           await writer
             .close()
             .catch((e) =>
               console.warn(
-                `[API ProcessStream Finally ${chatData.id}] Error closing writer (may be expected):`,
+                `[API ProcessStream Finally ${chatData.id}] Error closing writer:`,
                 e
               )
             );
@@ -253,16 +299,12 @@ export const addSessionChatMessage = async ({
         );
       }
     };
-    // --- End Refined processStream ---
 
-    // Run processStream in the background, don't await it here
     processStream().catch((err) => {
-      // This catch is for unexpected errors *outside* the processStream's try/catch/finally
       console.error(
         `[API AddMsg ${chatData.id}] UNHANDLED error from background stream processing task:`,
         err
       );
-      // Ensure writer is cleaned up if an error occurred *before* finally block in processStream ran
       if (writer && !writer.closed) {
         writer
           .abort(err)
@@ -286,38 +328,45 @@ export const addSessionChatMessage = async ({
   }
 };
 
-// PATCH /api/sessions/:sessionId/chats/:chatId/messages/:messageId - Update message star status
-// (No changes needed here regarding types)
 export const updateSessionChatMessageStarStatus = ({
   sessionData,
   chatData,
   messageData,
   body,
   set,
-}: any): ApiChatMessageResponse => {
-  const { starred, starredName } = body;
+}: ElysiaHandlerContext): ApiChatMessageResponse => {
+  const { starred, starredName } = body as {
+    starred: boolean;
+    starredName?: string | null;
+  };
   if (typeof starred !== 'boolean')
     throw new BadRequestError("Missing or invalid 'starred' field (boolean).");
-  if (starred && typeof starredName !== 'string')
+  // Allow starredName to be null or undefined if starred is true, but it must be a string if provided.
+  if (
+    starred &&
+    starredName !== undefined &&
+    starredName !== null &&
+    typeof starredName !== 'string'
+  ) {
     throw new BadRequestError(
-      "Missing or invalid 'starredName' field (string when starring)."
+      "If 'starredName' is provided when starring, it must be a string."
     );
-  if (!starred && starredName !== undefined)
-    console.warn(
-      "[API Star] 'starredName' provided but 'starred' is false. Name will be ignored/nulled."
-    );
+  }
+  if (!messageData)
+    throw new NotFoundError('Message context not found for star update.');
   if (messageData.sender !== 'user')
     throw new BadRequestError('Only user messages can be starred.');
 
   try {
     console.log(
-      `[API Star] Updating star status for message ${messageData.id} in chat ${chatData.id} (session ${sessionData.id}) to starred=${starred}, name=${starredName}`
+      `[API Star] Updating star for msg ${messageData.id} in chat ${chatData!.id} (session ${sessionData.id}) to starred=${starred}, name=${starredName}`
     );
+    const nameToSave = starred ? starredName || null : null; // Ensure name is null if unstarring
     const updatedMessage = messageRepository.updateMessageStarStatus(
       messageData.id,
       starred,
-      starredName
-    ); // <-- Use messageRepository
+      nameToSave
+    );
     if (!updatedMessage)
       throw new NotFoundError(
         `Message ${messageData.id} not found during update.`
@@ -343,12 +392,11 @@ export const updateSessionChatMessageStarStatus = ({
   }
 };
 
-// GET /api/sessions/:sessionId/chats/:chatId - Get details of a specific session chat
 export const getSessionChatDetails = ({
   chatData,
   sessionData,
   set,
-}: any): FullSessionChatApiResponse => {
+}: ElysiaHandlerContext): FullSessionChatApiResponse => {
   if (!chatData) throw new NotFoundError(`Chat details not found in context.`);
   if (chatData.sessionId !== sessionData.id)
     throw new ApiError(
@@ -361,24 +409,21 @@ export const getSessionChatDetails = ({
     starred: !!m.starred,
     starredName: m.starredName === undefined ? undefined : m.starredName,
   }));
-  // --- FIX: Exclude tags from the response ---
-  const { messages: _m, tags, ...metadata } = chatData;
-  // --- END FIX ---
+  const { messages: _m, tags, ...metadata } = chatData; // tags are not part of SessionChatMetadataResponse
   return {
     ...metadata,
-    sessionId: metadata.sessionId as number, // Assert sessionId is number
+    sessionId: metadata.sessionId as number,
     messages: messages,
   };
 };
 
-// PATCH /api/sessions/:sessionId/chats/:chatId/name - Rename a session chat
 export const renameSessionChat = ({
   chatData,
   sessionData,
   body,
   set,
-}: any): SessionChatMetadataResponse => {
-  const { name } = body; // Session chats don't have tags currently
+}: ElysiaHandlerContext): SessionChatMetadataResponse => {
+  const { name } = body as { name?: string | null };
   const nameToSave =
     typeof name === 'string' && name.trim() !== '' ? name.trim() : null;
   if (!chatData)
@@ -389,13 +434,12 @@ export const renameSessionChat = ({
       `Chat ${chatData.id} does not belong to session ${sessionData.id}.`
     );
   try {
-    // --- FIX: Use updated repo function, passing null for tags ---
+    // Session chats don't have tags, so pass null for tags
     const updatedChatMetadata = chatRepository.updateChatDetails(
       chatData.id,
       nameToSave,
       null
     );
-    // --- END FIX ---
     if (!updatedChatMetadata)
       throw new NotFoundError(
         `Chat with ID ${chatData.id} not found during update.`
@@ -404,16 +448,12 @@ export const renameSessionChat = ({
       `[API] Renamed session chat ${chatData.id} to "${updatedChatMetadata.name || '(no name)'}"`
     );
     set.status = 200;
-    if (updatedChatMetadata.sessionId === null) {
-      console.error(
-        `[API Error] Renamed session chat ${chatData.id} resulted in null sessionId!`
+    if (updatedChatMetadata.sessionId === null)
+      throw new InternalServerError(
+        'Renamed session chat resulted in null sessionId!'
       );
-      throw new InternalServerError('Failed to rename session chat correctly.');
-    }
-    // --- FIX: Exclude tags from response ---
-    const { tags: _t, ...responseMetadata } = updatedChatMetadata;
-    // --- END FIX ---
-    return responseMetadata as SessionChatMetadataResponse; // Assert sessionId is number, tags excluded
+    const { tags: _t, ...responseMetadata } = updatedChatMetadata; // Ensure tags are excluded from the response
+    return responseMetadata as SessionChatMetadataResponse;
   } catch (error) {
     console.error(
       `[API Error] renameSessionChat (Chat ID: ${chatData?.id}):`,
@@ -427,13 +467,11 @@ export const renameSessionChat = ({
   }
 };
 
-// DELETE /api/sessions/:sessionId/chats/:chatId - Delete a session chat
-// (Unchanged)
-export const deleteSessionChat = ({
+export const deleteSessionChat = async ({
   chatData,
   sessionData,
   set,
-}: any): { message: string } => {
+}: ElysiaHandlerContext): Promise<{ message: string }> => {
   if (!chatData)
     throw new NotFoundError(`Chat not found in context for delete.`);
   if (chatData.sessionId !== sessionData.id)
@@ -447,6 +485,15 @@ export const deleteSessionChat = ({
       throw new NotFoundError(
         `Chat with ID ${chatData.id} not found during deletion.`
       );
+
+    // Delete associated messages from Elasticsearch
+    await deleteByQuery(esClient, MESSAGES_INDEX, {
+      term: { chat_id: chatData.id },
+    });
+    console.log(
+      `[API ES] Deleted Elasticsearch messages for session chat ${chatData.id}.`
+    );
+
     console.log(`[API] Deleted session chat ${chatData.id}`);
     set.status = 200;
     return { message: `Chat ${chatData.id} deleted successfully.` };

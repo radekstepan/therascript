@@ -6,19 +6,20 @@ import {
   ValidationError,
   type Context as ElysiaContext,
   type Static,
+  type Cookie,
 } from 'elysia';
 import { cors } from '@elysiajs/cors';
 import { swagger } from '@elysiajs/swagger';
-import ollama from 'ollama';
 import config from './config/index.js';
 import { sessionRoutes } from './routes/sessionRoutes.js';
-import { chatRoutes } from './routes/chatRoutes.js'; // Routes for session chats
-import { standaloneChatRoutes } from './routes/standaloneChatRoutes.js'; // Routes for standalone chats
+import { chatRoutes } from './routes/chatRoutes.js';
+import { standaloneChatRoutes } from './routes/standaloneChatRoutes.js';
 import { ollamaRoutes } from './routes/ollamaRoutes.js';
 import { dockerRoutes } from './routes/dockerRoutes.js';
 import { metaRoutes } from './routes/metaRoutes.js';
 import { systemRoutes } from './routes/systemRoutes.js';
-import { searchRoutes } from './routes/searchRoutes.js'; // <-- Import Search routes
+import { adminRoutes } from './routes/adminRoutes.js'; // Import admin routes
+import { searchRoutes } from './routes/searchRoutes.js';
 import {
   ApiError,
   InternalServerError,
@@ -34,9 +35,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import axios from 'axios';
-import { closeDb } from './db/sqliteService.js'; // Import closeDb
+import { closeDb } from './db/sqliteService.js';
+import {
+  getElasticsearchClient,
+  initializeIndices,
+  checkEsHealth,
+} from '@therascript/elasticsearch-client';
 
-// --- Initial setup, version reading, CORS, request logging ---
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 let appVersion = '0.0.0';
@@ -60,6 +65,7 @@ try {
 console.log(
   `[Server] Starting Elysia application in ${config.server.nodeEnv} mode...`
 );
+
 const getErrorMessage = (error: unknown): string => {
   if (error instanceof Error) return error.message;
   try {
@@ -68,13 +74,14 @@ const getErrorMessage = (error: unknown): string => {
     return String(error) || 'An unknown error occurred';
   }
 };
-const getErrorStack = (error: unknown): string | undefined => {
-  if (error instanceof Error) return error.stack;
-  return undefined;
-};
+const getErrorStack = (error: unknown): string | undefined =>
+  error instanceof Error ? error.stack : undefined;
 console.log(`[CORS Config] Allowing origin: ${config.server.corsOrigin}`);
 
+const esClient = getElasticsearchClient(config.elasticsearch.url);
+
 const app = new Elysia()
+  .decorate('esClient', esClient)
   .use(
     cors({
       origin: config.server.corsOrigin,
@@ -103,30 +110,36 @@ const app = new Elysia()
           { name: 'Session', description: 'Session and Transcript Endpoints' },
           {
             name: 'Chat',
-            description:
-              'Chat Interaction Endpoints (within a session or global)',
-          }, // Combined Chat Tag
+            description: 'Chat Interaction Endpoints (Session & Standalone)',
+          },
+          { name: 'Standalone Chat', description: 'Standalone Chat Endpoints' },
           {
-            name: 'Standalone Chat',
-            description: 'Chat Interaction Endpoints (not tied to a session)',
-          }, // New Tag
-          { name: 'Search', description: 'Full-Text Search Endpoints' }, // <-- Added Search tag
+            name: 'Search',
+            description: 'Elasticsearch Full-Text Search Endpoints',
+          },
           {
             name: 'Transcription',
             description: 'Transcription Job Management',
           },
           { name: 'Ollama', description: 'Ollama LLM Management Endpoints' },
           { name: 'Docker', description: 'Docker Container Management' },
+          { name: 'System', description: 'System-level Actions' },
           {
-            name: 'System',
-            description: 'System-level Actions (Shutdown, etc.)',
-          },
+            name: 'Admin',
+            description: 'Administrative Actions (e.g., re-indexing)',
+          }, // Added Admin tag
           { name: 'Meta', description: 'API Metadata and Health' },
         ],
       },
     })
   )
   .onError(({ code, error, set, request }) => {
+    if ((error as any).meta?.body?.error?.type) {
+      console.error(
+        '[Error Handler] Elasticsearch Client Error:',
+        (error as any).meta.body.error
+      );
+    }
     const errorMessage = getErrorMessage(error);
     let path = 'N/A';
     let method = 'N/A';
@@ -152,7 +165,6 @@ const app = new Elysia()
         details: error.details,
       };
     }
-    // Removed specific NotFoundError/ConflictError handling here, use ApiError base
 
     switch (code) {
       case 'NOT_FOUND':
@@ -247,55 +259,57 @@ const app = new Elysia()
       details: fallbackError.details,
     };
   })
+  .use(metaRoutes)
+  .use(ollamaRoutes)
+  .use(dockerRoutes)
+  .use(systemRoutes)
+  .use(adminRoutes) // Added admin routes
+  .use(searchRoutes)
+  .use(sessionRoutes)
+  .use(chatRoutes)
+  .use(standaloneChatRoutes);
 
-  // --- Core Application Routes ---
-  .use(metaRoutes) // Handles /api/health, /api/schema, /api/starred-messages
-  .use(ollamaRoutes) // Handles /api/ollama/*
-  .use(dockerRoutes) // Handles /api/docker/*
-  .use(systemRoutes) // Handles /api/system/*
-  .use(searchRoutes) // Handles /api/search/* <-- Added Search routes
-  .use(sessionRoutes) // Handles /api/sessions/* and /api/transcription/*
-  .use(chatRoutes) // Handles /api/sessions/:sessionId/chats/*
-  .use(standaloneChatRoutes); // Handles /api/chats/*
-
-// --- Server Startup Check ---
 async function checkOllamaConnectionOnStartup() {
-  console.log(
-    `[Server Startup] Checking Ollama connection at ${config.ollama.baseURL}...`
-  );
+  /* ... */
+}
+
+async function initializeServices() {
+  console.log('[Server Startup] Initializing services...');
+  await checkOllamaConnectionOnStartup();
+
   try {
-    await axios.get(config.ollama.baseURL, { timeout: 2000 });
-    console.log('[Server Startup] ✅ Ollama connection successful.');
-    return true;
-  } catch (error: any) {
-    console.warn('-------------------------------------------------------');
-    console.warn(
-      `[Server Startup] ⚠️ Ollama service NOT DETECTED at ${config.ollama.baseURL}`
+    console.log(
+      '[Server Startup] Checking Elasticsearch connection and indices...'
     );
-    if (axios.isAxiosError(error)) {
-      if (error.code === 'ECONNREFUSED') {
-        console.warn(
-          '   Reason: Connection refused. (This is expected if not started yet).'
-        );
-      } else {
-        console.warn(`   Reason: ${error.message}`);
-      }
+    const esIsHealthy = await checkEsHealth(esClient);
+    if (esIsHealthy) {
+      await initializeIndices(esClient);
+      console.log(
+        '[Server Startup] ✅ Elasticsearch connection healthy and indices initialized.'
+      );
     } else {
-      console.warn(`   Reason: An unexpected error occurred: ${error.message}`);
+      console.error('-------------------------------------------------------');
+      console.error(
+        '[Server Startup] ⚠️ Elasticsearch service NOT HEALTHY or unreachable.'
+      );
+      console.error('   Search functionality will be impaired or unavailable.');
+      console.error(
+        '   Ensure Elasticsearch container is running and healthy (check Docker logs).'
+      );
+      console.error('-------------------------------------------------------');
     }
-    console.warn(
-      '   Ollama service will be started on demand when needed (e.g., loading a model).'
+  } catch (esInitError) {
+    console.error('-------------------------------------------------------');
+    console.error(
+      '[Server Startup] ❌ Error initializing Elasticsearch client or indices:',
+      esInitError
     );
-    console.warn('-------------------------------------------------------');
-    return false;
+    console.error('   Search functionality will be impaired or unavailable.');
+    console.error('-------------------------------------------------------');
   }
 }
 
-// --- Server Creation & Start ---
-console.log(
-  `[Server] Creating Node.js HTTP server wrapper on port ${config.server.port}...`
-);
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
   const host = req.headers.host || `localhost:${config.server.port}`;
   const pathAndQuery = req.url && req.url.startsWith('/') ? req.url : '/';
   const url = `http://${host}${pathAndQuery}`;
@@ -304,7 +318,7 @@ const server = http.createServer((req, res) => {
     .on('data', (chunk) => {
       bodyChunks.push(chunk);
     })
-    .on('end', () => {
+    .on('end', async () => {
       const bodyBuffer = Buffer.concat(bodyChunks);
       const requestInit: RequestInit = {
         method: req.method,
@@ -314,55 +328,39 @@ const server = http.createServer((req, res) => {
             ? bodyBuffer
             : undefined,
       };
-      app
-        .handle(new Request(url, requestInit))
-        .then(async (response) => {
-          res.writeHead(response.status, Object.fromEntries(response.headers));
-          if (response.body) {
-            try {
-              if (response.body instanceof ReadableStream) {
-                await response.body.pipeTo(
-                  new WritableStream({
-                    write(chunk) {
-                      res.write(chunk);
-                    },
-                    close() {
-                      res.end();
-                    },
-                    abort(err) {
-                      console.error('Response stream aborted:', err);
-                      res.destroy(
-                        err instanceof Error ? err : new Error(String(err))
-                      );
-                    },
-                  })
-                );
-              } else {
-                res.end(response.body);
-              }
-            } catch (pipeError) {
-              console.error('Error piping response body:', pipeError);
-              if (!res.writableEnded) {
-                res.end();
-              }
+      try {
+        const response = await app.handle(new Request(url, requestInit));
+        res.writeHead(response.status, Object.fromEntries(response.headers));
+        if (response.body) {
+          if (response.body instanceof ReadableStream) {
+            for await (const chunk of response.body) {
+              res.write(chunk);
             }
-          } else {
             res.end();
+          } else if (
+            typeof response.body === 'string' ||
+            Buffer.isBuffer(response.body)
+          ) {
+            res.end(response.body);
+          } else {
+            res.end(JSON.stringify(await (response as any).json()));
           }
-        })
-        .catch((err) => {
-          console.error('Error in app.handle:', err);
-          if (!res.headersSent) {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-          }
-          if (!res.writableEnded) {
-            res.end(
-              JSON.stringify({
-                error: 'Internal Server Error during request handling',
-              })
-            );
-          }
-        });
+        } else {
+          res.end();
+        }
+      } catch (err) {
+        console.error('Error in app.handle or response processing:', err);
+        if (!res.headersSent) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+        }
+        if (!res.writableEnded) {
+          res.end(
+            JSON.stringify({
+              error: 'Internal Server Error during request handling',
+            })
+          );
+        }
+      }
     })
     .on('error', (err) => {
       console.error('Request stream error:', err);
@@ -375,107 +373,79 @@ const server = http.createServer((req, res) => {
     });
 });
 
-checkOllamaConnectionOnStartup().then(() => {
-  server.listen(config.server.port, () => {
-    console.log(`-------------------------------------------------------`);
-    console.log(
-      `🚀 Therapy Analyzer Backend (Elysia/Node) listening on port ${config.server.port}`
-    );
-    console.log(`   Version: ${appVersion}`);
-    console.log(`   Mode: ${config.server.nodeEnv}`);
-    console.log(`   CORS Origin Allowed: ${config.server.corsOrigin}`);
-    console.log(`   DB Path: ${config.db.sqlitePath}`);
-    console.log(`   Ollama URL: ${config.ollama.baseURL}`);
-    console.log(`   Ollama Model: ${getActiveModel()} (Active)`);
-    console.log(
-      `   Configured Context: ${getConfiguredContextSize() ?? 'default'}`
-    );
-    console.log(`-------------------------------------------------------`);
-    console.log(
-      `Access API Docs at: http://localhost:${config.server.port}/api/docs`
-    );
-    console.log(
-      `Health Check: http://localhost:${config.server.port}/api/health`
-    );
-    console.log(`-------------------------------------------------------`);
+initializeServices()
+  .then(() => {
+    server.listen(config.server.port, () => {
+      console.log(`-------------------------------------------------------`);
+      console.log(
+        `🚀 Therapy Analyzer Backend (Elysia/Node) listening on port ${config.server.port}`
+      );
+      console.log(`   Version: ${appVersion}`);
+      console.log(`   Mode: ${config.server.nodeEnv}`);
+      console.log(`   CORS Origin Allowed: ${config.server.corsOrigin}`);
+      console.log(`   DB Path: ${config.db.sqlitePath}`);
+      console.log(`   Ollama URL: ${config.ollama.baseURL}`);
+      console.log(`   Ollama Model: ${getActiveModel()} (Active)`);
+      console.log(
+        `   Configured Context: ${getConfiguredContextSize() ?? 'default'}`
+      );
+      console.log(`   Elasticsearch URL: ${config.elasticsearch.url}`);
+      console.log(`-------------------------------------------------------`);
+      console.log(
+        `Access API Docs at: http://localhost:${config.server.port}/api/docs`
+      );
+      console.log(
+        `Health Check: http://localhost:${config.server.port}/api/health`
+      );
+      console.log(`-------------------------------------------------------`);
+    });
+  })
+  .catch((initError) => {
+    console.error('Failed to initialize services:', initError);
+    process.exit(1);
   });
-});
 
-// --- Graceful Shutdown ---
 let isShuttingDown = false;
 async function shutdown(signal: string) {
-  console.log(
-    `[API Server Shutdown] Received signal: ${signal}. Checking shutdown status.`
-  );
-  if (isShuttingDown) {
-    console.log(
-      '[API Server Shutdown] Already shutting down. Ignoring signal.'
-    );
-    return;
-  }
+  if (isShuttingDown) return;
   isShuttingDown = true;
-  console.log(
-    `[API Server Shutdown] Initiating graceful shutdown (Docker cleanup handled externally)...`
-  );
-  console.log('[API Server Shutdown] Closing HTTP server...');
-  server.close((err) => {
-    if (err)
-      console.error('[API Server Shutdown] Error closing HTTP server:', err);
-    else console.log('[API Server Shutdown] HTTP server closed successfully.');
-    console.log('[API Server Shutdown] Closing database connection...');
-    closeDb();
-    console.log(
-      '🚪 [API Server Shutdown] Shutdown sequence complete. Exiting process.'
+  console.log(`\n[Server] Received ${signal}. Shutting down gracefully...`);
+  try {
+    await new Promise((resolve, reject) => {
+      server.close((err) => {
+        if (err) {
+          console.error('[Server] Error closing HTTP server:', err);
+          return reject(err);
+        }
+        console.log('[Server] HTTP server closed.');
+        resolve(null);
+      });
+    });
+    closeDb(); // Close SQLite connection
+  } catch (err) {
+    console.error('[Server] Error during graceful shutdown:', err);
+  } finally {
+    console.log('[Server] Shutdown complete.');
+    process.exit(
+      signal === 'SIGINT' ? 0 : 128 + (signal === 'SIGTERM' ? 15 : 0)
     );
-    process.exitCode = err ? 1 : 0;
-    setTimeout(() => process.exit(process.exitCode), 100);
-  });
-  setTimeout(() => {
-    console.error(
-      '🛑 [API Server Shutdown] Shutdown timed out after 10 seconds. Forcing exit.'
-    );
-    try {
-      closeDb();
-    } catch {
-      /* ignore */
-    }
-    process.exit(1);
-  }, 10000);
-}
-process.on('SIGINT', () => {
-  console.log('[API Server Process] SIGINT received.');
-  shutdown('SIGINT').catch((e) =>
-    console.error('[API Server Process] Error during SIGINT shutdown:', e)
-  );
-});
-process.on('SIGTERM', () => {
-  console.log('[API Server Process] SIGTERM received.');
-  shutdown('SIGTERM').catch((e) =>
-    console.error('[API Server Process] Error during SIGTERM shutdown:', e)
-  );
-});
-process.on('uncaughtException', (error, origin) => {
-  console.error(`[API Server FATAL] Uncaught Exception at: ${origin}`, error);
-  if (!isShuttingDown) {
-    try {
-      closeDb();
-    } catch {}
   }
-  process.exit(1);
+}
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('uncaughtException', (err, origin) => {
+  console.error(`[Server UncaughtException] Origin: ${origin}, Error:`, err);
+  shutdown('uncaughtException').finally(() => process.exit(1));
 });
 process.on('unhandledRejection', (reason, promise) => {
   console.error(
-    '[API Server FATAL] Unhandled Rejection at:',
-    promise,
-    'reason:',
-    reason
+    '[Server UnhandledRejection] Reason:',
+    reason,
+    'Promise:',
+    promise
   );
-  if (!isShuttingDown) {
-    try {
-      closeDb();
-    } catch {}
-  }
-  process.exit(1);
+  shutdown('unhandledRejection').finally(() => process.exit(1));
 });
 
 export default app;

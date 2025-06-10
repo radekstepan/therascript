@@ -9,6 +9,7 @@ const execPromise = util.promisify(exec);
 // Docker Container Names (must match your docker-compose files)
 const OLLAMA_CONTAINER_NAME = 'ollama_server_managed';
 const WHISPER_CONTAINER_NAME = 'therascript_whisper_service';
+const ELASTICSEARCH_CONTAINER_NAME = 'therascript_elasticsearch_service'; // Added
 
 // --- UI Port for Cleanup ---
 // Read CORS_ORIGIN from environment. If not set, default (less ideal but provides a fallback).
@@ -86,6 +87,7 @@ async function cleanupDocker() {
   await Promise.allSettled([
     stopAndRemoveContainer(OLLAMA_CONTAINER_NAME),
     stopAndRemoveContainer(WHISPER_CONTAINER_NAME),
+    stopAndRemoveContainer(ELASTICSEARCH_CONTAINER_NAME), // Added
   ]);
   console.log('[RunProd Cleanup] Docker cleanup process finished.');
 }
@@ -143,12 +145,13 @@ const concurrentlyArgs = [
   'concurrently',
   '--kill-others-on-fail',
   '--names',
-  'API,UI,WHISPER',
+  'API,UI,WHISPER,ES', // Added ES
   '--prefix-colors',
-  'bgGreen.bold,bgMagenta.bold,bgCyan.bold',
+  'bgGreen.bold,bgMagenta.bold,bgCyan.bold,bgYellow.bold', // Added color for ES
   '"yarn start:api:prod"',
-  '"yarn dev:ui"',
+  '"yarn dev:ui"', // Typically for prod you'd serve static UI assets, but dev:ui is fine for this setup
   '"yarn start:whisper"',
+  '"yarn start:elasticsearch-manager"', // Added Elasticsearch manager
 ];
 
 const appProcess = spawn(concurrentlyArgs[0], concurrentlyArgs.slice(1), {

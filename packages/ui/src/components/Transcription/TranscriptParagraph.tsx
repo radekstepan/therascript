@@ -25,8 +25,6 @@ import {
 } from '@radix-ui/react-icons';
 import { cn } from '../../utils';
 import type { TranscriptParagraphData } from '../../types';
-// Removed formatTimestamp, using new helper
-// import { formatTimestamp } from '../../helpers';
 
 const textStyles = {
   whiteSpace: 'pre-wrap' as const,
@@ -37,7 +35,6 @@ const textStyles = {
   color: 'var(--gray-a12)',
 };
 
-// Helper to format milliseconds timestamp to MM:SS
 const formatParagraphTimestamp = (ms: number | undefined): string => {
   if (ms === undefined || isNaN(ms)) return '';
   const totalSeconds = Math.floor(ms / 1000);
@@ -53,11 +50,9 @@ interface TranscriptParagraphProps {
   activeEditIndex: number | null;
   setActiveEditIndex: Dispatch<SetStateAction<number | null>>;
   isSaving: boolean;
-  // --- Add Playback Props ---
-  onPlayToggle: (timestampMs: number, index: number) => void; // Callback to play/pause from a point
-  isPlaying: boolean; // Is this paragraph currently the one playing?
-  isAudioAvailable: boolean; // <-- NEW: Is audio file present?
-  // --- End Playback Props ---
+  onPlayToggle: (timestampMs: number, index: number) => void;
+  isPlaying: boolean;
+  isAudioAvailable: boolean;
 }
 
 export function TranscriptParagraph({
@@ -67,17 +62,18 @@ export function TranscriptParagraph({
   activeEditIndex,
   setActiveEditIndex,
   isSaving,
-  // --- Destructure Playback Props ---
   onPlayToggle,
   isPlaying,
-  isAudioAvailable, // <-- Destructure new prop
-  // --- End Playback Props ---
+  isAudioAvailable,
 }: TranscriptParagraphProps) {
   const [editValue, setEditValue] = useState(paragraph.text);
   const containerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const isEditing = activeEditIndex === index;
+
+  // The paragraph.id IS the paragraphIndex for TranscriptParagraphData
+  const paragraphDomId = `paragraph-${paragraph.id}`;
 
   useEffect(() => {
     if (isEditing && containerRef.current) {
@@ -93,14 +89,12 @@ export function TranscriptParagraph({
     if (!isEditing && paragraph.text !== editValue) {
       setEditValue(paragraph.text);
     }
-  }, [isEditing, paragraph.text]); // Ensure editValue resets if text changes externally
+  }, [isEditing, paragraph.text, editValue]); // Added editValue to dependencies
 
   const handleEditClick = () => {
-    // --- If playing, pause before editing ---
     if (isPlaying) {
-      onPlayToggle(paragraph.timestamp, index); // This will pause it
+      onPlayToggle(paragraph.timestamp, index);
     }
-    // --- End Pause ---
     setEditValue(paragraph.text);
     setActiveEditIndex(index);
   };
@@ -120,9 +114,8 @@ export function TranscriptParagraph({
       } catch (error) {
         console.error(`Error saving paragraph ${index}:`, error);
       }
-      // No need for separate setActiveEditIndex(null) here, mutation's onSuccess handles it
     } else {
-      setActiveEditIndex(null); // Close if no change was made
+      setActiveEditIndex(null);
     }
   };
 
@@ -136,16 +129,10 @@ export function TranscriptParagraph({
     }
   };
 
-  // --- Modified Play/Pause Click Handler ---
   const handlePlayPauseClick = () => {
-    // Only allow if audio is available
     if (!isAudioAvailable) return;
-    console.log(
-      `▶️ Play/Pause requested for paragraph index ${index} (ts: ${paragraph.timestamp})`
-    );
-    onPlayToggle(paragraph.timestamp, index); // Call the parent handler
+    onPlayToggle(paragraph.timestamp, index);
   };
-  // --- End Modification ---
 
   const renderContent = (isVisible: boolean = true) => (
     <Flex
@@ -154,13 +141,11 @@ export function TranscriptParagraph({
       className="group p-1"
       style={{ visibility: isVisible ? 'visible' : 'hidden' }}
     >
-      {/* Timestamp and Play/Pause Button */}
       <Flex
         direction="column"
         align="center"
         className="flex-shrink-0 mt-px pt-px"
       >
-        {/* --- Conditionally render Play/Pause Button based on audio availability --- */}
         {isAudioAvailable && (
           <Tooltip
             content={
@@ -171,29 +156,27 @@ export function TranscriptParagraph({
           >
             <IconButton
               variant="ghost"
-              color={isPlaying ? 'blue' : 'gray'} // Highlight if playing
+              color={isPlaying ? 'blue' : 'gray'}
               size="1"
               className={cn(
                 'transition-opacity p-0 h-5 w-5',
-                // Always show if editing or playing this one, otherwise show on hover/focus
                 isEditing ||
                   isPlaying ||
                   'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
               )}
-              onClick={handlePlayPauseClick} // Use combined handler
+              onClick={handlePlayPauseClick}
               title={isPlaying ? 'Pause' : 'Play'}
               aria-label={
                 isPlaying
                   ? 'Pause paragraph playback'
                   : 'Play paragraph from timestamp'
               }
-              disabled={isEditing} // Disable while editing this one
+              disabled={isEditing}
             >
               {isPlaying ? <PauseIcon /> : <PlayIcon />}
             </IconButton>
           </Tooltip>
         )}
-        {/* --- Render timestamp even if audio is gone --- */}
         {!isAudioAvailable && (
           <Tooltip
             content={`Timestamp: ${formatParagraphTimestamp(paragraph.timestamp)} (Audio not available)`}
@@ -203,11 +186,16 @@ export function TranscriptParagraph({
             </Box>
           </Tooltip>
         )}
-        {/* --- End Play/Pause Button --- */}
       </Flex>
 
-      {/* Paragraph Text */}
-      <Box as="div" className="flex-grow" style={textStyles}>
+      <Box
+        as="div"
+        className="flex-grow"
+        style={textStyles}
+        id={paragraphDomId}
+      >
+        {' '}
+        {/* Assign DOM ID here */}
         {paragraph.text.trim() ? (
           paragraph.text
         ) : (
@@ -217,7 +205,6 @@ export function TranscriptParagraph({
         )}
       </Box>
 
-      {/* Edit Button */}
       <Flex align="center" className="flex-shrink-0 mt-px pt-px">
         <Tooltip content="Edit paragraph">
           <IconButton
@@ -233,8 +220,7 @@ export function TranscriptParagraph({
             aria-label="Edit paragraph"
             disabled={isEditing}
           >
-            {' '}
-            <Pencil1Icon />{' '}
+            <Pencil1Icon />
           </IconButton>
         </Tooltip>
       </Flex>
@@ -246,17 +232,13 @@ export function TranscriptParagraph({
       ref={containerRef}
       className={cn(
         'rounded transition-colors duration-150',
-        // Apply hover background only when NOT editing this specific paragraph
         !isEditing && 'hover:bg-[--gray-a3]',
-        // --- Highlight if playing ---
-        isPlaying && isAudioAvailable && 'bg-[--blue-a3]' // Highlight only if audio is present
-        // --- End Highlight ---
+        isPlaying && isAudioAvailable && 'bg-[--blue-a3]'
       )}
-      style={{ position: 'relative' }} // Positioning context for the editor overlay
+      style={{ position: 'relative' }}
     >
       {isEditing ? (
         <>
-          {/* Editor Overlay */}
           <Box
             style={{
               position: 'absolute',
@@ -315,8 +297,7 @@ export function TranscriptParagraph({
                   title="Cancel (Esc)"
                   disabled={isSaving}
                 >
-                  {' '}
-                  <Cross1Icon /> Cancel{' '}
+                  <Cross1Icon /> Cancel
                 </Button>
                 <Button
                   onClick={handleSave}
@@ -337,11 +318,9 @@ export function TranscriptParagraph({
               </Flex>
             </Flex>
           </Box>
-          {/* Render original content invisibly below overlay to maintain layout space */}
           {renderContent(false)}
         </>
       ) : (
-        // Render the visible content when not editing
         renderContent(true)
       )}
     </Box>

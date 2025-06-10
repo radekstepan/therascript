@@ -1,6 +1,7 @@
 // packages/ui/src/components/SessionView/Transcription/Transcription.tsx
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useLocation } from 'react-router-dom'; // Import useLocation
 import type { Session, StructuredTranscript } from '../../../types';
 import { TranscriptParagraph } from '../../Transcription/TranscriptParagraph';
 import {
@@ -133,6 +134,7 @@ export function Transcription({
   const queryClient = useQueryClient();
   const audioRef = useRef<HTMLAudioElement>(null);
   const setToast = useSetAtom(toastMessageAtom);
+  const location = useLocation(); // Get location for hash changes
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [playingParagraphIndex, setPlayingParagraphIndex] = useState<
@@ -147,8 +149,40 @@ export function Transcription({
   const transcriptTokenCount = session?.transcriptTokenCount;
   const isAudioAvailable = !!session?.audioPath;
 
+  // Scroll to paragraph based on hash
+  useEffect(() => {
+    if (transcriptContent && transcriptContent.length > 0 && location.hash) {
+      const hash = location.hash.substring(1); // Remove #
+      if (hash.startsWith('paragraph-')) {
+        const paragraphIndexStr = hash.substring('paragraph-'.length);
+        const paragraphIndex = parseInt(paragraphIndexStr, 10);
+        if (!isNaN(paragraphIndex)) {
+          // Small delay to ensure elements are rendered, especially after tab switch
+          setTimeout(() => {
+            const element = document.getElementById(
+              `paragraph-${paragraphIndex}`
+            );
+            if (element) {
+              console.log(`[Transcription] Scrolling to ${hash}`);
+              element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              // Optional: Add a visual highlight
+              element.classList.add('highlight-paragraph');
+              setTimeout(
+                () => element.classList.remove('highlight-paragraph'),
+                2000
+              );
+            } else {
+              console.warn(
+                `[Transcription] Element ${hash} not found for scrolling.`
+              );
+            }
+          }, 100);
+        }
+      }
+    }
+  }, [location.hash, transcriptContent, isTabActive]); // Rerun on hash change or if transcript loads
+
   const handleAudioCanPlay = useCallback(() => {
-    console.log('[Audio] Ready to play');
     setAudioReady(true);
     setIsAudioLoading(false);
     setAudioError(null);
@@ -157,7 +191,6 @@ export function Transcription({
   const handleAudioError = useCallback(
     (e: React.SyntheticEvent<HTMLAudioElement>) => {
       const error = (e.target as HTMLAudioElement).error;
-      console.error('[Audio] Error:', error);
       let errorMessage = 'Unknown audio error';
       if (error) {
         switch (error.code) {
@@ -187,32 +220,21 @@ export function Transcription({
   );
 
   const handleAudioEnded = useCallback(() => {
-    console.log('[Audio] Playback ended');
     setIsPlaying(false);
     setPlayingParagraphIndex(null);
   }, []);
-
   const handleAudioPause = useCallback(() => {
-    console.log('[Audio] Playback paused');
-    if (audioRef.current && !audioRef.current.seeking) {
-      setIsPlaying(false);
-    }
+    if (audioRef.current && !audioRef.current.seeking) setIsPlaying(false);
   }, []);
-
   const handleAudioPlay = useCallback(() => {
-    console.log('[Audio] Playback started/resumed');
     setIsPlaying(true);
     setAudioError(null);
     setIsAudioLoading(false);
   }, []);
-
   const handleAudioWaiting = useCallback(() => {
-    console.log('[Audio] Waiting for data (buffering)...');
     setIsAudioLoading(true);
   }, []);
-
   const handleAudioPlaying = useCallback(() => {
-    console.log('[Audio] Buffering complete, playback continuing.');
     setIsAudioLoading(false);
   }, []);
 
@@ -251,15 +273,11 @@ export function Transcription({
         return;
       }
       if (audioRef.current.currentSrc !== audioSrc) {
-        console.log(`[Audio] Setting src to ${audioSrc}`);
         audioRef.current.src = audioSrc;
         audioRef.current.load();
         setIsAudioLoading(true);
       }
       const seekTimeSeconds = timestampMs / 1000;
-      console.log(
-        `[Audio] Attempting to play paragraph ${index} from ${seekTimeSeconds.toFixed(2)}s`
-      );
       const playAction = () => {
         const playPromise = audioRef.current!.play();
         if (playPromise !== undefined) {
@@ -268,7 +286,6 @@ export function Transcription({
               setPlayingParagraphIndex(index);
             })
             .catch((err) => {
-              console.error('[Audio] Playback error:', err);
               setAudioError(
                 `Playback error: ${err.message}. Browser might require user interaction first.`
               );
@@ -279,7 +296,6 @@ export function Transcription({
         }
       };
       if (!isPlaying && playingParagraphIndex === index) {
-        console.log('[Audio] Resuming playback');
         playAction();
       } else {
         if (
@@ -287,20 +303,13 @@ export function Transcription({
           (HTMLMediaElement.HAVE_FUTURE_DATA || 3)
         ) {
           if (Math.abs(audioRef.current.currentTime - seekTimeSeconds) > 0.2) {
-            console.log(`[Audio] Seeking to ${seekTimeSeconds.toFixed(2)}s`);
             audioRef.current.currentTime = seekTimeSeconds;
             setPlayingParagraphIndex(index);
             playAction();
           } else {
-            console.log(
-              `[Audio] Current time close enough (${audioRef.current.currentTime.toFixed(2)}s), not seeking.`
-            );
             playAction();
           }
         } else {
-          console.log(
-            `[Audio] Audio not ready (state ${audioRef.current.readyState}), seeking to ${seekTimeSeconds.toFixed(2)}s and waiting for canplay.`
-          );
           audioRef.current.currentTime = seekTimeSeconds;
           setPlayingParagraphIndex(index);
           setIsAudioLoading(true);
@@ -311,19 +320,14 @@ export function Transcription({
   );
 
   const pauseAudio = useCallback(() => {
-    if (audioRef.current) {
-      audioRef.current.pause();
-    }
+    if (audioRef.current) audioRef.current.pause();
   }, []);
 
   const togglePlayback = useCallback(
     (timestampMs: number, index: number) => {
       if (!isAudioAvailable) return;
-      if (playingParagraphIndex === index && isPlaying) {
-        pauseAudio();
-      } else {
-        playAudioFromTimestamp(timestampMs, index);
-      }
+      if (playingParagraphIndex === index && isPlaying) pauseAudio();
+      else playAudioFromTimestamp(timestampMs, index);
     },
     [
       isPlaying,
@@ -335,23 +339,18 @@ export function Transcription({
   );
 
   const saveParagraphMutation = useMutation({
-    mutationFn: ({ index, newText }: { index: number; newText: string }) => {
-      return updateTranscriptParagraph(session.id, index, newText);
-    },
+    mutationFn: ({ index, newText }: { index: number; newText: string }) =>
+      updateTranscriptParagraph(session.id, index, newText),
     onSuccess: (updatedStructuredTranscript, variables) => {
       queryClient.setQueryData(
         ['transcript', session.id],
         updatedStructuredTranscript
       );
       queryClient.invalidateQueries({ queryKey: ['sessionMeta', session.id] });
-      console.log(
-        `[Transcription Save Success] Paragraph ${variables.index} saved. Invalidated sessionMeta query.`
-      );
       setToast('Paragraph saved successfully.');
       setActiveEditIndex(null);
     },
     onError: (error, variables) => {
-      console.error(`Error saving paragraph ${variables.index}:`, error);
       setToast(`Error saving paragraph: ${error.message}`);
       setActiveEditIndex(null);
     },
@@ -363,7 +362,6 @@ export function Transcription({
       return deleteSessionAudio(session.id);
     },
     onSuccess: (data) => {
-      console.log(`[Delete Audio Success] ${data.message}`);
       setToast(data.message || 'Audio file deleted.');
       queryClient.invalidateQueries({ queryKey: ['sessionMeta', session.id] });
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
@@ -378,10 +376,6 @@ export function Transcription({
       setIsAudioLoading(false);
     },
     onError: (error) => {
-      console.error(
-        `Error deleting audio file for session ${session?.id}:`,
-        error
-      );
       setToast(`Error deleting audio: ${error.message}`);
     },
     onSettled: () => {
@@ -391,39 +385,27 @@ export function Transcription({
 
   const debouncedScrollSave = useCallback(
     debounce((scrollTop: number) => {
-      if (onScrollUpdate) {
-        onScrollUpdate(scrollTop);
-      }
+      if (onScrollUpdate) onScrollUpdate(scrollTop);
     }, 150),
     [onScrollUpdate]
   );
-
   const handleScroll = (event: React.UIEvent<HTMLDivElement>) => {
-    if (!restoreScrollRef.current && event.currentTarget) {
+    if (!restoreScrollRef.current && event.currentTarget)
       debouncedScrollSave(event.currentTarget.scrollTop);
-    }
-    if (restoreScrollRef.current) {
-      restoreScrollRef.current = false;
-    }
+    if (restoreScrollRef.current) restoreScrollRef.current = false;
   };
 
   useEffect(() => {
-    if (isTabActive) {
-      restoreScrollRef.current = true;
-    } else {
-      restoreScrollRef.current = false;
-    }
+    if (isTabActive) restoreScrollRef.current = true;
+    else restoreScrollRef.current = false;
   }, [isTabActive]);
-
   useEffect(() => {
     if (restoreScrollRef.current && viewportRef.current) {
       requestAnimationFrame(() => {
         if (restoreScrollRef.current && viewportRef.current) {
-          if (viewportRef.current.scrollTop !== initialScrollTop) {
+          if (viewportRef.current.scrollTop !== initialScrollTop)
             viewportRef.current.scrollTop = initialScrollTop;
-          } else {
-            restoreScrollRef.current = false;
-          }
+          else restoreScrollRef.current = false;
         }
       });
     }
@@ -435,7 +417,6 @@ export function Transcription({
       audioSrc &&
       audioRef.current.currentSrc !== audioSrc
     ) {
-      console.log('[Audio Effect] Setting audio source URL:', audioSrc);
       audioRef.current.src = audioSrc;
       audioRef.current.load();
       setIsAudioLoading(true);
@@ -449,7 +430,7 @@ export function Transcription({
     }
   }, [audioSrc]);
 
-  if (!session) {
+  if (!session)
     return (
       <Box p="4">
         <Text color="gray" style={{ fontStyle: 'italic' }}>
@@ -457,7 +438,6 @@ export function Transcription({
         </Text>
       </Box>
     );
-  }
 
   const paragraphs = transcriptContent || [];
 
@@ -465,16 +445,11 @@ export function Transcription({
     index: number,
     newText: string
   ) => {
-    if (isPlaying && playingParagraphIndex === index) {
-      pauseAudio();
-    }
+    if (isPlaying && playingParagraphIndex === index) pauseAudio();
     saveParagraphMutation.mutate({ index, newText });
   };
 
-  const handleDeleteAudioClick = () => {
-    setIsDeleteAudioConfirmOpen(true);
-  };
-
+  const handleDeleteAudioClick = () => setIsDeleteAudioConfirmOpen(true);
   const confirmDeleteAudio = () => {
     if (deleteAudioMutation.isPending) return;
     deleteAudioMutation.mutate();
@@ -482,6 +457,14 @@ export function Transcription({
 
   return (
     <>
+      <style>
+        {`
+          .highlight-paragraph {
+            background-color: var(--yellow-a4); /* Or your preferred Radix accent color */
+            transition: background-color 0.5s ease-out;
+          }
+        `}
+      </style>
       <Flex
         direction="column"
         style={{
@@ -489,7 +472,7 @@ export function Transcription({
           minHeight: 0,
           border: '1px solid var(--gray-a6)',
           borderRadius: 'var(--radius-3)',
-          backgroundColor: 'var(--color-panel-translucent)', // Apply translucent background
+          backgroundColor: 'var(--color-panel-translucent)',
         }}
       >
         {isAudioAvailable && (
@@ -508,17 +491,12 @@ export function Transcription({
             style={{ display: 'none' }}
           />
         )}
-
         <Flex
           align="baseline"
           justify="between"
           px="3"
           py="2"
-          style={{
-            borderBottom: '1px solid var(--gray-a6)',
-            flexShrink: 0,
-            // Removed backgroundColor: 'var(--gray-a2)'
-          }}
+          style={{ borderBottom: '1px solid var(--gray-a6)', flexShrink: 0 }}
           gap="3"
           wrap="wrap"
         >
@@ -596,7 +574,7 @@ export function Transcription({
               ? 'var(--red-a3)'
               : isAudioLoading
                 ? 'var(--amber-a3)'
-                : 'transparent', // Use transparent for normal state
+                : 'transparent',
             borderBottom:
               audioError || isAudioLoading
                 ? `1px solid ${audioError ? 'var(--red-a6)' : 'var(--amber-a6)'}`
@@ -629,7 +607,7 @@ export function Transcription({
               justify="center"
               style={{ minHeight: '100px' }}
             >
-              <Spinner size="2" />
+              <Spinner size="2" />{' '}
               <Text ml="2" color="gray">
                 Loading transcript...
               </Text>
@@ -648,16 +626,14 @@ export function Transcription({
           )}
 
           <Box p="3" className="space-y-3">
-            {' '}
-            {/* This padding is for the content inside scroll area */}
             {!isLoadingTranscript &&
               !transcriptError &&
               paragraphs.length > 0 &&
               paragraphs.map((paragraph, index) => (
                 <TranscriptParagraph
-                  key={paragraph.id ?? `p-${index}`}
+                  key={paragraph.id ?? `p-${index}`} // Use paragraph.id as it is the paragraphIndex
                   paragraph={paragraph}
-                  index={index}
+                  index={index} // This is the array index, paragraph.id is the original index
                   onSave={handleSaveParagraphInternal}
                   activeEditIndex={activeEditIndex}
                   setActiveEditIndex={setActiveEditIndex}

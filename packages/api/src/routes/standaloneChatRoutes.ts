@@ -1,23 +1,24 @@
-// =========================================
-// File: packages/api/src/routes/standaloneChatRoutes.ts
-// =========================================
-/* packages/api/src/routes/standaloneChatRoutes.ts */
-import { Elysia, t } from 'elysia';
-import { chatRepository } from '../repositories/chatRepository.js'; // Correct import
-import { messageRepository } from '../repositories/messageRepository.js'; // <-- Import Message Repo
+// packages/api/src/routes/standaloneChatRoutes.ts
+import { Elysia, t, type Static, type Cookie } from 'elysia';
+import { chatRepository } from '../repositories/chatRepository.js';
+import { messageRepository } from '../repositories/messageRepository.js';
 import {
   createStandaloneChat,
   listStandaloneChats,
   getStandaloneChatDetails,
   addStandaloneChatMessage,
-  editStandaloneChatDetails, // Use renamed edit handler
+  editStandaloneChatDetails,
   deleteStandaloneChat,
   updateStandaloneChatMessageStarStatus,
 } from '../api/standaloneChatHandler.js';
 import { NotFoundError, BadRequestError, ApiError } from '../errors.js';
-import type { ChatMetadata } from '../types/index.js';
+import type {
+  BackendChatSession,
+  BackendChatMessage,
+  ChatMetadata,
+} from '../types/index.js';
 
-// --- Schemas (Updated) ---
+// --- Schemas (as before, assuming they are correct) ---
 const ChatIdParamSchema = t.Object({
   chatId: t.String({
     pattern: '^[0-9]+$',
@@ -44,7 +45,7 @@ const ChatEditBodySchema = t.Object({
   ),
 });
 const MessageStarUpdateBodySchema = t.Object({
-  starred: t.Boolean({ error: "'starred' field required" }),
+  starred: t.Boolean({ error: "'starred' field (boolean) is required" }),
   starredName: t.Optional(t.Union([t.String({ minLength: 1 }), t.Null()])),
 });
 const StandaloneChatMetadataResponseSchema = t.Object({
@@ -89,77 +90,99 @@ export const standaloneChatRoutes = new Elysia({ prefix: '/api/chats' })
     deleteChatResponse: DeleteChatResponseSchema,
     chatMessageResponse: ChatMessageResponseSchema,
   })
-  .group(
-    '',
-    { detail: { tags: ['Standalone Chat'] } },
-    (app) =>
-      app
-        .post('/', createStandaloneChat, {
-          response: { 201: 'standaloneChatMetadataResponse' },
-          detail: { summary: 'Create a new standalone chat' },
-        })
-        .get('/', listStandaloneChats, {
-          response: { 200: 'standaloneChatListResponse' },
-          detail: { summary: 'List all standalone chats (metadata only)' },
-        })
-        .guard(
-          { params: 'chatIdParam' },
-          (app) =>
-            app
-              // --- FIX: Use chatRepository.findChatById ---
-              .derive(({ params }) => {
-                const chatId = parseInt(params.chatId, 10);
-                if (isNaN(chatId))
-                  throw new BadRequestError('Invalid chat ID format');
-                // Use the correct exported function here
-                const chat = chatRepository.findChatById(chatId);
-                if (!chat || chat.sessionId !== null) {
-                  throw new NotFoundError(`Standalone Chat ${chatId}`);
-                }
-                return { chatData: chat };
-              })
-              // --- END FIX ---
-              .get('/:chatId', getStandaloneChatDetails, {
+  .group('', { detail: { tags: ['Standalone Chat'] } }, (app) =>
+    app
+      .post('/', (context) => createStandaloneChat(context as any), {
+        // Cast context if necessary
+        response: { 201: 'standaloneChatMetadataResponse' },
+        detail: { summary: 'Create a new standalone chat' },
+      })
+      .get('/', (context) => listStandaloneChats(context as any), {
+        response: { 200: 'standaloneChatListResponse' },
+        detail: { summary: 'List all standalone chats (metadata only)' },
+      })
+      .guard(
+        { params: 'chatIdParam' }, // params.chatId will be a string
+        (app) =>
+          app
+            .derive((context) => {
+              // Elysia infers context
+              const { params } = context;
+              const chatIdNum = parseInt(params.chatId!, 10);
+              if (isNaN(chatIdNum))
+                throw new BadRequestError('Invalid chat ID format');
+              const chat = chatRepository.findChatById(chatIdNum);
+              if (!chat || chat.sessionId !== null) {
+                // Must be standalone
+                throw new NotFoundError(`Standalone Chat ${chatIdNum}`);
+              }
+              return { chatData: chat };
+            })
+            .get(
+              '/:chatId',
+              (context) => getStandaloneChatDetails(context as any),
+              {
                 response: { 200: 'fullStandaloneChatResponse' },
                 detail: { summary: 'Get full details for a standalone chat' },
-              })
-              .post('/:chatId/messages', addStandaloneChatMessage, {
+              }
+            )
+            .post(
+              '/:chatId/messages',
+              (context) => addStandaloneChatMessage(context as any),
+              {
                 body: 'chatMessageBody',
                 detail: {
                   summary: 'Add message & get AI response (stream)',
                   produces: ['text/event-stream'],
                 },
-              })
-              .patch('/:chatId/details', editStandaloneChatDetails, {
+              }
+            )
+            .patch(
+              '/:chatId/details',
+              (context) => editStandaloneChatDetails(context as any),
+              {
                 body: 'chatEditBody',
                 response: { 200: 'standaloneChatMetadataResponse' },
                 detail: {
                   summary: 'Update name and tags for a standalone chat',
                 },
-              })
-              .delete('/:chatId', deleteStandaloneChat, {
+              }
+            )
+            .delete(
+              '/:chatId',
+              (context) => deleteStandaloneChat(context as any),
+              {
                 response: { 200: 'deleteChatResponse' },
                 detail: { summary: 'Delete a standalone chat' },
-              })
-              .guard({ params: 'chatAndMessageParams' }, (app) =>
+              }
+            )
+            .guard(
+              { params: 'chatAndMessageParams' }, // params: chatId, messageId (strings)
+              (app) =>
                 app
-                  .derive(({ params, chatData }) => {
-                    const messageId = parseInt(params.messageId, 10);
-                    if (isNaN(messageId))
-                      throw new BadRequestError('Invalid msg ID');
-                    // Use the messageRepository function here
+                  .derive((context) => {
+                    // Elysia infers context
+                    const { params, chatData } = context; // chatData from parent derive
+                    const messageIdNum = parseInt(params.messageId!, 10);
+                    if (isNaN(messageIdNum))
+                      throw new BadRequestError('Invalid message ID format');
                     const message =
-                      messageRepository.findMessageById(messageId);
-                    if (!message || message.chatId !== chatData.id) {
+                      messageRepository.findMessageById(messageIdNum);
+                    if (
+                      !message ||
+                      !chatData ||
+                      message.chatId !== chatData.id
+                    ) {
                       throw new NotFoundError(
-                        `Message ${messageId} in chat ${chatData.id}`
+                        `Message ${messageIdNum} in chat ${chatData?.id}`
                       );
                     }
                     return { messageData: message };
                   })
                   .patch(
                     '/:chatId/messages/:messageId',
-                    updateStandaloneChatMessageStarStatus,
+                    (context) =>
+                      updateStandaloneChatMessageStarStatus(context as any),
                     {
                       body: 'messageStarUpdateBody',
                       response: { 200: 'chatMessageResponse' },
@@ -168,6 +191,6 @@ export const standaloneChatRoutes = new Elysia({ prefix: '/api/chats' })
                       },
                     }
                   )
-              ) // End message guard
-        ) // End chat guard
-  ); // End main group
+            )
+      )
+  );

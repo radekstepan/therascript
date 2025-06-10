@@ -1,46 +1,45 @@
 // =========================================
 // File: packages/api/src/types/index.ts
 // =========================================
-// No direct changes needed here as the FtsSearchResult type is defined locally
-// in chatRepository.ts and the SearchResultItemSchema is defined in searchRoutes.ts.
-// If you had a central SearchResultItem type here, you would add `clientName` and `tags`.
 
 export interface BackendChatMessage {
   id: number;
   chatId: number;
   sender: 'user' | 'ai';
   text: string;
-  timestamp: number;
+  timestamp: number; // UNIX Milliseconds
   promptTokens?: number | null;
   completionTokens?: number | null;
-  starred?: number; // 0 or 1 from DB
+  starred?: number; // 0 for false, 1 for true (from DB)
   starredName?: string | null;
 }
 
 export interface BackendChatSession {
   id: number;
-  sessionId: number | null;
-  timestamp: number;
+  sessionId: number | null; // Null for standalone chats
+  timestamp: number; // UNIX Milliseconds
   name?: string | null;
   messages?: BackendChatMessage[];
-  tags?: string[] | null;
+  tags?: string[] | null; // For standalone chats primarily
 }
 
+// Metadata for a chat, excluding its messages list
 export type ChatMetadata = Omit<BackendChatSession, 'messages'> & {
-  tags?: string[] | null;
+  tags?: string[] | null; // Ensure tags are part of this if they can be associated with a chat's metadata
 };
 
 export interface BackendTranscriptParagraph {
-  id: number;
+  id: number; // Primary key of the transcript_paragraphs table
   sessionId: number;
-  paragraphIndex: number;
-  timestampMs: number;
+  paragraphIndex: number; // Logical order of the paragraph within the session transcript
+  timestampMs: number; // Original timestamp in milliseconds from Whisper
   text: string;
 }
 
+// Structure used for API responses for transcript content
 export interface TranscriptParagraphData {
-  id: number;
-  timestamp: number;
+  id: number; // Corresponds to paragraphIndex for UI display purposes
+  timestamp: number; // start time in milliseconds (maps from timestampMs)
   text: string;
 }
 export type StructuredTranscript = TranscriptParagraphData[];
@@ -57,48 +56,61 @@ export interface WhisperSegment {
   compression_ratio: number;
   no_speech_prob: number;
 }
+
 export interface WhisperTranscriptionResult {
   text: string;
   segments: WhisperSegment[];
   language: string;
 }
+
 export interface WhisperJobStatus {
   job_id: string;
-  status: 'queued' | 'processing' | 'completed' | 'failed' | 'canceled';
-  progress?: number;
+  status:
+    | 'queued'
+    | 'processing'
+    | 'completed'
+    | 'failed'
+    | 'canceled'
+    | 'model_loading'
+    | 'model_downloading'
+    | 'transcribing'; // Added more detailed statuses
+  progress?: number; // Percentage 0-100
   result?: WhisperTranscriptionResult;
   error?: string;
-  start_time?: number;
-  end_time?: number;
-  duration?: number;
+  start_time?: number; // UNIX Milliseconds
+  end_time?: number; // UNIX Milliseconds
+  duration?: number; // Audio duration in seconds
+  message?: string; // Optional descriptive message from Whisper service
 }
 
 export interface BackendSession {
   id: number;
-  fileName: string;
+  fileName: string; // Original uploaded filename
   clientName: string;
   sessionName: string;
-  date: string;
+  date: string; // ISO 8601 string (e.g., "2023-10-27T12:00:00.000Z")
   sessionType: string;
   therapy: string;
-  audioPath: string | null;
+  audioPath: string | null; // Relative path/identifier for the audio file
   status: 'pending' | 'transcribing' | 'completed' | 'failed';
   whisperJobId: string | null;
   transcriptTokenCount?: number | null;
-  chats?: (Omit<ChatMetadata, 'tags'> & { sessionId: number })[];
+  chats?: (Omit<ChatMetadata, 'tags'> & { sessionId: number })[]; // For session details endpoint, session chats don't have tags from this relation
 }
 
+// Metadata for creating/updating a session
 export type BackendSessionMetadata = Omit<
   BackendSession,
   | 'id'
   | 'transcriptTokenCount'
   | 'chats'
-  | 'fileName'
+  | 'fileName' // fileName is usually derived from upload, not direct metadata input
   | 'status'
   | 'whisperJobId'
   | 'audioPath'
 >;
 
+// For API documentation via Swagger (if used)
 export interface ActionSchema {
   endpoint: string;
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -108,15 +120,19 @@ export interface ActionSchema {
   queryParams?: Record<string, string>;
   responseBody?: Record<string, unknown> | string;
 }
+
 export interface ApiErrorResponse {
   error: string;
+  message: string; // Added for consistency with Elysia error responses
   details?: string | Record<string, any>;
   validationErrors?: any;
 }
+
+// Ollama related types (internal API representation, dates are Date objects)
 export interface OllamaModelInfo {
   name: string;
-  modified_at: Date;
-  size: number;
+  modified_at: Date; // Date object
+  size: number; // in bytes
   digest: string;
   details: {
     format: string;
@@ -125,9 +141,10 @@ export interface OllamaModelInfo {
     parameter_size: string;
     quantization_level: string;
   };
-  size_vram?: number;
-  expires_at?: Date;
+  size_vram?: number; // Optional field from newer Ollama versions
+  expires_at?: Date; // Optional Date object
 }
+
 export type OllamaPullJobStatusState =
   | 'queued'
   | 'parsing'
@@ -137,25 +154,28 @@ export type OllamaPullJobStatusState =
   | 'failed'
   | 'canceling'
   | 'canceled';
+
 export interface OllamaPullJobStatus {
   jobId: string;
   modelName: string;
   status: OllamaPullJobStatusState;
   message: string;
-  progress?: number;
+  progress?: number; // 0-100
   completedBytes?: number;
   totalBytes?: number;
-  currentLayer?: string;
-  startTime: number;
-  endTime?: number;
+  currentLayer?: string; // For detailed progress
+  startTime: number; // UNIX Milliseconds
+  endTime?: number; // UNIX Milliseconds
   error?: string;
 }
+
+// Docker related types (as provided by Dockerode, simplified for API)
 export interface DockerContainerStatus {
   id: string;
   name: string;
   image: string;
-  state: string;
-  status: string;
+  state: string; // e.g., 'running', 'exited'
+  status: string; // Human-readable status, e.g., 'Up 5 minutes'
   ports: {
     PrivatePort: number;
     PublicPort?: number;
@@ -164,4 +184,26 @@ export interface DockerContainerStatus {
   }[];
 }
 
-// TODO comments should not be removed
+// Elasticsearch Search Result Item (API internal representation before sending to UI)
+// This type should align with what searchRoutes.ts maps from Elasticsearch
+export interface ApiSearchResultItem {
+  id: string | number; // ES _id (string) or a constructed ID like sessionId_paragraphIndex
+  type: 'chat' | 'transcript';
+  chatId: number | null;
+  sessionId: number | null;
+  sender: 'user' | 'ai' | null;
+  timestamp: number; // Milliseconds since epoch (consistent unit for both types)
+  snippet: string; // This is the main text content, or a highlighted version from ES
+  score?: number; // Elasticsearch relevance score
+  highlights?: Record<string, string[]>; // ES highlight object: { "fieldName": ["highlighted part 1"] }
+  clientName?: string | null;
+  tags?: string[] | null; // Tags, primarily for standalone chats
+  // paragraphIndex is implicitly part of 'id' for transcripts if using 'sessionId_paragraphIndex'
+}
+
+// API response structure for search
+export interface ApiSearchResponse {
+  query: string;
+  results: ApiSearchResultItem[];
+  total: number; // Total number of matching documents found by Elasticsearch
+}

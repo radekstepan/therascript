@@ -1,0 +1,23 @@
+{
+  "name": "@therascript/elasticsearch-manager",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Manages the Elasticsearch Docker service for Therascript",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@therascript/docker-utils": "*",
+    "dockerode": "^4.0.6"
+  },
+  "devDependencies": {
+    "@types/dockerode": "^3.3.34",
+    "@types/node": "^20.11.30",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.2"
+  }
+}

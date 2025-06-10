@@ -1,55 +1,76 @@
-# Defines and orchestrates the Whisper service container for the Therascript application.
-# This is the primary compose file used for managing the Whisper service lifecycle.
+# Defines and orchestrates the Whisper and Elasticsearch service containers for the Therascript application.
 # Ollama is managed by a separate compose file in `packages/ollama/docker-compose.yml`.
 
 services:
   # Whisper Transcription Service
   whisper:
-    # Build context: Specifies the directory containing the Dockerfile and related files.
     build:
-      context: ./packages/whisper # Path relative to this docker-compose.yml file
-      dockerfile: Dockerfile      # Name of the Dockerfile within the context directory
-    # Optional: Assign a name to the image built by this compose file.
+      context: ./packages/whisper
+      dockerfile: Dockerfile
     image: therascript/whisper
-    # Assign a fixed, predictable name to the running container for easier management.
     container_name: therascript_whisper_service
-    # Port mapping: Expose the container's port 8000 only on the host's loopback interface (127.0.0.1).
-    # This prevents the Whisper service from being directly accessible from outside the host machine.
-    # The API service (running on the host or in another container) connects to `localhost:8000`.
     ports:
-      - "127.0.0.1:8000:8000" # Format: HOST_IP:HOST_PORT:CONTAINER_PORT
-    # Volumes: Persist data between container runs.
+      - "127.0.0.1:8000:8000"
     volumes:
-      # Mount a named volume 'whisper_models' to the default Whisper cache directory inside the container.
-      # This prevents needing to re-download models every time the container starts.
       - whisper_models:/root/.cache
-      # Internal temporary directories are handled within the container's Dockerfile.
-      # Mounting host directories here is usually not needed unless for specific debugging.
-      # - ./whisper_temp_inputs:/app/temp_inputs
-      # - ./whisper_temp_outputs:/app/temp_outputs
-    # GPU Resource Allocation (Optional):
-    # Requires NVIDIA Container Toolkit on the host.
-    # Allocates GPU resources to the container for accelerated transcription.
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              count: all # Use 'all' available GPUs, or specify a number like '1'.
-              capabilities: [gpu] # Request GPU capabilities.
-    # Restart Policy: Automatically restart the container unless it was explicitly stopped.
+              count: all
+              capabilities: [gpu]
     restart: unless-stopped
-    # Health Check: Periodically checks if the service inside the container is responsive.
     healthcheck:
-      # Command to run inside the container for the health check. `curl --fail` exits non-zero on HTTP errors.
       test: ["CMD", "curl", "--fail", "http://localhost:8000/health"]
-      interval: 15s      # How often to run the check.
-      timeout: 5s        # Maximum time to wait for the check command to complete.
-      retries: 3         # Number of consecutive failures before marking the container as unhealthy.
-      start_period: 30s  # Grace period after container starts before failures count towards retries (allows model loading).
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
-# Named Volumes Definition: Defines the volumes used by the services above.
+  # Elasticsearch Service
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.14.1 # Using a specific recent version
+    container_name: therascript_elasticsearch_service
+    environment:
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m # Adjust RAM as needed for dev
+      - xpack.security.enabled=false # Disable security for local dev (NOT for production)
+      - TAKE_FILE_OWNERSHIP=true # For Docker volume permissions
+    ulimits: # Recommended settings for Elasticsearch
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      - "127.0.0.1:9200:9200" # Elasticsearch API
+      # - "127.0.0.1:9300:9300" # Elasticsearch transport (typically not needed for client)
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsSL http://localhost:9200/_cat/health?h=status | grep -q 'green\\|yellow'"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 120s # Give ES more time to start up, especially first time
+
+  # Kibana Service (Optional, for development and exploring ES data)
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.14.1 # Match Elasticsearch version
+    container_name: therascript_kibana_service
+    environment:
+      - ELASTICSEARCH_HOSTS=http://therascript_elasticsearch_service:9200 # Connect to ES container
+    ports:
+      - "127.0.0.1:5601:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
-  # Volume for caching Whisper models. `driver: local` uses the default Docker volume driver.
   whisper_models:
+    driver: local
+  es_data: # Volume for Elasticsearch data persistence
     driver: local

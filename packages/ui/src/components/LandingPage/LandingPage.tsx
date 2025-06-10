@@ -1,4 +1,3 @@
-// packages/ui/src/components/LandingPage/LandingPage.tsx
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -19,7 +18,6 @@ import {
   Heading,
   Text,
   Box,
-  // Container, // Container removed
   Spinner,
   AlertDialog,
 } from '@radix-ui/themes';
@@ -49,22 +47,29 @@ import type {
   StandaloneChatListItem,
 } from '../../types';
 import { formatTimestamp } from '../../helpers';
-import { cn } from '../../utils'; // Import cn for applying classes
+import { cn } from '../../utils';
 
 export function LandingPage() {
   const setToast = useSetAtom(toastMessageAtom);
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
-
   const activeSearchQuery = searchParams.get('q') || '';
 
   const [clientFilter, setClientFilter] = useState('');
-  const [filterTags, setFilterTags] = useState<string[]>([]);
-  const [newFilterTagInput, setNewFilterTagInput] = useState('');
+  // Removed state for tags
+  // const [filterTags, setFilterTags] = useState<string[]>([]);
+  // const [newFilterTagInput, setNewFilterTagInput] = useState('');
 
+  // Session states
   const currentSessionSortCriteria = useAtomValue(sessionSortCriteriaAtom);
   const currentSessionSortDirection = useAtomValue(sessionSortDirectionAtom);
   const setSessionSort = useSetAtom(setSessionSortAtom);
+  const [isEditingModalOpen, setIsEditingModalOpen] = useState(false);
+  const [sessionToEdit, setSessionToEdit] = useState<Session | null>(null);
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null);
+
+  // Standalone Chat states
   const currentStandaloneChatSortCriteria = useAtomValue(
     standaloneChatSortCriteriaAtom
   );
@@ -72,16 +77,12 @@ export function LandingPage() {
     standaloneChatSortDirectionAtom
   );
   const setStandaloneChatSort = useSetAtom(setStandaloneChatSortAtom);
-
-  const [isEditingModalOpen, setIsEditingModalOpen] = useState(false);
-  const [sessionToEdit, setSessionToEdit] = useState<Session | null>(null);
-  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
-  const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null);
   const [isEditChatModalOpen, setIsEditChatModalOpen] = useState(false);
   const [chatToEdit, setChatToEdit] = useState<StandaloneChatListItem | null>(
     null
   );
 
+  // Fetch sessions
   const {
     data: sessions,
     isLoading: isLoadingSessions,
@@ -91,6 +92,8 @@ export function LandingPage() {
     queryKey: ['sessions'],
     queryFn: fetchSessions,
   });
+
+  // Fetch standalone chats
   const {
     data: standaloneChats,
     isLoading: isLoadingStandaloneChats,
@@ -100,44 +103,31 @@ export function LandingPage() {
     queryKey: ['standaloneChats'],
     queryFn: fetchStandaloneChats,
   });
+
+  // Fetch search results (now using ES backend)
   const {
     data: searchResultsData,
     isLoading: isLoadingSearch,
     error: searchError,
     isFetching: isFetchingSearch,
   } = useQuery<SearchApiResponse, Error>({
-    queryKey: ['searchMessages', activeSearchQuery],
+    // Removed filterTags from queryKey
+    queryKey: ['searchMessages', activeSearchQuery, clientFilter],
     queryFn: () => {
       if (!activeSearchQuery)
-        return Promise.resolve({ query: '', results: [] });
-      return searchMessages(activeSearchQuery);
+        return Promise.resolve({ query: '', results: [], total: 0 });
+      // Removed filterTags from searchMessages call
+      return searchMessages(
+        activeSearchQuery,
+        50,
+        0,
+        clientFilter || undefined,
+        'all'
+      );
     },
     enabled: !!activeSearchQuery,
     staleTime: 5 * 60 * 1000,
   });
-
-  const filteredSearchResults = useMemo(() => {
-    if (!searchResultsData?.results) return [];
-    const lowerClientFilter = clientFilter.toLowerCase().trim();
-    const lowerFilterTags = filterTags.map((tag) => tag.toLowerCase());
-    if (!lowerClientFilter && lowerFilterTags.length === 0) {
-      return searchResultsData.results;
-    }
-    return searchResultsData.results.filter((item) => {
-      const clientMatch = lowerClientFilter
-        ? item.clientName?.toLowerCase().includes(lowerClientFilter)
-        : true;
-      const tagsMatch =
-        lowerFilterTags.length > 0
-          ? lowerFilterTags.every((filterTag) =>
-              item.tags?.some((itemTag) =>
-                itemTag.toLowerCase().includes(filterTag)
-              )
-            )
-          : true;
-      return clientMatch && tagsMatch;
-    });
-  }, [searchResultsData, clientFilter, filterTags]);
 
   const deleteSessionMutation = useMutation<{ message: string }, Error, number>(
     {
@@ -156,13 +146,31 @@ export function LandingPage() {
     }
   );
 
-  const sortedSessions = useMemo(() => {
-    // ... (sorting logic remains the same)
+  const filteredSessions = useMemo(() => {
     if (!sessions) return [];
+    if (activeSearchQuery) return sessions;
+    const lowerClientFilter = clientFilter.toLowerCase().trim();
+    if (!lowerClientFilter) return sessions;
+    return sessions.filter((s) =>
+      s.clientName?.toLowerCase().includes(lowerClientFilter)
+    );
+  }, [sessions, clientFilter, activeSearchQuery]);
+
+  const filteredStandaloneChats = useMemo(() => {
+    if (!standaloneChats) return [];
+    if (activeSearchQuery) return standaloneChats;
+    // Tag filtering logic removed for standalone chats in this context as well
+    return standaloneChats;
+  }, [standaloneChats, activeSearchQuery]);
+
+  // Sorting logic (remains the same for session and standalone chats)
+  const sortedSessions = useMemo(() => {
+    if (!filteredSessions) return [];
     const criteria = currentSessionSortCriteria;
     const direction = currentSessionSortDirection;
     const getString = (value: string | null | undefined): string => value ?? '';
-    return [...sessions].sort((a, b) => {
+    // Keep existing sort logic
+    return [...filteredSessions].sort((a, b) => {
       let compareResult = 0;
       try {
         switch (criteria) {
@@ -196,7 +204,7 @@ export function LandingPage() {
             );
             break;
           case 'date':
-            compareResult = getString(b.date).localeCompare(getString(a.date));
+            compareResult = getString(b.date).localeCompare(getString(a.date)); // Date default descending (b vs a)
             break;
           case 'id':
             compareResult = (a.id ?? 0) - (b.id ?? 0);
@@ -208,20 +216,22 @@ export function LandingPage() {
         return 0;
       }
       if (direction === 'desc' && criteria !== 'date') compareResult *= -1;
-      else if (direction === 'asc' && criteria === 'date') compareResult *= -1;
+      else if (direction === 'asc' && criteria === 'date') compareResult *= -1; // Reverse for date if asc
       return compareResult;
     });
-  }, [sessions, currentSessionSortCriteria, currentSessionSortDirection]);
+  }, [
+    filteredSessions,
+    currentSessionSortCriteria,
+    currentSessionSortDirection,
+  ]);
 
   const sortedStandaloneChats = useMemo(() => {
-    // ... (sorting logic remains the same)
-    if (!standaloneChats) return [];
+    if (!filteredStandaloneChats) return [];
     const criteria = currentStandaloneChatSortCriteria;
     const direction = currentStandaloneChatSortDirection;
     const getString = (value: string | null | undefined): string => value ?? '';
-    const getTagsString = (tags: string[] | null | undefined): string =>
-      (tags ?? []).join(', ');
-    return [...standaloneChats].sort((a, b) => {
+    // Removed getTagsString as tag filtering is removed
+    return [...filteredStandaloneChats].sort((a, b) => {
       let compareResult = 0;
       try {
         switch (criteria) {
@@ -238,12 +248,13 @@ export function LandingPage() {
           case 'date':
             compareResult = b.timestamp - a.timestamp;
             break;
-          case 'tags':
-            compareResult = getTagsString(a.tags).localeCompare(
-              getTagsString(b.tags),
-              undefined,
-              { sensitivity: 'base', usage: 'sort' }
-            );
+          case 'tags': // Keep for sorting, but filtering is gone
+            const tagsA = (a.tags ?? []).join(', ');
+            const tagsB = (b.tags ?? []).join(', ');
+            compareResult = tagsA.localeCompare(tagsB, undefined, {
+              sensitivity: 'base',
+              usage: 'sort',
+            });
             break;
           default:
             return 0;
@@ -256,7 +267,7 @@ export function LandingPage() {
       return compareResult;
     });
   }, [
-    standaloneChats,
+    filteredStandaloneChats,
     currentStandaloneChatSortCriteria,
     currentStandaloneChatSortDirection,
   ]);
@@ -269,55 +280,24 @@ export function LandingPage() {
     setSessionToEdit(session);
     setIsEditingModalOpen(true);
   };
-  const handleEditSaveSuccess = (updatedMetadata: Partial<SessionMetadata>) => {
+  const handleEditSaveSuccess = () => {
     setIsEditingModalOpen(false);
     setSessionToEdit(null);
-    setToast('Session details updated successfully.');
+    setToast('Session details updated.');
   };
   const handleDeleteSessionRequest = (session: Session) => {
     setSessionToDelete(session);
     setIsDeleteConfirmOpen(true);
   };
   const handleConfirmDeleteSession = () => {
-    if (!sessionToDelete || deleteSessionMutation.isPending) return;
-    deleteSessionMutation.mutate(sessionToDelete.id);
+    if (sessionToDelete) deleteSessionMutation.mutate(sessionToDelete.id);
   };
   const handleEditChatRequest = (chat: StandaloneChatListItem) => {
     setChatToEdit(chat);
     setIsEditChatModalOpen(true);
   };
 
-  const handleAddFilterTag = useCallback(() => {
-    // ... (tag logic remains the same)
-    const tagToAdd = newFilterTagInput.trim();
-    if (
-      tagToAdd &&
-      !filterTags.some((tag) => tag.toLowerCase() === tagToAdd.toLowerCase())
-    ) {
-      if (filterTags.length < 5) {
-        setFilterTags((prev) => [...prev, tagToAdd]);
-      } else {
-        setToast('Maximum of 5 filter tags allowed.');
-      }
-    }
-    setNewFilterTagInput('');
-  }, [newFilterTagInput, filterTags, setToast]);
-
-  const handleRemoveFilterTag = useCallback((tagToRemove: string) => {
-    // ... (tag logic remains the same)
-    setFilterTags((prev) => prev.filter((tag) => tag !== tagToRemove));
-  }, []);
-
-  const handleFilterTagInputKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      // ... (tag logic remains the same)
-      if (e.key === 'Enter' || e.key === ',') {
-        e.preventDefault();
-        handleAddFilterTag();
-      }
-    },
-    [handleAddFilterTag]
-  );
+  // Removed tag handlers: handleAddFilterTag, handleRemoveFilterTag, handleFilterTagInputKeyDown
 
   const isLoadingAnyData =
     isLoadingSessions ||
@@ -328,32 +308,34 @@ export function LandingPage() {
     standaloneChatsError ||
     (!!activeSearchQuery && searchError);
 
-  if (isLoadingAnyData && !anyError && !activeSearchQuery) {
+  if (
+    (isLoadingSessions || isLoadingStandaloneChats) &&
+    !anyError &&
+    !activeSearchQuery
+  ) {
     return (
       <Flex
         justify="center"
         align="center"
-        // Use consistent padding with TopToolbar, apply to main content area
         className={cn('px-4 md:px-6 lg:px-8', 'py-6 md:py-8 lg:py-10')}
-        style={{ height: 'calc(100vh - 64px)' }} // Adjust height if TopToolbar is fixed
+        style={{ height: 'calc(100vh - 64px)' }}
       >
-        <Spinner size="3" />
-        <Text ml="2">Loading data...</Text>
+        <Spinner size="3" /> <Text ml="2">Loading data...</Text>
       </Flex>
     );
   }
-  if (anyError && !activeSearchQuery) {
+  if ((sessionsError || standaloneChatsError) && !activeSearchQuery) {
     return (
       <Flex
         direction="column"
         justify="center"
         align="center"
-        // Use consistent padding with TopToolbar
         className={cn('px-4 md:px-6 lg:px-8', 'py-6 md:py-8 lg:py-10')}
-        style={{ height: 'calc(100vh - 64px)' }} // Adjust height
+        style={{ height: 'calc(100vh - 64px)' }}
       >
         <Text color="red" mb="4">
-          {anyError?.message || 'Failed to load data.'}
+          {(sessionsError || standaloneChatsError)?.message ||
+            'Failed to load data.'}
         </Text>
         <Button
           onClick={() => {
@@ -368,36 +350,29 @@ export function LandingPage() {
   }
 
   const showSearchResultsView = !!activeSearchQuery;
-  const hasFilteredResults = filteredSearchResults.length > 0;
-  const hasInitialSearchResults =
-    searchResultsData?.results && searchResultsData.results.length > 0;
+  const searchResults = searchResultsData?.results || [];
+  const totalSearchHits = searchResultsData?.total || 0;
 
   return (
     <>
-      {/* Main Box with consistent padding, replacing Container */}
       <Box
         className={cn(
           'flex-grow flex flex-col overflow-y-auto',
-          'py-4 md:py-6 lg:py-8', // Vertical padding
-          'px-4 md:px-6 lg:px-8' // Horizontal padding matching TopToolbar
+          'py-4 md:py-6 lg:py-8',
+          'px-4 md:px-6 lg:px-8'
         )}
       >
+        <Box mb="4">
+          <FilterControls
+            sessions={sessions}
+            clientFilter={clientFilter}
+            setClientFilter={setClientFilter}
+            // Removed tag related props
+          />
+        </Box>
+
         {showSearchResultsView ? (
           <>
-            <Box mb="4">
-              <FilterControls
-                sessions={sessions}
-                clientFilter={clientFilter}
-                setClientFilter={setClientFilter}
-                filterTags={filterTags}
-                setFilterTags={setFilterTags}
-                newFilterTagInput={newFilterTagInput}
-                setNewFilterTagInput={setNewFilterTagInput}
-                onAddFilterTag={handleAddFilterTag}
-                onRemoveFilterTag={handleRemoveFilterTag}
-                onFilterTagInputKeyDown={handleFilterTagInputKeyDown}
-              />
-            </Box>
             {(isLoadingSearch || isFetchingSearch) && !searchError && (
               <Flex justify="center" align="center" p="6">
                 <Spinner size="3" />{' '}
@@ -411,25 +386,21 @@ export function LandingPage() {
                 <Text color="red">Error searching: {searchError.message}</Text>
               </Card>
             )}
-            {!isLoadingSearch &&
-              !isFetchingSearch &&
-              !searchError &&
-              hasFilteredResults && (
-                <SearchResultList
-                  results={filteredSearchResults}
-                  query={activeSearchQuery}
-                />
-              )}
+            {!isLoadingSearch && !isFetchingSearch && !searchError && (
+              <SearchResultList
+                results={searchResults}
+                query={activeSearchQuery}
+                totalHits={totalSearchHits}
+              />
+            )}
             {!searchError &&
               !isLoadingSearch &&
               !isFetchingSearch &&
-              !hasFilteredResults && (
+              searchResults.length === 0 && (
                 <Card size="2" mb="4" style={{ width: '100%' }}>
                   <Text color="gray">
-                    {hasInitialSearchResults &&
-                    (clientFilter || filterTags.length > 0)
-                      ? `No results match the current filters for "${activeSearchQuery}".`
-                      : `No results found for "${activeSearchQuery}". Try a different search term.`}
+                    No results found for "{activeSearchQuery}" with the current
+                    filters.
                   </Text>
                 </Card>
               )}
@@ -527,8 +498,8 @@ export function LandingPage() {
             </Card>
           </>
         )}
-      </Box>{' '}
-      {/* End of main Box with padding */}
+      </Box>
+
       <EditDetailsModal
         isOpen={isEditingModalOpen}
         onOpenChange={(open: boolean) => {

@@ -1,6 +1,7 @@
 // packages/ui/src/components/SettingsPage.tsx
 import React, { useState } from 'react';
-import { useAtom } from 'jotai';
+import { useAtom, useSetAtom } from 'jotai';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Box,
   Heading,
@@ -14,6 +15,9 @@ import {
   Grid,
   Tooltip,
   Badge,
+  AlertDialog,
+  Spinner,
+  Callout,
 } from '@radix-ui/themes';
 import { renderMarkdownAtom } from '../store/ui/renderMarkdownAtom';
 import { LlmManagementModal } from './SessionView/Modals/LlmManagementModal';
@@ -21,29 +25,68 @@ import {
   MixerVerticalIcon,
   LayoutIcon as RadixLayoutIcon,
   CheckIcon,
-  ColorWheelIcon, // <-- REPLACED PaintBrushIcon with ColorWheelIcon
+  ColorWheelIcon,
+  UpdateIcon,
+  ExclamationTriangleIcon,
+  InfoCircledIcon,
 } from '@radix-ui/react-icons';
 import {
   accentColorAtom,
   RADIX_ACCENT_COLORS,
   type RadixAccentColor,
-  type AccentColorValue, // <-- Import AccentColorValue for explicit typing
-} from '../store'; // <-- CORRECTED PATH
+  type AccentColorValue,
+  toastMessageAtom,
+} from '../store';
+import { requestReindexElasticsearch } from '../api/api';
 
 export function SettingsPage() {
   const [renderMarkdown, setRenderMarkdown] = useAtom(renderMarkdownAtom);
   const [isLlmModalOpen, setIsLlmModalOpen] = useState(false);
   const [currentAccent, setCurrentAccent] = useAtom(accentColorAtom);
+  const setToast = useSetAtom(toastMessageAtom);
+  const queryClient = useQueryClient();
+
+  const [isReindexConfirmOpen, setIsReindexConfirmOpen] = useState(false);
+
+  const reindexMutation = useMutation({
+    mutationFn: requestReindexElasticsearch,
+    onSuccess: (data) => {
+      setToast(`✅ Elasticsearch Re-index: ${data.message}`);
+      if (data.errors && data.errors.length > 0) {
+        console.warn('Re-indexing completed with errors:', data.errors);
+        // Optionally, provide more detailed feedback or log client-side
+        setToast(
+          `⚠️ Re-index finished with ${data.errors.length} error(s). Check server logs.`
+        );
+      }
+      queryClient.invalidateQueries();
+    },
+    onError: (error: Error) => {
+      setToast(`❌ Re-index Error: ${error.message}`);
+      console.error('Re-index failed:', error);
+    },
+    onSettled: () => {
+      setIsReindexConfirmOpen(false);
+    },
+  });
 
   const handleMarkdownToggle = () => {
     setRenderMarkdown(!renderMarkdown);
   };
 
   const handleAccentColorSelect = (color: RadixAccentColor) => {
-    setCurrentAccent(color as AccentColorValue); // Cast to AccentColorValue
+    setCurrentAccent(color as AccentColorValue);
   };
 
   const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+  const handleReindexClick = () => {
+    setIsReindexConfirmOpen(true);
+  };
+
+  const handleConfirmReindex = () => {
+    reindexMutation.mutate();
+  };
 
   return (
     <>
@@ -57,7 +100,7 @@ export function SettingsPage() {
           Application Settings
         </Heading>
 
-        <Card>
+        <Card mb="6">
           <Box p="4">
             <Heading
               as="h2"
@@ -88,11 +131,9 @@ export function SettingsPage() {
               When enabled, AI responses in chat interfaces will be formatted
               using Markdown. Disable for plain text.
             </Text>
-
-            {/* Accent Color Selector Section */}
             <Separator my="5" size="4" />
             <Flex align="center" gap="2" mb="3">
-              <ColorWheelIcon // <-- USING ColorWheelIcon
+              <ColorWheelIcon
                 width="20"
                 height="20"
                 className="text-gray-600 dark:text-gray-400"
@@ -102,66 +143,62 @@ export function SettingsPage() {
               </Text>
             </Flex>
             <Grid columns={{ initial: '4', xs: '5', sm: '6', md: '8' }} gap="2">
-              {RADIX_ACCENT_COLORS.map(
-                (
-                  color: RadixAccentColor // <-- EXPLICITLY TYPE color
-                ) => (
-                  <Tooltip key={color} content={capitalize(color)}>
-                    <Button
-                      variant={currentAccent === color ? 'solid' : 'outline'}
-                      color={
-                        color as React.ComponentProps<typeof Button>['color'] // Cast for Radix Button color prop
-                      }
-                      onClick={() => handleAccentColorSelect(color)}
-                      style={{
-                        width: '100%',
-                        height: '36px',
-                        padding: '0',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color:
-                          currentAccent === color &&
-                          [
-                            'ruby',
-                            'crimson',
-                            'plum',
-                            'purple',
-                            'violet',
-                            'iris',
-                            'indigo',
-                            'blue',
-                            'sky',
-                            'cyan',
-                            'teal',
-                            'jade',
-                            'green',
-                            'grass',
-                            'brown',
-                            'gray',
-                          ].includes(color)
-                            ? 'white'
-                            : 'var(--gray-12)',
-                      }}
-                      title={`Set accent to ${capitalize(color)}`}
-                      aria-pressed={currentAccent === color}
-                    >
-                      {currentAccent === color ? (
-                        <CheckIcon width="18" height="18" />
-                      ) : (
-                        <Box
-                          style={{
-                            width: '14px',
-                            height: '14px',
-                            borderRadius: '50%',
-                            backgroundColor: `var(--${color}-9)`,
-                          }}
-                        />
-                      )}
-                    </Button>
-                  </Tooltip>
-                )
-              )}
+              {RADIX_ACCENT_COLORS.map((color: RadixAccentColor) => (
+                <Tooltip key={color} content={capitalize(color)}>
+                  <Button
+                    variant={currentAccent === color ? 'solid' : 'outline'}
+                    color={
+                      color as React.ComponentProps<typeof Button>['color']
+                    }
+                    onClick={() => handleAccentColorSelect(color)}
+                    style={{
+                      width: '100%',
+                      height: '36px',
+                      padding: '0',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color:
+                        currentAccent === color &&
+                        [
+                          'ruby',
+                          'crimson',
+                          'plum',
+                          'purple',
+                          'violet',
+                          'iris',
+                          'indigo',
+                          'blue',
+                          'sky',
+                          'cyan',
+                          'teal',
+                          'jade',
+                          'green',
+                          'grass',
+                          'brown',
+                          'gray',
+                        ].includes(color)
+                          ? 'white'
+                          : 'var(--gray-12)',
+                    }}
+                    title={`Set accent to ${capitalize(color)}`}
+                    aria-pressed={currentAccent === color}
+                  >
+                    {currentAccent === color ? (
+                      <CheckIcon width="18" height="18" />
+                    ) : (
+                      <Box
+                        style={{
+                          width: '14px',
+                          height: '14px',
+                          borderRadius: '50%',
+                          backgroundColor: `var(--${color}-9)`,
+                        }}
+                      />
+                    )}
+                  </Button>
+                </Tooltip>
+              ))}
             </Grid>
             <Text size="2" color="gray" mt="3">
               Select an accent color for the application theme. Changes will
@@ -170,9 +207,7 @@ export function SettingsPage() {
           </Box>
         </Card>
 
-        <Separator my="6" size="4" />
-
-        <Card>
+        <Card mb="6">
           <Box p="4">
             <Heading
               as="h2"
@@ -203,12 +238,135 @@ export function SettingsPage() {
             </Text>
           </Box>
         </Card>
+
+        <Card>
+          <Box p="4">
+            <Heading
+              as="h2"
+              size="5"
+              mb="4"
+              className="text-gray-800 dark:text-gray-200"
+            >
+              Data Management
+            </Heading>
+            <Flex align="center" justify="between" mb="2">
+              <Flex align="center" gap="2">
+                <UpdateIcon
+                  width="20"
+                  height="20"
+                  className="text-gray-600 dark:text-gray-400"
+                />
+                <Text size="3" className="text-gray-700 dark:text-gray-300">
+                  Search Index
+                </Text>
+              </Flex>
+              <Button
+                variant="outline"
+                color="orange"
+                onClick={handleReindexClick}
+                disabled={reindexMutation.isPending}
+              >
+                {reindexMutation.isPending ? (
+                  <>
+                    <Spinner size="1" /> Re-indexing...
+                  </>
+                ) : (
+                  'Re-index All Data'
+                )}
+              </Button>
+            </Flex>
+            <Text size="2" color="gray">
+              This will delete all current search index data and re-build it
+              from the database. Use if search results seem inconsistent or
+              after major data changes. This can take some time.
+            </Text>
+            {reindexMutation.isError && (
+              <Callout.Root color="red" size="1" mt="3">
+                <Callout.Icon>
+                  <ExclamationTriangleIcon />
+                </Callout.Icon>
+                <Callout.Text>
+                  Re-index failed: {reindexMutation.error.message}
+                </Callout.Text>
+              </Callout.Root>
+            )}
+            {reindexMutation.isSuccess &&
+              reindexMutation.data?.errors?.length > 0 && (
+                <Callout.Root color="amber" size="1" mt="3">
+                  <Callout.Icon>
+                    <InfoCircledIcon />
+                  </Callout.Icon>
+                  <Callout.Text>
+                    Re-indexing completed with{' '}
+                    {reindexMutation.data.errors.length} error(s). Check server
+                    logs.
+                    {reindexMutation.data.errors.map((err, i) => (
+                      <div
+                        key={i}
+                        style={{
+                          fontSize: '0.9em',
+                          opacity: 0.8,
+                          marginLeft: '1em',
+                        }}
+                      >
+                        -{' '}
+                        {err.length > 100 ? err.substring(0, 100) + '...' : err}
+                      </div>
+                    ))}
+                  </Callout.Text>
+                </Callout.Root>
+              )}
+          </Box>
+        </Card>
       </Container>
 
       <LlmManagementModal
         isOpen={isLlmModalOpen}
         onOpenChange={setIsLlmModalOpen}
       />
+
+      <AlertDialog.Root
+        open={isReindexConfirmOpen}
+        onOpenChange={setIsReindexConfirmOpen}
+      >
+        <AlertDialog.Content style={{ maxWidth: 450 }}>
+          <AlertDialog.Title>Confirm Re-index</AlertDialog.Title>
+          <AlertDialog.Description size="2">
+            Are you sure you want to delete all existing search index data and
+            re-index everything from the database? This operation can take some
+            time and cannot be undone.
+          </AlertDialog.Description>
+          <Flex gap="3" mt="4" justify="end">
+            <AlertDialog.Cancel>
+              <Button
+                variant="soft"
+                color="gray"
+                disabled={reindexMutation.isPending}
+              >
+                Cancel
+              </Button>
+            </AlertDialog.Cancel>
+            <AlertDialog.Action>
+              <Button
+                color="orange"
+                onClick={handleConfirmReindex}
+                disabled={reindexMutation.isPending}
+              >
+                {reindexMutation.isPending ? (
+                  <Spinner size="1" />
+                ) : (
+                  <UpdateIcon />
+                )}
+                <Text ml={reindexMutation.isPending ? '2' : '1'}>
+                  {reindexMutation.isPending
+                    ? 'Re-indexing...'
+                    : 'Confirm Re-index'}
+                </Text>
+              </Button>
+            </AlertDialog.Action>
+          </Flex>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </>
   );
 }

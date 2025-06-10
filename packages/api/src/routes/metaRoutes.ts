@@ -1,52 +1,77 @@
-/* packages/api/src/routes/metaRoutes.ts */
 import { Elysia, t } from 'elysia';
 import { InternalServerError } from '../errors.js';
-import { checkDatabaseHealth } from '../db/sqliteService.js'; // Assuming health check is in sqliteService
-import { getStarredMessages } from '../api/metaHandler.js'; // <-- Import handler
-import type { BackendChatMessage } from '../types/index.js'; // <-- Import type
+import { checkDatabaseHealth } from '../db/sqliteService.js';
+import { getStarredMessages } from '../api/metaHandler.js';
+import type { BackendChatMessage } from '../types/index.js';
+import {
+  getElasticsearchClient,
+  checkEsHealth,
+} from '@therascript/elasticsearch-client'; // Import ES client utils
+import config from '../config/index.js';
 
-// Schema for the starred message response
-// Use the updated ChatMessageResponseSchema definition consistent with other routes
 const StarredMessageResponseSchema = t.Object({
   id: t.Number(),
   chatId: t.Number(),
-  sender: t.Union([t.Literal('user'), t.Literal('ai')]), // Keep both for now, handler filters
+  sender: t.Union([t.Literal('user'), t.Literal('ai')]),
   text: t.String(),
   timestamp: t.Number(),
   promptTokens: t.Optional(t.Union([t.Number(), t.Null()])),
   completionTokens: t.Optional(t.Union([t.Number(), t.Null()])),
-  starred: t.Boolean(), // Should always be true here
+  starred: t.Boolean(),
   starredName: t.Optional(t.Union([t.String(), t.Null()])),
+});
+
+const HealthResponseSchema = t.Object({
+  status: t.String(),
+  database: t.String(),
+  elasticsearch: t.String(),
+  timestamp: t.String(),
 });
 
 export const metaRoutes = new Elysia({ prefix: '/api' })
   .model({
-    // Add model for starred message response
     starredMessageResponse: StarredMessageResponseSchema,
+    healthResponse: HealthResponseSchema, // Add health response schema
   })
   .group('', { detail: { tags: ['Meta'] } }, (app) =>
     app
       .get(
         '/health',
-        ({ set }) => {
+        async ({ set }) => {
+          let dbStatus = 'disconnected';
+          let esStatus = 'disconnected';
           try {
-            checkDatabaseHealth(); // Perform a quick check
-            set.status = 200;
-            return {
-              status: 'OK',
-              database: 'connected', // Simplified status
-              timestamp: new Date().toISOString(),
-            };
+            checkDatabaseHealth();
+            dbStatus = 'connected';
           } catch (dbError) {
-            console.error('[Health Check] Database error:', dbError);
-            throw new InternalServerError(
-              'Database connection failed',
-              dbError instanceof Error ? dbError : undefined
-            );
+            console.warn('[Health Check] Database error:', dbError);
           }
+
+          try {
+            const esClient = getElasticsearchClient(config.elasticsearch.url);
+            if (await checkEsHealth(esClient)) {
+              esStatus = 'connected';
+            }
+          } catch (esError) {
+            console.warn('[Health Check] Elasticsearch error:', esError);
+          }
+
+          const overallStatus =
+            dbStatus === 'connected' && esStatus === 'connected'
+              ? 'OK'
+              : 'DEGRADED';
+          set.status = overallStatus === 'OK' ? 200 : 503;
+
+          return {
+            status: overallStatus,
+            database: dbStatus,
+            elasticsearch: esStatus,
+            timestamp: new Date().toISOString(),
+          };
         },
         {
-          detail: { summary: 'Check API and Database health' },
+          detail: { summary: 'Check API, Database, and Elasticsearch health' },
+          response: { 200: 'healthResponse', 503: 'healthResponse' }, // Use defined schema
         }
       )
       .get(
@@ -62,13 +87,11 @@ export const metaRoutes = new Elysia({ prefix: '/api' })
           detail: { summary: 'API Schema Information (Redirects to Swagger)' },
         }
       )
-      // --- New Starred Messages Endpoint ---
       .get('/starred-messages', getStarredMessages, {
-        response: { 200: t.Array(StarredMessageResponseSchema) }, // Return array of starred messages
+        response: { 200: t.Array(StarredMessageResponseSchema) },
         detail: {
-          tags: ['Chat'], // Add to Chat tag
+          tags: ['Chat'],
           summary: 'Get all starred user messages (templates)',
         },
       })
   );
-// TODO comments should not be removed

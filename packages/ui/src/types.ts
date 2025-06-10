@@ -13,25 +13,25 @@ export interface ChatMessage {
   sender: 'user' | 'ai';
   text: string;
   timestamp: number;
-  starred?: boolean; // Optional boolean
-  starredName?: string | null; // Can be string, null, or undefined (UI preference)
-  promptTokens?: number | null; // Can be number, null, or undefined
-  completionTokens?: number | null; // Can be number, null, or undefined
+  starred?: boolean;
+  starredName?: string | null;
+  promptTokens?: number | null;
+  completionTokens?: number | null;
 }
 
 export interface ChatSession {
   id: number;
   sessionId: number | null;
   timestamp: number;
-  name?: string | null; // Can be string, null, or undefined (UI preference)
+  name?: string | null;
   messages?: ChatMessage[];
-  tags?: string[] | null; // Can be string array, null, or undefined
+  tags?: string[] | null;
 }
 
 export interface SessionMetadata {
   clientName: string;
   sessionName: string;
-  date: string; // Expects YYYY-MM-DD format for input, backend stores ISO
+  date: string; // YYYY-MM-DD for input
   sessionType: string;
   therapy: string;
 }
@@ -47,33 +47,30 @@ export interface Session extends SessionMetadata {
   chats: Pick<ChatSession, 'id' | 'sessionId' | 'timestamp' | 'name'>[];
 }
 
-// Backend types (can be useful for understanding API responses before mapping)
 export interface BackendChatSession {
-  id: number;
+  /* ... as before ... */ id: number;
   sessionId: number | null;
   timestamp: number;
   name?: string | null;
   messages?: BackendChatMessage[];
   tags?: string[] | null;
 }
-
 export interface BackendChatMessage {
-  id: number;
+  /* ... as before ... */ id: number;
   chatId: number;
   sender: 'user' | 'ai';
   text: string;
   timestamp: number;
   promptTokens?: number | null;
   completionTokens?: number | null;
-  starred?: number; // 0 or 1 from DB
+  starred?: number;
   starredName?: string | null;
 }
 
-// Ollama related types
 export interface OllamaModelInfo {
-  name: string;
-  modified_at: string; // ISO Date string
-  size: number; // in bytes
+  /* ... as before ... */ name: string;
+  modified_at: string;
+  size: number;
   digest: string;
   details: {
     format: string;
@@ -83,23 +80,20 @@ export interface OllamaModelInfo {
     quantization_level: string;
   };
   size_vram?: number;
-  expires_at?: string | null; // ISO Date string or null
-  size_total?: number; // Deprecated, use size
+  expires_at?: string | null;
 }
-
 export interface OllamaStatus {
-  activeModel: string;
-  modelChecked: string; // The model whose 'loaded' status is being reported
-  loaded: boolean; // Is modelChecked loaded?
-  details?: OllamaModelInfo | null; // Details of modelChecked if loaded, can be null
+  /* ... as before ... */ activeModel: string;
+  modelChecked: string;
+  loaded: boolean;
+  details?: OllamaModelInfo | null;
   configuredContextSize?: number | null;
 }
-
 export interface AvailableModelsResponse {
   models: OllamaModelInfo[];
 }
-
 export type UIPullJobStatusState =
+  /* ... as before ... */
   | 'queued'
   | 'parsing'
   | 'downloading'
@@ -108,25 +102,23 @@ export type UIPullJobStatusState =
   | 'failed'
   | 'canceling'
   | 'canceled';
-
 export interface UIPullJobStatus {
-  jobId: string;
+  /* ... as before ... */ jobId: string;
   modelName: string;
   status: UIPullJobStatusState;
   message: string;
-  progress?: number | null; // 0-100
+  progress?: number | null;
   error?: string | null;
   completedBytes?: number | null;
   totalBytes?: number | null;
 }
 
-// Docker related types
 export interface DockerContainerStatus {
-  id: string;
+  /* ... as before ... */ id: string;
   name: string;
   image: string;
   state: string;
-  status: string; // Human-readable status
+  status: string;
   ports: {
     PrivatePort: number;
     PublicPort?: number;
@@ -135,16 +127,17 @@ export interface DockerContainerStatus {
   }[];
 }
 
-// Search related types
+// Updated SearchResultItem for Elasticsearch
 export interface SearchResultItem {
-  id: number; // Message ID or Paragraph Index
+  id: string | number; // ES _id is string, paragraph_id (sessionId_idx) also string
   type: 'chat' | 'transcript';
   chatId: number | null;
   sessionId: number | null;
   sender: 'user' | 'ai' | null;
-  timestamp: number;
-  snippet: string;
-  rank: number;
+  timestamp: number; // Milliseconds since epoch
+  snippet: string; // Can be highlighted HTML
+  score?: number;
+  highlights?: Record<string, string[]>; // e.g., { "text": ["<mark>highlighted</mark> term"] }
   clientName?: string | null;
   tags?: string[] | null;
 }
@@ -152,11 +145,11 @@ export interface SearchResultItem {
 export interface SearchApiResponse {
   query: string;
   results: SearchResultItem[];
+  total: number; // Total number of hits from ES
 }
 
-// UI Transcription Status
 export interface UITranscriptionStatus {
-  job_id: string;
+  /* ... as before ... */ job_id: string;
   status:
     | 'queued'
     | 'model_loading'
@@ -166,17 +159,15 @@ export interface UITranscriptionStatus {
     | 'completed'
     | 'failed'
     | 'canceled';
-  progress?: number | null; // Percentage (0-100)
+  progress?: number | null;
   error?: string | null;
   duration?: number | null;
   message?: string | null;
 }
-
-// Standalone Chat List Item
 export interface StandaloneChatListItem {
-  id: number;
-  sessionId: null; // Should always be null for standalone chats
+  /* ... as before ... */ id: number;
+  sessionId: null;
   timestamp: number;
-  name?: string | null; // Can be string, null, or undefined
+  name?: string | null;
   tags?: string[] | null;
 }

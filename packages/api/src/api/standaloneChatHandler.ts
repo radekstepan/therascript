@@ -1,10 +1,6 @@
-// =========================================
-// File: packages/api/src/api/standaloneChatHandler.ts
-// (Refined processStream function)
-// =========================================
-/* packages/api/src/api/standaloneChatHandler.ts */
+// packages/api/src/api/standaloneChatHandler.ts
 import { chatRepository } from '../repositories/chatRepository.js';
-import { messageRepository } from '../repositories/messageRepository.js'; // <-- Import Message Repo
+import { messageRepository } from '../repositories/messageRepository.js';
 import { streamChatResponse } from '../services/ollamaService.js';
 import {
   NotFoundError,
@@ -16,12 +12,22 @@ import type {
   BackendChatMessage,
   ChatMetadata,
   BackendChatSession,
-} from '../types/index.js'; // Added BackendChatSession back for type safety
+  BackendSession,
+} from '../types/index.js'; // Added BackendSession
 import { TransformStream } from 'node:stream/web';
 import { TextEncoder } from 'node:util';
+import {
+  getElasticsearchClient,
+  MESSAGES_INDEX,
+  indexDocument,
+  deleteByQuery,
+  bulkIndexDocuments, // For updating multiple messages on chat detail change
+} from '@therascript/elasticsearch-client';
+import config from '../config/index.js';
+
+const esClient = getElasticsearchClient(config.elasticsearch.url);
 
 // Define precise return types matching the schemas where needed
-// Add tags to metadata response
 type StandaloneChatMetadataResponse = ChatMetadata & {
   sessionId: null;
   tags: string[] | null;
@@ -33,22 +39,34 @@ type FullStandaloneChatApiResponse = StandaloneChatMetadataResponse & {
   messages: ApiChatMessageResponse[];
 };
 
-// POST /api/chats - Create a new standalone chat
+// Define a type for Elysia context if not already available globally in your project
+interface ElysiaHandlerContext {
+  body: any;
+  params: Record<string, string | undefined>;
+  query: Record<string, string | undefined>;
+  set: { status?: number | string; headers?: Record<string, string> };
+  // These are added by 'derive' hooks if used for these routes
+  chatData?: BackendChatSession;
+  messageData?: BackendChatMessage;
+  // sessionData is not typically used in standalone chat handlers
+}
+
 export const createStandaloneChat = ({
   set,
-}: any): StandaloneChatMetadataResponse => {
+}: ElysiaHandlerContext): StandaloneChatMetadataResponse => {
   try {
-    const newChat: BackendChatSession = chatRepository.createChat(null); // Repo func returns BackendChatSession
+    const newChat: BackendChatSession = chatRepository.createChat(null); // sessionId is null for standalone
     console.log(`[API] Created new standalone chat ${newChat.id}`);
+    // Destructure messages and sessionId (which will be null) to get the metadata
     const { messages, sessionId: _ignoredSessionId, ...chatMetadata } = newChat;
     set.status = 201;
     // Construct the response type correctly, including tags
     const response: StandaloneChatMetadataResponse = {
       id: chatMetadata.id,
-      sessionId: null,
+      sessionId: null, // Explicitly null for standalone
       timestamp: chatMetadata.timestamp,
-      name: chatMetadata.name ?? null,
-      tags: chatMetadata.tags ?? null, // Ensure tags is present
+      name: chatMetadata.name ?? null, // Handle potential undefined from repo
+      tags: chatMetadata.tags ?? null, // Ensure tags is present, defaulting to null
     };
     return response;
   } catch (error) {
@@ -60,19 +78,17 @@ export const createStandaloneChat = ({
   }
 };
 
-// GET /api/chats - List all standalone chats (metadata only)
 export const listStandaloneChats = ({
   set,
-}: any): StandaloneChatMetadataResponse[] => {
+}: ElysiaHandlerContext): StandaloneChatMetadataResponse[] => {
   try {
-    // Repository function now returns the correct type including tags
-    const chats = chatRepository.findStandaloneChats();
+    const chats = chatRepository.findStandaloneChats(); // This should return the correct type including tags
     set.status = 200;
-    // Map to ensure correct final type if needed
+    // Map to ensure correct final type, especially sessionId being null
     return chats.map((chat) => ({
       ...chat, // Spread the chat metadata which includes tags
-      sessionId: null, // Ensure sessionId is null
-      tags: chat.tags ?? null, // Ensure tags is null if missing from repo somehow
+      sessionId: null, // Ensure sessionId is explicitly null
+      tags: chat.tags ?? null, // Default to null if undefined
     }));
   } catch (error) {
     console.error('[API Error] listStandaloneChats:', error);
@@ -83,15 +99,16 @@ export const listStandaloneChats = ({
   }
 };
 
-// GET /api/chats/:chatId - Get details of a specific standalone chat
 export const getStandaloneChatDetails = ({
   chatData,
   set,
-}: any): FullStandaloneChatApiResponse => {
-  // chatData comes from derive hook and should be BackendChatSession type already
-  if (!chatData)
+}: ElysiaHandlerContext): FullStandaloneChatApiResponse => {
+  if (!chatData) {
+    // This should ideally be caught by a derive hook if chatData is expected
     throw new NotFoundError(`Standalone chat not found in context.`);
+  }
   if (chatData.sessionId !== null) {
+    // Defensive check, should also be handled by how chatData is derived/fetched
     console.error(
       `[API Error] getStandaloneChatDetails: Chat ${chatData.id} has sessionId ${chatData.sessionId}, expected null.`
     );
@@ -102,8 +119,8 @@ export const getStandaloneChatDetails = ({
   set.status = 200;
   const messages = (chatData.messages ?? []).map((m: BackendChatMessage) => ({
     ...m,
-    starred: !!m.starred,
-    starredName: m.starredName === undefined ? undefined : m.starredName,
+    starred: !!m.starred, // Convert 0/1 to boolean
+    starredName: m.starredName === undefined ? undefined : m.starredName, // Preserve undefined if that's the DB state
   }));
   // chatData already includes tags, separate messages
   const { messages: _m, ...metadata } = chatData;
@@ -119,35 +136,58 @@ export const getStandaloneChatDetails = ({
   return response;
 };
 
-// POST /api/chats/:chatId/messages - Add message to standalone chat (Streaming)
 export const addStandaloneChatMessage = async ({
   chatData,
   body,
   set,
-}: any): Promise<Response> => {
-  const { text } = body;
+}: ElysiaHandlerContext): Promise<Response> => {
+  const { text } = body as { text: string }; // Type assertion for body
   const trimmedText = text.trim();
   let userMessage: BackendChatMessage;
-  if (!chatData)
-    throw new NotFoundError(`Standalone chat not found in context.`);
+
+  if (!chatData) {
+    throw new NotFoundError(`Standalone chat not found for adding message.`);
+  }
+
   try {
     userMessage = messageRepository.addMessage(
       chatData.id,
       'user',
       trimmedText
-    ); // <-- Use messageRepository
-    const currentMessages = messageRepository.findMessagesByChatId(chatData.id); // <-- Use messageRepository
-    if (currentMessages.length === 0)
+    );
+    // Index user message into Elasticsearch
+    await indexDocument(esClient, MESSAGES_INDEX, String(userMessage.id), {
+      message_id: String(userMessage.id),
+      chat_id: userMessage.chatId,
+      session_id: null, // Standalone chats have no session_id
+      sender: userMessage.sender,
+      text: userMessage.text,
+      timestamp: userMessage.timestamp,
+      // For standalone chats, include chat_name and tags if available from chatData
+      chat_name: chatData.name ?? null,
+      tags: chatData.tags ?? null,
+      // client_name and session_name are null for standalone chats
+      client_name: null,
+      session_name: null,
+    });
+    console.log(
+      `[API ES] Indexed User message ${userMessage.id} for standalone chat ${chatData.id}.`
+    );
+
+    const currentMessages = messageRepository.findMessagesByChatId(chatData.id);
+    if (currentMessages.length === 0) {
       throw new InternalServerError(
-        `CRITICAL: Chat ${chatData.id} has no messages after adding one.`
+        `CRITICAL: Chat ${chatData.id} has no messages immediately after adding one.`
       );
+    }
 
-    const ollamaStream = await streamChatResponse(null, currentMessages); // Pass null for transcript
+    const ollamaStream = await streamChatResponse(null, currentMessages); // Pass null for transcript context
 
-    const headers = new Headers();
-    headers.set('Content-Type', 'text/event-stream; charset=utf-8');
-    headers.set('Cache-Control', 'no-cache');
-    headers.set('Connection', 'keep-alive');
+    const headers = new Headers({
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    });
     headers.set('X-User-Message-Id', String(userMessage.id));
 
     const passthrough = new TransformStream<Uint8Array, Uint8Array>();
@@ -156,7 +196,6 @@ export const addStandaloneChatMessage = async ({
 
     const writeSseEvent = async (data: object) => {
       try {
-        // Check if writer is already closed or closing before writing
         await writer.write(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
       } catch (e) {
         console.warn(
@@ -167,14 +206,12 @@ export const addStandaloneChatMessage = async ({
       }
     };
 
-    // --- Refined processStream ---
     const processStream = async () => {
       let fullAiText = '';
       let finalPromptTokens: number | undefined;
       let finalCompletionTokens: number | undefined;
       let ollamaStreamError: Error | null = null;
 
-      // Wrap the Ollama stream iteration in its own try/catch
       try {
         console.log(
           `[API ProcessStream ${chatData.id}] Starting Ollama stream processing...`
@@ -189,7 +226,7 @@ export const addStandaloneChatMessage = async ({
             finalPromptTokens = chunk.prompt_eval_count;
             finalCompletionTokens = chunk.eval_count;
             console.log(
-              `[API ProcessStream ${chatData.id}] Ollama stream 'done' signal received. Tokens: C=${finalCompletionTokens}, P=${finalPromptTokens}`
+              `[API ProcessStream ${chatData.id}] Ollama stream 'done'. Tokens: C=${finalCompletionTokens}, P=${finalPromptTokens}`
             );
             await writeSseEvent({
               done: true,
@@ -219,16 +256,37 @@ export const addStandaloneChatMessage = async ({
         console.log(
           `[API ProcessStream Finally ${chatData.id}] Cleaning up. Ollama stream errored: ${!!ollamaStreamError}`
         );
-        // --- Database Saving ---
         if (fullAiText.trim()) {
           try {
-            messageRepository.addMessage(
-              // <-- Use messageRepository
+            const aiMessage = messageRepository.addMessage(
               chatData.id,
               'ai',
               fullAiText.trim(),
               finalPromptTokens,
-              finalCompletionTokens // Pass potentially undefined tokens
+              finalCompletionTokens
+            );
+            // Index AI message into Elasticsearch
+            await indexDocument(
+              esClient,
+              MESSAGES_INDEX,
+              String(aiMessage.id),
+              {
+                message_id: String(aiMessage.id),
+                chat_id: aiMessage.chatId,
+                session_id: null,
+                sender: aiMessage.sender,
+                text: aiMessage.text,
+                timestamp: aiMessage.timestamp,
+                promptTokens: aiMessage.promptTokens,
+                completionTokens: aiMessage.completionTokens,
+                chat_name: chatData.name ?? null,
+                tags: chatData.tags ?? null,
+                client_name: null,
+                session_name: null,
+              }
+            );
+            console.log(
+              `[API ES] Indexed AI message ${aiMessage.id} for standalone chat ${chatData.id}.`
             );
             console.log(
               `[API ProcessStream Finally ${chatData.id}] Saved AI message (length: ${fullAiText.trim().length}) to DB.`
@@ -255,28 +313,22 @@ export const addStandaloneChatMessage = async ({
             `[API ProcessStream Finally ${chatData.id}] No AI text generated or saved.`
           );
         }
-        // --- Ensure Writer Closure ---
+
         if (ollamaStreamError) {
-          console.log(
-            `[API ProcessStream Finally ${chatData.id}] Aborting writer due to error.`
-          );
           await writer
             .abort(ollamaStreamError)
             .catch((e) =>
               console.warn(
-                `[API ProcessStream Finally ${chatData.id}] Error aborting writer (may be expected):`,
+                `[API ProcessStream Finally ${chatData.id}] Error aborting writer:`,
                 e
               )
             );
         } else {
-          console.log(
-            `[API ProcessStream Finally ${chatData.id}] Closing writer normally.`
-          );
           await writer
             .close()
             .catch((e) =>
               console.warn(
-                `[API ProcessStream Finally ${chatData.id}] Error closing writer (may be expected):`,
+                `[API ProcessStream Finally ${chatData.id}] Error closing writer:`,
                 e
               )
             );
@@ -286,9 +338,7 @@ export const addStandaloneChatMessage = async ({
         );
       }
     };
-    // --- End Refined processStream ---
 
-    // Run processStream in the background, don't await it here
     processStream().catch((err) => {
       console.error(
         `[API AddMsg ${chatData.id}] UNHANDLED error from background stream processing task:`,
@@ -303,11 +353,7 @@ export const addStandaloneChatMessage = async ({
       }
     });
 
-    // Return the readable side of the passthrough stream immediately
-    return new Response(passthrough.readable as ReadableStream<Uint8Array>, {
-      status: 200,
-      headers,
-    });
+    return new Response(passthrough.readable as any, { status: 200, headers });
   } catch (error) {
     console.error(
       `[API Error] addStandaloneChatMessage setup failed (Chat ID: ${chatData?.id}):`,
@@ -321,35 +367,43 @@ export const addStandaloneChatMessage = async ({
   }
 };
 
-// PATCH /api/chats/:chatId/messages/:messageId - Update message star status
 export const updateStandaloneChatMessageStarStatus = ({
   chatData,
   messageData,
   body,
   set,
-}: any): ApiChatMessageResponse => {
-  const { starred, starredName } = body;
+}: ElysiaHandlerContext): ApiChatMessageResponse => {
+  const { starred, starredName } = body as {
+    starred: boolean;
+    starredName?: string | null;
+  };
   if (typeof starred !== 'boolean')
     throw new BadRequestError("Missing or invalid 'starred' field (boolean).");
-  if (starred && typeof starredName !== 'string')
+  if (
+    starred &&
+    starredName !== undefined &&
+    starredName !== null &&
+    typeof starredName !== 'string'
+  ) {
     throw new BadRequestError(
-      "Missing or invalid 'starredName' field (string when starring)."
+      "If 'starredName' is provided when starring, it must be a string."
     );
-  if (!starred && starredName !== undefined)
-    console.warn(
-      "[API Star] 'starredName' provided but 'starred' is false. Name will be ignored/nulled."
-    );
+  }
+  if (!messageData)
+    throw new NotFoundError('Message context not found for star update.');
   if (messageData.sender !== 'user')
     throw new BadRequestError('Only user messages can be starred.');
+
   try {
     console.log(
-      `[API Star] Updating msg ${messageData.id} in standalone chat ${chatData.id} to starred=${starred}, name=${starredName}`
+      `[API Star] Updating msg ${messageData.id} in standalone chat ${chatData!.id} to starred=${starred}, name=${starredName}`
     );
+    const nameToSave = starred ? starredName || null : null;
     const updatedMessage = messageRepository.updateMessageStarStatus(
       messageData.id,
       starred,
-      starredName
-    ); // <-- Use messageRepository
+      nameToSave
+    );
     if (!updatedMessage)
       throw new NotFoundError(
         `Message ${messageData.id} not found during update.`
@@ -372,13 +426,15 @@ export const updateStandaloneChatMessageStarStatus = ({
   }
 };
 
-// PATCH /api/chats/:chatId/details - Edit chat name and tags
-export const editStandaloneChatDetails = ({
+export const editStandaloneChatDetails = async ({
   chatData,
   body,
   set,
-}: any): StandaloneChatMetadataResponse => {
-  const { name, tags } = body;
+}: ElysiaHandlerContext): Promise<StandaloneChatMetadataResponse> => {
+  const { name, tags } = body as {
+    name?: string | null;
+    tags?: string[] | null;
+  };
   const nameToSave =
     typeof name === 'string' && name.trim() !== '' ? name.trim() : null;
   const validatedTags =
@@ -389,38 +445,82 @@ export const editStandaloneChatDetails = ({
   if (validatedTags && validatedTags.length > 10) {
     throw new BadRequestError('Cannot save more than 10 tags.');
   }
-
-  // Sort tags alphabetically before saving
   const tagsToSave = validatedTags
     ? [...validatedTags].sort((a, b) => a.localeCompare(b))
     : null;
 
+  if (!chatData) {
+    throw new NotFoundError('Chat data context missing for edit.');
+  }
+
   try {
-    // Pass sorted tags to the repository
+    const originalChatName = chatData.name ?? null;
+    const originalChatTags = chatData.tags ?? null;
+
     const updatedChatMetadata = chatRepository.updateChatDetails(
       chatData.id,
       nameToSave,
       tagsToSave
     );
-    if (!updatedChatMetadata)
+    if (!updatedChatMetadata) {
       throw new NotFoundError(
         `Chat with ID ${chatData.id} not found during update.`
       );
+    }
+
+    // Update Elasticsearch documents for this chat if name or tags changed
+    const nameChanged = nameToSave !== originalChatName;
+    const tagsChanged =
+      JSON.stringify(tagsToSave) !==
+      JSON.stringify(
+        originalChatTags?.sort((a, b) => a.localeCompare(b)) ?? null
+      );
+
+    if (nameChanged || tagsChanged) {
+      console.log(
+        `[API ES Update] Standalone chat metadata changed for ${chatData.id}, re-indexing messages.`
+      );
+      const messages = messageRepository.findMessagesByChatId(chatData.id);
+      const updateOps = messages
+        .map((m) => [
+          { update: { _index: MESSAGES_INDEX, _id: String(m.id) } },
+          {
+            doc: {
+              chat_name: updatedChatMetadata.name,
+              tags: updatedChatMetadata.tags,
+            },
+          },
+        ])
+        .flat();
+
+      if (updateOps.length > 0) {
+        await esClient.bulk({ refresh: true, operations: updateOps });
+        console.log(
+          `[API ES Update] Updated ${messages.length} messages in ES for chat ${chatData.id}.`
+        );
+      }
+    }
+
     console.log(
       `[API] Updated details chat ${chatData.id}. Name:"${updatedChatMetadata.name || ''}", Tags:${JSON.stringify(updatedChatMetadata.tags)}`
     );
     set.status = 200;
-    // Construct response ensuring correct type (repo returns parsed+sorted tags)
     const response: StandaloneChatMetadataResponse = {
       id: updatedChatMetadata.id,
       sessionId: null,
       timestamp: updatedChatMetadata.timestamp,
       name: updatedChatMetadata.name ?? null,
-      tags: updatedChatMetadata.tags ?? null, // Use tags from repo response
+      tags: updatedChatMetadata.tags ?? null,
     };
     return response;
   } catch (error) {
     console.error(`[API Err] editStandaloneDetails ${chatData?.id}:`, error);
+    if (
+      (error as any).meta?.body?.error?.type ===
+      'version_conflict_engine_exception'
+    ) {
+      console.warn(`[API ES Update] Version conflict for chat ${chatData?.id}`);
+    }
     if (error instanceof ApiError) throw error;
     throw new InternalServerError(
       'Failed update standalone chat details',
@@ -429,18 +529,30 @@ export const editStandaloneChatDetails = ({
   }
 };
 
-// DELETE /api/chats/:chatId - Delete a standalone chat
-export const deleteStandaloneChat = ({
+export const deleteStandaloneChat = async ({
   chatData,
   set,
-}: any): { message: string } => {
+}: ElysiaHandlerContext): Promise<{ message: string }> => {
+  if (!chatData) {
+    throw new NotFoundError('Chat data context missing for delete.');
+  }
   try {
     const deleted = chatRepository.deleteChatById(chatData.id);
-    if (!deleted)
+    if (!deleted) {
       throw new NotFoundError(`Chat ${chatData.id} not found during deletion.`);
+    }
+
+    // Delete associated messages from Elasticsearch
+    await deleteByQuery(esClient, MESSAGES_INDEX, {
+      term: { chat_id: chatData.id },
+    });
+    console.log(
+      `[API ES] Deleted Elasticsearch messages for standalone chat ${chatData.id}.`
+    );
+
     console.log(`[API] Deleted standalone chat ${chatData.id}`);
     set.status = 200;
-    return { message: `Chat ${chatData.id} deleted successfully.` }; // Adjusted message
+    return { message: `Chat ${chatData.id} deleted successfully.` };
   } catch (error) {
     console.error(`[API Err] deleteStandaloneChat ${chatData?.id}:`, error);
     if (error instanceof ApiError) throw error;
