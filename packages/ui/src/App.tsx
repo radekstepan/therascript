@@ -56,19 +56,29 @@ const PageContentManager: React.FC = () => {
   }, [location, setCurrentPageAtom]);
 
   return (
-    <Routes>
-      <Route path="/" element={<LandingPage />} />
-      <Route path="/sessions/:sessionId" element={<SessionView />} />
-      <Route
-        path="/sessions/:sessionId/chats/:chatId"
-        element={<SessionView />}
-      />
-      <Route path="/chats/:chatId" element={<StandaloneChatView />} />
-      <Route path="/sessions-list" element={<SessionsPage />} />
-      <Route path="/chats-list" element={<StandaloneChatsPage />} />
-      <Route path="/settings" element={<SettingsPage />} />
-      <Route path="*" element={<Navigate replace to="/" />} />
-    </Routes>
+    // This container needs to fill the space given by <main>
+    <div
+      style={{
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        minHeight: 0,
+      }}
+    >
+      <Routes>
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/sessions/:sessionId" element={<SessionView />} />
+        <Route
+          path="/sessions/:sessionId/chats/:chatId"
+          element={<SessionView />}
+        />
+        <Route path="/chats/:chatId" element={<StandaloneChatView />} />
+        <Route path="/sessions-list" element={<SessionsPage />} />
+        <Route path="/chats-list" element={<StandaloneChatsPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
+        <Route path="*" element={<Navigate replace to="/" />} />
+      </Routes>
+    </div>
   );
 };
 
@@ -116,29 +126,36 @@ function App() {
         scaling="100%"
       >
         <GeneratedBackground />
-        <div className="flex flex-col min-h-screen">
+        {/* Root container ensures RadixTheme styles apply globally and takes full viewport height */}
+        <div className="flex flex-col h-screen">
+          {/* Main layout flex container: Sidebar + Content Area */}
           <div className="flex flex-grow overflow-hidden">
-            <PersistentSidebar />
+            {' '}
+            {/* Prevents this div from scrolling */}
+            <PersistentSidebar /> {/* Fixed width, managed internally */}
+            {/* Content area that grows and handles its own internal layout */}
             <div
               className={cn(
-                'flex flex-col flex-grow transition-all duration-300 ease-in-out',
+                'flex flex-col flex-grow transition-all duration-300 ease-in-out overflow-hidden', // Added overflow-hidden
                 isSidebarOpen ? 'ml-64' : 'ml-20'
               )}
             >
-              <TopToolbar />
+              <TopToolbar /> {/* App Header, fixed height */}
+              {/* Main content rendering area */}
               <main
-                className="flex-grow overflow-y-auto"
+                className="flex-grow flex flex-col overflow-hidden" // Ensures <main> fills space and manages overflow
                 id="main-content"
-                // Ensure the main content area itself is transparent so the GeneratedBackground shows
-                style={{ backgroundColor: 'transparent' }}
+                style={{ backgroundColor: 'transparent', minHeight: 0 }} // minHeight: 0 is key for flex children
               >
-                <PageContentManager />
+                <PageContentManager />{' '}
+                {/* Renders the current page, should fill <main> */}
               </main>
             </div>
           </div>
 
           <UploadModal isOpen={isModalOpen} />
 
+          {/* Toast (Notifications) */}
           <Toast.Root
             open={isToastVisible}
             onOpenChange={handleToastOpenChange}
@@ -159,7 +176,6 @@ function App() {
               </IconButton>
             </Toast.Close>
           </Toast.Root>
-
           <Toast.Viewport className="fixed bottom-0 right-0 flex flex-col p-6 gap-3 w-[390px] max-w-[100vw] m-0 list-none z-[2147483647] outline-none" />
         </div>
       </RadixTheme>

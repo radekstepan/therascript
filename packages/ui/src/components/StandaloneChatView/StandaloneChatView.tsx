@@ -3,7 +3,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Flex, Box, Text, Spinner } from '@radix-ui/themes'; // Removed Button and ArrowLeftIcon
+import { Flex, Box, Text, Spinner } from '@radix-ui/themes';
 import { ChatInterface } from '../SessionView/Chat/ChatInterface';
 import { SelectActiveModelModal } from '../SessionView/Modals/SelectActiveModelModal';
 import { StandaloneChatHeader } from './StandaloneChatHeader';
@@ -59,43 +59,38 @@ export function StandaloneChatView() {
   const currentActiveChatId = activeChatIdState;
 
   return (
-    <Flex flexGrow="1" style={{ height: '100vh', overflow: 'hidden' }}>
-      <Flex
-        direction="column"
-        flexGrow="1"
-        style={{ minWidth: 0, height: '100vh', overflow: 'hidden' }}
+    <Flex
+      direction="column"
+      style={{ height: '100%', overflow: 'hidden', minHeight: 0 }} // Fill parent height, minHeight:0 for flex context
+    >
+      <StandaloneChatHeader activeChatId={currentActiveChatId} />{' '}
+      {/* Fixed height child */}
+      <Box // This Box will contain ChatInterface and handle its growth
+        flexGrow="1" // Takes remaining vertical space
+        style={{
+          minHeight: 0, // Crucial for flex children that need to scroll internally
+          overflow: 'hidden', // Ensure this Box itself doesn't cause page scroll
+          padding: 'var(--space-3)', // Keep padding if desired for aesthetics
+          display: 'flex', // Make it a flex container for ChatInterface
+          flexDirection: 'column', // ChatInterface will be a column
+        }}
       >
-        {/* Top bar within the view - REMOVED the backlink and container */}
-        {/* The "All Chats" link is now part of PersistentSidebar */}
-
-        <StandaloneChatHeader activeChatId={currentActiveChatId} />
-
-        <Box
-          flexGrow="1"
-          style={{
-            minHeight: 0,
-            overflow: 'hidden',
-            padding: 'var(--space-3)',
-          }}
-        >
-          {currentActiveChatId ? (
-            <ChatInterface
-              activeChatId={currentActiveChatId}
-              isStandalone={true}
-              ollamaStatus={ollamaStatus}
-              isLoadingOllamaStatus={isLoadingOllamaStatus}
-              onOpenLlmModal={handleOpenConfigureLlmModal}
-            />
-          ) : (
-            <Flex align="center" justify="center" style={{ height: '100%' }}>
-              <Text color="gray" size="3">
-                Select a chat to view or start a new one.
-              </Text>
-            </Flex>
-          )}
-        </Box>
-      </Flex>
-
+        {currentActiveChatId ? (
+          <ChatInterface // ChatInterface should now be height: '100%' of this Box
+            activeChatId={currentActiveChatId}
+            isStandalone={true}
+            ollamaStatus={ollamaStatus}
+            isLoadingOllamaStatus={isLoadingOllamaStatus}
+            onOpenLlmModal={handleOpenConfigureLlmModal}
+          />
+        ) : (
+          <Flex align="center" justify="center" style={{ height: '100%' }}>
+            <Text color="gray" size="3">
+              Select a chat to view or start a new one.
+            </Text>
+          </Flex>
+        )}
+      </Box>
       <SelectActiveModelModal
         isOpen={isSelectModelModalOpen}
         onOpenChange={setIsSelectModelModalOpen}

@@ -41,17 +41,8 @@ export function SessionContent({
   const [activeTab, setActiveTab] = useState<
     'chats' | 'chat' | 'transcription'
   >(activeChatId === null ? 'chats' : 'chat');
-  const [chatScrollPosition, setChatScrollPosition] = useState(0);
-  const [transcriptScrollPosition, setTranscriptScrollPosition] = useState(0);
 
-  const handleChatScroll = useCallback(
-    (scrollTop: number) => setChatScrollPosition(scrollTop),
-    []
-  );
-  const handleTranscriptScroll = useCallback(
-    (scrollTop: number) => setTranscriptScrollPosition(scrollTop),
-    []
-  );
+  // Removed scroll position state as scrolling is now fully managed by child components
 
   const activeChatIdRef = React.useRef(activeChatId);
   React.useEffect(() => {
@@ -65,26 +56,28 @@ export function SessionContent({
 
   return (
     <Flex direction="column" style={{ height: '100%', minHeight: 0 }}>
+      {' '}
+      {/* Ensure this fills parent */}
       {/* --- Side-by-side Layout (Large Screens) --- */}
       <Flex
-        className="hidden lg:flex flex-grow"
+        className="hidden lg:flex flex-grow" // flex-grow to take available space
         gap="4"
         px={{ initial: '4', md: '6' }}
         pt="3"
         pb="3"
-        style={{ minHeight: 0 }}
+        style={{ minHeight: 0 }} // Crucial for flex children
       >
-        {/* Chat Panel */}
+        {/* Chat Panel - needs to be flex column to allow ChatInterface to fill */}
         <Flex
           direction="column"
-          className="w-1/2 h-full"
-          style={{ minHeight: 0 }}
+          className="w-1/2 h-full" // h-full works because parent Flex has defined height context
+          style={{ minHeight: 0 }} // Crucial for flex children
         >
           {activeChatId !== null ? (
             <ChatInterface
-              session={session} // Pass session
+              session={session}
               activeChatId={activeChatId}
-              isStandalone={false} // Set to false
+              isStandalone={false}
               isLoadingSessionMeta={isLoadingSessionMeta}
               ollamaStatus={ollamaStatus}
               isLoadingOllamaStatus={isLoadingOllamaStatus}
@@ -112,11 +105,11 @@ export function SessionContent({
           )}
         </Flex>
 
-        {/* Transcription Panel */}
+        {/* Transcription Panel - needs to be flex column */}
         <Flex
           direction="column"
-          className="w-1/2 h-full"
-          style={{ minHeight: 0 }}
+          className="w-1/2 h-full" // h-full works
+          style={{ minHeight: 0 }} // Crucial for flex children
         >
           <Transcription
             session={session}
@@ -127,108 +120,141 @@ export function SessionContent({
           />
         </Flex>
       </Flex>
-
       {/* --- Tabbed Layout (Small Screens) --- */}
       <Flex
-        className="flex lg:hidden flex-grow flex-col"
-        style={{ minHeight: 0 }}
+        className="flex lg:hidden flex-grow flex-col" // flex-grow to take available space
+        style={{ minHeight: 0 }} // Crucial
       >
         <Tabs.Root
           value={activeTab}
           onValueChange={(value) => {
             setActiveTab(value as 'chats' | 'chat' | 'transcription');
           }}
-          className="flex flex-col flex-grow"
-          style={{ minHeight: 0 }}
+          // className="flex flex-col flex-grow"
+          // style={{ minHeight: 0 }}
+          // Make Tabs.Root itself a flex container that fills height
+          className="flex flex-col h-full"
         >
-          <Box px={{ initial: '4', md: '6' }} pt="2">
+          <Box px={{ initial: '4', md: '6' }} pt="2" flexShrink="0">
             {' '}
+            {/* TabList is fixed height */}
             <Tabs.List>
-              {' '}
-              <Tabs.Trigger value="chats">Chats</Tabs.Trigger>{' '}
+              <Tabs.Trigger value="chats">Chats</Tabs.Trigger>
               <Tabs.Trigger
                 value="chat"
                 disabled={!hasChats && activeChatId === null}
               >
                 Chat
-              </Tabs.Trigger>{' '}
-              <Tabs.Trigger value="transcription">Transcript</Tabs.Trigger>{' '}
-            </Tabs.List>{' '}
+              </Tabs.Trigger>
+              <Tabs.Trigger value="transcription">Transcript</Tabs.Trigger>
+            </Tabs.List>
           </Box>
-          <ScrollArea
-            type="auto"
-            scrollbars="vertical"
-            style={{ flexGrow: 1, minHeight: 0 }}
+
+          {/* Each Tabs.Content needs to manage its own height and allow children to fill it */}
+          {/* Removing the outer ScrollArea here */}
+          <Tabs.Content
+            value="chats"
+            className="flex-grow overflow-hidden" // flex-grow to take space, overflow-hidden
+            style={{
+              outline: 'none',
+              minHeight: 0,
+              display: activeTab === 'chats' ? 'flex' : 'none',
+              flexDirection: 'column',
+            }} // Use display:flex for active tab
           >
             <Box
               px={{ initial: '4', md: '6' }}
               pb={{ initial: '4', md: '6' }}
               pt="3"
-              className="h-full"
+              style={{
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+              }}
             >
-              <Tabs.Content
-                value="chats"
-                className="h-full"
-                style={{ outline: 'none' }}
-              >
-                {' '}
-                <SessionSidebar
-                  session={session}
-                  isLoading={isLoadingSessionMeta}
-                  error={sessionMetaError}
-                  hideHeader={true}
-                />{' '}
-              </Tabs.Content>
-              <Tabs.Content
-                value="chat"
-                className="h-full"
-                style={{ outline: 'none' }}
-              >
-                {activeChatId !== null ? (
-                  <ChatInterface
-                    session={session} // Pass session
-                    activeChatId={activeChatId}
-                    isStandalone={false} // Set to false
-                    isLoadingSessionMeta={isLoadingSessionMeta}
-                    ollamaStatus={ollamaStatus}
-                    isLoadingOllamaStatus={isLoadingOllamaStatus}
-                    onOpenLlmModal={onOpenLlmModal}
-                    isTabActive={activeTab === 'chat'}
-                    initialScrollTop={chatScrollPosition}
-                    onScrollUpdate={handleChatScroll}
-                  />
-                ) : hasChats ? (
-                  <Flex align="center" justify="center" className="h-full">
-                    {' '}
-                    <Text color="gray" align="center">
-                      Select a chat from the "Chats" tab.
-                    </Text>{' '}
-                  </Flex>
-                ) : (
-                  <StartChatPrompt
-                    onStartFirstChat={onStartFirstChat}
-                    isLoading={isLoadingSessionMeta}
-                  />
-                )}
-              </Tabs.Content>
-              <Tabs.Content
-                value="transcription"
-                className="h-full"
-                style={{ outline: 'none' }}
-              >
-                <Transcription
-                  session={session}
-                  transcriptContent={transcriptContent}
-                  onEditDetailsClick={onEditDetailsClick}
-                  isLoadingTranscript={isLoadingTranscript}
-                  transcriptError={transcriptError}
-                  isTabActive={activeTab === 'transcription'}
-                  initialScrollTop={transcriptScrollPosition}
-                  onScrollUpdate={handleTranscriptScroll}
-                />
-              </Tabs.Content>
+              <SessionSidebar // SessionSidebar needs to be adaptable to this flex context
+                session={session}
+                isLoading={isLoadingSessionMeta}
+                error={sessionMetaError}
+                hideHeader={true}
+              />
             </Box>
-          </ScrollArea>
+          </Tabs.Content>
+          <Tabs.Content
+            value="chat"
+            className="flex-grow overflow-hidden" // flex-grow to take space, overflow-hidden
+            style={{
+              outline: 'none',
+              minHeight: 0,
+              display: activeTab === 'chat' ? 'flex' : 'none',
+              flexDirection: 'column',
+            }}
+          >
+            <Box
+              px={{ initial: '4', md: '6' }}
+              pb={{ initial: '4', md: '6' }}
+              pt="3"
+              style={{
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+              }}
+            >
+              {activeChatId !== null ? (
+                <ChatInterface
+                  session={session}
+                  activeChatId={activeChatId}
+                  isStandalone={false}
+                  isLoadingSessionMeta={isLoadingSessionMeta}
+                  ollamaStatus={ollamaStatus}
+                  isLoadingOllamaStatus={isLoadingOllamaStatus}
+                  onOpenLlmModal={onOpenLlmModal}
+                  isTabActive={activeTab === 'chat'}
+                />
+              ) : hasChats ? (
+                <Flex align="center" justify="center" className="h-full">
+                  <Text color="gray" align="center">
+                    Select a chat from the "Chats" tab.
+                  </Text>
+                </Flex>
+              ) : (
+                <StartChatPrompt
+                  onStartFirstChat={onStartFirstChat}
+                  isLoading={isLoadingSessionMeta}
+                />
+              )}
+            </Box>
+          </Tabs.Content>
+          <Tabs.Content
+            value="transcription"
+            className="flex-grow overflow-hidden" // flex-grow to take space, overflow-hidden
+            style={{
+              outline: 'none',
+              minHeight: 0,
+              display: activeTab === 'transcription' ? 'flex' : 'none',
+              flexDirection: 'column',
+            }}
+          >
+            <Box
+              px={{ initial: '4', md: '6' }}
+              pb={{ initial: '4', md: '6' }}
+              pt="3"
+              style={{
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+              }}
+            >
+              <Transcription
+                session={session}
+                transcriptContent={transcriptContent}
+                onEditDetailsClick={onEditDetailsClick}
+                isLoadingTranscript={isLoadingTranscript}
+                transcriptError={transcriptError}
+                isTabActive={activeTab === 'transcription'}
+              />
+            </Box>
+          </Tabs.Content>
         </Tabs.Root>
       </Flex>
     </Flex>
