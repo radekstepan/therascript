@@ -9,6 +9,7 @@ import type { DockerContainerStatus } from '../types/index.js'; // Type definiti
 const PROJECT_CONTAINER_NAMES = [
   'ollama_server_managed', // From packages/ollama/docker-compose.yml
   'therascript_whisper_service', // From the root docker-compose.yml
+  'therascript_elasticsearch_service', // From the root docker-compose.yml - ADDED
 ];
 // --- End Project Specific Containers ---
 
