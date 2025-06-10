@@ -27,7 +27,7 @@ import {
   fetchSessions,
   deleteSession as deleteSessionApi,
   fetchStandaloneChats,
-  deleteStandaloneChat as deleteStandaloneChatApi, // <-- Import deleteStandaloneChat
+  deleteStandaloneChat as deleteStandaloneChatApi,
   searchMessages,
 } from '../../api/api';
 import {
@@ -40,7 +40,7 @@ import {
   setStandaloneChatSortAtom,
   StandaloneChatSortCriteria,
   toastMessageAtom,
-  activeChatIdAtom, // Import activeChatIdAtom
+  activeChatIdAtom,
 } from '../../store';
 import type {
   Session,
@@ -56,8 +56,8 @@ export function LandingPage() {
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const activeSearchQuery = searchParams.get('q') || '';
-  const navigate = useNavigate(); // For navigation after delete
-  const activeChatId = useAtomValue(activeChatIdAtom); // Get active chat ID
+  const navigate = useNavigate();
+  const activeChatId = useAtomValue(activeChatIdAtom);
 
   const [clientFilter, setClientFilter] = useState('');
 
@@ -83,9 +83,9 @@ export function LandingPage() {
   const [chatToEdit, setChatToEdit] = useState<StandaloneChatListItem | null>(
     null
   );
-  const [isDeleteChatConfirmOpen, setIsDeleteChatConfirmOpen] = useState(false); // <-- New state for chat delete confirm
+  const [isDeleteChatConfirmOpen, setIsDeleteChatConfirmOpen] = useState(false);
   const [chatToDelete, setChatToDelete] =
-    useState<StandaloneChatListItem | null>(null); // <-- New state for chat to delete
+    useState<StandaloneChatListItem | null>(null);
 
   // Fetch sessions
   const {
@@ -149,7 +149,6 @@ export function LandingPage() {
     }
   );
 
-  // --- Delete Chat Mutation ---
   const deleteChatMutation = useMutation<{ message: string }, Error, number>({
     mutationFn: deleteStandaloneChatApi,
     onSuccess: (data, deletedId) => {
@@ -158,9 +157,8 @@ export function LandingPage() {
       queryClient.removeQueries({
         queryKey: ['standaloneChat', deletedId],
       });
-      // If the deleted chat was the active one, navigate away
       if (activeChatId === deletedId) {
-        navigate('/'); // Navigate to homepage or another suitable route
+        navigate('/');
       }
     },
     onError: (e, id) => {
@@ -171,7 +169,6 @@ export function LandingPage() {
       setChatToDelete(null);
     },
   });
-  // --- End Delete Chat Mutation ---
 
   const filteredSessions = useMemo(() => {
     if (!sessions) return [];
@@ -319,8 +316,6 @@ export function LandingPage() {
     setChatToEdit(chat);
     setIsEditChatModalOpen(true);
   };
-
-  // --- New handlers for chat deletion ---
   const handleDeleteChatRequest = (chat: StandaloneChatListItem) => {
     setChatToDelete(chat);
     setIsDeleteChatConfirmOpen(true);
@@ -330,7 +325,6 @@ export function LandingPage() {
       deleteChatMutation.mutate(chatToDelete.id);
     }
   };
-  // --- End new handlers ---
 
   const isLoadingAnyData =
     isLoadingSessions ||
@@ -395,13 +389,17 @@ export function LandingPage() {
           'px-4 md:px-6 lg:px-8'
         )}
       >
-        <Box mb="4">
-          <FilterControls
-            sessions={sessions}
-            clientFilter={clientFilter}
-            setClientFilter={setClientFilter}
-          />
-        </Box>
+        {/* --- Conditionally render FilterControls --- */}
+        {showSearchResultsView && (
+          <Box mb="4">
+            <FilterControls
+              sessions={sessions}
+              clientFilter={clientFilter}
+              setClientFilter={setClientFilter}
+            />
+          </Box>
+        )}
+        {/* --- End Conditional render --- */}
 
         {showSearchResultsView ? (
           <>
@@ -474,7 +472,7 @@ export function LandingPage() {
                     sortDirection={currentStandaloneChatSortDirection}
                     onSort={handleStandaloneChatSort}
                     onEditChatRequest={handleEditChatRequest}
-                    onDeleteChatRequest={handleDeleteChatRequest} // <-- Pass new handler
+                    onDeleteChatRequest={handleDeleteChatRequest}
                   />
                 ) : (
                   <Flex flexGrow="1" align="center" justify="center" p="6">
@@ -590,7 +588,6 @@ export function LandingPage() {
         onOpenChange={setIsEditChatModalOpen}
         chat={chatToEdit}
       />
-      {/* --- Alert Dialog for Delete Chat --- */}
       <AlertDialog.Root
         open={isDeleteChatConfirmOpen}
         onOpenChange={setIsDeleteChatConfirmOpen}
@@ -632,7 +629,6 @@ export function LandingPage() {
           </Flex>
         </AlertDialog.Content>
       </AlertDialog.Root>
-      {/* --- End Alert Dialog for Delete Chat --- */}
     </>
   );
 }
