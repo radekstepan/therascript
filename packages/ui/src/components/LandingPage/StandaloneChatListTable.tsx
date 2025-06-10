@@ -5,7 +5,7 @@ import {
   ChatBubbleIcon,
   DotsHorizontalIcon,
   Pencil1Icon,
-  // TrashIcon removed - delete action moved to sidebar
+  TrashIcon, // <-- Import TrashIcon
   ChevronUpIcon,
   ChevronDownIcon,
 } from '@radix-ui/react-icons';
@@ -24,7 +24,7 @@ import { formatTimestamp } from '../../helpers';
 interface StandaloneChatListTableProps {
   chats: StandaloneChatListItem[];
   onEditChatRequest: (chat: StandaloneChatListItem) => void;
-  // onDeleteChatRequest prop removed
+  onDeleteChatRequest: (chat: StandaloneChatListItem) => void; // <-- New prop
   activeChatId?: number | null;
   sortCriteria: StandaloneChatSortCriteria;
   sortDirection: SortDirection;
@@ -36,7 +36,7 @@ type AriaSort = 'none' | 'ascending' | 'descending' | 'other' | undefined;
 export function StandaloneChatListTable({
   chats,
   onEditChatRequest,
-  // onDeleteChatRequest removed from props destructuring
+  onDeleteChatRequest, // <-- Destructure new prop
   sortCriteria,
   sortDirection,
   onSort,
@@ -235,7 +235,16 @@ export function StandaloneChatListTable({
                       <Pencil1Icon width="14" height="14" className="mr-2" />{' '}
                       Edit Details
                     </DropdownMenu.Item>
-                    {/* Delete Option Removed */}
+                    {/* --- ADDED DELETE OPTION --- */}
+                    <DropdownMenu.Separator />
+                    <DropdownMenu.Item
+                      color="red"
+                      onSelect={() => onDeleteChatRequest(chat)}
+                    >
+                      <TrashIcon width="14" height="14" className="mr-2" />{' '}
+                      Delete Chat
+                    </DropdownMenu.Item>
+                    {/* --- END ADDED DELETE OPTION --- */}
                   </DropdownMenu.Content>
                 </DropdownMenu.Root>
               </Table.Cell>

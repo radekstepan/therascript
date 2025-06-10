@@ -1,7 +1,7 @@
 // packages/ui/src/components/StandaloneChatsPage.tsx
 import React, { useMemo, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'; // Added useMutation, useQueryClient
 import {
   Box,
   Heading,
@@ -10,29 +10,46 @@ import {
   Spinner,
   Card,
   Button,
+  AlertDialog, // Added AlertDialog
 } from '@radix-ui/themes';
+import { TrashIcon } from '@radix-ui/react-icons'; // Added TrashIcon
 import { StandaloneChatListTable } from './LandingPage/StandaloneChatListTable';
 import { EditStandaloneChatModal } from './StandaloneChatView/EditStandaloneChatModal';
-import { fetchStandaloneChats } from '../api/api';
+import {
+  fetchStandaloneChats,
+  deleteStandaloneChat as deleteStandaloneChatApi, // Import delete API
+} from '../api/api';
 import {
   standaloneChatSortCriteriaAtom,
   standaloneChatSortDirectionAtom,
   setStandaloneChatSortAtom,
   StandaloneChatSortCriteria,
+  toastMessageAtom, // Added toastMessageAtom
+  activeChatIdAtom, // Added activeChatIdAtom
 } from '../store';
 import type { StandaloneChatListItem } from '../types';
 import { formatTimestamp } from '../helpers';
-import { cn } from '../utils'; // Corrected import path
+import { cn } from '../utils';
+import { useNavigate } from 'react-router-dom'; // Added useNavigate
 
 export function StandaloneChatsPage() {
   const currentSortCriteria = useAtomValue(standaloneChatSortCriteriaAtom);
   const currentSortDirection = useAtomValue(standaloneChatSortDirectionAtom);
   const setSort = useSetAtom(setStandaloneChatSortAtom);
+  const setToast = useSetAtom(toastMessageAtom); // Added setToast
+  const queryClient = useQueryClient(); // Added queryClient
+  const navigate = useNavigate(); // Added navigate
+  const activeChatId = useAtomValue(activeChatIdAtom); // Added activeChatId
 
   const [isEditChatModalOpen, setIsEditChatModalOpen] = useState(false);
   const [chatToEdit, setChatToEdit] = useState<StandaloneChatListItem | null>(
     null
   );
+  // --- State for Delete Chat Confirmation ---
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [chatToDelete, setChatToDelete] =
+    useState<StandaloneChatListItem | null>(null);
+  // --- End State for Delete Chat Confirmation ---
 
   const {
     data: standaloneChats,
@@ -43,6 +60,29 @@ export function StandaloneChatsPage() {
     queryKey: ['standaloneChats'],
     queryFn: fetchStandaloneChats,
   });
+
+  // --- Delete Chat Mutation ---
+  const deleteChatMutation = useMutation<{ message: string }, Error, number>({
+    mutationFn: deleteStandaloneChatApi,
+    onSuccess: (data, deletedId) => {
+      setToast(data.message || `Chat ${deletedId} deleted.`);
+      queryClient.invalidateQueries({ queryKey: ['standaloneChats'] });
+      queryClient.removeQueries({
+        queryKey: ['standaloneChat', deletedId],
+      });
+      if (activeChatId === deletedId) {
+        navigate('/');
+      }
+    },
+    onError: (e, id) => {
+      setToast(`Error deleting chat ${id}: ${e.message}`);
+    },
+    onSettled: () => {
+      setIsDeleteConfirmOpen(false);
+      setChatToDelete(null);
+    },
+  });
+  // --- End Delete Chat Mutation ---
 
   const sortedChats = useMemo(() => {
     if (!standaloneChats) return [];
@@ -93,6 +133,21 @@ export function StandaloneChatsPage() {
     setChatToEdit(chat);
     setIsEditChatModalOpen(true);
   };
+
+  // --- Handler for Delete Chat Request ---
+  const handleDeleteChatRequest = (chat: StandaloneChatListItem) => {
+    setChatToDelete(chat);
+    setIsDeleteConfirmOpen(true);
+  };
+  // --- End Handler for Delete Chat Request ---
+
+  // --- Handler for Confirming Delete ---
+  const handleConfirmDeleteChat = () => {
+    if (chatToDelete) {
+      deleteChatMutation.mutate(chatToDelete.id);
+    }
+  };
+  // --- End Handler for Confirming Delete ---
 
   if (isLoading) {
     return (
@@ -147,6 +202,7 @@ export function StandaloneChatsPage() {
                 sortDirection={currentSortDirection}
                 onSort={(criteria) => setSort(criteria)}
                 onEditChatRequest={handleEditChatRequest}
+                onDeleteChatRequest={handleDeleteChatRequest} // <-- Pass delete handler
               />
             </Box>
           </Card>
@@ -167,6 +223,49 @@ export function StandaloneChatsPage() {
         onOpenChange={setIsEditChatModalOpen}
         chat={chatToEdit}
       />
+      {/* --- Alert Dialog for Delete Chat Confirmation --- */}
+      <AlertDialog.Root
+        open={isDeleteConfirmOpen}
+        onOpenChange={setIsDeleteConfirmOpen}
+      >
+        <AlertDialog.Content style={{ maxWidth: 450 }}>
+          <AlertDialog.Title>Delete Chat</AlertDialog.Title>
+          <AlertDialog.Description size="2">
+            Are you sure you want to permanently delete the chat "
+            <Text weight="bold">
+              {chatToDelete?.name ||
+                `Chat (${formatTimestamp(chatToDelete?.timestamp || 0)})`}
+            </Text>
+            "? This action cannot be undone.
+          </AlertDialog.Description>
+          <Flex gap="3" mt="4" justify="end">
+            <AlertDialog.Cancel>
+              <Button
+                variant="soft"
+                color="gray"
+                disabled={deleteChatMutation.isPending}
+              >
+                Cancel
+              </Button>
+            </AlertDialog.Cancel>
+            <AlertDialog.Action>
+              <Button
+                color="red"
+                onClick={handleConfirmDeleteChat}
+                disabled={deleteChatMutation.isPending}
+              >
+                {deleteChatMutation.isPending ? (
+                  <Spinner size="1" />
+                ) : (
+                  <TrashIcon />
+                )}
+                <Text ml="1">Delete Chat</Text>
+              </Button>
+            </AlertDialog.Action>
+          </Flex>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
+      {/* --- End Alert Dialog --- */}
     </>
   );
 }

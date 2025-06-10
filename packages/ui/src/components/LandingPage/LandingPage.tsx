@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom'; // Added useNavigate
 import { useAtomValue, useSetAtom } from 'jotai';
 import {
   CounterClockwiseClockIcon,
@@ -27,6 +27,7 @@ import {
   fetchSessions,
   deleteSession as deleteSessionApi,
   fetchStandaloneChats,
+  deleteStandaloneChat as deleteStandaloneChatApi, // <-- Import deleteStandaloneChat
   searchMessages,
 } from '../../api/api';
 import {
@@ -39,6 +40,7 @@ import {
   setStandaloneChatSortAtom,
   StandaloneChatSortCriteria,
   toastMessageAtom,
+  activeChatIdAtom, // Import activeChatIdAtom
 } from '../../store';
 import type {
   Session,
@@ -54,11 +56,10 @@ export function LandingPage() {
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const activeSearchQuery = searchParams.get('q') || '';
+  const navigate = useNavigate(); // For navigation after delete
+  const activeChatId = useAtomValue(activeChatIdAtom); // Get active chat ID
 
   const [clientFilter, setClientFilter] = useState('');
-  // Removed state for tags
-  // const [filterTags, setFilterTags] = useState<string[]>([]);
-  // const [newFilterTagInput, setNewFilterTagInput] = useState('');
 
   // Session states
   const currentSessionSortCriteria = useAtomValue(sessionSortCriteriaAtom);
@@ -66,7 +67,8 @@ export function LandingPage() {
   const setSessionSort = useSetAtom(setSessionSortAtom);
   const [isEditingModalOpen, setIsEditingModalOpen] = useState(false);
   const [sessionToEdit, setSessionToEdit] = useState<Session | null>(null);
-  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [isDeleteSessionConfirmOpen, setIsDeleteSessionConfirmOpen] =
+    useState(false);
   const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null);
 
   // Standalone Chat states
@@ -81,6 +83,9 @@ export function LandingPage() {
   const [chatToEdit, setChatToEdit] = useState<StandaloneChatListItem | null>(
     null
   );
+  const [isDeleteChatConfirmOpen, setIsDeleteChatConfirmOpen] = useState(false); // <-- New state for chat delete confirm
+  const [chatToDelete, setChatToDelete] =
+    useState<StandaloneChatListItem | null>(null); // <-- New state for chat to delete
 
   // Fetch sessions
   const {
@@ -104,19 +109,17 @@ export function LandingPage() {
     queryFn: fetchStandaloneChats,
   });
 
-  // Fetch search results (now using ES backend)
+  // Fetch search results
   const {
     data: searchResultsData,
     isLoading: isLoadingSearch,
     error: searchError,
     isFetching: isFetchingSearch,
   } = useQuery<SearchApiResponse, Error>({
-    // Removed filterTags from queryKey
     queryKey: ['searchMessages', activeSearchQuery, clientFilter],
     queryFn: () => {
       if (!activeSearchQuery)
         return Promise.resolve({ query: '', results: [], total: 0 });
-      // Removed filterTags from searchMessages call
       return searchMessages(
         activeSearchQuery,
         50,
@@ -140,11 +143,35 @@ export function LandingPage() {
         setToast(`Error deleting session ${id}: ${e.message}`);
       },
       onSettled: () => {
-        setIsDeleteConfirmOpen(false);
+        setIsDeleteSessionConfirmOpen(false);
         setSessionToDelete(null);
       },
     }
   );
+
+  // --- Delete Chat Mutation ---
+  const deleteChatMutation = useMutation<{ message: string }, Error, number>({
+    mutationFn: deleteStandaloneChatApi,
+    onSuccess: (data, deletedId) => {
+      setToast(data.message || `Chat ${deletedId} deleted.`);
+      queryClient.invalidateQueries({ queryKey: ['standaloneChats'] });
+      queryClient.removeQueries({
+        queryKey: ['standaloneChat', deletedId],
+      });
+      // If the deleted chat was the active one, navigate away
+      if (activeChatId === deletedId) {
+        navigate('/'); // Navigate to homepage or another suitable route
+      }
+    },
+    onError: (e, id) => {
+      setToast(`Error deleting chat ${id}: ${e.message}`);
+    },
+    onSettled: () => {
+      setIsDeleteChatConfirmOpen(false);
+      setChatToDelete(null);
+    },
+  });
+  // --- End Delete Chat Mutation ---
 
   const filteredSessions = useMemo(() => {
     if (!sessions) return [];
@@ -159,17 +186,14 @@ export function LandingPage() {
   const filteredStandaloneChats = useMemo(() => {
     if (!standaloneChats) return [];
     if (activeSearchQuery) return standaloneChats;
-    // Tag filtering logic removed for standalone chats in this context as well
     return standaloneChats;
   }, [standaloneChats, activeSearchQuery]);
 
-  // Sorting logic (remains the same for session and standalone chats)
   const sortedSessions = useMemo(() => {
     if (!filteredSessions) return [];
     const criteria = currentSessionSortCriteria;
     const direction = currentSessionSortDirection;
     const getString = (value: string | null | undefined): string => value ?? '';
-    // Keep existing sort logic
     return [...filteredSessions].sort((a, b) => {
       let compareResult = 0;
       try {
@@ -204,7 +228,7 @@ export function LandingPage() {
             );
             break;
           case 'date':
-            compareResult = getString(b.date).localeCompare(getString(a.date)); // Date default descending (b vs a)
+            compareResult = getString(b.date).localeCompare(getString(a.date));
             break;
           case 'id':
             compareResult = (a.id ?? 0) - (b.id ?? 0);
@@ -216,7 +240,7 @@ export function LandingPage() {
         return 0;
       }
       if (direction === 'desc' && criteria !== 'date') compareResult *= -1;
-      else if (direction === 'asc' && criteria === 'date') compareResult *= -1; // Reverse for date if asc
+      else if (direction === 'asc' && criteria === 'date') compareResult *= -1;
       return compareResult;
     });
   }, [
@@ -230,7 +254,6 @@ export function LandingPage() {
     const criteria = currentStandaloneChatSortCriteria;
     const direction = currentStandaloneChatSortDirection;
     const getString = (value: string | null | undefined): string => value ?? '';
-    // Removed getTagsString as tag filtering is removed
     return [...filteredStandaloneChats].sort((a, b) => {
       let compareResult = 0;
       try {
@@ -248,7 +271,7 @@ export function LandingPage() {
           case 'date':
             compareResult = b.timestamp - a.timestamp;
             break;
-          case 'tags': // Keep for sorting, but filtering is gone
+          case 'tags':
             const tagsA = (a.tags ?? []).join(', ');
             const tagsB = (b.tags ?? []).join(', ');
             compareResult = tagsA.localeCompare(tagsB, undefined, {
@@ -287,7 +310,7 @@ export function LandingPage() {
   };
   const handleDeleteSessionRequest = (session: Session) => {
     setSessionToDelete(session);
-    setIsDeleteConfirmOpen(true);
+    setIsDeleteSessionConfirmOpen(true);
   };
   const handleConfirmDeleteSession = () => {
     if (sessionToDelete) deleteSessionMutation.mutate(sessionToDelete.id);
@@ -297,7 +320,17 @@ export function LandingPage() {
     setIsEditChatModalOpen(true);
   };
 
-  // Removed tag handlers: handleAddFilterTag, handleRemoveFilterTag, handleFilterTagInputKeyDown
+  // --- New handlers for chat deletion ---
+  const handleDeleteChatRequest = (chat: StandaloneChatListItem) => {
+    setChatToDelete(chat);
+    setIsDeleteChatConfirmOpen(true);
+  };
+  const handleConfirmDeleteChat = () => {
+    if (chatToDelete) {
+      deleteChatMutation.mutate(chatToDelete.id);
+    }
+  };
+  // --- End new handlers ---
 
   const isLoadingAnyData =
     isLoadingSessions ||
@@ -367,7 +400,6 @@ export function LandingPage() {
             sessions={sessions}
             clientFilter={clientFilter}
             setClientFilter={setClientFilter}
-            // Removed tag related props
           />
         </Box>
 
@@ -442,6 +474,7 @@ export function LandingPage() {
                     sortDirection={currentStandaloneChatSortDirection}
                     onSort={handleStandaloneChatSort}
                     onEditChatRequest={handleEditChatRequest}
+                    onDeleteChatRequest={handleDeleteChatRequest} // <-- Pass new handler
                   />
                 ) : (
                   <Flex flexGrow="1" align="center" justify="center" p="6">
@@ -510,8 +543,8 @@ export function LandingPage() {
         onSaveSuccess={handleEditSaveSuccess}
       />
       <AlertDialog.Root
-        open={isDeleteConfirmOpen}
-        onOpenChange={setIsDeleteConfirmOpen}
+        open={isDeleteSessionConfirmOpen}
+        onOpenChange={setIsDeleteSessionConfirmOpen}
       >
         <AlertDialog.Content style={{ maxWidth: 450 }}>
           <AlertDialog.Title>Delete Session</AlertDialog.Title>
@@ -557,6 +590,49 @@ export function LandingPage() {
         onOpenChange={setIsEditChatModalOpen}
         chat={chatToEdit}
       />
+      {/* --- Alert Dialog for Delete Chat --- */}
+      <AlertDialog.Root
+        open={isDeleteChatConfirmOpen}
+        onOpenChange={setIsDeleteChatConfirmOpen}
+      >
+        <AlertDialog.Content style={{ maxWidth: 450 }}>
+          <AlertDialog.Title>Delete Chat</AlertDialog.Title>
+          <AlertDialog.Description size="2">
+            Are you sure you want to permanently delete the chat "
+            <Text weight="bold">
+              {chatToDelete?.name ||
+                `Chat (${formatTimestamp(chatToDelete?.timestamp || 0)})`}
+            </Text>
+            "? This action cannot be undone.
+          </AlertDialog.Description>
+          <Flex gap="3" mt="4" justify="end">
+            <AlertDialog.Cancel>
+              <Button
+                variant="soft"
+                color="gray"
+                disabled={deleteChatMutation.isPending}
+              >
+                Cancel
+              </Button>
+            </AlertDialog.Cancel>
+            <AlertDialog.Action>
+              <Button
+                color="red"
+                onClick={handleConfirmDeleteChat}
+                disabled={deleteChatMutation.isPending}
+              >
+                {deleteChatMutation.isPending ? (
+                  <Spinner size="1" />
+                ) : (
+                  <TrashIcon />
+                )}
+                <Text ml="1">Delete Chat</Text>
+              </Button>
+            </AlertDialog.Action>
+          </Flex>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
+      {/* --- End Alert Dialog for Delete Chat --- */}
     </>
   );
 }
