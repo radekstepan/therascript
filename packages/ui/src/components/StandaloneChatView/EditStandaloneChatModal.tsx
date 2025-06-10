@@ -10,7 +10,7 @@ import {
 } from '@radix-ui/themes';
 import { PlusIcon, Cross2Icon } from '@radix-ui/react-icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import type { StandaloneChatListItem, ChatSession } from '../../types';
+import type { StandaloneChatListItem } from '../../types';
 import { renameStandaloneChat as editStandaloneChatApi } from '../../api/api';
 import { toastMessageAtom } from '../../store';
 import { useSetAtom } from 'jotai';
@@ -37,16 +37,37 @@ export function EditStandaloneChatModal({
   const setToast = useSetAtom(toastMessageAtom);
 
   const editChatMutation = useMutation<
-    StandaloneChatListItem,
-    Error,
-    { chatId: number; formState: ChatFormState }
+    StandaloneChatListItem, // Type of data returned on success
+    Error, // Type of error
+    { chatId: number; formState: ChatFormState } // Type of variables passed to mutationFn
   >({
-    /* ... mutation logic ... */
+    mutationFn: (variables: { chatId: number; formState: ChatFormState }) => {
+      const { chatId, formState } = variables;
+      // Ensure name is null if empty string, otherwise pass trimmed name.
+      // Ensure tags are passed correctly.
+      return editStandaloneChatApi(
+        chatId,
+        formState.name.trim() || null,
+        formState.tags
+      );
+    },
+    onSuccess: (updatedChat) => {
+      setToast('Chat details updated successfully.');
+      queryClient.invalidateQueries({ queryKey: ['standaloneChats'] });
+      queryClient.invalidateQueries({
+        queryKey: ['standaloneChat', updatedChat.id],
+      });
+      onOpenChange(false); // Close the modal on success
+    },
+    onError: (error: Error) => {
+      setToast(`Error updating chat: ${error.message}`);
+      // Error handling, potentially set an error message in the modal state
+      console.error('Edit chat failed:', error);
+    },
   });
 
   const getInitialChatFormState = useCallback(
     (entity: StandaloneChatListItem | null): ChatFormState => {
-      /* ... */
       if (!entity) {
         return { name: '', tags: [], newTagInput: '' };
       }
@@ -61,20 +82,20 @@ export function EditStandaloneChatModal({
 
   const validateChatForm = useCallback(
     (formState: ChatFormState): string | null => {
-      /* ... */
       if (formState.tags.some((tag) => !tag.trim())) {
-        /* ... */
+        return 'Tags cannot be empty or just whitespace.';
       }
       if (formState.tags.some((tag) => tag.length > 50)) {
-        /* ... */
+        return 'Tags cannot exceed 50 characters.';
       }
       if (formState.tags.length > 10) {
-        /* ... */
+        return 'Maximum of 10 tags allowed.';
       }
 
       const originalState = getInitialChatFormState(chat);
       const originalName = originalState.name;
-      const originalTagsString = JSON.stringify(originalState.tags.sort());
+      // Sort tags for consistent comparison
+      const originalTagsString = JSON.stringify([...originalState.tags].sort());
       const currentName = formState.name;
       const currentTagsString = JSON.stringify([...formState.tags].sort());
 
@@ -96,7 +117,6 @@ export function EditStandaloneChatModal({
     [editChatMutation]
   );
 
-  // Fix the ref type here to match EditEntityModal's expectation
   const renderChatFormFields = useCallback(
     (
       formState: ChatFormState,
@@ -104,14 +124,13 @@ export function EditStandaloneChatModal({
       isSaving: boolean,
       firstInputRef: React.RefObject<
         HTMLInputElement | HTMLTextAreaElement | null
-      > // <-- Use the correct type here
+      >
     ): React.ReactNode => {
       const [tagInputError, setTagInputError] = useState<string | null>(null);
 
       const handleAddTag = (e?: React.FormEvent | React.KeyboardEvent) => {
-        /* ... tag add logic ... */
         const tagToAdd = formState.newTagInput.trim();
-        setTagInputError(null); // Clear previous error
+        setTagInputError(null);
 
         if (!tagToAdd) return;
 
@@ -135,32 +154,34 @@ export function EditStandaloneChatModal({
         setFormState((prev) => ({
           ...prev,
           tags: [...prev.tags, tagToAdd],
-          newTagInput: '', // Clear input field after adding
+          newTagInput: '',
         }));
       };
 
       const handleRemoveTag = (tagToRemove: string) => {
-        /* ... tag remove logic ... */
         setFormState((prev) => ({
           ...prev,
           tags: prev.tags.filter((tag) => tag !== tagToRemove),
         }));
-        setTagInputError(null); // Clear error on remove
+        setTagInputError(null);
       };
 
       const handleTagInputKeyDown = (
         e: React.KeyboardEvent<HTMLInputElement>
       ) => {
-        /* ... tag keydown logic ... */
         if (e.key === 'Enter' || e.key === ',') {
           e.preventDefault();
           handleAddTag(e);
         }
-        if (tagInputError) setTagInputError(null); // Clear error on typing
+        if (tagInputError) setTagInputError(null);
       };
 
       const handleNameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-        /* ... */
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          // Potentially trigger save if this is the only field or for convenience
+          // This is handled by the main modal's save button normally
+        }
       };
 
       return (
@@ -170,7 +191,6 @@ export function EditStandaloneChatModal({
               Name (Optional)
             </Text>
             <TextField.Root
-              // Cast the ref to the specific type expected by TextField.Root
               ref={firstInputRef as React.RefObject<HTMLInputElement>}
               size="2"
               placeholder="Enter chat name"
@@ -184,10 +204,9 @@ export function EditStandaloneChatModal({
           </label>
 
           <label>
-            <Text as="div" size="2" mb="1" weight="medium">
+            <Text as="div" size="2" mb="1" mt="3" weight="medium">
               Tags
             </Text>
-            {/* ... Tag display ... */}
             <Flex
               gap="1"
               wrap="wrap"
@@ -227,7 +246,6 @@ export function EditStandaloneChatModal({
                 </Badge>
               ))}
             </Flex>
-            {/* ... Tag input ... */}
             <Flex gap="2" align="center">
               <TextField.Root
                 size="2"
