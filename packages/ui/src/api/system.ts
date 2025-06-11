@@ -64,3 +64,17 @@ export const requestReindexElasticsearch =
     );
     return response.data;
   };
+
+// --- NEW FUNCTION ---
+interface ResetAllDataResponse {
+  message: string;
+  errors: string[];
+}
+
+export const requestResetAllData = async (): Promise<ResetAllDataResponse> => {
+  const response = await axios.post<ResetAllDataResponse>(
+    '/api/admin/reset-all-data'
+  );
+  return response.data;
+};
+// --- END NEW FUNCTION ---
