@@ -1,6 +1,7 @@
 // packages/ui/src/components/StandaloneChatView/StandaloneChatHeader.tsx
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useSetAtom } from 'jotai';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Flex,
@@ -22,9 +23,9 @@ import { EntitySelectorDropdown } from '../Shared/EntitySelectorDropdown';
 import { EditStandaloneChatModal } from './EditStandaloneChatModal';
 import { fetchStandaloneChats, deleteStandaloneChat } from '../../api/api';
 import type { StandaloneChatListItem } from '../../types';
-import { useSetAtom } from 'jotai';
 import { toastMessageAtom } from '../../store';
 import { formatTimestamp } from '../../helpers';
+import { cn } from '../../utils'; // Corrected import path
 
 interface StandaloneChatHeaderProps {
   activeChatId: number | null;
@@ -99,8 +100,8 @@ export function StandaloneChatHeader({
       <Flex
         align="center"
         gap="2"
+        className={cn('px-4 md:px-6 lg:px-8', 'py-2')}
         style={{
-          padding: 'var(--space-2) var(--space-3)',
           borderBottom: '1px solid var(--gray-a6)',
           backgroundColor: 'var(--color-panel-solid)',
           flexShrink: 0,

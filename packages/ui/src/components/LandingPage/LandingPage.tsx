@@ -448,7 +448,7 @@ export function LandingPage() {
                 px="4"
                 pt="4"
                 pb="3"
-                style={{ borderBottom: '1px solid var(--gray-a6)' }}
+                // REMOVED: style={{ borderBottom: '1px solid var(--gray-a6)' }}
               >
                 <Heading
                   as="h2"
@@ -457,7 +457,8 @@ export function LandingPage() {
                   className="text-gray-800 dark:text-gray-200"
                 >
                   <Flex align="center" gap="2">
-                    <ChatBubbleIcon /> Standalone Chats
+                    {' '}
+                    <ChatBubbleIcon /> Standalone Chats{' '}
                   </Flex>
                 </Heading>
               </Flex>
@@ -495,7 +496,7 @@ export function LandingPage() {
                 px="4"
                 pt="4"
                 pb="3"
-                style={{ borderBottom: '1px solid var(--gray-a6)' }}
+                // REMOVED: style={{ borderBottom: '1px solid var(--gray-a6)' }}
               >
                 <Heading
                   as="h2"
@@ -504,7 +505,8 @@ export function LandingPage() {
                   className="text-gray-800 dark:text-gray-200"
                 >
                   <Flex align="center" gap="2">
-                    <CounterClockwiseClockIcon /> Session History
+                    {' '}
+                    <CounterClockwiseClockIcon /> Session History{' '}
                   </Flex>
                 </Heading>
               </Flex>

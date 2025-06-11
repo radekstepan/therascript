@@ -1,3 +1,4 @@
+// packages/ui/src/components/Transcription/TranscriptParagraph.tsx
 import React, {
   useState,
   useRef,
@@ -19,7 +20,7 @@ import {
   CheckIcon,
   Cross1Icon,
   PlayIcon,
-  PauseIcon, // Added PauseIcon
+  PauseIcon,
   UpdateIcon,
   ClockIcon,
 } from '@radix-ui/react-icons';
@@ -72,37 +73,54 @@ export function TranscriptParagraph({
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const isEditing = activeEditIndex === index;
 
-  // The paragraph.id IS the paragraphIndex for TranscriptParagraphData
   const paragraphDomId = `paragraph-${paragraph.id}`;
 
+  // Effect for handling actions when entering or exiting edit mode
   useEffect(() => {
-    if (isEditing && containerRef.current) {
-      const rect = containerRef.current.getBoundingClientRect();
-      setDimensions({ width: rect.width, height: rect.height });
+    if (isEditing) {
+      // When entering edit mode
+      if (containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        setDimensions({ width: rect.width, height: rect.height });
+      }
+      // Defer focus and select to ensure textarea is rendered and ready
       requestAnimationFrame(() => {
         if (textareaRef.current) {
           textareaRef.current.focus();
-          textareaRef.current.select();
+          textareaRef.current.select(); // Select all text only when entering edit mode
         }
       });
     }
-    if (!isEditing && paragraph.text !== editValue) {
-      setEditValue(paragraph.text);
+  }, [isEditing]); // This effect runs only when `isEditing` changes
+
+  // Effect for syncing `editValue` with `paragraph.text` prop changes when NOT editing
+  useEffect(() => {
+    if (!isEditing) {
+      // If not editing, and the paragraph text prop changes, update local editValue.
+      // Also ensures editValue is reset if isEditing becomes false (e.g., on cancel).
+      // The check `paragraph.text !== editValue` prevents unnecessary re-renders if
+      // `setEditValue` was already called with the same `paragraph.text` (e.g., in handleCancel).
+      if (paragraph.text !== editValue) {
+        setEditValue(paragraph.text);
+      }
     }
-  }, [isEditing, paragraph.text, editValue]); // Added editValue to dependencies
+    // If `isEditing` is true, user input controls `editValue`.
+    // Prop changes to `paragraph.text` during an active edit are intentionally ignored
+    // by this effect to preserve the user's current unsaved changes.
+  }, [paragraph.text, isEditing, editValue]);
 
   const handleEditClick = () => {
     if (isPlaying) {
       onPlayToggle(paragraph.timestamp, index);
     }
-    setEditValue(paragraph.text);
-    setActiveEditIndex(index);
+    setEditValue(paragraph.text); // Reset editValue to original text before editing
+    setActiveEditIndex(index); // This will set isEditing to true and trigger the above useEffect
   };
 
   const handleCancel = () => {
     if (isSaving) return;
-    setActiveEditIndex(null);
-    setEditValue(paragraph.text);
+    setActiveEditIndex(null); // Sets isEditing to false
+    setEditValue(paragraph.text); // Explicitly reset editValue to original
   };
 
   const handleSave = async () => {
@@ -111,10 +129,13 @@ export function TranscriptParagraph({
     if (trimmedValue !== paragraph.text.trim()) {
       try {
         await onSave(index, trimmedValue);
+        // setActiveEditIndex(null) is called by onSave success/error in parent or here if needed
       } catch (error) {
         console.error(`Error saving paragraph ${index}:`, error);
+        // Optionally handle error display here if not handled by parent
       }
     } else {
+      // If no actual change, just exit edit mode
       setActiveEditIndex(null);
     }
   };
@@ -194,8 +215,6 @@ export function TranscriptParagraph({
         style={textStyles}
         id={paragraphDomId}
       >
-        {' '}
-        {/* Assign DOM ID here */}
         {paragraph.text.trim() ? (
           paragraph.text
         ) : (
@@ -318,6 +337,7 @@ export function TranscriptParagraph({
               </Flex>
             </Flex>
           </Box>
+          {/* Render placeholder content with original dimensions to prevent layout shift */}
           {renderContent(false)}
         </>
       ) : (

@@ -246,7 +246,7 @@ export function SessionView() {
     >
       {/* Session Title Bar (fixed height) */}
       <Box
-        px={{ initial: '5', md: '7', lg: '8' }}
+        px={{ initial: '6' }}
         py="3"
         flexShrink="0"
         style={{

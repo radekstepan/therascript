@@ -119,10 +119,11 @@ export function TopToolbar() {
   return (
     <Box
       className={cn(
-        'sticky top-0 z-30 h-16 flex items-center',
+        'sticky top-0 z-30 flex items-center',
         'bg-gray-100 dark:bg-gray-800',
         'border-b border-gray-200 dark:border-gray-700',
-        'px-4 md:px-6 lg:px-8' // Add padding directly to the Box
+        'px-4 md:px-6 lg:px-8',
+        'py-4'
       )}
       style={{ width: '100%' }} // Ensure the Box takes full width
     >
