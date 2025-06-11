@@ -28,16 +28,17 @@ import { currentQueryAtom } from '../../../store';
 import { useAtom } from 'jotai';
 
 interface ChatInterfaceProps {
-  session?: Session | null;
+  session?: Session | null; // Optional for standalone
   activeChatId: number | null;
   isStandalone: boolean;
-  isLoadingSessionMeta?: boolean;
+  isLoadingSessionMeta?: boolean; // Optional for standalone
   ollamaStatus: OllamaStatus | undefined;
   isLoadingOllamaStatus: boolean;
   onOpenLlmModal: () => void;
-  isTabActive?: boolean;
-  initialScrollTop?: number;
-  onScrollUpdate?: (scrollTop: number) => void;
+  isTabActive?: boolean; // For tabbed layout on small screens
+  // Removed scroll props as they are not directly relevant to the main issue fix
+  // initialScrollTop?: number;
+  // onScrollUpdate?: (scrollTop: number) => void;
 }
 
 const createTemporaryId = (): number => -Math.floor(Math.random() * 1000000);
@@ -51,12 +52,9 @@ export function ChatInterface({
   isLoadingOllamaStatus,
   onOpenLlmModal,
   isTabActive,
-  initialScrollTop = 0,
-  onScrollUpdate,
 }: ChatInterfaceProps) {
   const activeSessionId = session?.id ?? null;
 
-  const restoreScrollRef = useRef(false);
   const chatContentRef = useRef<HTMLDivElement | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const queryClient = useQueryClient();
@@ -286,7 +284,7 @@ export function ChatInterface({
           streamError
         );
         setStreamingAiMessageId(null);
-        throw streamError;
+        throw streamError; // Rethrow to be caught by mutation's onError
       });
     },
     onError: (error, newMessageText, context) => {
@@ -311,52 +309,11 @@ export function ChatInterface({
   const combinedIsLoading =
     (!isStandalone && isLoadingSessionMeta) || (isLoadingMessages && !chatData);
 
-  const debouncedScrollSave = useCallback(
-    debounce((scrollTop: number) => {
-      if (onScrollUpdate) {
-        onScrollUpdate(scrollTop);
-      }
-    }, 150),
-    [onScrollUpdate]
-  );
-  const handleScroll = useCallback(
-    (event: React.UIEvent<HTMLDivElement>) => {
-      if (!restoreScrollRef.current && event.currentTarget) {
-        debouncedScrollSave(event.currentTarget.scrollTop);
-      }
-      if (restoreScrollRef.current) {
-        restoreScrollRef.current = false;
-      }
-    },
-    [debouncedScrollSave]
-  );
+  // Auto-scroll logic
   useEffect(() => {
-    if (isTabActive) {
-      restoreScrollRef.current = true;
-    } else {
-      restoreScrollRef.current = false;
-    }
-  }, [isTabActive]);
-  useEffect(() => {
-    if (restoreScrollRef.current && viewportRef.current) {
-      requestAnimationFrame(() => {
-        if (restoreScrollRef.current && viewportRef.current) {
-          if (viewportRef.current.scrollTop !== initialScrollTop) {
-            viewportRef.current.scrollTop = initialScrollTop;
-          } else {
-            restoreScrollRef.current = false;
-          }
-        }
-      });
-    }
-  }, [isTabActive, initialScrollTop]);
-  useEffect(() => {
-    if (
-      (isTabActive === undefined || isTabActive) &&
-      !restoreScrollRef.current &&
-      !combinedIsLoading
-    ) {
-      if (chatContentRef.current) {
+    // Check if the tab is active or if tab-based behavior is not applicable
+    if (isTabActive === undefined || isTabActive) {
+      if (!combinedIsLoading && chatContentRef.current) {
         const shouldScroll =
           chatMessages.length > 0 || streamingAiMessageId !== null;
         if (shouldScroll) {
@@ -383,16 +340,16 @@ export function ChatInterface({
     <Flex
       direction="column"
       style={{
-        height: '100%',
-        minHeight: 0,
+        height: '100%', // Fill parent height
+        minHeight: 0, // Essential for flex child
         border: '1px solid var(--gray-a6)',
         borderRadius: 'var(--radius-3)',
-        overflow: 'hidden',
-        backgroundColor: 'var(--color-panel-translucent)', // Apply translucent background
+        overflow: 'hidden', // Prevent this Flex from scrolling
+        backgroundColor: 'var(--color-panel-translucent)',
       }}
     >
       {!isStandalone && session && (
-        <ChatPanelHeader
+        <ChatPanelHeader // Fixed height
           session={session}
           activeChatId={activeChatId}
           ollamaStatus={ollamaStatus}
@@ -403,12 +360,11 @@ export function ChatInterface({
         />
       )}
 
-      <ScrollArea
+      <ScrollArea // This is the scrollable part for messages
         type="auto"
         scrollbars="vertical"
-        ref={viewportRef}
-        onScroll={handleScroll}
-        style={{ flexGrow: 1, minHeight: 0, position: 'relative' }}
+        ref={viewportRef} // Keep if needed for other scroll logic
+        style={{ flexGrow: 1, minHeight: 0, position: 'relative' }} // Crucial: flexGrow and minHeight: 0
       >
         {combinedIsLoading && (
           <Flex
@@ -417,7 +373,7 @@ export function ChatInterface({
             style={{
               position: 'absolute',
               inset: 0,
-              backgroundColor: 'var(--color-panel-translucent)', // Child of translucent will also be translucent
+              backgroundColor: 'var(--color-panel-translucent)',
               zIndex: 10,
               borderRadius: 'var(--radius-3)',
             }}
@@ -434,8 +390,8 @@ export function ChatInterface({
           </Flex>
         )}
 
-        <Box
-          p="4" // This padding ensures ChatMessages content is inset from the ChatInterface border
+        <Box // Padding container for messages
+          p="4"
           ref={chatContentRef}
           style={{
             opacity: combinedIsLoading ? 0.5 : 1,
@@ -453,14 +409,13 @@ export function ChatInterface({
         </Box>
       </ScrollArea>
 
-      <Box
+      <Box // Chat input area, fixed height
         px="4"
         pt="4"
         pb="2"
         style={{
           flexShrink: 0,
           borderTop: '1px solid var(--gray-a6)',
-          // Removed backgroundColor here, it will inherit from parent Flex
           opacity: combinedIsLoading ? 0.6 : 1,
           transition: 'opacity 0.2s ease-in-out',
         }}

@@ -41,10 +41,6 @@ export function SessionView() {
   const [isSelectModelModalOpen, setIsSelectModelModalOpen] = useState(false);
   const setToast = useSetAtom(toastMessageAtom);
 
-  // Removed sidebarWidth, clampedSidebarWidth, resizablePanelRef, isResizing, and related resizing handlers
-  // as the specific sidebar being resized (SessionSidebar for chats) is removed.
-  // If another panel needs resizing, that logic would be specific to it.
-
   const previousSessionIdRef = useRef<number | null>(null);
   const queryClient = useQueryClient();
 
@@ -120,8 +116,6 @@ export function SessionView() {
     },
   });
 
-  // Removed resizing useEffect handlers
-
   useEffect(() => {
     const currentSessionIdNum = sessionIdParam
       ? parseInt(sessionIdParam, 10)
@@ -160,7 +154,6 @@ export function SessionView() {
           navigateTo = `/sessions/${currentSessionIdNum}/chats/${targetChatId}`;
         }
       } else if (chatIdParam) {
-        // If URL has a chatId but there are no chats (e.g., after deletion), redirect to base session
         shouldNavigate = true;
         navigateTo = `/sessions/${currentSessionIdNum}`;
       }
@@ -212,7 +205,7 @@ export function SessionView() {
       <Flex
         justify="center"
         align="center"
-        style={{ height: '100vh', backgroundColor: 'var(--color-panel-solid)' }}
+        style={{ height: '100%', backgroundColor: 'var(--color-panel-solid)' }} // Use 100% instead of 100vh
       >
         <Spinner size="3" />{' '}
         <Text ml="2" color="gray">
@@ -227,7 +220,7 @@ export function SessionView() {
         direction="column"
         justify="center"
         align="center"
-        style={{ height: '100vh', backgroundColor: 'var(--color-panel-solid)' }}
+        style={{ height: '100%', backgroundColor: 'var(--color-panel-solid)' }} // Use 100% instead of 100vh
       >
         <Text color="red" mb="4">
           {sessionMetaError?.message || 'Session data could not be loaded.'}
@@ -247,59 +240,63 @@ export function SessionView() {
     : (activeChatIdAtomValue ?? null);
 
   return (
-    <Flex flexGrow="1" style={{ height: '100vh', overflow: 'hidden' }}>
-      {/* The left sidebar that was for SessionSidebar (chat list) is removed */}
-      {/* The resizable handle is also removed as its primary purpose was for that sidebar */}
-
-      <Flex
-        direction="column"
-        flexGrow="1"
-        style={{ minWidth: 0, height: '100vh', overflow: 'hidden' }}
+    <Flex
+      direction="column" // Main direction for SessionView's content
+      style={{ height: '100%', overflow: 'hidden', minHeight: 0 }} // Fill parent, prevent self-scroll
+    >
+      {/* Session Title Bar (fixed height) */}
+      <Box
+        px={{ initial: '5', md: '7', lg: '8' }}
+        py="3"
+        flexShrink="0"
+        style={{
+          backgroundColor: 'var(--color-panel-solid)',
+          borderBottom: '1px solid var(--gray-a6)',
+        }}
       >
-        <Box
-          px={{ initial: '5', md: '7', lg: '8' }}
-          py="3"
-          flexShrink="0"
-          style={{
-            backgroundColor: 'var(--color-panel-solid)',
-            borderBottom: '1px solid var(--gray-a6)',
-          }}
-        >
-          <Flex justify="between" align="center">
-            <Flex align="center" gap="2" style={{ minWidth: 0 }}>
-              {/* "All Sessions" backlink and "/" divider removed */}
-              <Text
-                size="2"
-                weight="bold"
-                truncate
-                title={displayTitle}
-                style={{ flexShrink: 1 }}
-                className="text-gray-800 dark:text-gray-200"
-              >
-                {displayTitle}
-              </Text>
-            </Flex>
+        <Flex justify="between" align="center">
+          <Flex align="center" gap="2" style={{ minWidth: 0 }}>
+            <Text
+              size="2"
+              weight="bold"
+              truncate
+              title={displayTitle}
+              style={{ flexShrink: 1 }}
+              className="text-gray-800 dark:text-gray-200"
+            >
+              {displayTitle}
+            </Text>
           </Flex>
-        </Box>
+        </Flex>
+      </Box>
 
-        <Box flexGrow="1" style={{ minHeight: 0, overflow: 'hidden' }}>
-          <SessionContent
-            session={sessionMetadata}
-            transcriptContent={transcriptContent}
-            onEditDetailsClick={handleOpenEditMetadataModal}
-            activeChatId={currentActiveChatId}
-            hasChats={hasChats}
-            onStartFirstChat={handleStartFirstChat}
-            isLoadingSessionMeta={isLoadingSessionMeta || isFetchingSessionMeta}
-            sessionMetaError={sessionMetaError}
-            isLoadingTranscript={isLoadingTranscript}
-            transcriptError={transcriptError}
-            ollamaStatus={ollamaStatus}
-            isLoadingOllamaStatus={isLoadingOllamaStatus}
-            onOpenLlmModal={handleOpenConfigureLlmModal}
-          />
-        </Box>
-      </Flex>
+      {/* Main content area for SessionContent */}
+      <Box
+        flexGrow="1"
+        style={{
+          minHeight: 0,
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        {/* SessionContent will take 100% height of this Box */}
+        <SessionContent
+          session={sessionMetadata}
+          transcriptContent={transcriptContent}
+          onEditDetailsClick={handleOpenEditMetadataModal}
+          activeChatId={currentActiveChatId}
+          hasChats={hasChats}
+          onStartFirstChat={handleStartFirstChat}
+          isLoadingSessionMeta={isLoadingSessionMeta || isFetchingSessionMeta}
+          sessionMetaError={sessionMetaError}
+          isLoadingTranscript={isLoadingTranscript}
+          transcriptError={transcriptError}
+          ollamaStatus={ollamaStatus}
+          isLoadingOllamaStatus={isLoadingOllamaStatus}
+          onOpenLlmModal={handleOpenConfigureLlmModal}
+        />
+      </Box>
 
       <EditDetailsModal
         isOpen={isEditingMetadata}
