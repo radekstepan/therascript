@@ -10,6 +10,7 @@ import { StandaloneChatHeader } from './StandaloneChatHeader';
 import { fetchOllamaStatus } from '../../api/api';
 import type { OllamaStatus } from '../../types';
 import { activeChatIdAtom, toastMessageAtom } from '../../store';
+import { cn } from '../../utils'; // Corrected import path
 
 export function StandaloneChatView() {
   const { chatId: chatIdParam } = useParams<{ chatId: string }>();
@@ -67,10 +68,10 @@ export function StandaloneChatView() {
       {/* Fixed height child */}
       <Box // This Box will contain ChatInterface and handle its growth
         flexGrow="1" // Takes remaining vertical space
+        className={cn('px-4 md:px-6 lg:px-8', 'py-6')}
         style={{
           minHeight: 0, // Crucial for flex children that need to scroll internally
           overflow: 'hidden', // Ensure this Box itself doesn't cause page scroll
-          padding: 'var(--space-3)', // Keep padding if desired for aesthetics
           display: 'flex', // Make it a flex container for ChatInterface
           flexDirection: 'column', // ChatInterface will be a column
         }}
