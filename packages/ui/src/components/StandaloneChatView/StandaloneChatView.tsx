@@ -1,5 +1,11 @@
 // packages/ui/src/components/StandaloneChatView/StandaloneChatView.tsx
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, {
+  useEffect,
+  useState,
+  useRef,
+  useCallback,
+  useMemo,
+} from 'react'; // Added useMemo
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -7,10 +13,10 @@ import { Flex, Box, Text, Spinner } from '@radix-ui/themes';
 import { ChatInterface } from '../SessionView/Chat/ChatInterface';
 import { SelectActiveModelModal } from '../SessionView/Modals/SelectActiveModelModal';
 import { StandaloneChatHeader } from './StandaloneChatHeader';
-import { fetchOllamaStatus } from '../../api/api';
-import type { OllamaStatus } from '../../types';
+import { fetchOllamaStatus, fetchStandaloneChatDetails } from '../../api/api'; // Added fetchStandaloneChatDetails
+import type { OllamaStatus, ChatSession } from '../../types'; // Added ChatSession
 import { activeChatIdAtom, toastMessageAtom } from '../../store';
-import { cn } from '../../utils'; // Corrected import path
+import { cn } from '../../utils';
 
 export function StandaloneChatView() {
   const { chatId: chatIdParam } = useParams<{ chatId: string }>();
@@ -39,7 +45,7 @@ export function StandaloneChatView() {
   useEffect(() => {
     const currentChatIdNum = chatIdParam ? parseInt(chatIdParam, 10) : null;
     if (!currentChatIdNum || isNaN(currentChatIdNum)) {
-      navigate('/', { replace: true });
+      navigate('/chats-list', { replace: true });
       setActiveChatIdState(null);
       return;
     }
@@ -50,6 +56,7 @@ export function StandaloneChatView() {
   }, [chatIdParam, activeChatIdState, navigate, setActiveChatIdState]);
 
   const handleOpenConfigureLlmModal = () => setIsSelectModelModalOpen(true);
+
   const handleModelSuccessfullySet = () => {
     console.log(
       '[StandaloneChatView] Model successfully set via SelectActiveModelModal.'
@@ -59,35 +66,79 @@ export function StandaloneChatView() {
 
   const currentActiveChatId = activeChatIdState;
 
+  // Fetch chatData to get messages for token calculation
+  const chatQueryKey = ['standaloneChat', currentActiveChatId];
+  const { data: chatData, isLoading: isLoadingChatData } = useQuery<
+    ChatSession | null,
+    Error
+  >({
+    queryKey: chatQueryKey,
+    queryFn: () => {
+      if (!currentActiveChatId) return Promise.resolve(null);
+      return fetchStandaloneChatDetails(currentActiveChatId);
+    },
+    enabled: !!currentActiveChatId,
+    staleTime: 5 * 60 * 1000, // Cache for a while
+  });
+
+  const lastAiMessageWithTokens = useMemo(() => {
+    if (!chatData?.messages || chatData.messages.length === 0) {
+      return null;
+    }
+    // Iterate in reverse to find the last AI message
+    for (let i = chatData.messages.length - 1; i >= 0; i--) {
+      if (chatData.messages[i].sender === 'ai') {
+        return chatData.messages[i];
+      }
+    }
+    return null; // No AI message found
+  }, [chatData?.messages]);
+
+  const latestPromptTokens = lastAiMessageWithTokens?.promptTokens ?? null;
+  const latestCompletionTokens =
+    lastAiMessageWithTokens?.completionTokens ?? null;
+
   return (
     <Flex
       direction="column"
-      style={{ height: '100%', overflow: 'hidden', minHeight: 0 }} // Fill parent height, minHeight:0 for flex context
+      style={{ height: '100%', overflow: 'hidden', minHeight: 0 }}
     >
-      <StandaloneChatHeader activeChatId={currentActiveChatId} />{' '}
-      {/* Fixed height child */}
-      <Box // This Box will contain ChatInterface and handle its growth
-        flexGrow="1" // Takes remaining vertical space
+      <StandaloneChatHeader
+        activeChatId={currentActiveChatId}
+        ollamaStatus={ollamaStatus}
+        isLoadingOllamaStatus={isLoadingOllamaStatus}
+        onOpenLlmModal={handleOpenConfigureLlmModal}
+        latestPromptTokens={latestPromptTokens} // <-- PASS PROP
+        latestCompletionTokens={latestCompletionTokens} // <-- PASS PROP
+      />
+      <Box
+        flexGrow="1"
         className={cn('px-4 md:px-6 lg:px-8', 'py-6')}
         style={{
-          minHeight: 0, // Crucial for flex children that need to scroll internally
-          overflow: 'hidden', // Ensure this Box itself doesn't cause page scroll
-          display: 'flex', // Make it a flex container for ChatInterface
-          flexDirection: 'column', // ChatInterface will be a column
+          minHeight: 0,
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
         }}
       >
-        {currentActiveChatId ? (
-          <ChatInterface // ChatInterface should now be height: '100%' of this Box
+        {isLoadingChatData && currentActiveChatId ? ( // Show spinner if loading chat data
+          <Flex align="center" justify="center" style={{ height: '100%' }}>
+            <Spinner size="3" /> <Text ml="2">Loading chat...</Text>
+          </Flex>
+        ) : currentActiveChatId ? (
+          <ChatInterface
             activeChatId={currentActiveChatId}
             isStandalone={true}
             ollamaStatus={ollamaStatus}
             isLoadingOllamaStatus={isLoadingOllamaStatus}
             onOpenLlmModal={handleOpenConfigureLlmModal}
+            // No transcriptTokenCount or activeModelDefaultContextSize for standalone
+            // latestPromptTokens and latestCompletionTokens are managed internally by ChatInterface or its children for *its own* header
           />
         ) : (
           <Flex align="center" justify="center" style={{ height: '100%' }}>
             <Text color="gray" size="3">
-              Select a chat to view or start a new one.
+              Select a chat to view or start a new one from the sidebar.
             </Text>
           </Flex>
         )}

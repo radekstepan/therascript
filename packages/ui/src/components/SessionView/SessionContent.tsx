@@ -21,6 +21,8 @@ interface SessionContentProps {
   ollamaStatus: OllamaStatus | undefined;
   isLoadingOllamaStatus: boolean;
   onOpenLlmModal: () => void;
+  transcriptTokenCount?: number | null; // <-- ADDED
+  activeModelDefaultContextSize?: number | null; // <-- ADDED
 }
 
 export function SessionContent({
@@ -37,12 +39,12 @@ export function SessionContent({
   ollamaStatus,
   isLoadingOllamaStatus,
   onOpenLlmModal,
+  transcriptTokenCount, // <-- DESTRUCTURED
+  activeModelDefaultContextSize, // <-- DESTRUCTURED
 }: SessionContentProps) {
   const [activeTab, setActiveTab] = useState<
     'chats' | 'chat' | 'transcription'
   >(activeChatId === null ? 'chats' : 'chat');
-
-  // Removed scroll position state as scrolling is now fully managed by child components
 
   const activeChatIdRef = React.useRef(activeChatId);
   React.useEffect(() => {
@@ -82,6 +84,8 @@ export function SessionContent({
               ollamaStatus={ollamaStatus}
               isLoadingOllamaStatus={isLoadingOllamaStatus}
               onOpenLlmModal={onOpenLlmModal}
+              transcriptTokenCount={transcriptTokenCount} // <-- PASS PROP
+              activeModelDefaultContextSize={activeModelDefaultContextSize} // <-- PASS PROP
             />
           ) : hasChats ? (
             <Box
@@ -130,9 +134,6 @@ export function SessionContent({
           onValueChange={(value) => {
             setActiveTab(value as 'chats' | 'chat' | 'transcription');
           }}
-          // className="flex flex-col flex-grow"
-          // style={{ minHeight: 0 }}
-          // Make Tabs.Root itself a flex container that fills height
           className="flex flex-col h-full"
         >
           <Box px={{ initial: '4', md: '6' }} pt="2" flexShrink="0">
@@ -150,17 +151,15 @@ export function SessionContent({
             </Tabs.List>
           </Box>
 
-          {/* Each Tabs.Content needs to manage its own height and allow children to fill it */}
-          {/* Removing the outer ScrollArea here */}
           <Tabs.Content
             value="chats"
-            className="flex-grow overflow-hidden" // flex-grow to take space, overflow-hidden
+            className="flex-grow overflow-hidden"
             style={{
               outline: 'none',
               minHeight: 0,
               display: activeTab === 'chats' ? 'flex' : 'none',
               flexDirection: 'column',
-            }} // Use display:flex for active tab
+            }}
           >
             <Box
               px={{ initial: '4', md: '6' }}
@@ -172,7 +171,7 @@ export function SessionContent({
                 flexDirection: 'column',
               }}
             >
-              <SessionSidebar // SessionSidebar needs to be adaptable to this flex context
+              <SessionSidebar
                 session={session}
                 isLoading={isLoadingSessionMeta}
                 error={sessionMetaError}
@@ -182,7 +181,7 @@ export function SessionContent({
           </Tabs.Content>
           <Tabs.Content
             value="chat"
-            className="flex-grow overflow-hidden" // flex-grow to take space, overflow-hidden
+            className="flex-grow overflow-hidden"
             style={{
               outline: 'none',
               minHeight: 0,
@@ -210,6 +209,8 @@ export function SessionContent({
                   isLoadingOllamaStatus={isLoadingOllamaStatus}
                   onOpenLlmModal={onOpenLlmModal}
                   isTabActive={activeTab === 'chat'}
+                  transcriptTokenCount={transcriptTokenCount} // <-- PASS PROP
+                  activeModelDefaultContextSize={activeModelDefaultContextSize} // <-- PASS PROP
                 />
               ) : hasChats ? (
                 <Flex align="center" justify="center" className="h-full">
@@ -227,7 +228,7 @@ export function SessionContent({
           </Tabs.Content>
           <Tabs.Content
             value="transcription"
-            className="flex-grow overflow-hidden" // flex-grow to take space, overflow-hidden
+            className="flex-grow overflow-hidden"
             style={{
               outline: 'none',
               minHeight: 0,

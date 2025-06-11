@@ -36,9 +36,8 @@ interface ChatInterfaceProps {
   isLoadingOllamaStatus: boolean;
   onOpenLlmModal: () => void;
   isTabActive?: boolean; // For tabbed layout on small screens
-  // Removed scroll props as they are not directly relevant to the main issue fix
-  // initialScrollTop?: number;
-  // onScrollUpdate?: (scrollTop: number) => void;
+  transcriptTokenCount?: number | null; // <-- ADDED
+  activeModelDefaultContextSize?: number | null; // <-- ADDED
 }
 
 const createTemporaryId = (): number => -Math.floor(Math.random() * 1000000);
@@ -52,6 +51,8 @@ export function ChatInterface({
   isLoadingOllamaStatus,
   onOpenLlmModal,
   isTabActive,
+  transcriptTokenCount, // <-- DESTRUCTURED
+  activeModelDefaultContextSize, // <-- DESTRUCTURED
 }: ChatInterfaceProps) {
   const activeSessionId = session?.id ?? null;
 
@@ -357,6 +358,8 @@ export function ChatInterface({
           latestPromptTokens={latestPromptTokens}
           latestCompletionTokens={latestCompletionTokens}
           onOpenLlmModal={onOpenLlmModal}
+          transcriptTokenCount={transcriptTokenCount} // <-- PASS PROP
+          activeModelDefaultContextSize={activeModelDefaultContextSize} // <-- PASS PROP
         />
       )}
 

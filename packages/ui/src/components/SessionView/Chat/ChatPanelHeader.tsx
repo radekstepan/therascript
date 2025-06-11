@@ -14,11 +14,12 @@ import {
   IconButton,
   AlertDialog,
   TextField,
-  Callout,
+  Callout, // Added Callout
 } from '@radix-ui/themes';
 import {
   MixerVerticalIcon,
-  InfoCircledIcon,
+  InfoCircledIcon, // Keep for general info
+  ExclamationTriangleIcon, // <-- For warning Callout
   CheckCircledIcon,
   SymbolIcon,
   LightningBoltIcon,
@@ -29,6 +30,7 @@ import {
   TrashIcon,
   Cross1Icon,
   CheckIcon,
+  ReaderIcon, // For transcript tokens
 } from '@radix-ui/react-icons';
 import type { OllamaStatus, Session, ChatSession } from '../../../types';
 import { cn } from '../../../utils';
@@ -44,6 +46,8 @@ import { useSetAtom } from 'jotai';
 import { toastMessageAtom } from '../../../store';
 import { formatTimestamp } from '../../../helpers';
 
+const PADDING_ESTIMATE = 1500; // Estimated tokens for chat history, prompts, and response
+
 interface ChatPanelHeaderProps {
   session: Session;
   activeChatId: number | null;
@@ -52,6 +56,8 @@ interface ChatPanelHeaderProps {
   latestPromptTokens: number | null;
   latestCompletionTokens: number | null;
   onOpenLlmModal: () => void;
+  transcriptTokenCount?: number | null; // <-- ADDED
+  activeModelDefaultContextSize?: number | null; // <-- ADDED
 }
 
 interface ChatRenameFormState {
@@ -66,6 +72,8 @@ export function ChatPanelHeader({
   latestPromptTokens,
   latestCompletionTokens,
   onOpenLlmModal,
+  transcriptTokenCount, // <-- DESTRUCTURED
+  activeModelDefaultContextSize, // <-- DESTRUCTURED
 }: ChatPanelHeaderProps) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -219,7 +227,7 @@ export function ChatPanelHeader({
         />
       </label>
     ),
-    [chatToEdit, validateRenameForm, handleSaveRename]
+    [chatToEdit, validateRenameForm, handleSaveRename] // Dependencies for useCallback
   );
 
   const modelName = ollamaStatus?.activeModel ?? 'No Model Selected';
@@ -255,123 +263,176 @@ export function ChatPanelHeader({
     renameChatMutation.isPending ||
     deleteChatMutation.isPending;
 
+  // Context Window Warning Logic
+  const effectiveModelContextSize =
+    configuredContextSize ?? activeModelDefaultContextSize ?? 0;
+  const showContextWarning =
+    typeof transcriptTokenCount === 'number' &&
+    transcriptTokenCount > 0 &&
+    effectiveModelContextSize > 0 &&
+    transcriptTokenCount + PADDING_ESTIMATE > effectiveModelContextSize;
+
   return (
     <>
       <Flex
-        align="center"
-        justify="between"
-        py="2"
-        px="3"
-        gap="2"
+        direction="column" // Main direction is column for Header + Optional Warning
         style={{
           borderBottom: '1px solid var(--gray-a6)',
-          // Removed backgroundColor: 'var(--color-panel-solid)',
           flexShrink: 0,
         }}
       >
-        <Flex align="center" gap="2" style={{ minWidth: 0, flexGrow: 1 }}>
-          <EntitySelectorDropdown
-            items={session.chats}
-            activeItemId={activeChatId}
-            onItemSelect={handleChatSelect}
-            placeholderText="Select a Chat..."
-            entityTypeLabel="Chat"
-            disabled={isAnyActionInProgress}
-          />
-          <IconButton
-            variant="soft"
-            size="1"
-            onClick={handleNewChat}
-            disabled={startNewChatMutation.isPending || isAnyActionInProgress}
-            title="Start New Chat"
-          >
-            {startNewChatMutation.isPending ? (
-              <Spinner size="1" />
-            ) : (
-              <PlusCircledIcon />
-            )}
-          </IconButton>
-          <DropdownMenu.Root>
-            <DropdownMenu.Trigger>
-              <IconButton
-                variant="ghost"
-                color="gray"
-                size="1"
-                disabled={!activeChat || isAnyActionInProgress}
-                title="Chat Actions"
-              >
-                <DotsHorizontalIcon />
-              </IconButton>
-            </DropdownMenu.Trigger>
-            <DropdownMenu.Content align="start">
-              <DropdownMenu.Item
-                onSelect={handleOpenRenameModal}
-                disabled={!activeChat || renameChatMutation.isPending}
-              >
-                <Pencil1Icon className="mr-1" /> Rename Chat
-              </DropdownMenu.Item>
-              <DropdownMenu.Separator />
-              <DropdownMenu.Item
-                color="red"
-                onSelect={handleOpenDeleteConfirm}
-                disabled={!activeChat || deleteChatMutation.isPending}
-              >
-                <TrashIcon className="mr-1" /> Delete Chat
-              </DropdownMenu.Item>
-            </DropdownMenu.Content>
-          </DropdownMenu.Root>
-        </Flex>
-
-        <Flex align="center" gap="2" flexShrink="0">
-          <Tooltip content={statusTooltipContent}>
-            <Flex align="center" gap="1">
-              {renderStatusBadge()}
-            </Flex>
-          </Tooltip>
-          {ollamaStatus?.activeModel && (
-            <Tooltip content={`Configured Context Size (num_ctx)`}>
-              <Badge
-                variant="soft"
-                color={configuredContextSize ? 'blue' : 'gray'}
-                size="1"
-                className={cn(isLoadingOllamaStatus ? 'opacity-50' : '')}
-              >
-                <LightningBoltIcon
-                  width="14"
-                  height="14"
-                  style={{ marginRight: '2px' }}
-                />
-                {isLoadingOllamaStatus
-                  ? '...'
-                  : configuredContextSize
-                    ? configuredContextSize.toLocaleString()
-                    : 'Default'}
-              </Badge>
-            </Tooltip>
-          )}
-          {(latestPromptTokens !== null || latestCompletionTokens !== null) && (
-            <Tooltip
-              content={`Last Interaction: ${latestPromptTokens?.toLocaleString() ?? '?'} Input + ${latestCompletionTokens?.toLocaleString() ?? '?'} Output Tokens`}
+        <Flex // Inner flex for the main header content row
+          align="center"
+          justify="between"
+          py="2"
+          px="3"
+          gap="2"
+        >
+          <Flex align="center" gap="2" style={{ minWidth: 0, flexGrow: 1 }}>
+            <EntitySelectorDropdown
+              items={session.chats}
+              activeItemId={activeChatId}
+              onItemSelect={handleChatSelect}
+              placeholderText="Select a Chat..."
+              entityTypeLabel="Chat"
+              disabled={isAnyActionInProgress}
+            />
+            <IconButton
+              variant="soft"
+              size="1"
+              onClick={handleNewChat}
+              disabled={startNewChatMutation.isPending || isAnyActionInProgress}
+              title="Start New Chat"
             >
-              <Badge variant="soft" color="gray" highContrast>
-                <ArchiveIcon
-                  width="14"
-                  height="14"
-                  style={{ marginRight: '4px', opacity: 0.8 }}
-                />
-                <Text size="1">{totalTokens.toLocaleString()} Tokens</Text>
-              </Badge>
+              {startNewChatMutation.isPending ? (
+                <Spinner size="1" />
+              ) : (
+                <PlusCircledIcon />
+              )}
+            </IconButton>
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger>
+                <IconButton
+                  variant="ghost"
+                  color="gray"
+                  size="1"
+                  disabled={!activeChat || isAnyActionInProgress}
+                  title="Chat Actions"
+                >
+                  <DotsHorizontalIcon />
+                </IconButton>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Content align="start">
+                <DropdownMenu.Item
+                  onSelect={handleOpenRenameModal}
+                  disabled={!activeChat || renameChatMutation.isPending}
+                >
+                  <Pencil1Icon className="mr-1" /> Rename Chat
+                </DropdownMenu.Item>
+                <DropdownMenu.Separator />
+                <DropdownMenu.Item
+                  color="red"
+                  onSelect={handleOpenDeleteConfirm}
+                  disabled={!activeChat || deleteChatMutation.isPending}
+                >
+                  <TrashIcon className="mr-1" /> Delete Chat
+                </DropdownMenu.Item>
+              </DropdownMenu.Content>
+            </DropdownMenu.Root>
+          </Flex>
+
+          <Flex align="center" gap="2" flexShrink="0">
+            {/* Transcript Token Count */}
+            {typeof transcriptTokenCount === 'number' && (
+              <Tooltip content="Transcript Size (Tokens)">
+                <Badge variant="soft" color="gray">
+                  <ReaderIcon
+                    width="14"
+                    height="14"
+                    style={{ marginRight: '3px' }}
+                  />
+                  {transcriptTokenCount.toLocaleString()}
+                </Badge>
+              </Tooltip>
+            )}
+
+            <Tooltip content={statusTooltipContent}>
+              <Flex align="center" gap="1">
+                {renderStatusBadge()}
+              </Flex>
             </Tooltip>
-          )}
-          <Button
-            variant="soft"
-            size="1"
-            onClick={onOpenLlmModal}
-            title="Configure AI Model"
-          >
-            <MixerVerticalIcon width="14" height="14" />
-          </Button>
+            {ollamaStatus?.activeModel && (
+              <Tooltip
+                content={
+                  `Configured Context: ${configuredContextSize ? configuredContextSize.toLocaleString() : 'Default'}` +
+                  (activeModelDefaultContextSize
+                    ? ` (Model Max: ${activeModelDefaultContextSize.toLocaleString()})`
+                    : '')
+                }
+              >
+                <Badge
+                  variant="soft"
+                  color={configuredContextSize ? 'blue' : 'gray'}
+                  size="1"
+                  className={cn(isLoadingOllamaStatus ? 'opacity-50' : '')}
+                >
+                  <LightningBoltIcon
+                    width="14"
+                    height="14"
+                    style={{ marginRight: '2px' }}
+                  />
+                  {isLoadingOllamaStatus
+                    ? '...'
+                    : configuredContextSize
+                      ? configuredContextSize.toLocaleString()
+                      : 'Default'}
+                </Badge>
+              </Tooltip>
+            )}
+            {(latestPromptTokens !== null ||
+              latestCompletionTokens !== null) && (
+              <Tooltip
+                content={`Last Interaction: ${latestPromptTokens?.toLocaleString() ?? '?'} Input + ${latestCompletionTokens?.toLocaleString() ?? '?'} Output Tokens`}
+              >
+                <Badge variant="soft" color="gray" highContrast>
+                  <ArchiveIcon
+                    width="14"
+                    height="14"
+                    style={{ marginRight: '4px', opacity: 0.8 }}
+                  />
+                  <Text size="1">{totalTokens.toLocaleString()} Tokens</Text>
+                </Badge>
+              </Tooltip>
+            )}
+            <Button
+              variant="soft"
+              size="1"
+              onClick={onOpenLlmModal}
+              title="Configure AI Model"
+            >
+              <MixerVerticalIcon width="14" height="14" />
+            </Button>
+          </Flex>
         </Flex>
+        {/* Context Window Warning Callout */}
+        {showContextWarning && (
+          <Box px="3" pb="2" pt="1">
+            <Callout.Root color="yellow" size="1">
+              <Callout.Icon>
+                <ExclamationTriangleIcon />
+              </Callout.Icon>
+              <Callout.Text>
+                Warning: Transcript size (~
+                {(transcriptTokenCount || 0).toLocaleString()} tokens) plus chat
+                padding (~{PADDING_ESTIMATE.toLocaleString()} tokens) may exceed
+                the model's current context window (
+                {effectiveModelContextSize.toLocaleString()} tokens for{' '}
+                {modelName}). Consider selecting a model with a larger context
+                or increasing the context size in "Configure Model".
+              </Callout.Text>
+            </Callout.Root>
+          </Box>
+        )}
       </Flex>
 
       {chatToEdit && (

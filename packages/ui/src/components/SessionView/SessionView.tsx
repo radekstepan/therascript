@@ -81,7 +81,7 @@ export function SessionView() {
     error: ollamaError,
   } = useQuery<OllamaStatus, Error>({
     queryKey: ['ollamaStatus'],
-    queryFn: () => fetchOllamaStatus(),
+    queryFn: () => fetchOllamaStatus(), // Fetch status for the currently active model
     staleTime: 60 * 1000,
     refetchOnWindowFocus: true,
     refetchInterval: 5000,
@@ -239,12 +239,17 @@ export function SessionView() {
     ? parseInt(chatIdParam, 10)
     : (activeChatIdAtomValue ?? null);
 
+  const transcriptTokenCount = sessionMetadata.transcriptTokenCount;
+  const activeModelDefaultContextSize =
+    ollamaStatus?.details?.name === ollamaStatus?.activeModel
+      ? ollamaStatus?.details?.defaultContextSize
+      : null;
+
   return (
     <Flex
-      direction="column" // Main direction for SessionView's content
-      style={{ height: '100%', overflow: 'hidden', minHeight: 0 }} // Fill parent, prevent self-scroll
+      direction="column"
+      style={{ height: '100%', overflow: 'hidden', minHeight: 0 }}
     >
-      {/* Session Title Bar (fixed height) */}
       <Box
         px={{ initial: '6' }}
         py="3"
@@ -270,7 +275,6 @@ export function SessionView() {
         </Flex>
       </Box>
 
-      {/* Main content area for SessionContent */}
       <Box
         flexGrow="1"
         style={{
@@ -280,7 +284,6 @@ export function SessionView() {
           flexDirection: 'column',
         }}
       >
-        {/* SessionContent will take 100% height of this Box */}
         <SessionContent
           session={sessionMetadata}
           transcriptContent={transcriptContent}
@@ -295,6 +298,8 @@ export function SessionView() {
           ollamaStatus={ollamaStatus}
           isLoadingOllamaStatus={isLoadingOllamaStatus}
           onOpenLlmModal={handleOpenConfigureLlmModal}
+          transcriptTokenCount={transcriptTokenCount}
+          activeModelDefaultContextSize={activeModelDefaultContextSize}
         />
       </Box>
 
@@ -311,6 +316,7 @@ export function SessionView() {
         onModelSuccessfullySet={handleModelSuccessfullySet}
         currentActiveModelName={ollamaStatus?.activeModel}
         currentConfiguredContextSize={ollamaStatus?.configuredContextSize}
+        activeTranscriptTokens={transcriptTokenCount} // <-- PASS PROP
       />
     </Flex>
   );

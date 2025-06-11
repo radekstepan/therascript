@@ -31,7 +31,7 @@ import type {
   OllamaPullJobStatusState,
 } from '../types/index.js';
 
-// --- Ollama Response/Request Schemas (Unchanged) ---
+// --- Ollama Response/Request Schemas ---
 const OllamaModelDetailSchema = t.Object({
   format: t.String(),
   family: t.String(),
@@ -46,6 +46,7 @@ const OllamaModelInfoSchema = t.Object({
   size: t.Number(),
   digest: t.String(),
   details: OllamaModelDetailSchema,
+  defaultContextSize: t.Optional(t.Union([t.Number(), t.Null()])), // <-- ADDED
   size_vram: t.Optional(t.Number()),
   expires_at: t.Optional(t.String()),
   // size_total removed
@@ -58,7 +59,7 @@ const OllamaStatusResponseSchema = t.Object({
   activeModel: t.String(),
   modelChecked: t.String(),
   loaded: t.Boolean(),
-  details: t.Optional(OllamaModelInfoSchema), // Uses the string-date schema
+  details: t.Optional(OllamaModelInfoSchema), // Uses the string-date schema, will include defaultContextSize
   configuredContextSize: t.Optional(t.Union([t.Number(), t.Null()])),
 });
 const SetModelBodySchema = t.Object({
@@ -131,16 +132,16 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
         async ({ set }) => {
           console.log(`[API Models] Requesting available models`);
           try {
-            const models = await listModels(); // Service returns internal type (Date objects)
+            const models = await listModels(); // Service returns internal type (Date objects, defaultContextSize)
             set.status = 200;
-            // --- FIX: Convert Date objects back to strings for API response ---
+            // Convert Date objects to strings and ensure defaultContextSize is included
             const responseModels = models.map((m) => ({
               ...m,
-              modified_at: m.modified_at.toISOString(), // Convert Date to string
-              expires_at: m.expires_at?.toISOString(), // Convert Date to string (optional)
+              modified_at: m.modified_at.toISOString(),
+              expires_at: m.expires_at?.toISOString(),
+              defaultContextSize: m.defaultContextSize ?? null, // Ensure it's null if undefined
             }));
             return { models: responseModels };
-            // --- End FIX ---
           } catch (error: any) {
             console.error(
               `[API Models] Error fetching available models:`,
@@ -203,7 +204,6 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
           },
         }
       )
-      // --- FIX: Use service layer function ---
       .post(
         '/unload',
         async ({ set }) => {
@@ -234,14 +234,13 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
             404: t.Any(),
             500: t.Any(),
             503: t.Any(),
-          }, // Add potential error codes
+          },
           detail: {
             summary:
               'Request Ollama to unload the currently active model from memory',
           },
         }
       )
-      // --- END FIX ---
       .post(
         '/pull-model',
         ({ body, set }) => {
@@ -416,7 +415,7 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
             `[API Status] Checking status for model: ${modelNameToCheck} (Current Active: ${currentActiveModel}, Configured Context: ${currentConfiguredContext ?? 'default'})`
           );
           try {
-            const loadedModelResult = await checkModelStatus(modelNameToCheck); // Service returns internal type (Date objects)
+            const loadedModelResult = await checkModelStatus(modelNameToCheck);
             set.status = 200;
             if (
               loadedModelResult &&
@@ -434,12 +433,13 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
             } else {
               const loadedModelInfo =
                 loadedModelResult as OllamaModelInfo | null;
-              // --- FIX: Convert Date objects back to strings for API response ---
               const detailsResponse = loadedModelInfo
                 ? {
                     ...loadedModelInfo,
-                    modified_at: loadedModelInfo.modified_at.toISOString(), // Convert Date to string
-                    expires_at: loadedModelInfo.expires_at?.toISOString(), // Convert Date to string (optional)
+                    modified_at: loadedModelInfo.modified_at.toISOString(),
+                    expires_at: loadedModelInfo.expires_at?.toISOString(),
+                    defaultContextSize:
+                      loadedModelInfo.defaultContextSize ?? null, // Ensure null if undefined
                   }
                 : undefined;
               return {
@@ -450,7 +450,6 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
                 details: detailsResponse,
                 configuredContextSize: currentConfiguredContext,
               };
-              // --- End FIX ---
             }
           } catch (error: any) {
             console.error(
@@ -467,7 +466,7 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
           response: { 200: 'ollamaStatusResponse', 500: t.Any() },
           detail: {
             summary:
-              'Check loaded status & configured context size for active/specific model',
+              'Check loaded status & configured/default context sizes for active/specific model',
           },
         }
       )

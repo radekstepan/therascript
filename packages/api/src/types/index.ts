@@ -141,6 +141,7 @@ export interface OllamaModelInfo {
     parameter_size: string;
     quantization_level: string;
   };
+  defaultContextSize?: number | null; // <-- ADDED: Model's default/max context window
   size_vram?: number; // Optional field from newer Ollama versions
   expires_at?: Date; // Optional Date object
 }

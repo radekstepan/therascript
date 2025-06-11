@@ -13,6 +13,7 @@ import {
   TextField,
   Separator,
   Link,
+  Tooltip,
 } from '@radix-ui/themes';
 import {
   InfoCircledIcon,
@@ -20,20 +21,23 @@ import {
   CheckCircledIcon,
   LightningBoltIcon,
   ExclamationTriangleIcon,
+  MagicWandIcon, // <-- CHANGED: Using MagicWandIcon instead of SparklesIcon
 } from '@radix-ui/react-icons';
 import {
   fetchAvailableModels,
   setOllamaModel,
-  fetchOllamaStatus,
+  // fetchOllamaStatus, // Not directly used in this modal's logic anymore for status checks
 } from '../../../api/api';
 import { toastMessageAtom } from '../../../store';
 import { useSetAtom } from 'jotai';
 import type {
   OllamaModelInfo,
-  OllamaStatus,
+  // OllamaStatus, // Not directly used
   AvailableModelsResponse,
 } from '../../../types';
 import { LlmManagementModal } from './LlmManagementModal';
+
+const PADDING_ESTIMATE = 1500; // Tokens for system prompt, chat history, user query, AI response buffer
 
 interface SelectActiveModelModalProps {
   isOpen: boolean;
@@ -41,6 +45,7 @@ interface SelectActiveModelModalProps {
   onModelSuccessfullySet: () => void;
   currentActiveModelName?: string | null;
   currentConfiguredContextSize?: number | null;
+  activeTranscriptTokens?: number | null;
 }
 
 export function SelectActiveModelModal({
@@ -49,6 +54,7 @@ export function SelectActiveModelModal({
   onModelSuccessfullySet,
   currentActiveModelName,
   currentConfiguredContextSize,
+  activeTranscriptTokens,
 }: SelectActiveModelModalProps) {
   const queryClient = useQueryClient();
   const setToast = useSetAtom(toastMessageAtom);
@@ -96,7 +102,6 @@ export function SelectActiveModelModal({
       return setOllamaModel(modelName, contextSize);
     },
     onSuccess: (data: { message: string }, variables) => {
-      // Add type for data
       setToast(`✅ ${data.message}`);
       queryClient.invalidateQueries({ queryKey: ['ollamaStatus'] });
       onModelSuccessfullySet();
@@ -140,15 +145,37 @@ export function SelectActiveModelModal({
   };
 
   const availableModels = availableModelsData?.models || [];
+  const selectedModelDetails = availableModels.find(
+    (m) => m.name === selectedModelName
+  );
 
   const handleAdvancedModalLinkClick = (
     event: React.MouseEvent<HTMLAnchorElement>
   ) => {
     if (setModelMutation.isPending) {
-      event.preventDefault(); // Prevent navigation if mutation is pending
+      event.preventDefault();
       return;
     }
     setIsAdvancedModalOpen(true);
+  };
+
+  const suggestedContextSize =
+    typeof activeTranscriptTokens === 'number' && activeTranscriptTokens > 0
+      ? activeTranscriptTokens + PADDING_ESTIMATE
+      : null;
+
+  const handleUseSuggested = () => {
+    if (suggestedContextSize) {
+      setContextSizeInput(suggestedContextSize.toString());
+    }
+  };
+
+  const handleUseModelDefault = () => {
+    if (selectedModelDetails?.defaultContextSize) {
+      setContextSizeInput(selectedModelDetails.defaultContextSize.toString());
+    } else {
+      setContextSizeInput('');
+    }
   };
 
   return (
@@ -185,7 +212,9 @@ export function SelectActiveModelModal({
               ) : (
                 <Select.Root
                   value={selectedModelName}
-                  onValueChange={setSelectedModelName}
+                  onValueChange={(value) => {
+                    setSelectedModelName(value);
+                  }}
                   disabled={
                     setModelMutation.isPending || availableModels.length === 0
                   }
@@ -200,12 +229,17 @@ export function SelectActiveModelModal({
                     style={{ width: '100%' }}
                     disabled={
                       setModelMutation.isPending || availableModels.length === 0
-                    } // Also disable trigger if pending
+                    }
                   />
                   <Select.Content position="popper">
                     {availableModels.map((model) => (
                       <Select.Item key={model.name} value={model.name}>
                         {model.name}
+                        {model.defaultContextSize && (
+                          <Text size="1" color="gray" ml="2">
+                            ({model.defaultContextSize.toLocaleString()} tokens)
+                          </Text>
+                        )}
                       </Select.Item>
                     ))}
                   </Select.Content>
@@ -214,12 +248,46 @@ export function SelectActiveModelModal({
             </label>
 
             <label>
-              <Text as="div" size="2" mb="1" weight="medium">
-                Context Window Size (Optional)
-              </Text>
+              <Flex justify="between" align="center" mb="1">
+                <Text as="div" size="2" weight="medium">
+                  Context Window Size (num_ctx)
+                </Text>
+                <Flex gap="2">
+                  {suggestedContextSize && selectedModelDetails && (
+                    <Button
+                      variant="soft"
+                      size="1"
+                      onClick={handleUseSuggested}
+                      disabled={setModelMutation.isPending}
+                      title={`Based on transcript + padding (${suggestedContextSize.toLocaleString()})`}
+                    >
+                      <MagicWandIcon width="12" height="12" /> Use Suggested{' '}
+                      {/* <-- CHANGED ICON */}
+                    </Button>
+                  )}
+                  {selectedModelDetails?.defaultContextSize && (
+                    <Button
+                      variant="soft"
+                      size="1"
+                      onClick={handleUseModelDefault}
+                      disabled={setModelMutation.isPending}
+                      title={`Model's default maximum (${selectedModelDetails.defaultContextSize.toLocaleString()})`}
+                    >
+                      <LightningBoltIcon width="12" height="12" /> Use Default
+                      Max
+                    </Button>
+                  )}
+                </Flex>
+              </Flex>
               <TextField.Root
                 size="2"
-                placeholder="e.g., 4096 (Default if empty)"
+                placeholder={
+                  suggestedContextSize
+                    ? `Suggested: ${suggestedContextSize.toLocaleString()} (Transcript + Padding)`
+                    : selectedModelDetails?.defaultContextSize
+                      ? `Model Default: ${selectedModelDetails.defaultContextSize.toLocaleString()}`
+                      : 'e.g., 4096 (Empty for default)'
+                }
                 value={contextSizeInput}
                 onChange={(e) => setContextSizeInput(e.target.value)}
                 disabled={setModelMutation.isPending}
@@ -227,7 +295,16 @@ export function SelectActiveModelModal({
                 min="1"
               />
               <Text size="1" color="gray" mt="1">
-                Leave empty to use the model's default context size.
+                Enter desired context size. Leave empty for model's default.
+                {activeTranscriptTokens && (
+                  <Box mt="1">
+                    <Text size="1" color="gray">
+                      Current transcript: ~
+                      {activeTranscriptTokens.toLocaleString()} tokens. Chat
+                      padding: ~{PADDING_ESTIMATE.toLocaleString()} tokens.
+                    </Text>
+                  </Box>
+                )}
               </Text>
             </label>
 
@@ -243,7 +320,6 @@ export function SelectActiveModelModal({
 
           <Separator my="4" size="4" />
           <Flex justify="start" mb="4">
-            {/* Conditionally prevent click instead of using disabled prop */}
             <Link
               onClick={
                 !setModelMutation.isPending
@@ -251,12 +327,12 @@ export function SelectActiveModelModal({
                   : (e) => e.preventDefault()
               }
               size="2"
-              aria-disabled={setModelMutation.isPending} // For accessibility
+              aria-disabled={setModelMutation.isPending}
               style={
                 setModelMutation.isPending
                   ? { pointerEvents: 'none', opacity: 0.6 }
                   : {}
-              } // Visual cue
+              }
             >
               Advanced: Pull, Delete, or View All Models...
             </Link>

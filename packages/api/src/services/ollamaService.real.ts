@@ -165,7 +165,46 @@ const STANDALONE_SYSTEM_PROMPT = `You are a helpful AI assistant. Answer the use
 const activePullJobs = new Map<string, OllamaPullJobStatus>();
 const pullJobCancellationFlags = new Map<string, boolean>();
 
-// --- FIX: Ensure listModels returns Date objects internally ---
+// --- NEW: Helper to fetch model details and parse context size ---
+async function _fetchModelDefaultContextSize(
+  modelName: string
+): Promise<number | null> {
+  try {
+    console.log(
+      `[Real OllamaService] Fetching details for ${modelName} to get context size...`
+    );
+    const showResponse: ShowResponse = await ollama.show({ model: modelName });
+    if (showResponse.parameters) {
+      const parametersString = showResponse.parameters;
+      const lines = parametersString.split('\n');
+      for (const line of lines) {
+        const parts = line.trim().split(/\s+/); // Split by one or more spaces
+        if (parts[0].toLowerCase() === 'num_ctx' && parts.length > 1) {
+          const numCtx = parseInt(parts[1], 10);
+          if (!isNaN(numCtx) && numCtx > 0) {
+            console.log(
+              `[Real OllamaService] Parsed num_ctx ${numCtx} for ${modelName}`
+            );
+            return numCtx;
+          }
+        }
+      }
+    }
+    console.warn(
+      `[Real OllamaService] Could not parse num_ctx from parameters for ${modelName}. Modelfile params string: ${showResponse.parameters}`
+    );
+    return null;
+  } catch (error: any) {
+    console.error(
+      `[Real OllamaService] Error fetching/parsing details for ${modelName} for context size:`,
+      error.message || error
+    );
+    return null; // Return null if 'ollama show' fails or parsing fails
+  }
+}
+// --- END NEW HELPER ---
+
+// --- MODIFIED: listModels to include defaultContextSize ---
 export const listModels = async (): Promise<OllamaModelInfo[]> => {
   console.log(`[Real OllamaService] Request to list available models...`);
   try {
@@ -174,34 +213,44 @@ export const listModels = async (): Promise<OllamaModelInfo[]> => {
       `[Real OllamaService] Ollama ready. Fetching models from ${config.ollama.baseURL}/api/tags`
     );
     const response: ListResponse = await ollama.list();
-    // Map to OllamaModelInfo, creating Date objects from API strings/dates
-    return response.models.map((model: ModelResponse): OllamaModelInfo => {
-      const modifiedAtDate =
-        typeof model.modified_at === 'string'
-          ? new Date(model.modified_at)
-          : (model.modified_at ?? new Date(0)); // Handle potential missing date
-      const expiresAtDate =
-        typeof model.expires_at === 'string'
-          ? new Date(model.expires_at)
-          : (model.expires_at ?? undefined); // Handle Date or string
 
-      return {
-        name: model.name,
-        modified_at: modifiedAtDate, // Use Date object
-        size: model.size,
-        digest: model.digest,
-        details: {
-          format: model.details.format,
-          family: model.details.family,
-          families: model.details.families,
-          parameter_size: model.details.parameter_size,
-          quantization_level: model.details.quantization_level,
-        },
-        size_vram: model.size_vram,
-        expires_at: expiresAtDate, // Use Date object or undefined
-        // size_total removed
-      };
-    });
+    const modelsWithDetails: OllamaModelInfo[] = await Promise.all(
+      response.models.map(
+        async (model: ModelResponse): Promise<OllamaModelInfo> => {
+          const modifiedAtDate =
+            typeof model.modified_at === 'string'
+              ? new Date(model.modified_at)
+              : (model.modified_at ?? new Date(0));
+          const expiresAtDate =
+            typeof model.expires_at === 'string'
+              ? new Date(model.expires_at)
+              : (model.expires_at ?? undefined);
+
+          // Fetch default context size for each model
+          const defaultCtxSize = await _fetchModelDefaultContextSize(
+            model.name
+          );
+
+          return {
+            name: model.name,
+            modified_at: modifiedAtDate,
+            size: model.size,
+            digest: model.digest,
+            details: {
+              format: model.details.format,
+              family: model.details.family,
+              families: model.details.families,
+              parameter_size: model.details.parameter_size,
+              quantization_level: model.details.quantization_level,
+            },
+            defaultContextSize: defaultCtxSize, // <-- ADDED
+            size_vram: model.size_vram,
+            expires_at: expiresAtDate,
+          };
+        }
+      )
+    );
+    return modelsWithDetails;
   } catch (error: any) {
     console.error(
       '[Real OllamaService] Error fetching available models:',
@@ -219,7 +268,7 @@ export const listModels = async (): Promise<OllamaModelInfo[]> => {
     );
   }
 };
-// --- END FIX ---
+// --- END MODIFIED listModels ---
 
 // --- Keep original Parse Ollama Pull Stream Chunk ---
 function parseOllamaPullStreamChunk(
@@ -552,7 +601,7 @@ export const deleteOllamaModel = async (modelName: string): Promise<string> => {
   }
 };
 
-// --- FIX: Ensure checkModelStatus returns Date objects internally ---
+// --- MODIFIED: checkModelStatus to include defaultContextSize ---
 export const checkModelStatus = async (
   modelToCheck: string
 ): Promise<OllamaModelInfo | null | { status: 'unavailable' }> => {
@@ -560,38 +609,41 @@ export const checkModelStatus = async (
     `[Real OllamaService] Checking if specific model '${modelToCheck}' is loaded...`
   );
   try {
-    await ensureOllamaReady(); // Check readiness before checking status
+    await ensureOllamaReady();
     const response = await ollama.ps();
-    const loadedModel = response.models.find(
+    const loadedModelEntry = response.models.find(
       (model: any) => model.name === modelToCheck
-    ); // Use any if type is uncertain
+    );
 
-    if (loadedModel) {
+    if (loadedModelEntry) {
       console.log(
         `[Real OllamaService] Specific model '${modelToCheck}' found loaded.`
       );
-      // Map to OllamaModelInfo, ensuring dates are Date objects
-      const modifiedAtDate = loadedModel.modified_at
-        ? new Date(loadedModel.modified_at)
-        : new Date(0); // Default if missing
-      const expiresAtDate = loadedModel.expires_at
-        ? new Date(loadedModel.expires_at)
+      const modifiedAtDate = loadedModelEntry.modified_at
+        ? new Date(loadedModelEntry.modified_at)
+        : new Date(0);
+      const expiresAtDate = loadedModelEntry.expires_at
+        ? new Date(loadedModelEntry.expires_at)
         : undefined;
 
+      // Fetch default context size for the loaded model
+      const defaultCtxSize = await _fetchModelDefaultContextSize(modelToCheck);
+
       return {
-        name: loadedModel.name,
-        modified_at: modifiedAtDate, // Keep as Date
-        size: loadedModel.size ?? 0,
-        digest: loadedModel.digest,
-        details: loadedModel.details ?? {
+        name: loadedModelEntry.name,
+        modified_at: modifiedAtDate,
+        size: loadedModelEntry.size ?? 0,
+        digest: loadedModelEntry.digest,
+        details: loadedModelEntry.details ?? {
           format: 'unknown',
           family: 'unknown',
           families: null,
           parameter_size: 'unknown',
           quantization_level: 'unknown',
         },
-        size_vram: loadedModel.size_vram,
-        expires_at: expiresAtDate, // Keep as Date or undefined
+        defaultContextSize: defaultCtxSize, // <-- ADDED
+        size_vram: loadedModelEntry.size_vram,
+        expires_at: expiresAtDate,
       };
     } else {
       console.log(
@@ -623,7 +675,7 @@ export const checkModelStatus = async (
     return null;
   }
 };
-// --- END FIX ---
+// --- END MODIFIED checkModelStatus ---
 
 // --- Keep original Load Model Function ---
 export const loadOllamaModel = async (modelName: string): Promise<void> => {
@@ -953,10 +1005,3 @@ export const streamChatResponse = async (
     );
   }
 };
-
-// --- Optionally include the deprecated non-streaming function ---
-/*
-export const generateChatResponse = async ( contextTranscript: string | null, chatHistory: BackendChatMessage[], retryAttempt: boolean = false ): Promise<{ content: string; promptTokens?: number; completionTokens?: number }> => {
-    // ... (original implementation) ...
-};
-*/
