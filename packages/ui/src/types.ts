@@ -68,9 +68,9 @@ export interface BackendChatMessage {
 }
 
 export interface OllamaModelInfo {
-  /* ... as before ... */ name: string;
-  modified_at: string;
-  size: number;
+  name: string;
+  modified_at: string; // ISO string
+  size: number; // in bytes
   digest: string;
   details: {
     format: string;
@@ -79,15 +79,16 @@ export interface OllamaModelInfo {
     parameter_size: string;
     quantization_level: string;
   };
+  defaultContextSize?: number | null; // <-- ADDED
   size_vram?: number;
-  expires_at?: string | null;
+  expires_at?: string | null; // ISO string
 }
 export interface OllamaStatus {
-  /* ... as before ... */ activeModel: string;
-  modelChecked: string;
+  activeModel: string;
+  modelChecked: string; // The model whose details are provided below
   loaded: boolean;
-  details?: OllamaModelInfo | null;
-  configuredContextSize?: number | null;
+  details?: OllamaModelInfo | null; // Contains details of modelChecked, including defaultContextSize
+  configuredContextSize?: number | null; // The num_ctx the backend is currently using for the activeModel
 }
 export interface AvailableModelsResponse {
   models: OllamaModelInfo[];

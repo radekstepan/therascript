@@ -12,27 +12,45 @@ import {
   Text,
   Spinner,
   Callout,
+  Badge,
+  Tooltip,
+  Box,
 } from '@radix-ui/themes';
 import {
   DotsHorizontalIcon,
   Pencil1Icon,
   TrashIcon,
   InfoCircledIcon,
+  MixerVerticalIcon,
+  CheckCircledIcon,
+  SymbolIcon,
+  LightningBoltIcon,
+  ArchiveIcon, // <-- Keep ArchiveIcon for tokens
 } from '@radix-ui/react-icons';
 import { EntitySelectorDropdown } from '../Shared/EntitySelectorDropdown';
 import { EditStandaloneChatModal } from './EditStandaloneChatModal';
 import { fetchStandaloneChats, deleteStandaloneChat } from '../../api/api';
-import type { StandaloneChatListItem } from '../../types';
+import type { StandaloneChatListItem, OllamaStatus } from '../../types';
 import { toastMessageAtom } from '../../store';
 import { formatTimestamp } from '../../helpers';
-import { cn } from '../../utils'; // Corrected import path
+import { cn } from '../../utils';
 
 interface StandaloneChatHeaderProps {
   activeChatId: number | null;
+  ollamaStatus: OllamaStatus | undefined;
+  isLoadingOllamaStatus: boolean;
+  onOpenLlmModal: () => void;
+  latestPromptTokens?: number | null; // <-- NEW PROP
+  latestCompletionTokens?: number | null; // <-- NEW PROP
 }
 
 export function StandaloneChatHeader({
   activeChatId,
+  ollamaStatus,
+  isLoadingOllamaStatus,
+  onOpenLlmModal,
+  latestPromptTokens, // <-- Destructure
+  latestCompletionTokens, // <-- Destructure
 }: StandaloneChatHeaderProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -69,7 +87,6 @@ export function StandaloneChatHeader({
       });
       setIsDeleteConfirmOpen(false);
       setChatToDelete(null);
-      // Navigate to the main chats list if the active chat was deleted
       navigate(`/chats-list`, { replace: true });
     },
     onError: (error) => setToast(`Error deleting chat: ${error.message}`),
@@ -93,57 +110,160 @@ export function StandaloneChatHeader({
     }
   };
 
-  const isLoading = isLoadingChats || deleteChatMutation.isPending;
+  const modelName = ollamaStatus?.activeModel ?? 'No Model Selected';
+  const isLoaded = ollamaStatus?.loaded ?? false;
+  const isActiveModelLoaded =
+    isLoaded && ollamaStatus?.modelChecked === ollamaStatus?.activeModel;
+  const configuredContextSize = ollamaStatus?.configuredContextSize;
+  const activeModelDefaultContextSize =
+    ollamaStatus?.details?.name === ollamaStatus?.activeModel
+      ? ollamaStatus?.details?.defaultContextSize
+      : null;
+
+  const renderStatusBadge = () => {
+    if (isLoadingOllamaStatus) return <Spinner size="1" />;
+    if (!ollamaStatus?.activeModel)
+      return <SymbolIcon className="text-yellow-500" width="14" height="14" />;
+    if (isActiveModelLoaded)
+      return (
+        <CheckCircledIcon className="text-green-600" width="14" height="14" />
+      );
+    return <SymbolIcon className="text-gray-500" width="14" height="14" />;
+  };
+
+  let statusTooltipContent = 'Loading status...';
+  if (!isLoadingOllamaStatus) {
+    if (!ollamaStatus?.activeModel) {
+      statusTooltipContent =
+        'No AI model selected. Click "Configure Model" to choose one.';
+    } else if (isActiveModelLoaded) {
+      statusTooltipContent = `Active Model: ${modelName} (Loaded)`;
+    } else {
+      statusTooltipContent = `Active Model: ${modelName} (Not loaded or unavailable)`;
+    }
+  }
+
+  const totalTokens = (latestPromptTokens ?? 0) + (latestCompletionTokens ?? 0); // <-- Calculate total tokens
+
+  const isLoadingAny =
+    isLoadingChats || deleteChatMutation.isPending || isLoadingOllamaStatus;
 
   return (
     <>
       <Flex
-        align="center"
-        gap="2"
-        className={cn('px-4 md:px-6 lg:px-8', 'py-2')}
+        direction="column"
         style={{
           borderBottom: '1px solid var(--gray-a6)',
           backgroundColor: 'var(--color-panel-solid)',
           flexShrink: 0,
         }}
       >
-        <EntitySelectorDropdown
-          items={standaloneChats || []}
-          activeItemId={activeChatId}
-          onItemSelect={handleChatSelect}
-          placeholderText="Select a Chat..."
-          entityTypeLabel="Chat"
-          disabled={isLoading}
-        />
-        <DropdownMenu.Root>
-          <DropdownMenu.Trigger>
-            <IconButton
-              variant="ghost"
-              color="gray"
+        <Flex
+          align="center"
+          gap="2"
+          className={cn('px-4 md:px-6 lg:px-8', 'py-2')}
+        >
+          <Flex align="center" gap="1" style={{ flexGrow: 1, minWidth: 0 }}>
+            <EntitySelectorDropdown
+              items={standaloneChats || []}
+              activeItemId={activeChatId}
+              onItemSelect={handleChatSelect}
+              placeholderText="Select a Chat..."
+              entityTypeLabel="Chat"
+              disabled={isLoadingAny}
+            />
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger>
+                <IconButton
+                  variant="ghost"
+                  color="gray"
+                  size="1"
+                  disabled={!activeChat || isLoadingAny}
+                  title="Chat Actions"
+                >
+                  <DotsHorizontalIcon />
+                </IconButton>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Content align="end">
+                <DropdownMenu.Item
+                  onSelect={handleOpenEditModal}
+                  disabled={!activeChat || deleteChatMutation.isPending}
+                >
+                  <Pencil1Icon className="mr-1" /> Edit Details
+                </DropdownMenu.Item>
+                <DropdownMenu.Separator />
+                <DropdownMenu.Item
+                  color="red"
+                  onSelect={handleOpenDeleteConfirm}
+                  disabled={!activeChat || deleteChatMutation.isPending}
+                >
+                  <TrashIcon className="mr-1" /> Delete Chat
+                </DropdownMenu.Item>
+              </DropdownMenu.Content>
+            </DropdownMenu.Root>
+          </Flex>
+
+          <Flex align="center" gap="2" flexShrink="0">
+            <Tooltip content={statusTooltipContent}>
+              <Flex align="center" gap="1">
+                {renderStatusBadge()}
+              </Flex>
+            </Tooltip>
+            {ollamaStatus?.activeModel && (
+              <Tooltip
+                content={
+                  `Configured Context: ${configuredContextSize ? configuredContextSize.toLocaleString() : 'Default'}` +
+                  (activeModelDefaultContextSize
+                    ? ` (Model Max: ${activeModelDefaultContextSize.toLocaleString()})`
+                    : '')
+                }
+              >
+                <Badge
+                  variant="soft"
+                  color={configuredContextSize ? 'blue' : 'gray'}
+                  size="1"
+                  className={cn(isLoadingOllamaStatus ? 'opacity-50' : '')}
+                >
+                  <LightningBoltIcon
+                    width="14"
+                    height="14"
+                    style={{ marginRight: '2px' }}
+                  />
+                  {isLoadingOllamaStatus
+                    ? '...'
+                    : configuredContextSize
+                      ? configuredContextSize.toLocaleString()
+                      : 'Default'}
+                </Badge>
+              </Tooltip>
+            )}
+            {/* Display Last Interaction Tokens */}
+            {(latestPromptTokens !== null ||
+              latestCompletionTokens !== null) && (
+              <Tooltip
+                content={`Last Interaction: ${latestPromptTokens?.toLocaleString() ?? '?'} Input + ${latestCompletionTokens?.toLocaleString() ?? '?'} Output Tokens`}
+              >
+                <Badge variant="soft" color="gray" highContrast>
+                  <ArchiveIcon
+                    width="14"
+                    height="14"
+                    style={{ marginRight: '4px', opacity: 0.8 }}
+                  />
+                  <Text size="1">{totalTokens.toLocaleString()} Tokens</Text>
+                </Badge>
+              </Tooltip>
+            )}
+            <Button
+              variant="soft"
               size="1"
-              disabled={!activeChat || isLoading}
-              title="Chat Actions"
+              onClick={onOpenLlmModal}
+              title="Configure AI Model"
+              disabled={isLoadingAny}
             >
-              <DotsHorizontalIcon />
-            </IconButton>
-          </DropdownMenu.Trigger>
-          <DropdownMenu.Content align="end">
-            <DropdownMenu.Item
-              onSelect={handleOpenEditModal}
-              disabled={!activeChat}
-            >
-              <Pencil1Icon className="mr-1" /> Edit Details
-            </DropdownMenu.Item>
-            <DropdownMenu.Separator />
-            <DropdownMenu.Item
-              color="red"
-              onSelect={handleOpenDeleteConfirm}
-              disabled={!activeChat || deleteChatMutation.isPending}
-            >
-              <TrashIcon className="mr-1" /> Delete Chat
-            </DropdownMenu.Item>
-          </DropdownMenu.Content>
-        </DropdownMenu.Root>
+              <MixerVerticalIcon width="14" height="14" />
+            </Button>
+          </Flex>
+        </Flex>
       </Flex>
 
       <EditStandaloneChatModal
