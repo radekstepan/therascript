@@ -143,5 +143,20 @@ export const deleteUploadedAudioFile = async (
   }
 };
 
+// --- NEW FUNCTION ---
+// Clears the entire uploads directory.
+export const deleteAllUploads = async (): Promise<void> => {
+  console.warn(`[FileService] DELETING ALL UPLOADS in ${uploadsDir}`);
+  try {
+    await fs.rm(uploadsDir, { recursive: true, force: true });
+    await fs.mkdir(uploadsDir, { recursive: true });
+    console.log(`[FileService] Uploads directory has been cleared.`);
+  } catch (error) {
+    console.error(`[FileService] Error clearing uploads directory:`, error);
+    throw new Error('Failed to clear uploads directory.');
+  }
+};
+// --- END NEW FUNCTION ---
+
 // Expose the new function and the helper for resolving paths
 export { getAudioAbsolutePath };

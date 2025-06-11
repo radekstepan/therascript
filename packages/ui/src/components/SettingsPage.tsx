@@ -29,6 +29,7 @@ import {
   UpdateIcon,
   ExclamationTriangleIcon,
   InfoCircledIcon,
+  TrashIcon,
 } from '@radix-ui/react-icons';
 import {
   accentColorAtom,
@@ -37,7 +38,7 @@ import {
   type AccentColorValue,
   toastMessageAtom,
 } from '../store';
-import { requestReindexElasticsearch } from '../api/api';
+import { requestReindexElasticsearch, requestResetAllData } from '../api/api';
 
 export function SettingsPage() {
   const [renderMarkdown, setRenderMarkdown] = useAtom(renderMarkdownAtom);
@@ -47,6 +48,7 @@ export function SettingsPage() {
   const queryClient = useQueryClient();
 
   const [isReindexConfirmOpen, setIsReindexConfirmOpen] = useState(false);
+  const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
 
   const reindexMutation = useMutation({
     mutationFn: requestReindexElasticsearch,
@@ -54,7 +56,6 @@ export function SettingsPage() {
       setToast(`✅ Elasticsearch Re-index: ${data.message}`);
       if (data.errors && data.errors.length > 0) {
         console.warn('Re-indexing completed with errors:', data.errors);
-        // Optionally, provide more detailed feedback or log client-side
         setToast(
           `⚠️ Re-index finished with ${data.errors.length} error(s). Check server logs.`
         );
@@ -67,6 +68,28 @@ export function SettingsPage() {
     },
     onSettled: () => {
       setIsReindexConfirmOpen(false);
+    },
+  });
+
+  const resetAllDataMutation = useMutation({
+    mutationFn: requestResetAllData,
+    onSuccess: (data) => {
+      setToast(`✅ System Reset: ${data.message}`);
+      if (data.errors && data.errors.length > 0) {
+        console.warn('Reset completed with errors:', data.errors);
+        setToast(
+          `⚠️ Reset finished with ${data.errors.length} error(s). Check server logs.`
+        );
+      }
+      // Invalidate all queries to refetch data from a now-empty state
+      queryClient.invalidateQueries();
+    },
+    onError: (error: Error) => {
+      setToast(`❌ System Reset Error: ${error.message}`);
+      console.error('System reset failed:', error);
+    },
+    onSettled: () => {
+      setIsResetConfirmOpen(false);
     },
   });
 
@@ -83,9 +106,15 @@ export function SettingsPage() {
   const handleReindexClick = () => {
     setIsReindexConfirmOpen(true);
   };
-
   const handleConfirmReindex = () => {
     reindexMutation.mutate();
+  };
+
+  const handleResetAllDataClick = () => {
+    setIsResetConfirmOpen(true);
+  };
+  const handleConfirmResetAllData = () => {
+    resetAllDataMutation.mutate();
   };
 
   return (
@@ -239,7 +268,7 @@ export function SettingsPage() {
           </Box>
         </Card>
 
-        <Card>
+        <Card mb="6">
           <Box p="4">
             <Heading
               as="h2"
@@ -318,6 +347,52 @@ export function SettingsPage() {
               )}
           </Box>
         </Card>
+
+        <Card
+          variant="surface"
+          style={{ '--card-background': 'var(--red-2)' } as React.CSSProperties}
+        >
+          <Box p="4">
+            <Heading
+              as="h2"
+              size="5"
+              mb="2"
+              className="text-red-800 dark:text-red-100"
+            >
+              Danger Zone
+            </Heading>
+            <Separator
+              my="3"
+              size="4"
+              style={{ backgroundColor: 'var(--red-6)' }}
+            />
+            <Flex align="center" justify="between" mb="2">
+              <Box>
+                <Text
+                  size="3"
+                  weight="medium"
+                  className="text-red-800 dark:text-red-200"
+                >
+                  Reset All Application Data
+                </Text>
+                <Text as="p" size="2" color="red" mt="1">
+                  This will permanently delete all sessions, chats, messages,
+                  and transcripts from the database and search index. This
+                  action cannot be undone.
+                </Text>
+              </Box>
+              <Button
+                color="red"
+                variant="solid"
+                onClick={handleResetAllDataClick}
+                disabled={resetAllDataMutation.isPending}
+              >
+                {resetAllDataMutation.isPending ? <Spinner /> : <TrashIcon />}
+                <Text ml="2">Reset Everything</Text>
+              </Button>
+            </Flex>
+          </Box>
+        </Card>
       </Container>
 
       <LlmManagementModal
@@ -361,6 +436,49 @@ export function SettingsPage() {
                   {reindexMutation.isPending
                     ? 'Re-indexing...'
                     : 'Confirm Re-index'}
+                </Text>
+              </Button>
+            </AlertDialog.Action>
+          </Flex>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
+
+      <AlertDialog.Root
+        open={isResetConfirmOpen}
+        onOpenChange={setIsResetConfirmOpen}
+      >
+        <AlertDialog.Content style={{ maxWidth: 450 }}>
+          <AlertDialog.Title>Confirm System Reset</AlertDialog.Title>
+          <AlertDialog.Description size="2">
+            This is your final confirmation. Are you absolutely sure you want to
+            delete ALL data? This includes all sessions, chats, and starred
+            templates. This action cannot be undone.
+          </AlertDialog.Description>
+          <Flex gap="3" mt="4" justify="end">
+            <AlertDialog.Cancel>
+              <Button
+                variant="soft"
+                color="gray"
+                disabled={resetAllDataMutation.isPending}
+              >
+                Cancel
+              </Button>
+            </AlertDialog.Cancel>
+            <AlertDialog.Action>
+              <Button
+                color="red"
+                onClick={handleConfirmResetAllData}
+                disabled={resetAllDataMutation.isPending}
+              >
+                {resetAllDataMutation.isPending ? (
+                  <Spinner size="1" />
+                ) : (
+                  <TrashIcon />
+                )}
+                <Text ml={resetAllDataMutation.isPending ? '2' : '1'}>
+                  {resetAllDataMutation.isPending
+                    ? 'Resetting...'
+                    : 'Yes, Delete Everything'}
                 </Text>
               </Button>
             </AlertDialog.Action>

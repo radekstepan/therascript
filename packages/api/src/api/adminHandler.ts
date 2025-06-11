@@ -9,6 +9,7 @@ import {
   type MessageSource,
 } from '@therascript/elasticsearch-client';
 import config from '../config/index.js';
+import { db, schema, verifySchemaVersion } from '../db/sqliteService.js';
 import { sessionRepository } from '../repositories/sessionRepository.js';
 import { transcriptRepository } from '../repositories/transcriptRepository.js';
 import { chatRepository } from '../repositories/chatRepository.js';
@@ -19,6 +20,7 @@ import type {
   TranscriptParagraphData,
   BackendChatMessage,
 } from '../types/index.js';
+import { deleteAllUploads } from '../services/fileService.js';
 
 const esClient = getElasticsearchClient(config.elasticsearch.url);
 
@@ -193,4 +195,87 @@ export const handleReindexElasticsearch = async ({
       errors,
     };
   }
+};
+
+// --- NEW HANDLER ---
+interface ResetResult {
+  message: string;
+  errors: string[];
+}
+
+export const handleResetAllData = async ({
+  set,
+}: any): Promise<ResetResult> => {
+  console.warn(
+    '[API Admin] !!! DESTRUCTIVE ACTION: Received request to RESET ALL DATA !!!'
+  );
+  const errors: string[] = [];
+
+  // 1. Reset Elasticsearch
+  try {
+    console.log('[API Admin Reset] Deleting existing Elasticsearch indices...');
+    await deleteIndex(esClient, TRANSCRIPTS_INDEX).catch((e) => {
+      if (!e.message?.includes('index_not_found_exception')) throw e;
+    });
+    await deleteIndex(esClient, MESSAGES_INDEX).catch((e) => {
+      if (!e.message?.includes('index_not_found_exception')) throw e;
+    });
+    console.log('[API Admin Reset] Elasticsearch indices deleted.');
+
+    console.log('[API Admin Reset] Re-initializing Elasticsearch indices...');
+    await initializeIndices(esClient);
+    console.log('[API Admin Reset] Elasticsearch indices re-initialized.');
+  } catch (e: any) {
+    const msg = `Error resetting Elasticsearch: ${e.message || String(e)}`;
+    console.error(msg, e);
+    errors.push(msg);
+  }
+
+  // 2. Reset SQLite Database by dropping all tables and re-running schema
+  try {
+    console.log('[API Admin Reset] Dropping all SQLite tables...');
+    const dropTransaction = db.transaction(() => {
+      db.exec('DROP TABLE IF EXISTS messages');
+      db.exec('DROP TABLE IF EXISTS chats');
+      db.exec('DROP TABLE IF EXISTS transcript_paragraphs');
+      db.exec('DROP TABLE IF EXISTS sessions');
+      db.exec('DROP TABLE IF EXISTS schema_metadata');
+    });
+    dropTransaction();
+    console.log('[API Admin Reset] All known tables dropped.');
+
+    console.log('[API Admin Reset] Re-initializing SQLite schema...');
+    db.exec(schema);
+    verifySchemaVersion(db, schema); // Re-verify and store hash
+    console.log('[API Admin Reset] SQLite schema re-initialized.');
+  } catch (e: any) {
+    const msg = `Error resetting SQLite database: ${e.message || String(e)}`;
+    console.error(msg, e);
+    errors.push(msg);
+  }
+
+  // 3. Reset file storage
+  try {
+    console.log('[API Admin Reset] Deleting all uploaded files...');
+    await deleteAllUploads();
+    console.log('[API Admin Reset] All uploaded files deleted.');
+  } catch (e: any) {
+    const msg = `Error deleting uploaded files: ${e.message || String(e)}`;
+    console.error(msg, e);
+    errors.push(msg);
+  }
+
+  if (errors.length > 0) {
+    set.status = 500;
+    return {
+      message: 'Failed to reset all data. See errors.',
+      errors: errors,
+    };
+  }
+
+  set.status = 200;
+  return {
+    message: 'Application data and search index have been reset successfully.',
+    errors: [],
+  };
 };
