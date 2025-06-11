@@ -151,7 +151,13 @@ export function StandaloneChatsPage() {
 
   if (isLoading) {
     return (
-      <Box className={cn('px-4 md:px-6 lg:px-8', 'py-6')}>
+      <Box
+        className={cn(
+          'flex-grow flex flex-col',
+          'px-4 md:px-6 lg:px-8',
+          'py-6'
+        )}
+      >
         <Flex justify="center" align="center" style={{ minHeight: '200px' }}>
           <Spinner size="3" /> <Text ml="2">Loading standalone chats...</Text>
         </Flex>
@@ -161,7 +167,13 @@ export function StandaloneChatsPage() {
 
   if (error) {
     return (
-      <Box className={cn('px-4 md:px-6 lg:px-8', 'py-6')}>
+      <Box
+        className={cn(
+          'flex-grow flex flex-col',
+          'px-4 md:px-6 lg:px-8',
+          'py-6'
+        )}
+      >
         <Card style={{ width: '100%' }}>
           <Text color="red">
             Error loading standalone chats: {error.message}
@@ -176,7 +188,13 @@ export function StandaloneChatsPage() {
 
   return (
     <>
-      <Box className={cn('px-4 md:px-6 lg:px-8', 'py-6')}>
+      <Box
+        className={cn(
+          'flex-grow flex flex-col overflow-y-auto',
+          'px-4 md:px-6 lg:px-8',
+          'py-6'
+        )}
+      >
         <Flex justify="between" align="center" mb="6">
           <Heading
             as="h1"

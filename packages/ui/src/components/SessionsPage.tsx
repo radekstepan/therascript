@@ -24,7 +24,7 @@ import {
   toastMessageAtom,
 } from '../store';
 import type { Session, SessionMetadata } from '../types';
-import { cn } from '../utils'; // Corrected import path
+import { cn } from '../utils';
 
 export function SessionsPage() {
   const setToast = useSetAtom(toastMessageAtom);
@@ -145,7 +145,13 @@ export function SessionsPage() {
 
   if (isLoading) {
     return (
-      <Box className={cn('px-4 md:px-6 lg:px-8', 'py-6')}>
+      <Box
+        className={cn(
+          'flex-grow flex flex-col',
+          'px-4 md:px-6 lg:px-8',
+          'py-6'
+        )}
+      >
         <Flex justify="center" align="center" style={{ minHeight: '200px' }}>
           <Spinner size="3" /> <Text ml="2">Loading sessions...</Text>
         </Flex>
@@ -155,7 +161,13 @@ export function SessionsPage() {
 
   if (error) {
     return (
-      <Box className={cn('px-4 md:px-6 lg:px-8', 'py-6')}>
+      <Box
+        className={cn(
+          'flex-grow flex flex-col',
+          'px-4 md:px-6 lg:px-8',
+          'py-6'
+        )}
+      >
         <Card style={{ width: '100%' }}>
           <Text color="red">Error loading sessions: {error.message}</Text>
           <Button onClick={() => refetch()} mt="2">
@@ -168,7 +180,13 @@ export function SessionsPage() {
 
   return (
     <>
-      <Box className={cn('px-4 md:px-6 lg:px-8', 'py-6')}>
+      <Box
+        className={cn(
+          'flex-grow flex flex-col overflow-y-auto',
+          'px-4 md:px-6 lg:px-8',
+          'py-6'
+        )}
+      >
         <Flex justify="between" align="center" mb="6">
           <Heading
             as="h1"

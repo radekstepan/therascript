@@ -39,6 +39,7 @@ import {
   toastMessageAtom,
 } from '../store';
 import { requestReindexElasticsearch, requestResetAllData } from '../api/api';
+import { cn } from '../utils';
 
 export function SettingsPage() {
   const [renderMarkdown, setRenderMarkdown] = useAtom(renderMarkdownAtom);
@@ -119,281 +120,300 @@ export function SettingsPage() {
 
   return (
     <>
-      <Container size="3" px="4" py="6">
-        <Heading
-          as="h1"
-          size="7"
-          mb="6"
-          className="text-gray-900 dark:text-gray-100"
-        >
-          Application Settings
-        </Heading>
+      <Box
+        className={cn(
+          'flex-grow flex flex-col overflow-y-auto',
+          'px-4 md:px-6 lg:px-8',
+          'py-6'
+        )}
+      >
+        <Container size="3">
+          <Heading
+            as="h1"
+            size="7"
+            mb="6"
+            className="text-gray-900 dark:text-gray-100"
+          >
+            Application Settings
+          </Heading>
 
-        <Card mb="6">
-          <Box p="4">
-            <Heading
-              as="h2"
-              size="5"
-              mb="4"
-              className="text-gray-800 dark:text-gray-200"
-            >
-              Appearance
-            </Heading>
-            <Flex align="center" justify="between" mb="4">
-              <Flex align="center" gap="2">
-                <RadixLayoutIcon
-                  width="20"
-                  height="20"
-                  className="text-gray-600 dark:text-gray-400"
-                />
-                <Text size="3" className="text-gray-700 dark:text-gray-300">
-                  Render AI messages as Markdown
-                </Text>
-              </Flex>
-              <Switch
-                checked={renderMarkdown}
-                onCheckedChange={handleMarkdownToggle}
-                aria-label="Toggle Markdown rendering for AI responses"
-              />
-            </Flex>
-            <Text size="2" color="gray">
-              When enabled, AI responses in chat interfaces will be formatted
-              using Markdown. Disable for plain text.
-            </Text>
-            <Separator my="5" size="4" />
-            <Flex align="center" gap="2" mb="3">
-              <ColorWheelIcon
-                width="20"
-                height="20"
-                className="text-gray-600 dark:text-gray-400"
-              />
-              <Text size="3" className="text-gray-700 dark:text-gray-300">
-                Accent Color
-              </Text>
-            </Flex>
-            <Grid columns={{ initial: '4', xs: '5', sm: '6', md: '8' }} gap="2">
-              {RADIX_ACCENT_COLORS.map((color: RadixAccentColor) => (
-                <Tooltip key={color} content={capitalize(color)}>
-                  <Button
-                    variant={currentAccent === color ? 'solid' : 'outline'}
-                    color={
-                      color as React.ComponentProps<typeof Button>['color']
-                    }
-                    onClick={() => handleAccentColorSelect(color)}
-                    style={{
-                      width: '100%',
-                      height: '36px',
-                      padding: '0',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color:
-                        currentAccent === color &&
-                        [
-                          'ruby',
-                          'crimson',
-                          'plum',
-                          'purple',
-                          'violet',
-                          'iris',
-                          'indigo',
-                          'blue',
-                          'sky',
-                          'cyan',
-                          'teal',
-                          'jade',
-                          'green',
-                          'grass',
-                          'brown',
-                          'gray',
-                        ].includes(color)
-                          ? 'white'
-                          : 'var(--gray-12)',
-                    }}
-                    title={`Set accent to ${capitalize(color)}`}
-                    aria-pressed={currentAccent === color}
-                  >
-                    {currentAccent === color ? (
-                      <CheckIcon width="18" height="18" />
-                    ) : (
-                      <Box
-                        style={{
-                          width: '14px',
-                          height: '14px',
-                          borderRadius: '50%',
-                          backgroundColor: `var(--${color}-9)`,
-                        }}
-                      />
-                    )}
-                  </Button>
-                </Tooltip>
-              ))}
-            </Grid>
-            <Text size="2" color="gray" mt="3">
-              Select an accent color for the application theme. Changes will
-              apply immediately. Your preference is saved locally.
-            </Text>
-          </Box>
-        </Card>
-
-        <Card mb="6">
-          <Box p="4">
-            <Heading
-              as="h2"
-              size="5"
-              mb="4"
-              className="text-gray-800 dark:text-gray-200"
-            >
-              Language Model Management
-            </Heading>
-            <Flex align="center" justify="between">
-              <Flex align="center" gap="2">
-                <MixerVerticalIcon
-                  width="20"
-                  height="20"
-                  className="text-gray-600 dark:text-gray-400"
-                />
-                <Text size="3" className="text-gray-700 dark:text-gray-300">
-                  Manage AI Models
-                </Text>
-              </Flex>
-              <Button variant="soft" onClick={() => setIsLlmModalOpen(true)}>
-                Open Model Manager
-              </Button>
-            </Flex>
-            <Text size="2" color="gray" mt="2">
-              View available models, download new ones, or set the active model
-              for analysis.
-            </Text>
-          </Box>
-        </Card>
-
-        <Card mb="6">
-          <Box p="4">
-            <Heading
-              as="h2"
-              size="5"
-              mb="4"
-              className="text-gray-800 dark:text-gray-200"
-            >
-              Data Management
-            </Heading>
-            <Flex align="center" justify="between" mb="2">
-              <Flex align="center" gap="2">
-                <UpdateIcon
-                  width="20"
-                  height="20"
-                  className="text-gray-600 dark:text-gray-400"
-                />
-                <Text size="3" className="text-gray-700 dark:text-gray-300">
-                  Search Index
-                </Text>
-              </Flex>
-              <Button
-                variant="outline"
-                color="orange"
-                onClick={handleReindexClick}
-                disabled={reindexMutation.isPending}
+          <Card mb="6">
+            <Box p="4">
+              <Heading
+                as="h2"
+                size="5"
+                mb="4"
+                className="text-gray-800 dark:text-gray-200"
               >
-                {reindexMutation.isPending ? (
-                  <>
-                    <Spinner size="1" /> Re-indexing...
-                  </>
-                ) : (
-                  'Re-index All Data'
-                )}
-              </Button>
-            </Flex>
-            <Text size="2" color="gray">
-              This will delete all current search index data and re-build it
-              from the database. Use if search results seem inconsistent or
-              after major data changes. This can take some time.
-            </Text>
-            {reindexMutation.isError && (
-              <Callout.Root color="red" size="1" mt="3">
-                <Callout.Icon>
-                  <ExclamationTriangleIcon />
-                </Callout.Icon>
-                <Callout.Text>
-                  Re-index failed: {reindexMutation.error.message}
-                </Callout.Text>
-              </Callout.Root>
-            )}
-            {reindexMutation.isSuccess &&
-              reindexMutation.data?.errors?.length > 0 && (
-                <Callout.Root color="amber" size="1" mt="3">
+                Appearance
+              </Heading>
+              <Flex align="center" justify="between" mb="4">
+                <Flex align="center" gap="2">
+                  <RadixLayoutIcon
+                    width="20"
+                    height="20"
+                    className="text-gray-600 dark:text-gray-400"
+                  />
+                  <Text size="3" className="text-gray-700 dark:text-gray-300">
+                    Render AI messages as Markdown
+                  </Text>
+                </Flex>
+                <Switch
+                  checked={renderMarkdown}
+                  onCheckedChange={handleMarkdownToggle}
+                  aria-label="Toggle Markdown rendering for AI responses"
+                />
+              </Flex>
+              <Text size="2" color="gray">
+                When enabled, AI responses in chat interfaces will be formatted
+                using Markdown. Disable for plain text.
+              </Text>
+              <Separator my="5" size="4" />
+              <Flex align="center" gap="2" mb="3">
+                <ColorWheelIcon
+                  width="20"
+                  height="20"
+                  className="text-gray-600 dark:text-gray-400"
+                />
+                <Text size="3" className="text-gray-700 dark:text-gray-300">
+                  Accent Color
+                </Text>
+              </Flex>
+              <Grid
+                columns={{ initial: '4', xs: '5', sm: '6', md: '8' }}
+                gap="2"
+              >
+                {RADIX_ACCENT_COLORS.map((color: RadixAccentColor) => (
+                  <Tooltip key={color} content={capitalize(color)}>
+                    <Button
+                      variant={currentAccent === color ? 'solid' : 'outline'}
+                      color={
+                        color as React.ComponentProps<typeof Button>['color']
+                      }
+                      onClick={() => handleAccentColorSelect(color)}
+                      style={{
+                        width: '100%',
+                        height: '36px',
+                        padding: '0',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color:
+                          currentAccent === color &&
+                          [
+                            'ruby',
+                            'crimson',
+                            'plum',
+                            'purple',
+                            'violet',
+                            'iris',
+                            'indigo',
+                            'blue',
+                            'sky',
+                            'cyan',
+                            'teal',
+                            'jade',
+                            'green',
+                            'grass',
+                            'brown',
+                            'gray',
+                          ].includes(color)
+                            ? 'white'
+                            : 'var(--gray-12)',
+                      }}
+                      title={`Set accent to ${capitalize(color)}`}
+                      aria-pressed={currentAccent === color}
+                    >
+                      {currentAccent === color ? (
+                        <CheckIcon width="18" height="18" />
+                      ) : (
+                        <Box
+                          style={{
+                            width: '14px',
+                            height: '14px',
+                            borderRadius: '50%',
+                            backgroundColor: `var(--${color}-9)`,
+                          }}
+                        />
+                      )}
+                    </Button>
+                  </Tooltip>
+                ))}
+              </Grid>
+              <Text size="2" color="gray" mt="3">
+                Select an accent color for the application theme. Changes will
+                apply immediately. Your preference is saved locally.
+              </Text>
+            </Box>
+          </Card>
+
+          <Card mb="6">
+            <Box p="4">
+              <Heading
+                as="h2"
+                size="5"
+                mb="4"
+                className="text-gray-800 dark:text-gray-200"
+              >
+                Language Model Management
+              </Heading>
+              <Flex align="center" justify="between">
+                <Flex align="center" gap="2">
+                  <MixerVerticalIcon
+                    width="20"
+                    height="20"
+                    className="text-gray-600 dark:text-gray-400"
+                  />
+                  <Text size="3" className="text-gray-700 dark:text-gray-300">
+                    Manage AI Models
+                  </Text>
+                </Flex>
+                <Button variant="soft" onClick={() => setIsLlmModalOpen(true)}>
+                  Open Model Manager
+                </Button>
+              </Flex>
+              <Text size="2" color="gray" mt="2">
+                View available models, download new ones, or set the active
+                model for analysis.
+              </Text>
+            </Box>
+          </Card>
+
+          <Card mb="6">
+            <Box p="4">
+              <Heading
+                as="h2"
+                size="5"
+                mb="4"
+                className="text-gray-800 dark:text-gray-200"
+              >
+                Data Management
+              </Heading>
+              <Flex align="center" justify="between" mb="2">
+                <Flex align="center" gap="2">
+                  <UpdateIcon
+                    width="20"
+                    height="20"
+                    className="text-gray-600 dark:text-gray-400"
+                  />
+                  <Text size="3" className="text-gray-700 dark:text-gray-300">
+                    Search Index
+                  </Text>
+                </Flex>
+                <Button
+                  variant="outline"
+                  color="orange"
+                  onClick={handleReindexClick}
+                  disabled={reindexMutation.isPending}
+                >
+                  {reindexMutation.isPending ? (
+                    <>
+                      <Spinner size="1" /> Re-indexing...
+                    </>
+                  ) : (
+                    'Re-index All Data'
+                  )}
+                </Button>
+              </Flex>
+              <Text size="2" color="gray">
+                This will delete all current search index data and re-build it
+                from the database. Use if search results seem inconsistent or
+                after major data changes. This can take some time.
+              </Text>
+              {reindexMutation.isError && (
+                <Callout.Root color="red" size="1" mt="3">
                   <Callout.Icon>
-                    <InfoCircledIcon />
+                    <ExclamationTriangleIcon />
                   </Callout.Icon>
                   <Callout.Text>
-                    Re-indexing completed with{' '}
-                    {reindexMutation.data.errors.length} error(s). Check server
-                    logs.
-                    {reindexMutation.data.errors.map((err, i) => (
-                      <div
-                        key={i}
-                        style={{
-                          fontSize: '0.9em',
-                          opacity: 0.8,
-                          marginLeft: '1em',
-                        }}
-                      >
-                        -{' '}
-                        {err.length > 100 ? err.substring(0, 100) + '...' : err}
-                      </div>
-                    ))}
+                    Re-index failed: {reindexMutation.error.message}
                   </Callout.Text>
                 </Callout.Root>
               )}
-          </Box>
-        </Card>
+              {reindexMutation.isSuccess &&
+                reindexMutation.data?.errors?.length > 0 && (
+                  <Callout.Root color="amber" size="1" mt="3">
+                    <Callout.Icon>
+                      <InfoCircledIcon />
+                    </Callout.Icon>
+                    <Callout.Text>
+                      Re-indexing completed with{' '}
+                      {reindexMutation.data.errors.length} error(s). Check
+                      server logs.
+                      {reindexMutation.data.errors.map((err, i) => (
+                        <div
+                          key={i}
+                          style={{
+                            fontSize: '0.9em',
+                            opacity: 0.8,
+                            marginLeft: '1em',
+                          }}
+                        >
+                          -{' '}
+                          {err.length > 100
+                            ? err.substring(0, 100) + '...'
+                            : err}
+                        </div>
+                      ))}
+                    </Callout.Text>
+                  </Callout.Root>
+                )}
+            </Box>
+          </Card>
 
-        <Card
-          variant="surface"
-          style={{ '--card-background': 'var(--red-2)' } as React.CSSProperties}
-        >
-          <Box p="4">
-            <Heading
-              as="h2"
-              size="5"
-              mb="2"
-              className="text-red-800 dark:text-red-100"
-            >
-              Danger Zone
-            </Heading>
-            <Separator
-              my="3"
-              size="4"
-              style={{ backgroundColor: 'var(--red-6)' }}
-            />
-            <Flex align="center" justify="between" mb="2">
+          <Card
+            variant="surface"
+            style={
+              { '--card-background': 'var(--red-2)' } as React.CSSProperties
+            }
+          >
+            <Box p="4">
+              <Heading
+                as="h2"
+                size="5"
+                mb="2"
+                className="text-red-800 dark:text-red-100"
+              >
+                Danger Zone
+              </Heading>
+              <Separator
+                my="3"
+                size="4"
+                style={{ backgroundColor: 'var(--red-6)' }}
+              />
               <Box>
-                <Text
-                  size="3"
-                  weight="medium"
-                  className="text-red-800 dark:text-red-200"
-                >
-                  Reset All Application Data
-                </Text>
+                <Flex align="center" justify="between">
+                  <Text
+                    size="3"
+                    weight="medium"
+                    className="text-red-800 dark:text-red-200"
+                  >
+                    Reset All Application Data
+                  </Text>
+                  <Button
+                    color="red"
+                    variant="solid"
+                    onClick={handleResetAllDataClick}
+                    disabled={resetAllDataMutation.isPending}
+                  >
+                    {resetAllDataMutation.isPending ? (
+                      <Spinner />
+                    ) : (
+                      <TrashIcon />
+                    )}
+                    <Text ml="2">Reset Everything</Text>
+                  </Button>
+                </Flex>
                 <Text as="p" size="2" color="red" mt="1">
                   This will permanently delete all sessions, chats, messages,
                   and transcripts from the database and search index. This
                   action cannot be undone.
                 </Text>
               </Box>
-              <Button
-                color="red"
-                variant="solid"
-                onClick={handleResetAllDataClick}
-                disabled={resetAllDataMutation.isPending}
-              >
-                {resetAllDataMutation.isPending ? <Spinner /> : <TrashIcon />}
-                <Text ml="2">Reset Everything</Text>
-              </Button>
-            </Flex>
-          </Box>
-        </Card>
-      </Container>
+            </Box>
+          </Card>
+        </Container>
+      </Box>
 
       <LlmManagementModal
         isOpen={isLlmModalOpen}
