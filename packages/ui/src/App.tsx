@@ -143,9 +143,9 @@ function App() {
               <TopToolbar /> {/* App Header, fixed height */}
               {/* Main content rendering area */}
               <main
-                className="flex-grow flex flex-col overflow-hidden" // Ensures <main> fills space and manages overflow
+                className="flex-grow flex flex-col overflow-y-auto" // Ensures <main> fills space and manages overflow
                 id="main-content"
-                style={{ backgroundColor: 'transparent', minHeight: 0 }} // minHeight: 0 is key for flex children
+                style={{ backgroundColor: 'transparent' }}
               >
                 <PageContentManager />{' '}
                 {/* Renders the current page, should fill <main> */}
