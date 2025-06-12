@@ -182,7 +182,7 @@ export function SessionsPage() {
     <>
       <Box
         className={cn(
-          'flex-grow flex flex-col overflow-y-auto',
+          'flex-grow flex flex-col',
           'px-4 md:px-6 lg:px-8',
           'py-6'
         )}
@@ -199,7 +199,7 @@ export function SessionsPage() {
 
         {sortedSessions && sortedSessions.length > 0 ? (
           <Card
-            className="flex flex-col overflow-hidden"
+            className="flex flex-col overflow-hidden flex-grow"
             style={{ width: '100%' }}
           >
             <Box
