@@ -4,9 +4,9 @@ import {
   FileTextIcon,
   ChevronUpIcon,
   ChevronDownIcon,
-  DotsHorizontalIcon, // <-- Use Dots icon for menu trigger
-  Pencil1Icon, // <-- Keep Edit icon for menu item
-  TrashIcon, // <-- Add Trash icon for menu item
+  DotsHorizontalIcon,
+  Pencil1Icon,
+  TrashIcon,
 } from '@radix-ui/react-icons';
 import {
   Table,
@@ -15,12 +15,12 @@ import {
   Flex,
   IconButton,
   DropdownMenu,
-} from '@radix-ui/themes'; // <-- Added DropdownMenu
+  ScrollArea,
+} from '@radix-ui/themes';
 import type { Session } from '../../types';
 import type { SessionSortCriteria, SortDirection } from '../../store';
 import { sessionColorMap, therapyColorMap } from '../../constants';
 import { formatIsoDateToYMD } from '../../helpers';
-// import { cn } from '../../utils'; // <-- Remove cn import if no longer needed
 
 interface SessionListTableProps {
   sessions: Session[];
@@ -28,7 +28,7 @@ interface SessionListTableProps {
   sortDirection: SortDirection;
   onSort: (criteria: SessionSortCriteria) => void;
   onEditSession: (session: Session) => void;
-  onDeleteSessionRequest: (session: Session) => void; // <-- New prop for requesting deletion
+  onDeleteSessionRequest: (session: Session) => void;
 }
 
 type AriaSort = 'none' | 'ascending' | 'descending' | 'other' | undefined;
@@ -55,13 +55,11 @@ export function SessionListTable({
     e: React.MouseEvent<HTMLTableRowElement>,
     sessionId: number
   ) => {
-    // Prevent triggering row click when clicking on elements inside the menu button cell
     const target = e.target as HTMLElement;
     if (target.closest('button[aria-label="Session options"]')) {
       return;
     }
     if (target.closest('[role="menu"]')) {
-      // Prevent clicks inside the dropdown menu from navigating
       return;
     }
     navigate(`/sessions/${sessionId}`);
@@ -71,14 +69,12 @@ export function SessionListTable({
     e: React.KeyboardEvent<HTMLTableRowElement>,
     sessionId: number
   ) => {
-    // Prevent triggering row navigation if Enter is pressed on the menu button
     if (
       e.key === 'Enter' &&
       !(e.target as HTMLElement).closest('button[aria-label="Session options"]')
     ) {
       navigate(`/sessions/${sessionId}`);
     }
-    // Allow space/enter on the button to open the menu
   };
 
   const renderSortIcon = useCallback(
@@ -117,7 +113,11 @@ export function SessionListTable({
   );
 
   return (
-    <div className="flex-grow overflow-y-auto">
+    <ScrollArea
+      type="auto"
+      scrollbars="vertical"
+      style={{ flexGrow: 1, minHeight: 0 }}
+    >
       <Table.Root variant="surface" size="2">
         <Table.Header
           style={{
@@ -222,7 +222,6 @@ export function SessionListTable({
                   )}
                 </Text>
               </Table.Cell>
-              {/* *** Actions Cell with Dropdown Menu *** */}
               <Table.Cell
                 align="right"
                 onClick={(e) => e.stopPropagation()}
@@ -237,7 +236,6 @@ export function SessionListTable({
                       className="p-1"
                       aria-label="Session options"
                       title="Session options"
-                      // No separate onClick needed for trigger
                     >
                       <DotsHorizontalIcon />
                     </IconButton>
@@ -245,7 +243,7 @@ export function SessionListTable({
                   <DropdownMenu.Content
                     align="end"
                     size="1"
-                    onClick={(e) => e.stopPropagation()} // Prevent menu clicks from triggering row
+                    onClick={(e) => e.stopPropagation()}
                     onMouseDown={(e) => e.stopPropagation()}
                   >
                     <DropdownMenu.Item onSelect={() => onEditSession(session)}>
@@ -267,6 +265,6 @@ export function SessionListTable({
           ))}
         </Table.Body>
       </Table.Root>
-    </div>
+    </ScrollArea>
   );
 }
