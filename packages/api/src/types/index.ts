@@ -2,6 +2,13 @@
 // File: packages/api/src/types/index.ts
 // =========================================
 
+export interface Template {
+  id: number;
+  title: string;
+  text: string;
+  createdAt: number; // UNIX Milliseconds
+}
+
 export interface BackendChatMessage {
   id: number;
   chatId: number;
@@ -10,8 +17,6 @@ export interface BackendChatMessage {
   timestamp: number; // UNIX Milliseconds
   promptTokens?: number | null;
   completionTokens?: number | null;
-  starred?: number; // 0 for false, 1 for true (from DB)
-  starredName?: string | null;
 }
 
 export interface BackendChatSession {

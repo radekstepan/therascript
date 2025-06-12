@@ -231,9 +231,9 @@ export function ChatInput({
               type="button"
               variant="soft"
               size="2"
-              title="Show Starred Templates"
+              title="Show Templates"
               onClick={() => setShowTemplates((prev) => !prev)}
-              aria-label="Show starred templates"
+              aria-label="Show templates"
               disabled={starredButtonDisabled}
             >
               <StarIcon width={16} height={16} />

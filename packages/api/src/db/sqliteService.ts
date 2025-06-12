@@ -69,12 +69,19 @@ export const schema = `
         timestamp INTEGER NOT NULL,
         promptTokens INTEGER,
         completionTokens INTEGER,
-        starred INTEGER DEFAULT 0,
-        starredName TEXT NULL,
         FOREIGN KEY (chatId) REFERENCES chats (id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_message_chat ON messages (chatId);
     CREATE INDEX IF NOT EXISTS idx_message_timestamp ON messages (timestamp);
+
+    -- Templates Table
+    CREATE TABLE IF NOT EXISTS templates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        text TEXT NOT NULL,
+        createdAt INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_template_created_at ON templates (createdAt);
 
     CREATE TABLE IF NOT EXISTS schema_metadata (
         key TEXT PRIMARY KEY,

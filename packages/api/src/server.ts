@@ -14,6 +14,7 @@ import config from './config/index.js';
 import { sessionRoutes } from './routes/sessionRoutes.js';
 import { chatRoutes } from './routes/chatRoutes.js';
 import { standaloneChatRoutes } from './routes/standaloneChatRoutes.js';
+import { templateRoutes } from './routes/templateRoutes.js'; // IMPORT
 import { ollamaRoutes } from './routes/ollamaRoutes.js';
 import { dockerRoutes } from './routes/dockerRoutes.js';
 import { metaRoutes } from './routes/metaRoutes.js';
@@ -113,6 +114,10 @@ const app = new Elysia()
             description: 'Chat Interaction Endpoints (Session & Standalone)',
           },
           { name: 'Standalone Chat', description: 'Standalone Chat Endpoints' },
+          {
+            name: 'Templates',
+            description: 'Manage reusable text templates',
+          }, // ADDED
           {
             name: 'Search',
             description: 'Elasticsearch Full-Text Search Endpoints',
@@ -267,7 +272,8 @@ const app = new Elysia()
   .use(searchRoutes)
   .use(sessionRoutes)
   .use(chatRoutes)
-  .use(standaloneChatRoutes);
+  .use(standaloneChatRoutes)
+  .use(templateRoutes); // ADDED
 
 async function checkOllamaConnectionOnStartup() {
   /* ... */

@@ -1,6 +1,6 @@
 /* packages/ui/src/components/SessionView/Chat/StarredTemplatesList.tsx */
-import React, { useEffect } from 'react'; // Added useEffect
-import { useQuery } from '@tanstack/react-query'; // For fetching starred messages data
+import React, { useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   Button,
   Box,
@@ -9,62 +9,51 @@ import {
   ScrollArea,
   Spinner,
   Callout,
-} from '@radix-ui/themes'; // Import Callout
-import { StarIcon, Cross1Icon, InfoCircledIcon } from '@radix-ui/react-icons';
-import { cn } from '../../../utils'; // Utility for combining class names
-import type { ChatMessage } from '../../../types'; // Type for starred messages
-import { fetchStarredMessages } from '../../../api/api'; // API function to fetch starred messages
+} from '@radix-ui/themes';
+import { Cross1Icon, InfoCircledIcon } from '@radix-ui/react-icons';
+import { cn } from '../../../utils';
+import type { Template } from '../../../types';
+import { fetchTemplates } from '../../../api/templates';
 
-interface StarredTemplatesProps {
-  onSelectTemplate: (text: string) => void; // Callback when a template is clicked
-  onClose: () => void; // Callback to close the popover
+interface StarredTemplatesListProps {
+  onSelectTemplate: (text: string) => void;
+  onClose: () => void;
 }
 
-/**
- * Fetches and displays a list of starred messages (templates) in a popover.
- * Allows users to select a template to insert into the chat input.
- */
 export function StarredTemplatesList({
   onSelectTemplate,
   onClose,
-}: StarredTemplatesProps) {
-  // --- Fetch starred messages using React Query ---
+}: StarredTemplatesListProps) {
   const {
-    data: starredMessages,
+    data: templates,
     isLoading,
     error,
-  } = useQuery<ChatMessage[], Error>({
-    queryKey: ['starredMessages'], // Unique key for caching this query
-    queryFn: fetchStarredMessages, // The API function to call
-    staleTime: 5 * 60 * 1000, // Cache data for 5 minutes before considering it stale
+  } = useQuery<Template[], Error>({
+    queryKey: ['templates'],
+    queryFn: fetchTemplates,
+    staleTime: 5 * 60 * 1000,
   });
-  // --- End Fetch ---
 
-  // --- Escape Key Handler ---
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         onClose();
       }
     };
-    // Add listener when the component mounts (popover is open)
     document.addEventListener('keydown', handleKeyDown);
-    // Remove listener when the component unmounts (popover closes)
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [onClose]); // Dependency on onClose ensures the correct function is called
+  }, [onClose]);
 
-  // CSS classes for the popover container
   const popoverClasses = cn(
-    'absolute bottom-full mb-2 left-0 z-50', // Positioning relative to the trigger button
-    'w-72 max-h-60 overflow-hidden flex flex-col', // Size constraints and layout
-    'rounded-md border shadow-lg', // Appearance
-    'bg-[--color-panel-solid] border-[--gray-a6]' // Radix theme variables for background and border
+    'absolute bottom-full mb-2 left-0 z-50',
+    'w-72 max-h-60 overflow-hidden flex flex-col',
+    'rounded-md border shadow-lg',
+    'bg-[--color-panel-solid] border-[--gray-a6]'
   );
 
   return (
-    // Popover container
     <Box
       className={popoverClasses}
       style={{
@@ -72,7 +61,6 @@ export function StarredTemplatesList({
         borderColor: 'var(--gray-a6)',
       }}
     >
-      {/* Popover Header */}
       <Flex
         justify="between"
         align="center"
@@ -82,9 +70,8 @@ export function StarredTemplatesList({
         style={{ borderColor: 'var(--gray-a6)' }}
       >
         <Text size="1" weight="medium" color="gray">
-          Starred Templates
+          Templates
         </Text>
-        {/* Close button */}
         <Button
           variant="ghost"
           size="1"
@@ -95,10 +82,8 @@ export function StarredTemplatesList({
           <Cross1Icon />
         </Button>
       </Flex>
-      {/* Scrollable Content Area */}
       <ScrollArea type="auto" scrollbars="vertical" style={{ flexGrow: 1 }}>
         <Box p="1">
-          {/* Loading State */}
           {isLoading ? (
             <Flex
               align="center"
@@ -106,20 +91,18 @@ export function StarredTemplatesList({
               p="4"
               style={{ minHeight: 80 }}
             >
-              <Spinner size="2" />{' '}
+              <Spinner size="2" />
               <Text ml="2" size="2" color="gray">
                 Loading...
               </Text>
             </Flex>
-          ) : /* Error State */
-          error ? (
+          ) : error ? (
             <Flex
               align="center"
               justify="center"
               p="4"
               style={{ minHeight: 80 }}
             >
-              {/* Use Callout for better error display */}
               <Callout.Root color="red" size="1" style={{ width: '100%' }}>
                 <Callout.Icon>
                   <InfoCircledIcon />
@@ -127,8 +110,7 @@ export function StarredTemplatesList({
                 <Callout.Text>Error: {error.message}</Callout.Text>
               </Callout.Root>
             </Flex>
-          ) : /* Empty State */
-          !starredMessages || starredMessages.length === 0 ? (
+          ) : !templates || templates.length === 0 ? (
             <Flex
               align="center"
               justify="center"
@@ -136,45 +118,30 @@ export function StarredTemplatesList({
               style={{ minHeight: 80 }}
             >
               <Text size="2" color="gray" align="center">
-                No starred messages found. <br /> Click the ☆ next to a user
-                message to save it as a template.
+                No templates found. <br /> Click the ☆ next to a user message to
+                save it as a template.
               </Text>
             </Flex>
           ) : (
-            /* Data Loaded State */
-            // Sort messages alphabetically by starred name, falling back to text snippet
-            [...starredMessages]
-              .sort((a, b) =>
-                (a.starredName || a.text).localeCompare(b.starredName || b.text)
-              )
-              .map((msg) => {
-                // Determine display name: use starredName if available, otherwise truncate message text
-                const displayName =
-                  msg.starredName ||
-                  msg.text.substring(0, 50) +
-                    (msg.text.length > 50 ? '...' : '');
-                return (
-                  // Button for each template
-                  <Button
-                    key={msg.id}
-                    variant="ghost"
-                    // Call the onSelectTemplate callback with the full message text when clicked
-                    onClick={() => onSelectTemplate(msg.text)}
-                    // Styling for button appearance and text wrapping
-                    className="block w-full h-auto text-left p-2 text-sm rounded whitespace-normal justify-start"
-                    style={{
-                      whiteSpace: 'normal',
-                      justifyContent: 'flex-start',
-                      textAlign: 'left',
-                    }}
-                    // Tooltip showing a longer preview of the message text
-                    title={`Insert: "${msg.text.substring(0, 100)}${msg.text.length > 100 ? '...' : ''}"`}
-                    size="2"
-                  >
-                    {displayName}
-                  </Button>
-                );
-              })
+            [...templates]
+              .sort((a, b) => a.title.localeCompare(b.title))
+              .map((template) => (
+                <Button
+                  key={template.id}
+                  variant="ghost"
+                  onClick={() => onSelectTemplate(template.text)}
+                  className="block w-full h-auto text-left p-2 text-sm rounded whitespace-normal justify-start"
+                  style={{
+                    whiteSpace: 'normal',
+                    justifyContent: 'flex-start',
+                    textAlign: 'left',
+                  }}
+                  title={`Insert: "${template.text.substring(0, 100)}${template.text.length > 100 ? '...' : ''}"`}
+                  size="2"
+                >
+                  {template.title}
+                </Button>
+              ))
           )}
         </Box>
       </ScrollArea>

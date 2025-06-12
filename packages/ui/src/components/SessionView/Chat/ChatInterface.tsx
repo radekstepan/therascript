@@ -236,7 +236,6 @@ export function ChatInterface({
         sender: 'user',
         text: newMessageText,
         timestamp: Date.now(),
-        starred: false,
       };
       const tempAiMessageId = createTemporaryId();
       const temporaryAiMessage: ChatMessage = {
@@ -245,7 +244,6 @@ export function ChatInterface({
         sender: 'ai',
         text: '',
         timestamp: Date.now(),
-        starred: false,
       };
 
       queryClient.setQueryData<ChatSession>(currentChatQueryKey, (oldData) => ({

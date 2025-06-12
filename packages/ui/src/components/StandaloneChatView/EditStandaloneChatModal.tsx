@@ -37,14 +37,12 @@ export function EditStandaloneChatModal({
   const setToast = useSetAtom(toastMessageAtom);
 
   const editChatMutation = useMutation<
-    StandaloneChatListItem, // Type of data returned on success
-    Error, // Type of error
-    { chatId: number; formState: ChatFormState } // Type of variables passed to mutationFn
+    StandaloneChatListItem,
+    Error,
+    { chatId: number; formState: ChatFormState }
   >({
     mutationFn: (variables: { chatId: number; formState: ChatFormState }) => {
       const { chatId, formState } = variables;
-      // Ensure name is null if empty string, otherwise pass trimmed name.
-      // Ensure tags are passed correctly.
       return editStandaloneChatApi(
         chatId,
         formState.name.trim() || null,
@@ -57,11 +55,10 @@ export function EditStandaloneChatModal({
       queryClient.invalidateQueries({
         queryKey: ['standaloneChat', updatedChat.id],
       });
-      onOpenChange(false); // Close the modal on success
+      onOpenChange(false);
     },
     onError: (error: Error) => {
       setToast(`Error updating chat: ${error.message}`);
-      // Error handling, potentially set an error message in the modal state
       console.error('Edit chat failed:', error);
     },
   });
@@ -94,7 +91,6 @@ export function EditStandaloneChatModal({
 
       const originalState = getInitialChatFormState(chat);
       const originalName = originalState.name;
-      // Sort tags for consistent comparison
       const originalTagsString = JSON.stringify([...originalState.tags].sort());
       const currentName = formState.name;
       const currentTagsString = JSON.stringify([...formState.tags].sort());
@@ -179,8 +175,6 @@ export function EditStandaloneChatModal({
       const handleNameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === 'Enter') {
           e.preventDefault();
-          // Potentially trigger save if this is the only field or for convenience
-          // This is handled by the main modal's save button normally
         }
       };
 
@@ -291,7 +285,7 @@ export function EditStandaloneChatModal({
   );
 
   return (
-    <EditEntityModal<StandaloneChatListItem, ChatFormState>
+    <EditEntityModal<StandaloneChatListItem | null, ChatFormState>
       isOpen={isOpen}
       onOpenChange={onOpenChange}
       entity={chat}

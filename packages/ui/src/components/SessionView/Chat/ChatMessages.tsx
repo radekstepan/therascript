@@ -1,31 +1,21 @@
 /* packages/ui/src/components/SessionView/Chat/ChatMessages.tsx */
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useCallback, RefObject } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Box,
   Flex,
-  Spinner,
   Text,
-  IconButton,
-  Tooltip,
+  TextArea,
   TextField,
-  AlertDialog,
   Button,
-  Callout,
+  Spinner,
 } from '@radix-ui/themes';
-import {
-  StarIcon,
-  StarFilledIcon,
-  CheckIcon,
-  Cross1Icon,
-  Pencil1Icon,
-  InfoCircledIcon,
-} from '@radix-ui/react-icons';
-import { updateMessageStarStatus } from '../../../api/api';
+import { createTemplate } from '../../../api/templates';
 import { toastMessageAtom, renderMarkdownAtom } from '../../../store';
-import type { ChatMessage, ChatSession, Session } from '../../../types';
-import { ChatMessageBubble } from './ChatMessageBubble'; // Import the new component
+import type { ChatMessage, Template } from '../../../types';
+import { ChatMessageBubble } from './ChatMessageBubble';
+import { EditEntityModal, type BaseEntity } from '../../Shared/EditEntityModal';
 
 interface ChatMessagesProps {
   messages: ChatMessage[];
@@ -36,158 +26,127 @@ interface ChatMessagesProps {
   isAiResponding: boolean;
 }
 
+interface TemplateFormState {
+  title: string;
+  text: string;
+}
+
 // Helper function to strip HTML tags for plain text fallback
 function stripHtmlTags(html: string): string {
   const SCRIPT_REGEX = /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi;
-  // Remove script tags
   let scriptless = html.replace(SCRIPT_REGEX, '');
-  // Remove style tags
   const STYLE_REGEX = /<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi;
   scriptless = scriptless.replace(STYLE_REGEX, '');
-  // Create a temporary div element
   const div = document.createElement('div');
-  // Set its innerHTML to the scriptless HTML
   div.innerHTML = scriptless;
-  // Return the text content
   return div.textContent || div.innerText || '';
 }
 
 export function ChatMessages({
   messages,
-  activeChatId,
-  isStandalone,
-  streamingMessageId,
-  activeSessionId,
   isAiResponding,
+  streamingMessageId,
 }: ChatMessagesProps) {
   const queryClient = useQueryClient();
   const setToast = useSetAtom(toastMessageAtom);
   const renderMd = useAtomValue(renderMarkdownAtom);
-  const [editingStarMessageId, setEditingStarMessageId] = useState<
-    number | null
-  >(null);
-  const [currentStarredName, setCurrentStarredName] = useState('');
-  const [starEditError, setStarEditError] = useState<string | null>(null);
 
-  const starNameInputRef = useRef<HTMLInputElement>(null);
+  const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
+  const [templateToCreate, setTemplateToCreate] =
+    useState<TemplateFormState | null>(null);
 
-  // useEffect for focus unchanged
-  useEffect(() => {
-    if (editingStarMessageId !== null) {
-      const timer = setTimeout(() => {
-        starNameInputRef.current?.focus();
-      }, 50);
-      return () => clearTimeout(timer);
-    }
-  }, [editingStarMessageId]);
-
-  // starMutation unchanged
-  const starMutation = useMutation({
-    mutationFn: (variables: {
-      messageId: number;
-      starred: boolean;
-      starredName?: string | null;
-    }) => {
-      const { messageId, starred, starredName } = variables;
-      if (isStandalone && activeChatId) {
-        return updateMessageStarStatus(
-          messageId,
-          starred,
-          starredName,
-          activeChatId,
-          null
-        );
-      } else if (!isStandalone && activeSessionId && activeChatId) {
-        return updateMessageStarStatus(
-          messageId,
-          starred,
-          starredName,
-          activeChatId,
-          activeSessionId
-        );
-      } else {
-        throw new Error(
-          'Missing required IDs (session/chat) to update star status.'
-        );
-      }
+  const createTemplateMutation = useMutation({
+    mutationFn: (data: { title: string; text: string }) => createTemplate(data),
+    onSuccess: () => {
+      setToast('Template saved successfully.');
+      queryClient.invalidateQueries({ queryKey: ['templates'] });
+      setIsTemplateModalOpen(false);
+      setTemplateToCreate(null);
     },
-    onSuccess: (updatedMessage) => {
-      const queryKey = isStandalone
-        ? ['standaloneChat', activeChatId]
-        : ['chat', activeSessionId, activeChatId];
-      queryClient.setQueryData<ChatSession>(queryKey, (oldData) => {
-        if (!oldData) return oldData;
-        return {
-          ...oldData,
-          messages: (oldData.messages || []).map((msg) =>
-            msg.id === updatedMessage.id ? updatedMessage : msg
-          ),
-        };
-      });
-      queryClient.invalidateQueries({ queryKey: ['starredMessages'] });
-      setToast(
-        `Message ${updatedMessage.starred ? 'starred' : 'unstarred'} successfully.`
-      );
-      cancelStarEdit();
-    },
-    onError: (error) => {
-      console.error('Star update failed:', error);
-      setStarEditError(`Failed to update star status: ${error.message}`);
+    onError: (error: Error) => {
+      setToast(`Error saving template: ${error.message}`);
     },
   });
 
-  // handleStarClick unchanged
   const handleStarClick = (message: ChatMessage) => {
-    if (message.sender !== 'user' || starMutation.isPending) return;
-
-    if (message.starred) {
-      starMutation.mutate({ messageId: message.id, starred: false });
-    } else {
-      setEditingStarMessageId(message.id);
-      setCurrentStarredName(message.starredName || '');
-      setStarEditError(null);
-    }
-  };
-
-  // handleSaveStarName unchanged
-  const handleSaveStarName = () => {
-    if (editingStarMessageId === null || starMutation.isPending) return;
-    const nameToSave = currentStarredName.trim();
-    if (!nameToSave) {
-      setStarEditError('Please enter a name for the starred template.');
-      return;
-    }
-    setStarEditError(null);
-    starMutation.mutate({
-      messageId: editingStarMessageId,
-      starred: true,
-      starredName: nameToSave,
+    if (message.sender !== 'user') return;
+    setTemplateToCreate({
+      title: `From chat on ${new Date().toLocaleDateString()}`,
+      text: message.text,
     });
+    setIsTemplateModalOpen(true);
   };
 
-  // cancelStarEdit unchanged
-  const cancelStarEdit = () => {
-    setEditingStarMessageId(null);
-    setCurrentStarredName('');
-    setStarEditError(null);
-    starMutation.reset();
+  const getInitialFormState = useCallback(
+    (entity: BaseEntity | null): TemplateFormState => {
+      // The entity will be null when creating, so we use the state `templateToCreate`
+      return templateToCreate || { title: '', text: '' };
+    },
+    [templateToCreate]
+  );
+
+  const validateForm = useCallback(
+    (formState: TemplateFormState): string | null => {
+      if (!formState.title.trim()) return 'Title is required.';
+      if (!formState.text.trim()) return 'Text is required.';
+      return null;
+    },
+    []
+  );
+
+  const handleSaveTemplate = async (
+    entityId: number,
+    validatedState: TemplateFormState
+  ) => {
+    createTemplateMutation.mutate(validatedState);
   };
 
-  // handleStarNameKeyDown unchanged
-  const handleStarNameKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      handleSaveStarName();
-    }
-  };
+  const renderFormFields = useCallback(
+    (
+      formState: TemplateFormState,
+      setFormState: React.Dispatch<React.SetStateAction<TemplateFormState>>,
+      isSaving: boolean,
+      firstInputRef: RefObject<HTMLInputElement | HTMLTextAreaElement | null>
+    ): React.ReactNode => (
+      <Flex direction="column" gap="3">
+        <label>
+          <Text as="div" size="2" mb="1" weight="medium">
+            Title
+          </Text>
+          <TextField.Root
+            ref={firstInputRef as React.RefObject<HTMLInputElement>}
+            placeholder="Enter a short, descriptive title"
+            value={formState.title}
+            onChange={(e) =>
+              setFormState((prev) => ({ ...prev, title: e.target.value }))
+            }
+            disabled={isSaving}
+          />
+        </label>
+        <label>
+          <Text as="div" size="2" mb="1" weight="medium">
+            Template Text
+          </Text>
+          <TextArea
+            placeholder="Enter the template text..."
+            value={formState.text}
+            onChange={(e) =>
+              setFormState((prev) => ({ ...prev, text: e.target.value }))
+            }
+            disabled={isSaving}
+            rows={6}
+          />
+        </label>
+      </Flex>
+    ),
+    []
+  );
 
-  // Updated handleCopyClick
   const handleCopyClick = async (copyPayload: {
     text: string;
     html?: string;
   }) => {
     const { text, html } = copyPayload;
-
     if (html && navigator.clipboard && navigator.clipboard.write) {
       try {
         const plainTextBlob = new Blob([stripHtmlTags(html)], {
@@ -206,11 +165,8 @@ export function ChatMessages({
           'Failed to copy HTML to clipboard, falling back to plain text:',
           err
         );
-        // Fall through to plain text copying
       }
     }
-
-    // Fallback to copying plain text (original Markdown source or plain text)
     try {
       await navigator.clipboard.writeText(text);
       setToast('Message text copied to clipboard!');
@@ -223,7 +179,6 @@ export function ChatMessages({
   return (
     <>
       <Flex direction="column" gap="3">
-        {/* Render the ChatMessageBubble component inside the map */}
         {messages.map((message) => {
           const isCurrentlyStreaming = message.id === streamingMessageId;
           return (
@@ -231,91 +186,32 @@ export function ChatMessages({
               key={message.id}
               message={message}
               isCurrentlyStreaming={isCurrentlyStreaming}
-              isAiResponding={isAiResponding} // Pass down thinking status
-              renderMd={renderMd} // Pass down markdown setting
-              onStarClick={handleStarClick} // Pass down handler
-              onCopyClick={handleCopyClick} // Pass down handler
-              isStarMutationPending={starMutation.isPending} // Pass down mutation status
+              isAiResponding={isAiResponding}
+              renderMd={renderMd}
+              onStarClick={handleStarClick}
+              onCopyClick={handleCopyClick}
             />
           );
         })}
       </Flex>
 
-      {/* Star Naming Modal (unchanged) */}
-      <AlertDialog.Root
-        open={editingStarMessageId !== null}
-        onOpenChange={(open) => !open && cancelStarEdit()}
-      >
-        <AlertDialog.Content style={{ maxWidth: 450 }}>
-          <AlertDialog.Title>
-            <Flex align="center" gap="2">
-              <Pencil1Icon /> Save Starred Template
-            </Flex>
-          </AlertDialog.Title>
-          <AlertDialog.Description size="2" mt="1" mb="4">
-            Give this starred message a short name for easy identification.
-          </AlertDialog.Description>
-          <Flex direction="column" gap="3">
-            <label>
-              <Text as="div" size="2" mb="1" weight="medium">
-                Template Name
-              </Text>
-              <TextField.Root
-                ref={starNameInputRef}
-                size="2"
-                placeholder="Enter template name..."
-                value={currentStarredName}
-                onChange={(e) => setCurrentStarredName(e.target.value)}
-                onKeyDown={handleStarNameKeyDown}
-                disabled={starMutation.isPending}
-                maxLength={50}
-              />
-            </label>
-            {starEditError && (
-              <Callout.Root color="red" size="1">
-                <Callout.Icon>
-                  <InfoCircledIcon />
-                </Callout.Icon>
-                <Callout.Text>{starEditError}</Callout.Text>
-              </Callout.Root>
-            )}
-            {starMutation.isError && !starEditError && (
-              <Callout.Root color="red" size="1">
-                <Callout.Icon>
-                  <InfoCircledIcon />
-                </Callout.Icon>
-                <Callout.Text>Error: {starMutation.error.message}</Callout.Text>
-              </Callout.Root>
-            )}
-          </Flex>
-          <Flex gap="3" mt="4" justify="end">
-            <Button
-              variant="soft"
-              color="gray"
-              onClick={cancelStarEdit}
-              disabled={starMutation.isPending}
-            >
-              <Cross1Icon /> Cancel
-            </Button>
-            <Button
-              onClick={handleSaveStarName}
-              disabled={starMutation.isPending || !currentStarredName.trim()}
-            >
-              {starMutation.isPending ? (
-                <>
-                  {' '}
-                  <Spinner size="2" /> <Text ml="1">Saving...</Text>{' '}
-                </>
-              ) : (
-                <>
-                  {' '}
-                  <CheckIcon /> Save Template{' '}
-                </>
-              )}
-            </Button>
-          </Flex>
-        </AlertDialog.Content>
-      </AlertDialog.Root>
+      <EditEntityModal
+        isOpen={isTemplateModalOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setIsTemplateModalOpen(false);
+            setTemplateToCreate(null);
+          }
+        }}
+        entity={null}
+        entityTypeLabel="Template"
+        getInitialFormState={getInitialFormState}
+        renderFormFields={renderFormFields}
+        validateForm={validateForm}
+        onSave={handleSaveTemplate}
+        isSaving={createTemplateMutation.isPending}
+        saveError={createTemplateMutation.error?.message}
+      />
     </>
   );
 }
