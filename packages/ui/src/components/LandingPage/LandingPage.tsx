@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom'; // Added useNavigate
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAtomValue, useSetAtom } from 'jotai';
 import {
   CounterClockwiseClockIcon,
@@ -437,19 +437,13 @@ export function LandingPage() {
           </>
         ) : (
           <>
+            {/* Session History Card - MOVED TO TOP */}
             <Card
               size="3"
-              className="flex flex-col overflow-hidden mb-6"
+              className="flex-grow flex flex-col overflow-hidden h-full mb-6"
               style={{ width: '100%' }}
             >
-              <Flex
-                justify="between"
-                align="center"
-                px="4"
-                pt="4"
-                pb="3"
-                // REMOVED: style={{ borderBottom: '1px solid var(--gray-a6)' }}
-              >
+              <Flex justify="between" align="center" px="4" pt="4" pb="3">
                 <Heading
                   as="h2"
                   size="5"
@@ -457,8 +451,45 @@ export function LandingPage() {
                   className="text-gray-800 dark:text-gray-200"
                 >
                   <Flex align="center" gap="2">
-                    {' '}
-                    <ChatBubbleIcon /> Standalone Chats{' '}
+                    <CounterClockwiseClockIcon /> Session History
+                  </Flex>
+                </Heading>
+              </Flex>
+              <Box className="flex-grow flex flex-col overflow-hidden">
+                {sortedSessions.length === 0 ? (
+                  <Flex flexGrow="1" align="center" justify="center" p="6">
+                    <Text color="gray">
+                      No sessions found. Click "New Session" in the toolbar.
+                    </Text>
+                  </Flex>
+                ) : (
+                  <SessionListTable
+                    sessions={sortedSessions}
+                    sortCriteria={currentSessionSortCriteria}
+                    sortDirection={currentSessionSortDirection}
+                    onSort={handleSessionSort}
+                    onEditSession={handleEditSession}
+                    onDeleteSessionRequest={handleDeleteSessionRequest}
+                  />
+                )}
+              </Box>
+            </Card>
+
+            {/* Standalone Chats Card - MOVED TO BOTTOM */}
+            <Card
+              size="3"
+              className="flex flex-col overflow-hidden"
+              style={{ width: '100%' }}
+            >
+              <Flex justify="between" align="center" px="4" pt="4" pb="3">
+                <Heading
+                  as="h2"
+                  size="5"
+                  weight="medium"
+                  className="text-gray-800 dark:text-gray-200"
+                >
+                  <Flex align="center" gap="2">
+                    <ChatBubbleIcon /> Standalone Chats
                   </Flex>
                 </Heading>
               </Flex>
@@ -481,51 +512,6 @@ export function LandingPage() {
                       No standalone chats yet. Click "New Chat" in the toolbar.
                     </Text>
                   </Flex>
-                )}
-              </Box>
-            </Card>
-
-            <Card
-              size="3"
-              className="flex-grow flex flex-col overflow-hidden h-full"
-              style={{ width: '100%' }}
-            >
-              <Flex
-                justify="between"
-                align="center"
-                px="4"
-                pt="4"
-                pb="3"
-                // REMOVED: style={{ borderBottom: '1px solid var(--gray-a6)' }}
-              >
-                <Heading
-                  as="h2"
-                  size="5"
-                  weight="medium"
-                  className="text-gray-800 dark:text-gray-200"
-                >
-                  <Flex align="center" gap="2">
-                    {' '}
-                    <CounterClockwiseClockIcon /> Session History{' '}
-                  </Flex>
-                </Heading>
-              </Flex>
-              <Box className="flex-grow flex flex-col overflow-hidden">
-                {sortedSessions.length === 0 ? (
-                  <Flex flexGrow="1" align="center" justify="center" p="6">
-                    <Text color="gray">
-                      No sessions found. Click "New Session" in the toolbar.
-                    </Text>
-                  </Flex>
-                ) : (
-                  <SessionListTable
-                    sessions={sortedSessions}
-                    sortCriteria={currentSessionSortCriteria}
-                    sortDirection={currentSessionSortDirection}
-                    onSort={handleSessionSort}
-                    onEditSession={handleEditSession}
-                    onDeleteSessionRequest={handleDeleteSessionRequest}
-                  />
                 )}
               </Box>
             </Card>

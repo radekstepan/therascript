@@ -5,7 +5,7 @@ import {
   ChatBubbleIcon,
   DotsHorizontalIcon,
   Pencil1Icon,
-  TrashIcon, // <-- Import TrashIcon
+  TrashIcon,
   ChevronUpIcon,
   ChevronDownIcon,
 } from '@radix-ui/react-icons';
@@ -16,6 +16,7 @@ import {
   IconButton,
   DropdownMenu,
   Badge,
+  ScrollArea,
 } from '@radix-ui/themes';
 import type { StandaloneChatListItem } from '../../types';
 import type { StandaloneChatSortCriteria, SortDirection } from '../../store';
@@ -24,7 +25,7 @@ import { formatTimestamp } from '../../helpers';
 interface StandaloneChatListTableProps {
   chats: StandaloneChatListItem[];
   onEditChatRequest: (chat: StandaloneChatListItem) => void;
-  onDeleteChatRequest: (chat: StandaloneChatListItem) => void; // <-- New prop
+  onDeleteChatRequest: (chat: StandaloneChatListItem) => void;
   activeChatId?: number | null;
   sortCriteria: StandaloneChatSortCriteria;
   sortDirection: SortDirection;
@@ -36,7 +37,7 @@ type AriaSort = 'none' | 'ascending' | 'descending' | 'other' | undefined;
 export function StandaloneChatListTable({
   chats,
   onEditChatRequest,
-  onDeleteChatRequest, // <-- Destructure new prop
+  onDeleteChatRequest,
   sortCriteria,
   sortDirection,
   onSort,
@@ -115,7 +116,11 @@ export function StandaloneChatListTable({
   );
 
   return (
-    <div className="flex-grow overflow-y-auto">
+    <ScrollArea
+      type="auto"
+      scrollbars="vertical"
+      style={{ flexGrow: 1, minHeight: 0 }}
+    >
       <Table.Root variant="surface" size="2">
         {/* Table Header */}
         <Table.Header
@@ -235,7 +240,6 @@ export function StandaloneChatListTable({
                       <Pencil1Icon width="14" height="14" className="mr-2" />{' '}
                       Edit Details
                     </DropdownMenu.Item>
-                    {/* --- ADDED DELETE OPTION --- */}
                     <DropdownMenu.Separator />
                     <DropdownMenu.Item
                       color="red"
@@ -244,7 +248,6 @@ export function StandaloneChatListTable({
                       <TrashIcon width="14" height="14" className="mr-2" />{' '}
                       Delete Chat
                     </DropdownMenu.Item>
-                    {/* --- END ADDED DELETE OPTION --- */}
                   </DropdownMenu.Content>
                 </DropdownMenu.Root>
               </Table.Cell>
@@ -252,6 +255,6 @@ export function StandaloneChatListTable({
           ))}
         </Table.Body>
       </Table.Root>
-    </div>
+    </ScrollArea>
   );
 }

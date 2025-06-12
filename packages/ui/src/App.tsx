@@ -126,7 +126,7 @@ function App() {
         appearance={effectiveTheme}
         accentColor={currentAccentColor}
         panelBackground="solid"
-        radius="medium"
+        radius="none"
         scaling="100%"
       >
         <GeneratedBackground />
