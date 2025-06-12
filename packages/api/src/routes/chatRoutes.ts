@@ -9,7 +9,6 @@ import {
   renameSessionChat,
   deleteSessionChat,
   getSessionChatDetails,
-  updateSessionChatMessageStarStatus,
 } from '../api/sessionChatHandler.js';
 import { NotFoundError, BadRequestError, ApiError } from '../errors.js';
 import type {
@@ -17,7 +16,7 @@ import type {
   BackendChatMessage,
   ChatMetadata,
   BackendSession,
-} from '../types/index.js';
+} from '../types/index.js'; // Added BackendChatSession
 
 // --- Schemas ---
 const SessionIdParamSchema = t.Object({
@@ -34,22 +33,9 @@ const ChatIdParamSchema = t.Object({
   }),
 });
 
-const MessageIdParamSchema = t.Object({
-  messageId: t.String({
-    pattern: '^[0-9]+$',
-    error: 'Message ID must be a positive number',
-  }),
-});
-
 const SessionAndChatParamsSchema = t.Intersect([
   SessionIdParamSchema,
   ChatIdParamSchema,
-]);
-
-const SessionChatAndMessageParamsSchema = t.Intersect([
-  SessionIdParamSchema,
-  ChatIdParamSchema,
-  MessageIdParamSchema,
 ]);
 
 const ChatMessageBodySchema = t.Object({
@@ -58,11 +44,6 @@ const ChatMessageBodySchema = t.Object({
 
 const ChatRenameBodySchema = t.Object({
   name: t.Optional(t.Union([t.String({ minLength: 1 }), t.Null()])),
-});
-
-const MessageStarUpdateBodySchema = t.Object({
-  starred: t.Boolean({ error: "'starred' field (boolean) is required" }),
-  starredName: t.Optional(t.Union([t.String({ minLength: 1 }), t.Null()])),
 });
 
 const SessionChatMetadataResponseSchema = t.Object({
@@ -80,8 +61,6 @@ const ChatMessageResponseSchema = t.Object({
   timestamp: t.Number(),
   promptTokens: t.Optional(t.Union([t.Number(), t.Null()])),
   completionTokens: t.Optional(t.Union([t.Number(), t.Null()])),
-  starred: t.Boolean(),
-  starredName: t.Optional(t.Union([t.String(), t.Null()])),
 });
 
 const FullSessionChatResponseSchema = t.Object({
@@ -100,12 +79,9 @@ export const chatRoutes = new Elysia({
   .model({
     sessionIdParam: SessionIdParamSchema,
     chatIdParam: ChatIdParamSchema,
-    messageIdParam: MessageIdParamSchema,
     sessionAndChatParams: SessionAndChatParamsSchema,
-    sessionChatAndMessageParams: SessionChatAndMessageParamsSchema,
     chatMessageBody: ChatMessageBodySchema,
     chatRenameBody: ChatRenameBodySchema,
-    messageStarUpdateBody: MessageStarUpdateBodySchema,
     sessionChatMetadataResponse: SessionChatMetadataResponseSchema,
     chatMessageResponse: ChatMessageResponseSchema,
     fullSessionChatResponse: FullSessionChatResponseSchema,
@@ -204,52 +180,6 @@ export const chatRoutes = new Elysia({
                         },
                       }
                     )
-                    .guard(
-                      { params: 'sessionChatAndMessageParams' }, // Ensures sessionId, chatId, messageId are strings
-                      (app) =>
-                        app
-                          .derive((context) => {
-                            // Elysia infers context
-                            const { params, chatData } = context; // chatData from parent derive
-                            const messageIdNum = parseInt(
-                              params.messageId!,
-                              10
-                            );
-                            if (isNaN(messageIdNum)) {
-                              throw new BadRequestError(
-                                'Invalid message ID format in path.'
-                              );
-                            }
-                            const message =
-                              messageRepository.findMessageById(messageIdNum);
-                            if (
-                              !message ||
-                              !chatData ||
-                              message.chatId !== chatData.id
-                            ) {
-                              // Ensure chatData exists
-                              throw new NotFoundError(
-                                `Message ${messageIdNum} not found in chat ${chatData?.id}`
-                              );
-                            }
-                            return { messageData: message }; // Adds messageData
-                          })
-                          .patch(
-                            '/:chatId/messages/:messageId',
-                            (context) =>
-                              updateSessionChatMessageStarStatus(
-                                context as any
-                              ),
-                            {
-                              body: 'messageStarUpdateBody',
-                              response: { 200: 'chatMessageResponse' },
-                              detail: {
-                                summary:
-                                  'Update star status/name for a message',
-                              },
-                            }
-                          )
-                    ) // End message-specific guard
               ) // End chat-specific guard
         ) // End group for /api/sessions/:sessionId/chats
   ); // End sessionID guard

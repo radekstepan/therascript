@@ -22,7 +22,6 @@ interface ChatMessageBubbleProps {
   onStarClick: (message: ChatMessage) => void; // Callback for starring
   // Updated onCopyClick prop signature
   onCopyClick: (payload: { text: string; html?: string }) => void;
-  isStarMutationPending: boolean; // Pass mutation state
 }
 
 export function ChatMessageBubble({
@@ -32,7 +31,6 @@ export function ChatMessageBubble({
   renderMd,
   onStarClick,
   onCopyClick,
-  isStarMutationPending,
 }: ChatMessageBubbleProps) {
   const animatedText = useAnimatedText(
     message.text,
@@ -76,34 +74,21 @@ export function ChatMessageBubble({
           showWaitingIndicator && 'min-h-[3rem]'
         )}
       >
-        {/* Star Button */}
+        {/* Star Button (Action to create template) */}
         {message.sender === 'user' && (
-          <Tooltip
-            content={
-              message.starred
-                ? 'Unstar this message'
-                : 'Star this message (Save as template)'
-            }
-          >
+          <Tooltip content={'Save as template'}>
             <IconButton
               variant="ghost"
-              color={message.starred ? 'yellow' : 'gray'}
+              color={'gray'}
               size="1"
               className={cn(
                 'absolute top-1 right-1 p-0.5 transition-opacity z-10',
-                message.starred
-                  ? 'opacity-100'
-                  : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
+                'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
               )}
               onClick={() => onStarClick(message)}
-              aria-label={message.starred ? 'Unstar message' : 'Star message'}
-              disabled={isStarMutationPending}
+              aria-label={'Save message as template'}
             >
-              {message.starred ? (
-                <StarFilledIcon width={14} height={14} />
-              ) : (
-                <StarIcon width={14} height={14} />
-              )}
+              <StarIcon width={14} height={14} />
             </IconButton>
           </Tooltip>
         )}
@@ -157,25 +142,6 @@ export function ChatMessageBubble({
               </Text>
             )}
           </>
-        )}
-
-        {/* Display Starred Name */}
-        {message.starred && message.starredName && (
-          <Flex
-            align="center"
-            gap="1"
-            mt="1"
-            justify={message.sender === 'user' ? 'end' : 'start'}
-          >
-            <StarFilledIcon
-              width={12}
-              height={12}
-              className="text-yellow-600"
-            />
-            <Text size="1" color="gray" style={{ fontStyle: 'italic' }}>
-              {message.starredName}
-            </Text>
-          </Flex>
         )}
       </Box>
     </Flex>

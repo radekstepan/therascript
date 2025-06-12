@@ -30,9 +30,7 @@ const esClient = getElasticsearchClient(config.elasticsearch.url);
 type SessionChatMetadataResponse = Omit<ChatMetadata, 'tags'> & {
   sessionId: number;
 };
-type ApiChatMessageResponse = Omit<BackendChatMessage, 'starred'> & {
-  starred: boolean;
-};
+type ApiChatMessageResponse = BackendChatMessage;
 type FullSessionChatApiResponse = SessionChatMetadataResponse & {
   messages: ApiChatMessageResponse[];
 };
@@ -328,70 +326,6 @@ export const addSessionChatMessage = async ({
   }
 };
 
-export const updateSessionChatMessageStarStatus = ({
-  sessionData,
-  chatData,
-  messageData,
-  body,
-  set,
-}: ElysiaHandlerContext): ApiChatMessageResponse => {
-  const { starred, starredName } = body as {
-    starred: boolean;
-    starredName?: string | null;
-  };
-  if (typeof starred !== 'boolean')
-    throw new BadRequestError("Missing or invalid 'starred' field (boolean).");
-  // Allow starredName to be null or undefined if starred is true, but it must be a string if provided.
-  if (
-    starred &&
-    starredName !== undefined &&
-    starredName !== null &&
-    typeof starredName !== 'string'
-  ) {
-    throw new BadRequestError(
-      "If 'starredName' is provided when starring, it must be a string."
-    );
-  }
-  if (!messageData)
-    throw new NotFoundError('Message context not found for star update.');
-  if (messageData.sender !== 'user')
-    throw new BadRequestError('Only user messages can be starred.');
-
-  try {
-    console.log(
-      `[API Star] Updating star for msg ${messageData.id} in chat ${chatData!.id} (session ${sessionData.id}) to starred=${starred}, name=${starredName}`
-    );
-    const nameToSave = starred ? starredName || null : null; // Ensure name is null if unstarring
-    const updatedMessage = messageRepository.updateMessageStarStatus(
-      messageData.id,
-      starred,
-      nameToSave
-    );
-    if (!updatedMessage)
-      throw new NotFoundError(
-        `Message ${messageData.id} not found during update.`
-      );
-    set.status = 200;
-    const { starred: starredNum, ...rest } = updatedMessage;
-    return {
-      ...rest,
-      starred: !!starredNum,
-      starredName:
-        rest.starredName === undefined ? undefined : rest.starredName,
-    };
-  } catch (error) {
-    console.error(
-      `[API Error] updateSessionChatMessageStarStatus (Message ID: ${messageData?.id}):`,
-      error
-    );
-    if (error instanceof ApiError) throw error;
-    throw new InternalServerError(
-      'Failed to update message star status',
-      error instanceof Error ? error : undefined
-    );
-  }
-};
-
 export const getSessionChatDetails = ({
   chatData,
   sessionData,
@@ -404,11 +338,7 @@ export const getSessionChatDetails = ({
       `Chat ${chatData.id} does not belong to session ${sessionData.id}.`
     );
   set.status = 200;
-  const messages = (chatData.messages ?? []).map((m: BackendChatMessage) => ({
-    ...m,
-    starred: !!m.starred,
-    starredName: m.starredName === undefined ? undefined : m.starredName,
-  }));
+  const messages = (chatData.messages ?? []).map((m: BackendChatMessage) => m);
   const { messages: _m, tags, ...metadata } = chatData; // tags are not part of SessionChatMetadataResponse
   return {
     ...metadata,

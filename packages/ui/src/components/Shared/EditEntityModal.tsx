@@ -11,34 +11,32 @@ import {
 } from '@radix-ui/themes';
 import { InfoCircledIcon, Cross2Icon, CheckIcon } from '@radix-ui/react-icons';
 
-interface BaseEntity {
+export interface BaseEntity {
   id: number;
   name?: string | null;
 }
 
-interface EditEntityModalProps<T extends BaseEntity, FormState> {
+interface EditEntityModalProps<T extends BaseEntity | null, FormState> {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
-  entity: T | null;
+  entity: T;
   entityTypeLabel: string;
-  getInitialFormState: (entity: T | null) => FormState;
-  // Adjust ref type to accept null from useRef initialization
+  getInitialFormState: (entity: T) => FormState;
   renderFormFields: (
     formState: FormState,
     setFormState: React.Dispatch<React.SetStateAction<FormState>>,
     isSaving: boolean,
     firstInputRef: React.RefObject<
       HTMLInputElement | HTMLTextAreaElement | null
-    > // Allow null
+    >
   ) => React.ReactNode;
   validateForm: (formState: FormState) => string | null;
   onSave: (entityId: number, validatedState: FormState) => Promise<any>;
   isSaving: boolean;
   saveError?: string | null;
-  // REMOVED onSaveSuccess prop - parent mutation should handle success actions
 }
 
-export function EditEntityModal<T extends BaseEntity, FormState>({
+export function EditEntityModal<T extends BaseEntity | null, FormState>({
   isOpen,
   onOpenChange,
   entity,
@@ -49,7 +47,6 @@ export function EditEntityModal<T extends BaseEntity, FormState>({
   onSave,
   isSaving,
   saveError,
-  // Removed onSaveSuccess from props
 }: EditEntityModalProps<T, FormState>) {
   const [formState, setFormState] = useState<FormState>(() =>
     getInitialFormState(entity)
@@ -58,17 +55,15 @@ export function EditEntityModal<T extends BaseEntity, FormState>({
     string | null
   >(null);
 
-  // Initialize ref allowing null
   const firstInputRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(
     null
   );
 
   useEffect(() => {
-    if (isOpen && entity) {
+    if (isOpen) {
       setFormState(getInitialFormState(entity));
       setLocalValidationError(null);
       const timer = setTimeout(() => {
-        // Check if ref exists before focusing
         firstInputRef.current?.focus();
       }, 50);
       return () => clearTimeout(timer);
@@ -78,29 +73,25 @@ export function EditEntityModal<T extends BaseEntity, FormState>({
   }, [isOpen, entity, getInitialFormState]);
 
   const handleSaveClick = async () => {
-    if (!entity || isSaving) return;
+    if (isSaving || (entity === null && !isOpen)) return;
 
     const validationError = validateForm(formState);
     setLocalValidationError(validationError);
 
     if (validationError === null) {
       try {
-        await onSave(entity.id, formState);
-        // Success handling (closing modal, invalidation) is now done
-        // within the parent component's useMutation hook.
+        await onSave(entity?.id ?? -1, formState);
       } catch (error) {
         console.error(
           `[EditEntityModal] Save failed for ${entityTypeLabel}:`,
           error
         );
-        // Error is passed down via saveError prop from parent mutation
       }
     }
   };
 
   const handleManualClose = (open: boolean) => {
     if (!open && isSaving) {
-      console.log('[EditEntityModal] Prevented close while saving.');
       return;
     }
     onOpenChange(open);
@@ -110,17 +101,21 @@ export function EditEntityModal<T extends BaseEntity, FormState>({
   };
 
   const displayError = localValidationError || saveError;
+  const isCreating = !entity;
 
   return (
     <Dialog.Root open={isOpen} onOpenChange={handleManualClose}>
       <Dialog.Content style={{ maxWidth: 525 }}>
-        <Dialog.Title>Edit {entityTypeLabel} Details</Dialog.Title>
+        <Dialog.Title>
+          {isCreating ? 'Create New' : 'Edit'} {entityTypeLabel}
+        </Dialog.Title>
         <Dialog.Description size="2" mb="4">
-          Update the details for this {entityTypeLabel.toLowerCase()}.
+          {isCreating
+            ? 'Fill in the details below.'
+            : `Update the details for this ${entityTypeLabel.toLowerCase()}.`}
         </Dialog.Description>
 
         <Flex direction="column" gap="4" py="4">
-          {/* Pass the ref correctly */}
           {renderFormFields(formState, setFormState, isSaving, firstInputRef)}
 
           {displayError && (

@@ -7,3 +7,4 @@ export * from './docker';
 export * from './search';
 export * from './meta';
 export * from './system';
+export * from './templates';

@@ -16,6 +16,7 @@ import {
   Container as ContainerIcon,
   Power,
   AlertTriangle,
+  Star, // IMPORT Star icon
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -49,6 +50,7 @@ const navItems: NavItemType[] = [
     page: '/sessions-list',
   },
   { id: 'chats', label: 'All Chats', icon: MessageSquare, page: '/chats-list' },
+  { id: 'templates', label: 'Templates', icon: Star, page: '/templates' }, // CHANGED icon
   { id: 'settings', label: 'Settings', icon: Settings, page: '/settings' },
 ];
 

@@ -9,7 +9,6 @@ import {
   addStandaloneChatMessage,
   editStandaloneChatDetails,
   deleteStandaloneChat,
-  updateStandaloneChatMessageStarStatus,
 } from '../api/standaloneChatHandler.js';
 import { NotFoundError, BadRequestError, ApiError } from '../errors.js';
 import type {
@@ -18,23 +17,14 @@ import type {
   ChatMetadata,
 } from '../types/index.js';
 
-// --- Schemas (as before, assuming they are correct) ---
+// --- Schemas ---
 const ChatIdParamSchema = t.Object({
   chatId: t.String({
     pattern: '^[0-9]+$',
     error: 'Chat ID must be a positive number',
   }),
 });
-const MessageIdParamSchema = t.Object({
-  messageId: t.String({
-    pattern: '^[0-9]+$',
-    error: 'Message ID must be a positive number',
-  }),
-});
-const ChatAndMessageParamsSchema = t.Intersect([
-  ChatIdParamSchema,
-  MessageIdParamSchema,
-]);
+
 const ChatMessageBodySchema = t.Object({
   text: t.String({ minLength: 1, error: 'Message text cannot be empty' }),
 });
@@ -43,10 +33,6 @@ const ChatEditBodySchema = t.Object({
   tags: t.Optional(
     t.Union([t.Array(t.String({ minLength: 1, maxLength: 50 })), t.Null()])
   ),
-});
-const MessageStarUpdateBodySchema = t.Object({
-  starred: t.Boolean({ error: "'starred' field (boolean) is required" }),
-  starredName: t.Optional(t.Union([t.String({ minLength: 1 }), t.Null()])),
 });
 const StandaloneChatMetadataResponseSchema = t.Object({
   id: t.Number(),
@@ -66,8 +52,6 @@ const ChatMessageResponseSchema = t.Object({
   timestamp: t.Number(),
   promptTokens: t.Optional(t.Union([t.Number(), t.Null()])),
   completionTokens: t.Optional(t.Union([t.Number(), t.Null()])),
-  starred: t.Boolean(),
-  starredName: t.Optional(t.Union([t.String(), t.Null()])),
 });
 const FullStandaloneChatResponseSchema = t.Intersect([
   StandaloneChatMetadataResponseSchema,
@@ -79,11 +63,8 @@ const DeleteChatResponseSchema = t.Object({ message: t.String() });
 export const standaloneChatRoutes = new Elysia({ prefix: '/api/chats' })
   .model({
     chatIdParam: ChatIdParamSchema,
-    messageIdParam: MessageIdParamSchema,
-    chatAndMessageParams: ChatAndMessageParamsSchema,
     chatMessageBody: ChatMessageBodySchema,
     chatEditBody: ChatEditBodySchema,
-    messageStarUpdateBody: MessageStarUpdateBodySchema,
     standaloneChatMetadataResponse: StandaloneChatMetadataResponseSchema,
     standaloneChatListResponse: StandaloneChatListResponseSchema,
     fullStandaloneChatResponse: FullStandaloneChatResponseSchema,
@@ -155,42 +136,6 @@ export const standaloneChatRoutes = new Elysia({ prefix: '/api/chats' })
                 response: { 200: 'deleteChatResponse' },
                 detail: { summary: 'Delete a standalone chat' },
               }
-            )
-            .guard(
-              { params: 'chatAndMessageParams' }, // params: chatId, messageId (strings)
-              (app) =>
-                app
-                  .derive((context) => {
-                    // Elysia infers context
-                    const { params, chatData } = context; // chatData from parent derive
-                    const messageIdNum = parseInt(params.messageId!, 10);
-                    if (isNaN(messageIdNum))
-                      throw new BadRequestError('Invalid message ID format');
-                    const message =
-                      messageRepository.findMessageById(messageIdNum);
-                    if (
-                      !message ||
-                      !chatData ||
-                      message.chatId !== chatData.id
-                    ) {
-                      throw new NotFoundError(
-                        `Message ${messageIdNum} in chat ${chatData?.id}`
-                      );
-                    }
-                    return { messageData: message };
-                  })
-                  .patch(
-                    '/:chatId/messages/:messageId',
-                    (context) =>
-                      updateStandaloneChatMessageStarStatus(context as any),
-                    {
-                      body: 'messageStarUpdateBody',
-                      response: { 200: 'chatMessageResponse' },
-                      detail: {
-                        summary: 'Update star status/name for a message',
-                      },
-                    }
-                  )
             )
       )
   );

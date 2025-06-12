@@ -47,8 +47,6 @@ const createIsoTimestamp = (
 interface SampleChatMessage {
   sender: 'user' | 'ai';
   text: string;
-  starred?: boolean;
-  starredName?: string;
 }
 interface SampleChat {
   name?: string;
@@ -115,8 +113,6 @@ const sampleSessions: SampleSession[] = [
           {
             sender: 'user',
             text: 'What did Jane say about work?',
-            starred: true,
-            starredName: 'Jane Work Stress Quote',
           },
           {
             sender: 'ai',
@@ -193,8 +189,6 @@ const sampleSessions: SampleSession[] = [
           {
             sender: 'user',
             text: "What triggers John's anxiety?",
-            starred: true,
-            starredName: 'John Triggers',
           },
           {
             sender: 'ai',
@@ -314,11 +308,36 @@ async function preloadDatabase() {
       `INSERT INTO chats (sessionId, timestamp, name, tags) VALUES (?, ?, ?, ?)`
     );
     const insertMessage = db.prepare(
-      `INSERT INTO messages (chatId, sender, text, timestamp, promptTokens, completionTokens, starred, starredName) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO messages (chatId, sender, text, timestamp, promptTokens, completionTokens) VALUES (?, ?, ?, ?, ?, ?)`
     );
     const insertParagraph = db.prepare(
       `INSERT INTO transcript_paragraphs (sessionId, paragraphIndex, timestampMs, text) VALUES (?, ?, ?, ?)`
     );
+    const insertTemplate = db.prepare(
+      'INSERT INTO templates (title, text, createdAt) VALUES (?, ?, ?)'
+    );
+
+    // Pre-load templates from markdown files
+    const templatesDir = path.resolve(
+      packageApiDir,
+      'src/preload-data/templates'
+    );
+    try {
+      const templateFiles = await fs.readdir(templatesDir);
+      for (const file of templateFiles) {
+        if (file.endsWith('.md')) {
+          const title = path.basename(file, '.md');
+          const text = await fs.readFile(
+            path.join(templatesDir, file),
+            'utf-8'
+          );
+          insertTemplate.run(title, text.trim(), Date.now());
+          console.log(`[Preload] Loaded template: "${title}"`);
+        }
+      }
+    } catch (e) {
+      console.warn(`[Preload] Could not load preload-data/templates: ${e}`);
+    }
 
     db.transaction(() => {
       for (const session of sampleSessions) {
@@ -400,9 +419,7 @@ async function preloadDatabase() {
               message.text,
               messageTimestamp,
               null,
-              null,
-              message.starred ? 1 : 0,
-              message.starredName || null
+              null
             );
             const actualMessageId = msgResult.lastInsertRowid as number;
             esMessageDocsToBulk.push({

@@ -1,5 +1,12 @@
 // packages/ui/src/types.ts
 
+export interface Template {
+  id: number;
+  title: string;
+  text: string;
+  createdAt: number;
+}
+
 export interface TranscriptParagraphData {
   id: number;
   timestamp: number; // start time in milliseconds
@@ -13,8 +20,6 @@ export interface ChatMessage {
   sender: 'user' | 'ai';
   text: string;
   timestamp: number;
-  starred?: boolean;
-  starredName?: string | null;
   promptTokens?: number | null;
   completionTokens?: number | null;
 }
@@ -63,8 +68,6 @@ export interface BackendChatMessage {
   timestamp: number;
   promptTokens?: number | null;
   completionTokens?: number | null;
-  starred?: number;
-  starredName?: string | null;
 }
 
 export interface OllamaModelInfo {

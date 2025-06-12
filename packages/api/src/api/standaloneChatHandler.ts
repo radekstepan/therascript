@@ -32,9 +32,7 @@ type StandaloneChatMetadataResponse = ChatMetadata & {
   sessionId: null;
   tags: string[] | null;
 };
-type ApiChatMessageResponse = Omit<BackendChatMessage, 'starred'> & {
-  starred: boolean;
-};
+type ApiChatMessageResponse = BackendChatMessage;
 type FullStandaloneChatApiResponse = StandaloneChatMetadataResponse & {
   messages: ApiChatMessageResponse[];
 };
@@ -117,11 +115,7 @@ export const getStandaloneChatDetails = ({
     );
   }
   set.status = 200;
-  const messages = (chatData.messages ?? []).map((m: BackendChatMessage) => ({
-    ...m,
-    starred: !!m.starred, // Convert 0/1 to boolean
-    starredName: m.starredName === undefined ? undefined : m.starredName, // Preserve undefined if that's the DB state
-  }));
+  const messages = (chatData.messages ?? []).map((m: BackendChatMessage) => m);
   // chatData already includes tags, separate messages
   const { messages: _m, ...metadata } = chatData;
   // Construct the response ensuring all fields match FullStandaloneChatApiResponse
@@ -362,65 +356,6 @@ export const addStandaloneChatMessage = async ({
     if (error instanceof ApiError) throw error;
     throw new InternalServerError(
       'Failed to setup standalone chat message stream',
-      error instanceof Error ? error : undefined
-    );
-  }
-};
-
-export const updateStandaloneChatMessageStarStatus = ({
-  chatData,
-  messageData,
-  body,
-  set,
-}: ElysiaHandlerContext): ApiChatMessageResponse => {
-  const { starred, starredName } = body as {
-    starred: boolean;
-    starredName?: string | null;
-  };
-  if (typeof starred !== 'boolean')
-    throw new BadRequestError("Missing or invalid 'starred' field (boolean).");
-  if (
-    starred &&
-    starredName !== undefined &&
-    starredName !== null &&
-    typeof starredName !== 'string'
-  ) {
-    throw new BadRequestError(
-      "If 'starredName' is provided when starring, it must be a string."
-    );
-  }
-  if (!messageData)
-    throw new NotFoundError('Message context not found for star update.');
-  if (messageData.sender !== 'user')
-    throw new BadRequestError('Only user messages can be starred.');
-
-  try {
-    console.log(
-      `[API Star] Updating msg ${messageData.id} in standalone chat ${chatData!.id} to starred=${starred}, name=${starredName}`
-    );
-    const nameToSave = starred ? starredName || null : null;
-    const updatedMessage = messageRepository.updateMessageStarStatus(
-      messageData.id,
-      starred,
-      nameToSave
-    );
-    if (!updatedMessage)
-      throw new NotFoundError(
-        `Message ${messageData.id} not found during update.`
-      );
-    set.status = 200;
-    const { starred: starredNum, ...rest } = updatedMessage;
-    return {
-      ...rest,
-      starred: !!starredNum,
-      starredName:
-        rest.starredName === undefined ? undefined : rest.starredName,
-    };
-  } catch (error) {
-    console.error(`[API Err] updateStandaloneStar ${messageData?.id}:`, error);
-    if (error instanceof ApiError) throw error;
-    throw new InternalServerError(
-      'Failed update msg star status',
       error instanceof Error ? error : undefined
     );
   }
