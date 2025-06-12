@@ -1,4 +1,4 @@
-ou are an evaluator tasked with assessing the accuracy of an LLM’s output that identifies CBT techniques in a therapy session transcript. You will receive two inputs:
+You are an evaluator tasked with assessing the accuracy of an LLM’s output that identifies CBT techniques in a therapy session transcript. You will receive two inputs:
 1. The verbatim transcript of a therapy session.
 2. The LLM’s output describing what CBT techniques were used.
 

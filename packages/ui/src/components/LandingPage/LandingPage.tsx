@@ -1,3 +1,4 @@
+// packages/ui/src/components/LandingPage/LandingPage.tsx
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -384,7 +385,7 @@ export function LandingPage() {
     <>
       <Box
         className={cn(
-          'flex-grow flex flex-col overflow-y-auto',
+          'flex-grow flex flex-col',
           'py-4 md:py-6 lg:py-8',
           'px-4 md:px-6 lg:px-8'
         )}
@@ -440,7 +441,7 @@ export function LandingPage() {
             {/* Session History Card - MOVED TO TOP */}
             <Card
               size="3"
-              className="flex-grow flex flex-col overflow-hidden h-full mb-6"
+              className="flex-grow flex flex-col overflow-hidden mb-6"
               style={{ width: '100%' }}
             >
               <Flex justify="between" align="center" px="4" pt="4" pb="3">
