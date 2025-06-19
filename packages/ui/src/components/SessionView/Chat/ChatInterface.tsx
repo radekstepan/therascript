@@ -425,6 +425,7 @@ export function ChatInterface({
           isStandalone={isStandalone}
           disabled={combinedIsLoading || !activeChatId || isAiResponding}
           addMessageMutation={addMessageMutation}
+          transcriptTokenCount={transcriptTokenCount} // <-- PASS PROP
         />
       </Box>
     </Flex>

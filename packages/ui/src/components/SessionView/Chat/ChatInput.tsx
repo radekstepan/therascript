@@ -25,7 +25,7 @@ import {
   // Button, // No longer needed for inline prompt
   // Callout, // No longer needed for inline prompt
 } from '@radix-ui/themes';
-import { StarredTemplatesList } from './StarredTemplates';
+import { StarredTemplatesList } from './StarredTemplatesList';
 import {
   currentQueryAtom,
   activeChatIdAtom,
@@ -49,12 +49,14 @@ interface ChatInputProps {
     string,
     unknown
   >;
+  transcriptTokenCount?: number | null; // <-- ADDED PROP
 }
 
 export function ChatInput({
   isStandalone,
   disabled = false,
   addMessageMutation,
+  transcriptTokenCount, // <-- DESTRUCTURED PROP
 }: ChatInputProps) {
   const [currentQuery, setCurrentQuery] = useAtom(currentQueryAtom);
   const activeChatId = useAtomValue(activeChatIdAtom);
@@ -205,7 +207,7 @@ export function ChatInput({
 
   const handleCancelStreamClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     e.preventDefault();
-    setToastMessageAtom('❗ Stream cancellation requested (if supported).');
+    setToastMessageAtom('? Stream cancellation requested (if supported).');
     if (!isEffectivelyDisabled && inputRef.current) {
       inputRef.current.focus();
     }
@@ -310,6 +312,7 @@ export function ChatInput({
         onModelSuccessfullySet={handleModelSuccessfullySet}
         currentActiveModelName={ollamaStatus?.activeModel}
         currentConfiguredContextSize={ollamaStatus?.configuredContextSize}
+        activeTranscriptTokens={transcriptTokenCount} // <-- PASS PROP
       />
     </>
   );
