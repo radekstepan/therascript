@@ -39,7 +39,6 @@ import * as util from 'node:util';
 import * as path from 'node:path';
 import * as fs from 'node:fs'; // For checking compose file
 import { fileURLToPath } from 'node:url';
-import { sessionRepository } from '../repositories/sessionRepository.js';
 
 const exec = util.promisify(callbackExec);
 
@@ -903,11 +902,6 @@ export const streamChatResponse = async (
   chatHistory: BackendChatMessage[],
   retryAttempt: boolean = false
 ): Promise<AsyncIterable<ChatResponse>> => {
-  if (sessionRepository.isTranscriptionInProgress()) {
-    throw new ConflictError(
-      'A transcription is currently in progress. Please wait for it to complete before starting a chat.'
-    );
-  }
   const modelToUse = getActiveModel();
   const contextSize = getConfiguredContextSize();
   const isStandalone = contextTranscript === null;
