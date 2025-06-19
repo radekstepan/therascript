@@ -21,23 +21,24 @@ import {
   CheckCircledIcon,
   LightningBoltIcon,
   ExclamationTriangleIcon,
-  MagicWandIcon, // <-- CHANGED: Using MagicWandIcon instead of SparklesIcon
+  MagicWandIcon,
+  ReloadIcon, // <-- ADDED
 } from '@radix-ui/react-icons';
 import {
   fetchAvailableModels,
   setOllamaModel,
-  // fetchOllamaStatus, // Not directly used in this modal's logic anymore for status checks
+  unloadOllamaModel, // <-- ADDED
 } from '../../../api/api';
 import { toastMessageAtom } from '../../../store';
 import { useSetAtom } from 'jotai';
 import type {
   OllamaModelInfo,
-  // OllamaStatus, // Not directly used
   AvailableModelsResponse,
+  OllamaStatus, // <-- ADDED
 } from '../../../types';
 import { LlmManagementModal } from './LlmManagementModal';
 
-const PADDING_ESTIMATE = 1500; // Tokens for system prompt, chat history, user query, AI response buffer
+const PADDING_ESTIMATE = 1500;
 
 interface SelectActiveModelModalProps {
   isOpen: boolean;
@@ -46,6 +47,7 @@ interface SelectActiveModelModalProps {
   currentActiveModelName?: string | null;
   currentConfiguredContextSize?: number | null;
   activeTranscriptTokens?: number | null;
+  ollamaStatus: OllamaStatus | undefined; // <-- ADDED PROP
 }
 
 export function SelectActiveModelModal({
@@ -55,6 +57,7 @@ export function SelectActiveModelModal({
   currentActiveModelName,
   currentConfiguredContextSize,
   activeTranscriptTokens,
+  ollamaStatus, // <-- DESTRUCTURED PROP
 }: SelectActiveModelModalProps) {
   const queryClient = useQueryClient();
   const setToast = useSetAtom(toastMessageAtom);
@@ -102,7 +105,7 @@ export function SelectActiveModelModal({
       return setOllamaModel(modelName, contextSize);
     },
     onSuccess: (data: { message: string }, variables) => {
-      setToast(`✅ ${data.message}`);
+      setToast(`? ${data.message}`);
       queryClient.invalidateQueries({ queryKey: ['ollamaStatus'] });
       onModelSuccessfullySet();
       onOpenChange(false);
@@ -111,9 +114,26 @@ export function SelectActiveModelModal({
       setLocalError(
         `Failed to set model: ${error.message || 'Request failed.'}`
       );
-      setToast(`❌ Error setting model: ${error.message || 'Request failed.'}`);
+      setToast(`? Error setting model: ${error.message || 'Request failed.'}`);
     },
   });
+
+  const unloadMutation = useMutation({
+    mutationFn: unloadOllamaModel,
+    onSuccess: (data) => {
+      setToast(`? ${data.message}`);
+      queryClient.invalidateQueries({ queryKey: ['ollamaStatus'] });
+    },
+    onError: (error: Error) => {
+      setToast(
+        `? Error unloading model: ${error.message || 'Request failed.'}`
+      );
+    },
+  });
+
+  const isAnyActionInProgress =
+    setModelMutation.isPending || unloadMutation.isPending;
+  const isUnloadDisabled = !ollamaStatus?.loaded || isAnyActionInProgress;
 
   const handleSetModel = () => {
     setLocalError(null);
@@ -139,8 +159,13 @@ export function SelectActiveModelModal({
     });
   };
 
+  const handleUnloadClick = () => {
+    if (isUnloadDisabled) return;
+    unloadMutation.mutate();
+  };
+
   const handleManualClose = (open: boolean) => {
-    if (!open && setModelMutation.isPending) return;
+    if (!open && isAnyActionInProgress) return;
     onOpenChange(open);
   };
 
@@ -152,7 +177,7 @@ export function SelectActiveModelModal({
   const handleAdvancedModalLinkClick = (
     event: React.MouseEvent<HTMLAnchorElement>
   ) => {
-    if (setModelMutation.isPending) {
+    if (isAnyActionInProgress) {
       event.preventDefault();
       return;
     }
@@ -216,7 +241,7 @@ export function SelectActiveModelModal({
                     setSelectedModelName(value);
                   }}
                   disabled={
-                    setModelMutation.isPending || availableModels.length === 0
+                    isAnyActionInProgress || availableModels.length === 0
                   }
                 >
                   <Select.Trigger
@@ -228,7 +253,7 @@ export function SelectActiveModelModal({
                     }
                     style={{ width: '100%' }}
                     disabled={
-                      setModelMutation.isPending || availableModels.length === 0
+                      isAnyActionInProgress || availableModels.length === 0
                     }
                   />
                   <Select.Content position="popper">
@@ -258,11 +283,10 @@ export function SelectActiveModelModal({
                       variant="soft"
                       size="1"
                       onClick={handleUseSuggested}
-                      disabled={setModelMutation.isPending}
+                      disabled={isAnyActionInProgress}
                       title={`Based on transcript + padding (${suggestedContextSize.toLocaleString()})`}
                     >
-                      <MagicWandIcon width="12" height="12" /> Use Suggested{' '}
-                      {/* <-- CHANGED ICON */}
+                      <MagicWandIcon width="12" height="12" /> Use Suggested
                     </Button>
                   )}
                   {selectedModelDetails?.defaultContextSize && (
@@ -270,7 +294,7 @@ export function SelectActiveModelModal({
                       variant="soft"
                       size="1"
                       onClick={handleUseModelDefault}
-                      disabled={setModelMutation.isPending}
+                      disabled={isAnyActionInProgress}
                       title={`Model's default maximum (${selectedModelDetails.defaultContextSize.toLocaleString()})`}
                     >
                       <LightningBoltIcon width="12" height="12" /> Use Default
@@ -290,7 +314,7 @@ export function SelectActiveModelModal({
                 }
                 value={contextSizeInput}
                 onChange={(e) => setContextSizeInput(e.target.value)}
-                disabled={setModelMutation.isPending}
+                disabled={isAnyActionInProgress}
                 type="number"
                 min="1"
               />
@@ -322,14 +346,14 @@ export function SelectActiveModelModal({
           <Flex justify="start" mb="4">
             <Link
               onClick={
-                !setModelMutation.isPending
+                !isAnyActionInProgress
                   ? handleAdvancedModalLinkClick
                   : (e) => e.preventDefault()
               }
               size="2"
-              aria-disabled={setModelMutation.isPending}
+              aria-disabled={isAnyActionInProgress}
               style={
-                setModelMutation.isPending
+                isAnyActionInProgress
                   ? { pointerEvents: 'none', opacity: 0.6 }
                   : {}
               }
@@ -338,33 +362,51 @@ export function SelectActiveModelModal({
             </Link>
           </Flex>
 
-          <Flex gap="3" mt="4" justify="end">
+          <Flex gap="3" mt="4" justify="between" align="center">
             <Button
-              variant="soft"
-              color="gray"
-              onClick={() => handleManualClose(false)}
-              disabled={setModelMutation.isPending}
-            >
-              <Cross2Icon /> Cancel
-            </Button>
-            <Button
-              onClick={handleSetModel}
-              disabled={
-                setModelMutation.isPending ||
-                isLoadingAvailable ||
-                !selectedModelName
+              variant="outline"
+              color="orange"
+              onClick={handleUnloadClick}
+              disabled={isUnloadDisabled}
+              title={
+                !ollamaStatus?.loaded
+                  ? 'No model is currently loaded'
+                  : 'Unload the active model'
               }
             >
-              {setModelMutation.isPending ? (
-                <>
-                  <Spinner size="2" /> <Text ml="1">Applying...</Text>
-                </>
-              ) : (
-                <>
-                  <CheckCircledIcon /> Set Active Model
-                </>
-              )}
+              {unloadMutation.isPending ? <Spinner size="2" /> : <ReloadIcon />}
+              <Text ml="1">
+                {unloadMutation.isPending ? 'Unloading...' : 'Unload Model'}
+              </Text>
             </Button>
+            <Flex gap="3">
+              <Button
+                variant="soft"
+                color="gray"
+                onClick={() => handleManualClose(false)}
+                disabled={isAnyActionInProgress}
+              >
+                <Cross2Icon /> Cancel
+              </Button>
+              <Button
+                onClick={handleSetModel}
+                disabled={
+                  isAnyActionInProgress ||
+                  isLoadingAvailable ||
+                  !selectedModelName
+                }
+              >
+                {setModelMutation.isPending ? (
+                  <>
+                    <Spinner size="2" /> <Text ml="1">Applying...</Text>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircledIcon /> Set Active Model
+                  </>
+                )}
+              </Button>
+            </Flex>
           </Flex>
         </Dialog.Content>
       </Dialog.Root>
