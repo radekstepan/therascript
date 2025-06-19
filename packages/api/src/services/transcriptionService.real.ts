@@ -18,6 +18,7 @@ import type {
   WhisperJobStatus,
   WhisperSegment,
 } from '../types/index.js'; // Import type definitions
+import { unloadActiveModel } from './ollamaService.js';
 
 // Get Whisper service configuration from the main config
 const WHISPER_API_URL = config.whisper.apiUrl;
@@ -160,6 +161,22 @@ function groupSegmentsIntoParagraphs(
 export const startTranscriptionJob = async (
   filePath: string
 ): Promise<string> => {
+  console.log(
+    '[Real TranscriptionService] Unloading active Ollama model to free up GPU memory for transcription...'
+  );
+  try {
+    await unloadActiveModel();
+    console.log(
+      '[Real TranscriptionService] Unload request sent to Ollama service successfully.'
+    );
+  } catch (error) {
+    // Log a warning but don't fail the transcription job.
+    // The user should be able to transcribe even if Ollama is unresponsive.
+    console.warn(
+      '[Real TranscriptionService] Could not unload Ollama model. This might be okay if it was not loaded. Continuing with transcription. Error:',
+      error instanceof Error ? error.message : String(error)
+    );
+  }
   // Resolve to absolute path for clarity and consistency
   const absoluteFilePath = path.resolve(filePath);
   const fileName = path.basename(absoluteFilePath); // Extract filename for logging/form data

@@ -39,6 +39,7 @@ import * as util from 'node:util';
 import * as path from 'node:path';
 import * as fs from 'node:fs'; // For checking compose file
 import { fileURLToPath } from 'node:url';
+import { sessionRepository } from '../repositories/sessionRepository.js';
 
 const exec = util.promisify(callbackExec);
 
@@ -109,13 +110,13 @@ export async function ensureOllamaReady(timeoutMs = 30000): Promise<void> {
   console.log('[Real Ollama Docker] Ensuring Ollama service is ready...');
   if ((await isOllamaContainerRunning()) && (await isOllamaApiResponsive())) {
     console.log(
-      '[Real Ollama Docker] ✅ Ollama container running and API responsive.'
+      '[Real Ollama Docker] ? Ollama container running and API responsive.'
     );
     return;
   }
   if (!(await isOllamaContainerRunning())) {
     console.log(
-      '[Real Ollama Docker] 🅾️ Ollama container not running. Attempting to start...'
+      '[Real Ollama Docker] ??? Ollama container not running. Attempting to start...'
     );
     try {
       await runOllamaComposeCommand(`up -d ${OLLAMA_SERVICE_NAME}`);
@@ -124,7 +125,7 @@ export async function ensureOllamaReady(timeoutMs = 30000): Promise<void> {
       );
     } catch (startError: any) {
       console.error(
-        '[Real Ollama Docker] ❌ Failed to issue start command for Ollama service:',
+        '[Real Ollama Docker] ? Failed to issue start command for Ollama service:',
         startError
       );
       throw new InternalServerError(
@@ -140,16 +141,16 @@ export async function ensureOllamaReady(timeoutMs = 30000): Promise<void> {
   const startTime = Date.now();
   while (Date.now() - startTime < timeoutMs) {
     console.log(
-      '[Real Ollama Docker] ⏳ Waiting for Ollama API to become responsive...'
+      '[Real Ollama Docker] ? Waiting for Ollama API to become responsive...'
     );
     if (await isOllamaApiResponsive()) {
-      console.log('[Real Ollama Docker] ✅ Ollama API is now responsive.');
+      console.log('[Real Ollama Docker] ? Ollama API is now responsive.');
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, 3000));
   }
   console.error(
-    `[Real Ollama Docker] ❌ Ollama API did not become responsive within ${timeoutMs / 1000} seconds.`
+    `[Real Ollama Docker] ? Ollama API did not become responsive within ${timeoutMs / 1000} seconds.`
   );
   throw new InternalServerError(
     `Ollama service started but API did not respond within timeout.`
@@ -902,6 +903,11 @@ export const streamChatResponse = async (
   chatHistory: BackendChatMessage[],
   retryAttempt: boolean = false
 ): Promise<AsyncIterable<ChatResponse>> => {
+  if (sessionRepository.isTranscriptionInProgress()) {
+    throw new ConflictError(
+      'A transcription is currently in progress. Please wait for it to complete before starting a chat.'
+    );
+  }
   const modelToUse = getActiveModel();
   const contextSize = getConfiguredContextSize();
   const isStandalone = contextTranscript === null;

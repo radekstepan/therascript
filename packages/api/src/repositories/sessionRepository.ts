@@ -28,10 +28,12 @@ const updateSessionMetadataStmt = prepareStmt(
 // SQL statement to delete a session by ID. Foreign key constraints handle related chats/messages/paragraphs.
 const deleteSessionStmt = prepareStmt('DELETE FROM sessions WHERE id = ?');
 // --- Removed findSessionByTranscriptPathStmt ---
-// const findSessionByTranscriptPathStmt = prepareStmt('SELECT * FROM sessions WHERE transcriptPath = ?');
 // *** ADDED Statement to find session by audioPath ***
 const findSessionByAudioPathStmt = prepareStmt(
   'SELECT * FROM sessions WHERE audioPath = ?'
+);
+const selectTranscribingSessionStmt = prepareStmt(
+  "SELECT id FROM sessions WHERE status = 'transcribing' LIMIT 1"
 );
 
 export const sessionRepository = {
@@ -210,6 +212,22 @@ export const sessionRepository = {
       return sessionRepository.findById(id);
     } catch (error) {
       throw new Error(`DB error updating metadata for session ${id}: ${error}`);
+    }
+  },
+
+  isTranscriptionInProgress: (): boolean => {
+    try {
+      const result = selectTranscribingSessionStmt.get();
+      return !!result;
+    } catch (error) {
+      console.error(
+        `[SessionRepo] Error checking for in-progress transcriptions:`,
+        error
+      );
+      console.warn(
+        '[SessionRepo] Could not determine if a transcription is in progress due to a database error. Proceeding as if none are active.'
+      );
+      return false;
     }
   },
 
