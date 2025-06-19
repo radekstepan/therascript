@@ -2,6 +2,8 @@
 
 Therascript is a comprehensive application designed to assist therapists by streamlining the process of analyzing therapy sessions. It allows users to upload audio recordings of sessions, which are then transcribed and made available for AI-powered chat analysis. This enables therapists to quickly gain insights, review key moments, and efficiently manage their session notes.
 
+![Screenshot](screenshot.png)
+
 ## Key Features
 
 *   **Session Management:** Upload audio files, manage session metadata (client details, date, type, therapy modality), and view a history of all sessions.
