@@ -149,6 +149,7 @@ export function StandaloneChatView() {
         onModelSuccessfullySet={handleModelSuccessfullySet}
         currentActiveModelName={ollamaStatus?.activeModel}
         currentConfiguredContextSize={ollamaStatus?.configuredContextSize}
+        ollamaStatus={ollamaStatus}
       />
     </Flex>
   );

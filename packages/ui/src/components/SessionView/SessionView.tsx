@@ -316,7 +316,8 @@ export function SessionView() {
         onModelSuccessfullySet={handleModelSuccessfullySet}
         currentActiveModelName={ollamaStatus?.activeModel}
         currentConfiguredContextSize={ollamaStatus?.configuredContextSize}
-        activeTranscriptTokens={transcriptTokenCount} // <-- PASS PROP
+        activeTranscriptTokens={transcriptTokenCount}
+        ollamaStatus={ollamaStatus}
       />
     </Flex>
   );
