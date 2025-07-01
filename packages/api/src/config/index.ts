@@ -28,9 +28,15 @@ console.log(`[Config] Determined APP_MODE as: ${appMode}`);
 const port = parseInt(getEnvVar('PORT', '3001'), 10);
 const isProduction = nodeEnv === 'production';
 const corsOrigin = getEnvVar('CORS_ORIGIN', 'http://localhost:3002');
-const ollamaBaseURL = getEnvVar('OLLAMA_BASE_URL', 'http://localhost:11434');
-const ollamaModel = getEnvVar('OLLAMA_MODEL', 'llama3');
-const ollamaKeepAlive = getEnvVar('OLLAMA_CHAT_KEEP_ALIVE', '5m');
+
+// --- vLLM Configuration ---
+const vllmBaseURL = getEnvVar('VLLM_BASE_URL', 'http://localhost:8000/v1');
+const vllmApiKey = getEnvVar('VLLM_API_KEY', 'not-needed');
+const vllmModel = getEnvVar(
+  'VLLM_MODEL',
+  'NousResearch/Meta-Llama-3-8B-Instruct'
+);
+
 const whisperApiURL = getEnvVar('WHISPER_API_URL', 'http://localhost:8000');
 const whisperModel = getEnvVar('WHISPER_MODEL', 'tiny');
 const elasticsearchUrl = getEnvVar(
@@ -83,14 +89,13 @@ const config = {
     corsOrigin: corsOrigin,
     appMode: appMode as 'production' | 'development' | 'mock',
   },
-  ollama: {
-    baseURL: ollamaBaseURL,
-    model: ollamaModel,
-    keepAlive: ollamaKeepAlive,
+  vllm: {
+    baseURL: vllmBaseURL,
+    apiKey: vllmApiKey,
+    model: vllmModel,
   },
   whisper: { apiUrl: whisperApiURL, model: whisperModel },
   elasticsearch: {
-    // Added Elasticsearch config section
     url: elasticsearchUrl,
   },
   db: {
@@ -126,14 +131,14 @@ ensureDirectoryExists(config.db.uploadsDir, 'uploads');
 console.log('[Config] Final check before exporting config object:');
 console.log(`  - Value of APP_MODE in process.env: ${process.env.APP_MODE}`);
 console.log(
-  `  - Value of OLLAMA_MODEL in process.env: ${process.env.OLLAMA_MODEL}`
+  `  - Value of VLLM_MODEL in process.env: ${process.env.VLLM_MODEL}`
 );
 console.log('[Config] Effective Configuration Loaded:');
 console.log(`  - APP_MODE: ${config.server.appMode}`);
 console.log(`  - NODE_ENV: ${config.server.nodeEnv}`);
 console.log(`  - Port: ${config.server.port}`);
 console.log(`  - CORS Origin: ${config.server.corsOrigin}`);
-console.log(`  - Ollama Model (in config object): ${config.ollama.model}`);
+console.log(`  - vLLM Model (in config object): ${config.vllm.model}`);
 console.log(`  - Whisper Model: ${config.whisper.model}`);
 console.log(`  - Elasticsearch URL: ${config.elasticsearch.url}`);
 console.log(`  - DB Path: ${config.db.sqlitePath}`);

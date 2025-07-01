@@ -1,7 +1,7 @@
 // packages/api/src/api/standaloneChatHandler.ts
 import { chatRepository } from '../repositories/chatRepository.js';
 import { messageRepository } from '../repositories/messageRepository.js';
-import { streamChatResponse } from '../services/ollamaService.js';
+import { streamChatResponse } from '../services/vllmService.js';
 import {
   NotFoundError,
   InternalServerError,
@@ -13,7 +13,7 @@ import type {
   ChatMetadata,
   BackendChatSession,
   BackendSession,
-} from '../types/index.js'; // Added BackendSession
+} from '../types/index.js';
 import { TransformStream } from 'node:stream/web';
 import { TextEncoder } from 'node:util';
 import {
@@ -21,13 +21,12 @@ import {
   MESSAGES_INDEX,
   indexDocument,
   deleteByQuery,
-  bulkIndexDocuments, // For updating multiple messages on chat detail change
+  bulkIndexDocuments,
 } from '@therascript/elasticsearch-client';
 import config from '../config/index.js';
 
 const esClient = getElasticsearchClient(config.elasticsearch.url);
 
-// Define precise return types matching the schemas where needed
 type StandaloneChatMetadataResponse = ChatMetadata & {
   sessionId: null;
   tags: string[] | null;
@@ -37,34 +36,28 @@ type FullStandaloneChatApiResponse = StandaloneChatMetadataResponse & {
   messages: ApiChatMessageResponse[];
 };
 
-// Define a type for Elysia context if not already available globally in your project
 interface ElysiaHandlerContext {
   body: any;
   params: Record<string, string | undefined>;
   query: Record<string, string | undefined>;
   set: { status?: number | string; headers?: Record<string, string> };
-  // These are added by 'derive' hooks if used for these routes
   chatData?: BackendChatSession;
   messageData?: BackendChatMessage;
-  // sessionData is not typically used in standalone chat handlers
 }
 
 export const createStandaloneChat = ({
   set,
 }: ElysiaHandlerContext): StandaloneChatMetadataResponse => {
   try {
-    const newChat: BackendChatSession = chatRepository.createChat(null); // sessionId is null for standalone
-    console.log(`[API] Created new standalone chat ${newChat.id}`);
-    // Destructure messages and sessionId (which will be null) to get the metadata
+    const newChat: BackendChatSession = chatRepository.createChat(null);
     const { messages, sessionId: _ignoredSessionId, ...chatMetadata } = newChat;
     set.status = 201;
-    // Construct the response type correctly, including tags
     const response: StandaloneChatMetadataResponse = {
       id: chatMetadata.id,
-      sessionId: null, // Explicitly null for standalone
+      sessionId: null,
       timestamp: chatMetadata.timestamp,
-      name: chatMetadata.name ?? null, // Handle potential undefined from repo
-      tags: chatMetadata.tags ?? null, // Ensure tags is present, defaulting to null
+      name: chatMetadata.name ?? null,
+      tags: chatMetadata.tags ?? null,
     };
     return response;
   } catch (error) {
@@ -80,13 +73,12 @@ export const listStandaloneChats = ({
   set,
 }: ElysiaHandlerContext): StandaloneChatMetadataResponse[] => {
   try {
-    const chats = chatRepository.findStandaloneChats(); // This should return the correct type including tags
+    const chats = chatRepository.findStandaloneChats();
     set.status = 200;
-    // Map to ensure correct final type, especially sessionId being null
     return chats.map((chat) => ({
-      ...chat, // Spread the chat metadata which includes tags
-      sessionId: null, // Ensure sessionId is explicitly null
-      tags: chat.tags ?? null, // Default to null if undefined
+      ...chat,
+      sessionId: null,
+      tags: chat.tags ?? null,
     }));
   } catch (error) {
     console.error('[API Error] listStandaloneChats:', error);
@@ -102,29 +94,22 @@ export const getStandaloneChatDetails = ({
   set,
 }: ElysiaHandlerContext): FullStandaloneChatApiResponse => {
   if (!chatData) {
-    // This should ideally be caught by a derive hook if chatData is expected
     throw new NotFoundError(`Standalone chat not found in context.`);
   }
   if (chatData.sessionId !== null) {
-    // Defensive check, should also be handled by how chatData is derived/fetched
-    console.error(
-      `[API Error] getStandaloneChatDetails: Chat ${chatData.id} has sessionId ${chatData.sessionId}, expected null.`
-    );
     throw new InternalServerError(
       `Chat ${chatData.id} is not a standalone chat.`
     );
   }
   set.status = 200;
   const messages = (chatData.messages ?? []).map((m: BackendChatMessage) => m);
-  // chatData already includes tags, separate messages
   const { messages: _m, ...metadata } = chatData;
-  // Construct the response ensuring all fields match FullStandaloneChatApiResponse
   const response: FullStandaloneChatApiResponse = {
     id: metadata.id,
-    sessionId: null, // Explicitly null
+    sessionId: null,
     timestamp: metadata.timestamp,
     name: metadata.name ?? null,
-    tags: metadata.tags ?? null, // Include tags
+    tags: metadata.tags ?? null,
     messages: messages,
   };
   return response;
@@ -135,7 +120,7 @@ export const addStandaloneChatMessage = async ({
   body,
   set,
 }: ElysiaHandlerContext): Promise<Response> => {
-  const { text } = body as { text: string }; // Type assertion for body
+  const { text } = body as { text: string };
   const trimmedText = text.trim();
   let userMessage: BackendChatMessage;
 
@@ -149,33 +134,25 @@ export const addStandaloneChatMessage = async ({
       'user',
       trimmedText
     );
-    // Index user message into Elasticsearch
     await indexDocument(esClient, MESSAGES_INDEX, String(userMessage.id), {
       message_id: String(userMessage.id),
       chat_id: userMessage.chatId,
-      session_id: null, // Standalone chats have no session_id
+      session_id: null,
       sender: userMessage.sender,
       text: userMessage.text,
       timestamp: userMessage.timestamp,
-      // For standalone chats, include chat_name and tags if available from chatData
       chat_name: chatData.name ?? null,
       tags: chatData.tags ?? null,
-      // client_name and session_name are null for standalone chats
       client_name: null,
       session_name: null,
     });
-    console.log(
-      `[API ES] Indexed User message ${userMessage.id} for standalone chat ${chatData.id}.`
-    );
 
     const currentMessages = messageRepository.findMessagesByChatId(chatData.id);
     if (currentMessages.length === 0) {
-      throw new InternalServerError(
-        `CRITICAL: Chat ${chatData.id} has no messages immediately after adding one.`
-      );
+      throw new InternalServerError('CRITICAL: No messages after adding one.');
     }
 
-    const ollamaStream = await streamChatResponse(null, currentMessages); // Pass null for transcript context
+    const vllmStream = await streamChatResponse(null, currentMessages);
 
     const headers = new Headers({
       'Content-Type': 'text/event-stream; charset=utf-8',
@@ -192,10 +169,7 @@ export const addStandaloneChatMessage = async ({
       try {
         await writer.write(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
       } catch (e) {
-        console.warn(
-          `[API SSE Write Error ${chatData.id}]: Failed to write to stream (client likely disconnected):`,
-          e
-        );
+        console.warn(`[API SSE Write Error ${chatData.id}]:`, e);
         throw new Error('SSE write failed, aborting stream processing.');
       }
     };
@@ -204,24 +178,18 @@ export const addStandaloneChatMessage = async ({
       let fullAiText = '';
       let finalPromptTokens: number | undefined;
       let finalCompletionTokens: number | undefined;
-      let ollamaStreamError: Error | null = null;
+      let vllmStreamError: Error | null = null;
 
       try {
-        console.log(
-          `[API ProcessStream ${chatData.id}] Starting Ollama stream processing...`
-        );
-        for await (const chunk of ollamaStream) {
-          if (chunk.message?.content) {
-            const textChunk = chunk.message.content;
-            fullAiText += textChunk;
-            await writeSseEvent({ chunk: textChunk });
+        for await (const chunk of vllmStream) {
+          const contentChunk = chunk.choices[0]?.delta?.content;
+          if (contentChunk) {
+            fullAiText += contentChunk;
+            await writeSseEvent({ chunk: contentChunk });
           }
-          if (chunk.done) {
-            finalPromptTokens = chunk.prompt_eval_count;
-            finalCompletionTokens = chunk.eval_count;
-            console.log(
-              `[API ProcessStream ${chatData.id}] Ollama stream 'done'. Tokens: C=${finalCompletionTokens}, P=${finalPromptTokens}`
-            );
+          if (chunk.choices[0]?.finish_reason === 'stop') {
+            finalPromptTokens = chunk.usage?.prompt_tokens;
+            finalCompletionTokens = chunk.usage?.completion_tokens;
             await writeSseEvent({
               done: true,
               promptTokens: finalPromptTokens,
@@ -229,27 +197,13 @@ export const addStandaloneChatMessage = async ({
             });
           }
         }
-        console.log(
-          `[API ProcessStream ${chatData.id}] Finished iterating Ollama stream successfully.`
-        );
       } catch (streamError: any) {
-        ollamaStreamError =
-          streamError instanceof Error
-            ? streamError
-            : new Error(String(streamError));
-        console.error(
-          `[API ProcessStream ${chatData.id}] Error DURING Ollama stream iteration:`,
-          ollamaStreamError
-        );
+        vllmStreamError = streamError;
+        console.error(`[API Stream Error ${chatData.id}]:`, vllmStreamError);
         try {
-          await writeSseEvent({
-            error: 'Stream processing failed on server during LLM interaction.',
-          });
+          await writeSseEvent({ error: 'Stream processing failed.' });
         } catch {}
       } finally {
-        console.log(
-          `[API ProcessStream Finally ${chatData.id}] Cleaning up. Ollama stream errored: ${!!ollamaStreamError}`
-        );
         if (fullAiText.trim()) {
           try {
             const aiMessage = messageRepository.addMessage(
@@ -259,7 +213,6 @@ export const addStandaloneChatMessage = async ({
               finalPromptTokens,
               finalCompletionTokens
             );
-            // Index AI message into Elasticsearch
             await indexDocument(
               esClient,
               MESSAGES_INDEX,
@@ -279,78 +232,31 @@ export const addStandaloneChatMessage = async ({
                 session_name: null,
               }
             );
-            console.log(
-              `[API ES] Indexed AI message ${aiMessage.id} for standalone chat ${chatData.id}.`
-            );
-            console.log(
-              `[API ProcessStream Finally ${chatData.id}] Saved AI message (length: ${fullAiText.trim().length}) to DB.`
-            );
           } catch (dbError) {
-            console.error(
-              `[API ProcessStream Finally ${chatData.id}] CRITICAL: Failed to save AI message to DB:`,
-              dbError
-            );
-            ollamaStreamError =
-              ollamaStreamError ||
-              new InternalServerError(
-                'Failed to save AI response to database.',
-                dbError instanceof Error ? dbError : undefined
+            console.error('Failed to save AI message to DB:', dbError);
+            if (!vllmStreamError) {
+              vllmStreamError = new InternalServerError(
+                'Failed to save AI response.'
               );
-            try {
-              await writeSseEvent({
-                error: 'Failed to save final AI response.',
-              });
-            } catch {}
+            }
           }
-        } else {
-          console.warn(
-            `[API ProcessStream Finally ${chatData.id}] No AI text generated or saved.`
-          );
         }
-
-        if (ollamaStreamError) {
-          await writer
-            .abort(ollamaStreamError)
-            .catch((e) =>
-              console.warn(
-                `[API ProcessStream Finally ${chatData.id}] Error aborting writer:`,
-                e
-              )
-            );
+        if (vllmStreamError) {
+          await writer.abort(vllmStreamError).catch(() => {});
         } else {
-          await writer
-            .close()
-            .catch((e) =>
-              console.warn(
-                `[API ProcessStream Finally ${chatData.id}] Error closing writer:`,
-                e
-              )
-            );
+          await writer.close().catch(() => {});
         }
-        console.log(
-          `[API ProcessStream Finally ${chatData.id}] Writer cleanup attempt finished.`
-        );
       }
     };
 
-    processStream().catch((err) => {
-      console.error(
-        `[API AddMsg ${chatData.id}] UNHANDLED error from background stream processing task:`,
-        err
-      );
-      if (writer && !writer.closed) {
-        writer
-          .abort(err)
-          .catch((abortErr) =>
-            console.error('Error aborting writer in outer catch:', abortErr)
-          );
-      }
-    });
+    processStream().catch((err) =>
+      console.error('Unhandled error in background stream processing:', err)
+    );
 
     return new Response(passthrough.readable as any, { status: 200, headers });
   } catch (error) {
     console.error(
-      `[API Error] addStandaloneChatMessage setup failed (Chat ID: ${chatData?.id}):`,
+      `[API Error] addStandaloneChatMessage setup (Chat ID: ${chatData?.id}):`,
       error
     );
     if (error instanceof ApiError) throw error;
@@ -403,7 +309,6 @@ export const editStandaloneChatDetails = async ({
       );
     }
 
-    // Update Elasticsearch documents for this chat if name or tags changed
     const nameChanged = nameToSave !== originalChatName;
     const tagsChanged =
       JSON.stringify(tagsToSave) !==
@@ -477,7 +382,6 @@ export const deleteStandaloneChat = async ({
       throw new NotFoundError(`Chat ${chatData.id} not found during deletion.`);
     }
 
-    // Delete associated messages from Elasticsearch
     await deleteByQuery(esClient, MESSAGES_INDEX, {
       term: { chat_id: chatData.id },
     });

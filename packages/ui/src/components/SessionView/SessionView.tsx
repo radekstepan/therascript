@@ -13,8 +13,8 @@ import {
   fetchTranscript,
   startSessionChat,
   fetchSessionChatDetails,
-  fetchOllamaStatus,
 } from '../../api/api';
+import { fetchVllmStatus } from '../../api/vllm';
 import type {
   Session,
   SessionMetadata,
@@ -80,8 +80,8 @@ export function SessionView() {
     isLoading: isLoadingOllamaStatus,
     error: ollamaError,
   } = useQuery<OllamaStatus, Error>({
-    queryKey: ['ollamaStatus'],
-    queryFn: () => fetchOllamaStatus(), // Fetch status for the currently active model
+    queryKey: ['vllmStatus'],
+    queryFn: () => fetchVllmStatus(),
     staleTime: 60 * 1000,
     refetchOnWindowFocus: true,
     refetchInterval: 5000,
@@ -191,7 +191,7 @@ export function SessionView() {
   const handleMetadataSaveSuccess = (
     updatedMetadata: Partial<SessionMetadata>
   ) => {
-    // Toast handled by EditDetailsModal
+    setToast('Session details updated successfully.');
   };
   const handleModelSuccessfullySet = () => {
     console.log(
@@ -205,7 +205,7 @@ export function SessionView() {
       <Flex
         justify="center"
         align="center"
-        style={{ height: '100%', backgroundColor: 'var(--color-panel-solid)' }} // Use 100% instead of 100vh
+        style={{ height: '100%', backgroundColor: 'var(--color-panel-solid)' }}
       >
         <Spinner size="3" />{' '}
         <Text ml="2" color="gray">
@@ -220,7 +220,7 @@ export function SessionView() {
         direction="column"
         justify="center"
         align="center"
-        style={{ height: '100%', backgroundColor: 'var(--color-panel-solid)' }} // Use 100% instead of 100vh
+        style={{ height: '100%', backgroundColor: 'var(--color-panel-solid)' }}
       >
         <Text color="red" mb="4">
           {sessionMetaError?.message || 'Session data could not be loaded.'}

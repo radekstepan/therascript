@@ -14,12 +14,12 @@ import config from './config/index.js';
 import { sessionRoutes } from './routes/sessionRoutes.js';
 import { chatRoutes } from './routes/chatRoutes.js';
 import { standaloneChatRoutes } from './routes/standaloneChatRoutes.js';
-import { templateRoutes } from './routes/templateRoutes.js'; // IMPORT
-import { ollamaRoutes } from './routes/ollamaRoutes.js';
+import { templateRoutes } from './routes/templateRoutes.js';
+import { vllmRoutes } from './routes/vllmRoutes.js';
 import { dockerRoutes } from './routes/dockerRoutes.js';
 import { metaRoutes } from './routes/metaRoutes.js';
 import { systemRoutes } from './routes/systemRoutes.js';
-import { adminRoutes } from './routes/adminRoutes.js'; // Import admin routes
+import { adminRoutes } from './routes/adminRoutes.js';
 import { searchRoutes } from './routes/searchRoutes.js';
 import {
   ApiError,
@@ -104,7 +104,7 @@ const app = new Elysia()
   .use(
     swagger({
       path: '/api/docs',
-      exclude: ['/api/docs', '/api/docs/json', '/api/health', '/api/schema'],
+      exclude: ['/api/docs/json', '/api/health', '/api/schema'],
       documentation: {
         info: { title: 'Therascript API (Elysia)', version: appVersion },
         tags: [
@@ -117,7 +117,7 @@ const app = new Elysia()
           {
             name: 'Templates',
             description: 'Manage reusable text templates',
-          }, // ADDED
+          },
           {
             name: 'Search',
             description: 'Elasticsearch Full-Text Search Endpoints',
@@ -126,13 +126,13 @@ const app = new Elysia()
             name: 'Transcription',
             description: 'Transcription Job Management',
           },
-          { name: 'Ollama', description: 'Ollama LLM Management Endpoints' },
+          { name: 'vLLM', description: 'vLLM Management Endpoints' },
           { name: 'Docker', description: 'Docker Container Management' },
           { name: 'System', description: 'System-level Actions' },
           {
             name: 'Admin',
             description: 'Administrative Actions (e.g., re-indexing)',
-          }, // Added Admin tag
+          },
           { name: 'Meta', description: 'API Metadata and Health' },
         ],
       },
@@ -265,23 +265,23 @@ const app = new Elysia()
     };
   })
   .use(metaRoutes)
-  .use(ollamaRoutes)
+  .use(vllmRoutes)
   .use(dockerRoutes)
   .use(systemRoutes)
-  .use(adminRoutes) // Added admin routes
+  .use(adminRoutes)
   .use(searchRoutes)
   .use(sessionRoutes)
   .use(chatRoutes)
   .use(standaloneChatRoutes)
-  .use(templateRoutes); // ADDED
+  .use(templateRoutes);
 
-async function checkOllamaConnectionOnStartup() {
+async function checkVllmConnectionOnStartup() {
   /* ... */
 }
 
 async function initializeServices() {
   console.log('[Server Startup] Initializing services...');
-  await checkOllamaConnectionOnStartup();
+  await checkVllmConnectionOnStartup();
 
   try {
     console.log(
@@ -390,8 +390,8 @@ initializeServices()
       console.log(`   Mode: ${config.server.nodeEnv}`);
       console.log(`   CORS Origin Allowed: ${config.server.corsOrigin}`);
       console.log(`   DB Path: ${config.db.sqlitePath}`);
-      console.log(`   Ollama URL: ${config.ollama.baseURL}`);
-      console.log(`   Ollama Model: ${getActiveModel()} (Active)`);
+      console.log(`   vLLM URL: ${config.vllm.baseURL}`);
+      console.log(`   vLLM Model: ${getActiveModel()} (Active)`);
       console.log(
         `   Configured Context: ${getConfiguredContextSize() ?? 'default'}`
       );

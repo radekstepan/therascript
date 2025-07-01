@@ -7,8 +7,9 @@ import {
   deleteUploadedAudioFile,
   saveUploadedAudio,
 } from '../services/fileService.js';
-import { reloadActiveModelContext } from '../services/ollamaService.js';
-// Import getStructuredTranscriptionResult from transcriptionService where it's actually exported
+// The concept of reloading context is specific to Ollama's keep-alive.
+// vLLM manages its model memory differently, so this is no longer needed.
+// import { reloadActiveModelContext } from '../services/vllmService.js';
 import { getStructuredTranscriptionResult } from '../services/transcriptionService.js';
 import type {
   BackendSession,
@@ -379,17 +380,7 @@ export const updateTranscriptParagraph = async ({
     console.log(
       `[API updateTranscriptParagraph] Updated paragraph ${paragraphIndex} for session ${sessionId}. New token count: ${tokenCount ?? 'N/A'}`
     );
-    try {
-      await reloadActiveModelContext();
-      console.log(
-        `[API updateTranscriptParagraph] Ollama model context reload triggered successfully.`
-      );
-    } catch (reloadError) {
-      console.error(
-        `[API updateTranscriptParagraph] WARNING: Failed to trigger Ollama model context reload:`,
-        reloadError
-      );
-    }
+    // Reloading context is not necessary for vLLM
     set.status = 200;
     return updatedTranscriptFromDb;
   } catch (error) {

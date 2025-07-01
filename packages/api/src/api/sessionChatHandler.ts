@@ -2,7 +2,7 @@
 import { chatRepository } from '../repositories/chatRepository.js';
 import { transcriptRepository } from '../repositories/transcriptRepository.js';
 import { messageRepository } from '../repositories/messageRepository.js';
-import { streamChatResponse } from '../services/ollamaService.js';
+import { streamChatResponse } from '../services/vllmService.js';
 import {
   NotFoundError,
   InternalServerError,
@@ -136,7 +136,7 @@ export const addSessionChatMessage = async ({
       );
     }
 
-    const ollamaStream = await streamChatResponse(
+    const vllmStream = await streamChatResponse(
       transcriptString,
       currentMessages
     );
@@ -168,43 +168,42 @@ export const addSessionChatMessage = async ({
       let fullAiText = '';
       let finalPromptTokens: number | undefined;
       let finalCompletionTokens: number | undefined;
-      let ollamaStreamError: Error | null = null;
+      let vllmStreamError: Error | null = null;
 
       try {
         console.log(
-          `[API ProcessStream ${chatData.id}] Starting Ollama stream processing...`
+          `[API ProcessStream ${chatData.id}] Starting vLLM stream processing...`
         );
-        for await (const chunk of ollamaStream) {
-          if (chunk.message?.content) {
-            const textChunk = chunk.message.content;
-            fullAiText += textChunk;
-            await writeSseEvent({ chunk: textChunk });
+        for await (const chunk of vllmStream) {
+          const contentChunk = chunk.choices[0]?.delta?.content;
+          if (contentChunk) {
+            fullAiText += contentChunk;
+            await writeSseEvent({ chunk: contentChunk });
           }
-          if (chunk.done) {
-            finalPromptTokens = chunk.prompt_eval_count;
-            finalCompletionTokens = chunk.eval_count;
+          if (chunk.choices[0]?.finish_reason === 'stop') {
+            finalPromptTokens = chunk.usage?.prompt_tokens;
+            finalCompletionTokens = chunk.usage?.completion_tokens;
             console.log(
-              `[API ProcessStream ${chatData.id}] Ollama stream 'done'. Tokens: C=${finalCompletionTokens}, P=${finalPromptTokens}`
+              `[API ProcessStream ${chatData.id}] vLLM stream 'done'. Tokens: C=${finalCompletionTokens}, P=${finalPromptTokens}`
             );
             await writeSseEvent({
               done: true,
               promptTokens: finalPromptTokens,
               completionTokens: finalCompletionTokens,
             });
-            // Stream from Ollama is done, but we continue in finally to save to DB
           }
         }
         console.log(
-          `[API ProcessStream ${chatData.id}] Finished iterating Ollama stream successfully.`
+          `[API ProcessStream ${chatData.id}] Finished iterating vLLM stream successfully.`
         );
       } catch (streamError: any) {
-        ollamaStreamError =
+        vllmStreamError =
           streamError instanceof Error
             ? streamError
             : new Error(String(streamError));
         console.error(
-          `[API ProcessStream ${chatData.id}] Error DURING Ollama stream iteration:`,
-          ollamaStreamError
+          `[API ProcessStream ${chatData.id}] Error DURING vLLM stream iteration:`,
+          vllmStreamError
         );
         try {
           await writeSseEvent({
@@ -213,7 +212,7 @@ export const addSessionChatMessage = async ({
         } catch {}
       } finally {
         console.log(
-          `[API ProcessStream Finally ${chatData.id}] Cleaning up. Ollama stream errored: ${!!ollamaStreamError}`
+          `[API ProcessStream Finally ${chatData.id}] Cleaning up. vLLM stream errored: ${!!vllmStreamError}`
         );
         if (fullAiText.trim()) {
           try {
@@ -224,7 +223,6 @@ export const addSessionChatMessage = async ({
               finalPromptTokens,
               finalCompletionTokens
             );
-            // Index AI message into Elasticsearch
             await indexDocument(
               esClient,
               MESSAGES_INDEX,
@@ -247,54 +245,28 @@ export const addSessionChatMessage = async ({
             console.log(
               `[API ES] Indexed AI message ${aiMessage.id} for session chat ${chatData.id}.`
             );
-            console.log(
-              `[API ProcessStream Finally ${chatData.id}] Saved AI message (length: ${fullAiText.trim().length}) to DB.`
-            );
           } catch (dbError) {
             console.error(
               `[API ProcessStream Finally ${chatData.id}] CRITICAL: Failed to save AI message to DB:`,
               dbError
             );
-            ollamaStreamError =
-              ollamaStreamError ||
+            vllmStreamError =
+              vllmStreamError ||
               new InternalServerError(
                 'Failed to save AI response to database.',
                 dbError instanceof Error ? dbError : undefined
               );
-            try {
-              await writeSseEvent({
-                error: 'Failed to save final AI response.',
-              });
-            } catch {}
           }
         } else {
           console.warn(
             `[API ProcessStream Finally ${chatData.id}] No AI text generated or saved.`
           );
         }
-
-        if (ollamaStreamError) {
-          await writer
-            .abort(ollamaStreamError)
-            .catch((e) =>
-              console.warn(
-                `[API ProcessStream Finally ${chatData.id}] Error aborting writer:`,
-                e
-              )
-            );
+        if (vllmStreamError) {
+          await writer.abort(vllmStreamError).catch(() => {});
         } else {
-          await writer
-            .close()
-            .catch((e) =>
-              console.warn(
-                `[API ProcessStream Finally ${chatData.id}] Error closing writer:`,
-                e
-              )
-            );
+          await writer.close().catch(() => {});
         }
-        console.log(
-          `[API ProcessStream Finally ${chatData.id}] Writer cleanup attempt finished.`
-        );
       }
     };
 
@@ -303,13 +275,6 @@ export const addSessionChatMessage = async ({
         `[API AddMsg ${chatData.id}] UNHANDLED error from background stream processing task:`,
         err
       );
-      if (writer && !writer.closed) {
-        writer
-          .abort(err)
-          .catch((abortErr) =>
-            console.error('Error aborting writer in outer catch:', abortErr)
-          );
-      }
     });
 
     return new Response(passthrough.readable as any, { status: 200, headers });

@@ -12,7 +12,6 @@ import {
   Select,
   TextField,
   Separator,
-  Link,
   Tooltip,
 } from '@radix-ui/themes';
 import {
@@ -22,21 +21,15 @@ import {
   LightningBoltIcon,
   ExclamationTriangleIcon,
   MagicWandIcon,
-  ReloadIcon, // <-- ADDED
 } from '@radix-ui/react-icons';
-import {
-  fetchAvailableModels,
-  setOllamaModel,
-  unloadOllamaModel, // <-- ADDED
-} from '../../../api/api';
+import { fetchAvailableModels, setVllmModel } from '../../../api/vllm';
 import { toastMessageAtom } from '../../../store';
 import { useSetAtom } from 'jotai';
 import type {
   OllamaModelInfo,
   AvailableModelsResponse,
-  OllamaStatus, // <-- ADDED
+  OllamaStatus,
 } from '../../../types';
-import { LlmManagementModal } from './LlmManagementModal';
 
 const PADDING_ESTIMATE = 1500;
 
@@ -47,7 +40,7 @@ interface SelectActiveModelModalProps {
   currentActiveModelName?: string | null;
   currentConfiguredContextSize?: number | null;
   activeTranscriptTokens?: number | null;
-  ollamaStatus: OllamaStatus | undefined; // <-- ADDED PROP
+  ollamaStatus: OllamaStatus | undefined;
 }
 
 export function SelectActiveModelModal({
@@ -57,7 +50,6 @@ export function SelectActiveModelModal({
   currentActiveModelName,
   currentConfiguredContextSize,
   activeTranscriptTokens,
-  ollamaStatus, // <-- DESTRUCTURED PROP
 }: SelectActiveModelModalProps) {
   const queryClient = useQueryClient();
   const setToast = useSetAtom(toastMessageAtom);
@@ -68,7 +60,6 @@ export function SelectActiveModelModal({
   const [contextSizeInput, setContextSizeInput] = useState<string>(
     currentConfiguredContextSize?.toString() || ''
   );
-  const [isAdvancedModalOpen, setIsAdvancedModalOpen] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
   const modelSelectRef = useRef<HTMLButtonElement>(null);
@@ -90,7 +81,7 @@ export function SelectActiveModelModal({
     isLoading: isLoadingAvailable,
     error: availableError,
   } = useQuery<AvailableModelsResponse, Error>({
-    queryKey: ['availableOllamaModels'],
+    queryKey: ['availableVllmModels'],
     queryFn: fetchAvailableModels,
     enabled: isOpen,
     staleTime: 10 * 1000,
@@ -102,11 +93,11 @@ export function SelectActiveModelModal({
       contextSize?: number | null;
     }) => {
       const { modelName, contextSize } = variables;
-      return setOllamaModel(modelName, contextSize);
+      return setVllmModel(modelName, contextSize);
     },
-    onSuccess: (data: { message: string }, variables) => {
-      setToast(`? ${data.message}`);
-      queryClient.invalidateQueries({ queryKey: ['ollamaStatus'] });
+    onSuccess: (data: { message: string }) => {
+      setToast(`✅ ${data.message}`);
+      queryClient.invalidateQueries({ queryKey: ['vllmStatus'] });
       onModelSuccessfullySet();
       onOpenChange(false);
     },
@@ -114,26 +105,11 @@ export function SelectActiveModelModal({
       setLocalError(
         `Failed to set model: ${error.message || 'Request failed.'}`
       );
-      setToast(`? Error setting model: ${error.message || 'Request failed.'}`);
+      setToast(`❌ Error setting model: ${error.message || 'Request failed.'}`);
     },
   });
 
-  const unloadMutation = useMutation({
-    mutationFn: unloadOllamaModel,
-    onSuccess: (data) => {
-      setToast(`? ${data.message}`);
-      queryClient.invalidateQueries({ queryKey: ['ollamaStatus'] });
-    },
-    onError: (error: Error) => {
-      setToast(
-        `? Error unloading model: ${error.message || 'Request failed.'}`
-      );
-    },
-  });
-
-  const isAnyActionInProgress =
-    setModelMutation.isPending || unloadMutation.isPending;
-  const isUnloadDisabled = !ollamaStatus?.loaded || isAnyActionInProgress;
+  const isAnyActionInProgress = setModelMutation.isPending;
 
   const handleSetModel = () => {
     setLocalError(null);
@@ -159,30 +135,12 @@ export function SelectActiveModelModal({
     });
   };
 
-  const handleUnloadClick = () => {
-    if (isUnloadDisabled) return;
-    unloadMutation.mutate();
-  };
-
   const handleManualClose = (open: boolean) => {
     if (!open && isAnyActionInProgress) return;
     onOpenChange(open);
   };
 
   const availableModels = availableModelsData?.models || [];
-  const selectedModelDetails = availableModels.find(
-    (m) => m.name === selectedModelName
-  );
-
-  const handleAdvancedModalLinkClick = (
-    event: React.MouseEvent<HTMLAnchorElement>
-  ) => {
-    if (isAnyActionInProgress) {
-      event.preventDefault();
-      return;
-    }
-    setIsAdvancedModalOpen(true);
-  };
 
   const suggestedContextSize =
     typeof activeTranscriptTokens === 'number' && activeTranscriptTokens > 0
@@ -196,225 +154,162 @@ export function SelectActiveModelModal({
   };
 
   const handleUseModelDefault = () => {
-    if (selectedModelDetails?.defaultContextSize) {
-      setContextSizeInput(selectedModelDetails.defaultContextSize.toString());
-    } else {
-      setContextSizeInput('');
-    }
+    setContextSizeInput('');
   };
 
   return (
-    <>
-      <Dialog.Root open={isOpen} onOpenChange={handleManualClose}>
-        <Dialog.Content style={{ maxWidth: 500 }}>
-          <Dialog.Title>Configure AI Model</Dialog.Title>
-          <Dialog.Description size="2" mb="4" color="gray">
-            Select an active Ollama model and optionally set a custom context
-            window size.
-          </Dialog.Description>
+    <Dialog.Root open={isOpen} onOpenChange={handleManualClose}>
+      <Dialog.Content style={{ maxWidth: 500 }}>
+        <Dialog.Title>Configure AI Model</Dialog.Title>
+        <Dialog.Description size="2" mb="4" color="gray">
+          Select an active vLLM model and optionally set a custom context window
+          size for API requests.
+        </Dialog.Description>
 
-          <Flex direction="column" gap="3">
-            <label>
-              <Text as="div" size="2" mb="1" weight="medium">
-                Select Model
-              </Text>
-              {isLoadingAvailable ? (
-                <Flex align="center" gap="2">
-                  <Spinner size="1" />
-                  <Text color="gray" size="2">
-                    Loading available models...
-                  </Text>
-                </Flex>
-              ) : availableError ? (
-                <Callout.Root color="red" size="1">
-                  <Callout.Icon>
-                    <ExclamationTriangleIcon />
-                  </Callout.Icon>
-                  <Callout.Text>
-                    Error loading models: {availableError.message}
-                  </Callout.Text>
-                </Callout.Root>
-              ) : (
-                <Select.Root
-                  value={selectedModelName}
-                  onValueChange={(value) => {
-                    setSelectedModelName(value);
-                  }}
+        <Flex direction="column" gap="3">
+          <label>
+            <Text as="div" size="2" mb="1" weight="medium">
+              Select Model
+            </Text>
+            {isLoadingAvailable ? (
+              <Flex align="center" gap="2">
+                <Spinner size="1" />
+                <Text color="gray" size="2">
+                  Loading available models...
+                </Text>
+              </Flex>
+            ) : availableError ? (
+              <Callout.Root color="red" size="1">
+                <Callout.Icon>
+                  <ExclamationTriangleIcon />
+                </Callout.Icon>
+                <Callout.Text>
+                  Error loading models: {availableError.message}
+                </Callout.Text>
+              </Callout.Root>
+            ) : (
+              <Select.Root
+                value={selectedModelName}
+                onValueChange={(value) => setSelectedModelName(value)}
+                disabled={isAnyActionInProgress || availableModels.length === 0}
+              >
+                <Select.Trigger
+                  ref={modelSelectRef}
+                  placeholder={
+                    availableModels.length === 0
+                      ? 'No model being served'
+                      : 'Choose a model...'
+                  }
+                  style={{ width: '100%' }}
                   disabled={
                     isAnyActionInProgress || availableModels.length === 0
                   }
-                >
-                  <Select.Trigger
-                    ref={modelSelectRef}
-                    placeholder={
-                      availableModels.length === 0
-                        ? 'No models found locally'
-                        : 'Choose a model...'
-                    }
-                    style={{ width: '100%' }}
-                    disabled={
-                      isAnyActionInProgress || availableModels.length === 0
-                    }
-                  />
-                  <Select.Content position="popper">
-                    {availableModels.map((model) => (
-                      <Select.Item key={model.name} value={model.name}>
-                        {model.name}
-                        {model.defaultContextSize && (
-                          <Text size="1" color="gray" ml="2">
-                            ({model.defaultContextSize.toLocaleString()} tokens)
-                          </Text>
-                        )}
-                      </Select.Item>
-                    ))}
-                  </Select.Content>
-                </Select.Root>
-              )}
-            </label>
-
-            <label>
-              <Flex justify="between" align="center" mb="1">
-                <Text as="div" size="2" weight="medium">
-                  Context Window Size (num_ctx)
-                </Text>
-                <Flex gap="2">
-                  {suggestedContextSize && selectedModelDetails && (
-                    <Button
-                      variant="soft"
-                      size="1"
-                      onClick={handleUseSuggested}
-                      disabled={isAnyActionInProgress}
-                      title={`Based on transcript + padding (${suggestedContextSize.toLocaleString()})`}
-                    >
-                      <MagicWandIcon width="12" height="12" /> Use Suggested
-                    </Button>
-                  )}
-                  {selectedModelDetails?.defaultContextSize && (
-                    <Button
-                      variant="soft"
-                      size="1"
-                      onClick={handleUseModelDefault}
-                      disabled={isAnyActionInProgress}
-                      title={`Model's default maximum (${selectedModelDetails.defaultContextSize.toLocaleString()})`}
-                    >
-                      <LightningBoltIcon width="12" height="12" /> Use Default
-                      Max
-                    </Button>
-                  )}
-                </Flex>
-              </Flex>
-              <TextField.Root
-                size="2"
-                placeholder={
-                  suggestedContextSize
-                    ? `Suggested: ${suggestedContextSize.toLocaleString()} (Transcript + Padding)`
-                    : selectedModelDetails?.defaultContextSize
-                      ? `Model Default: ${selectedModelDetails.defaultContextSize.toLocaleString()}`
-                      : 'e.g., 4096 (Empty for default)'
-                }
-                value={contextSizeInput}
-                onChange={(e) => setContextSizeInput(e.target.value)}
-                disabled={isAnyActionInProgress}
-                type="number"
-                min="1"
-              />
-              <Text size="1" color="gray" mt="1">
-                Enter desired context size. Leave empty for model's default.
-                {activeTranscriptTokens && (
-                  <Box mt="1">
-                    <Text size="1" color="gray">
-                      Current transcript: ~
-                      {activeTranscriptTokens.toLocaleString()} tokens. Chat
-                      padding: ~{PADDING_ESTIMATE.toLocaleString()} tokens.
-                    </Text>
-                  </Box>
-                )}
-              </Text>
-            </label>
-
-            {localError && (
-              <Callout.Root color="red" size="1">
-                <Callout.Icon>
-                  <InfoCircledIcon />
-                </Callout.Icon>
-                <Callout.Text>{localError}</Callout.Text>
-              </Callout.Root>
+                />
+                <Select.Content position="popper">
+                  {availableModels.map((model) => (
+                    <Select.Item key={model.name} value={model.name}>
+                      {model.name}
+                    </Select.Item>
+                  ))}
+                </Select.Content>
+              </Select.Root>
             )}
-          </Flex>
+          </label>
 
-          <Separator my="4" size="4" />
-          <Flex justify="start" mb="4">
-            <Link
-              onClick={
-                !isAnyActionInProgress
-                  ? handleAdvancedModalLinkClick
-                  : (e) => e.preventDefault()
-              }
-              size="2"
-              aria-disabled={isAnyActionInProgress}
-              style={
-                isAnyActionInProgress
-                  ? { pointerEvents: 'none', opacity: 0.6 }
-                  : {}
-              }
-            >
-              Advanced: Pull, Delete, or View All Models...
-            </Link>
-          </Flex>
-
-          <Flex gap="3" mt="4" justify="between" align="center">
-            <Button
-              variant="outline"
-              color="orange"
-              onClick={handleUnloadClick}
-              disabled={isUnloadDisabled}
-              title={
-                !ollamaStatus?.loaded
-                  ? 'No model is currently loaded'
-                  : 'Unload the active model'
-              }
-            >
-              {unloadMutation.isPending ? <Spinner size="2" /> : <ReloadIcon />}
-              <Text ml="1">
-                {unloadMutation.isPending ? 'Unloading...' : 'Unload Model'}
+          <label>
+            <Flex justify="between" align="center" mb="1">
+              <Text as="div" size="2" weight="medium">
+                Context Window Size
               </Text>
-            </Button>
-            <Flex gap="3">
-              <Button
-                variant="soft"
-                color="gray"
-                onClick={() => handleManualClose(false)}
-                disabled={isAnyActionInProgress}
-              >
-                <Cross2Icon /> Cancel
-              </Button>
-              <Button
-                onClick={handleSetModel}
-                disabled={
-                  isAnyActionInProgress ||
-                  isLoadingAvailable ||
-                  !selectedModelName
-                }
-              >
-                {setModelMutation.isPending ? (
-                  <>
-                    <Spinner size="2" /> <Text ml="1">Applying...</Text>
-                  </>
-                ) : (
-                  <>
-                    <CheckCircledIcon /> Set Active Model
-                  </>
+              <Flex gap="2">
+                {suggestedContextSize && (
+                  <Button
+                    variant="soft"
+                    size="1"
+                    onClick={handleUseSuggested}
+                    disabled={isAnyActionInProgress}
+                    title={`Based on transcript + padding (${suggestedContextSize.toLocaleString()})`}
+                  >
+                    <MagicWandIcon width="12" height="12" /> Use Suggested
+                  </Button>
                 )}
-              </Button>
+                <Button
+                  variant="soft"
+                  size="1"
+                  onClick={handleUseModelDefault}
+                  disabled={isAnyActionInProgress}
+                  title="Let API use model's default"
+                >
+                  <LightningBoltIcon width="12" height="12" /> Use Default
+                </Button>
+              </Flex>
             </Flex>
-          </Flex>
-        </Dialog.Content>
-      </Dialog.Root>
+            <TextField.Root
+              size="2"
+              placeholder={
+                suggestedContextSize
+                  ? `Suggested: ${suggestedContextSize.toLocaleString()}`
+                  : 'e.g., 4096 (Empty for default)'
+              }
+              value={contextSizeInput}
+              onChange={(e) => setContextSizeInput(e.target.value)}
+              disabled={isAnyActionInProgress}
+              type="number"
+              min="1"
+            />
+            <Text size="1" color="gray" mt="1">
+              This sets the context size for API requests, it does not change
+              the vLLM server's `max-model-len`.
+              {activeTranscriptTokens && (
+                <Box mt="1">
+                  <Text size="1" color="gray">
+                    Current transcript: ~
+                    {activeTranscriptTokens.toLocaleString()} tokens.
+                  </Text>
+                </Box>
+              )}
+            </Text>
+          </label>
 
-      <LlmManagementModal
-        isOpen={isAdvancedModalOpen}
-        onOpenChange={setIsAdvancedModalOpen}
-      />
-    </>
+          {localError && (
+            <Callout.Root color="red" size="1">
+              <Callout.Icon>
+                <InfoCircledIcon />
+              </Callout.Icon>
+              <Callout.Text>{localError}</Callout.Text>
+            </Callout.Root>
+          )}
+        </Flex>
+
+        <Separator my="4" size="4" />
+
+        <Flex gap="3" mt="4" justify="end" align="center">
+          <Button
+            variant="soft"
+            color="gray"
+            onClick={() => handleManualClose(false)}
+            disabled={isAnyActionInProgress}
+          >
+            <Cross2Icon /> Cancel
+          </Button>
+          <Button
+            onClick={handleSetModel}
+            disabled={
+              isAnyActionInProgress || isLoadingAvailable || !selectedModelName
+            }
+          >
+            {setModelMutation.isPending ? (
+              <>
+                <Spinner size="2" /> <Text ml="1">Applying...</Text>
+              </>
+            ) : (
+              <>
+                <CheckCircledIcon /> Set Active Model
+              </>
+            )}
+          </Button>
+        </Flex>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

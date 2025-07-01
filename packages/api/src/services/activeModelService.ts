@@ -2,8 +2,8 @@
 import config from '../config/index.js';
 
 // Initialize with the value from the config file (.env)
-let activeModelName: string = config.ollama.model;
-// Store the configured context size (null means use Ollama default)
+let activeModelName: string = config.vllm.model;
+// Store the configured context size (null means use vLLM default)
 let configuredContextSize: number | null = null;
 
 export const getActiveModel = (): string => {
@@ -63,14 +63,8 @@ export const setActiveModelAndContext = (
     );
   }
 };
-// --- End Modified Setter ---
-
-// Deprecated single setter - use setActiveModelAndContext instead
-// export const setActiveModel = (newModelName: string): void => {
-//     setActiveModelAndContext(newModelName, configuredContextSize); // Keep current context if only model changes
-// };
 
 // Function to get the original model from config (might be useful)
 export const getConfiguredModel = (): string => {
-  return config.ollama.model;
+  return config.vllm.model;
 };

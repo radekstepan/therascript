@@ -1,0 +1,53 @@
+# Defines the vLLM service container.
+# This file is managed by the scripts in this package to start and stop the vLLM server.
+# Configuration is handled via an .env file in the same directory.
+
+services:
+  vllm:
+    # Use the official vLLM image with the OpenAI-compatible entrypoint.
+    image: vllm/vllm-openai:latest
+    # A predictable container name for easier management.
+    container_name: vllm_server_managed
+    # Pass environment variables from the .env file to the container.
+    # vLLM's entrypoint script uses these to configure the server.
+    env_file: .env
+    # Expose vLLM's default API port (8000) to the host machine.
+    ports:
+      - "8000:8000"
+    # Use a named volume to persist downloaded Hugging Face models.
+    # The cache is stored in /root/.cache inside the container.
+    volumes:
+      - vllm_data:/root/.cache
+    # GPU Acceleration Configuration.
+    # Requires NVIDIA Container Toolkit on the Docker host.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            # This allocates GPU(s) to the container.
+            # The specific GPU is controlled by the NVIDIA_VISIBLE_DEVICES
+            # environment variable set in the .env file.
+            - driver: nvidia
+              count: all # 'all' makes all GPUs visible; NVIDIA_VISIBLE_DEVICES filters them.
+              capabilities: [gpu]
+    # The command to run inside the container.
+    # These arguments are passed to the vLLM OpenAI API server.
+    command:
+      - "--host"
+      - "0.0.0.0"
+      - "--model"
+      - "${VLLM_MODEL}" # Loaded from .env file
+      - "--api-key"
+      - "${VLLM_API_KEY}" # Loaded from .env file
+      - "--max-model-len"
+      - "${VLLM_MAX_MODEL_LEN:-4096}" # Loaded from .env or defaults to 4096
+      - "--gpu-memory-utilization"
+      - "0.95"
+      - "--dtype"
+      - "auto"
+    # Restart the container unless it was explicitly stopped.
+    restart: unless-stopped
+
+# Define the named volume used above for model persistence.
+volumes:
+  vllm_data:
