@@ -76,6 +76,12 @@ export function UploadModal({ isOpen }: UploadModalProps) {
     }
   }, [isOpen, currentJobId]);
 
+  useEffect(() => {
+    if (sessionTypeInput === 'Intake') {
+      setTherapyInput('N/A');
+    }
+  }, [sessionTypeInput]);
+
   const uploadMutation = useMutation({
     mutationFn: ({
       file,
@@ -586,7 +592,7 @@ export function UploadModal({ isOpen }: UploadModalProps) {
                 <Select.Root
                   value={therapyInput}
                   onValueChange={setTherapyInput}
-                  disabled={overallIsLoading}
+                  disabled={overallIsLoading || sessionTypeInput === 'Intake'}
                   required
                   size="2"
                 >

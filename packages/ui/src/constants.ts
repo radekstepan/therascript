@@ -4,25 +4,27 @@ import type { Badge } from '@radix-ui/themes';
 
 // TODO we should be fetching these from the API
 export const SESSION_TYPES = [
-  'Individual',
-  'Phone',
-  'Skills Group',
-  'Family Session',
-  'Family Skills',
   'Couples',
   'Couples Individual',
-];
+  'Family Session',
+  'Family Skills',
+  'Individual',
+  'Intake',
+  'Phone',
+  'Skills Group',
+].sort();
 
 export const THERAPY_TYPES = [
   'ACT',
-  'DBT',
   'CBT',
-  'ERP',
-  'Mindfulness',
   'Couples ACT',
   'Couples DBT',
+  'DBT',
   'DBT Skills',
-];
+  'ERP',
+  'Mindfulness',
+  'N/A',
+].sort();
 
 // Constants for allowed upload types, consistent with Whisper's capabilities
 // This list is used for the <input accept> attribute and client-side validation logic.
@@ -84,6 +86,7 @@ export const sessionColorMap: Record<
   'family skills': 'green',
   couples: 'indigo',
   'couples individual': 'plum',
+  intake: 'amber',
   default: 'gray',
 };
 
@@ -99,5 +102,6 @@ export const therapyColorMap: Record<
   'couples act': 'violet',
   'couples dbt': 'yellow',
   'dbt skills': 'orange',
+  'n/a': 'gray',
   default: 'pink',
 };

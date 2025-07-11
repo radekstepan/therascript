@@ -148,7 +148,13 @@ export function EditDetailsModal({
         field: K,
         value: SessionFormState[K]
       ) => {
-        setFormState((prevState) => ({ ...prevState, [field]: value }));
+        setFormState((prevState) => {
+          const newState = { ...prevState, [field]: value };
+          if (field === 'sessionType' && value === 'Intake') {
+            newState.therapy = 'N/A';
+          }
+          return newState;
+        });
       };
 
       const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -266,7 +272,7 @@ export function EditDetailsModal({
             required
             size="2"
             name="therapyType"
-            disabled={isSaving}
+            disabled={isSaving || formState.sessionType === 'Intake'}
           >
             <Select.Trigger
               id="therapyTypeEditModal"
