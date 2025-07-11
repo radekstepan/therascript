@@ -70,6 +70,7 @@ export interface WhisperTranscriptionResult {
 
 export interface WhisperJobStatus {
   job_id: string;
+  // FIX: Added 'started' to the list of valid statuses.
   status:
     | 'queued'
     | 'processing'
@@ -78,7 +79,9 @@ export interface WhisperJobStatus {
     | 'canceled'
     | 'model_loading'
     | 'model_downloading'
-    | 'transcribing'; // Added more detailed statuses
+    | 'transcribing'
+    | 'started'
+    | 'canceling';
   progress?: number; // Percentage 0-100
   result?: WhisperTranscriptionResult;
   error?: string;
@@ -146,7 +149,7 @@ export interface OllamaModelInfo {
     parameter_size: string;
     quantization_level: string;
   };
-  defaultContextSize?: number | null; // <-- ADDED: Model's default/max context window
+  defaultContextSize?: number | null;
   size_vram?: number; // Optional field from newer Ollama versions
   expires_at?: Date; // Optional Date object
 }
@@ -191,25 +194,23 @@ export interface DockerContainerStatus {
 }
 
 // Elasticsearch Search Result Item (API internal representation before sending to UI)
-// This type should align with what searchRoutes.ts maps from Elasticsearch
 export interface ApiSearchResultItem {
-  id: string | number; // ES _id (string) or a constructed ID like sessionId_paragraphIndex
+  id: string | number;
   type: 'chat' | 'transcript';
   chatId: number | null;
   sessionId: number | null;
   sender: 'user' | 'ai' | null;
-  timestamp: number; // Milliseconds since epoch (consistent unit for both types)
-  snippet: string; // This is the main text content, or a highlighted version from ES
-  score?: number; // Elasticsearch relevance score
-  highlights?: Record<string, string[]>; // ES highlight object: { "fieldName": ["highlighted part 1"] }
+  timestamp: number;
+  snippet: string;
+  score?: number;
+  highlights?: Record<string, string[]>;
   clientName?: string | null;
-  tags?: string[] | null; // Tags, primarily for standalone chats
-  // paragraphIndex is implicitly part of 'id' for transcripts if using 'sessionId_paragraphIndex'
+  tags?: string[] | null;
 }
 
 // API response structure for search
 export interface ApiSearchResponse {
   query: string;
   results: ApiSearchResultItem[];
-  total: number; // Total number of matching documents found by Elasticsearch
+  total: number;
 }
