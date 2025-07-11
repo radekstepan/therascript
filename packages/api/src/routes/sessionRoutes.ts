@@ -21,7 +21,7 @@ import {
   updateTranscriptParagraph,
   deleteSessionAudioHandler,
   finalizeSessionHandler,
-} from '../api/sessionHandler.js'; // Ensure finalizeSessionHandler is imported
+} from '../api/sessionHandler.js';
 import { calculateTokenCount } from '../services/tokenizerService.js';
 import {
   deleteUploadedAudioFile,
@@ -39,7 +39,7 @@ import type {
   WhisperJobStatus,
   ChatMetadata,
   BackendChatSession,
-} from '../types/index.js'; // Added BackendChatSession
+} from '../types/index.js';
 import {
   NotFoundError,
   InternalServerError,
@@ -151,6 +151,7 @@ const UploadBodySchema = t.Object({
 });
 const TranscriptionStatusResponseSchema = t.Object({
   job_id: t.String(),
+  // FIX: Added 'started' and 'canceling' to the Elysia schema enum.
   status: t.Union([
     t.Literal('queued'),
     t.Literal('model_loading'),
@@ -160,6 +161,8 @@ const TranscriptionStatusResponseSchema = t.Object({
     t.Literal('completed'),
     t.Literal('failed'),
     t.Literal('canceled'),
+    t.Literal('started'),
+    t.Literal('canceling'),
   ]),
   progress: t.Optional(t.Number()),
   error: t.Optional(t.Union([t.String(), t.Null()])),
@@ -183,11 +186,6 @@ const parseSize = (sizeStr: string): number => {
   return v;
 };
 
-// Define Elysia context type for handlers more explicitly if needed globally,
-// or type context parameters directly in handlers.
-// For instance:
-// type SessionRouteContext = ElysiaContext<{ params: Static<typeof SessionIdParamSchema> }> & { sessionData: BackendSession };
-
 export const sessionRoutes = new Elysia({ prefix: '/api' })
   .model({
     sessionIdParam: SessionIdParamSchema,
@@ -208,7 +206,7 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
         const { jobId } = params;
         try {
           const statusData = await getTranscriptionStatus(jobId);
-          return statusData; // Handler should return data matching schema
+          return statusData;
         } catch (err) {
           console.error(`[API Err] Tx Status ${jobId}:`, err);
           if (err instanceof ApiError) throw err;
@@ -251,7 +249,7 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
             newSess = sessionRepository.create(
               { ...metadata, date: isoDate },
               audioFile.name,
-              null, // audioPath set after saving
+              null,
               new Date().toISOString()
             );
             if (!newSess)
@@ -359,7 +357,7 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
       .guard({ params: 'sessionIdParam' }, (app) =>
         app
           .derive(({ params }) => {
-            const sid = parseInt(params.sessionId!, 10); // params.sessionId will be string
+            const sid = parseInt(params.sessionId!, 10);
             if (isNaN(sid))
               throw new BadRequestError('Invalid Session ID format');
             const s = sessionRepository.findById(sid);
@@ -399,7 +397,6 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
           .get(
             '/:sessionId/audio',
             (context: any) => {
-              // context type here for Elysia pass-through
               const { request, set, sessionData } = context;
               const sid = sessionData.id;
               const absPath = getAudioAbsolutePath(sessionData.audioPath);
@@ -488,8 +485,7 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
           .delete(
             '/:sessionId',
             async ({ params, set, sessionData }) => {
-              // params from guard, sessionData from derive
-              const sid = sessionData.id; // Already parsed and validated
+              const sid = sessionData.id;
               console.log(`[API Del] Request to delete session ${sid}`);
               const audioId = sessionData.audioPath;
               try {
@@ -557,5 +553,3 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
           )
       )
   );
-
-// No need to export 'sessionRoutesInstance', the plugin is applied via .use(sessionRoutes) in server.ts

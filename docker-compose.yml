@@ -5,8 +5,10 @@ services:
   # Whisper Transcription Service
   whisper:
     build:
-      context: ./packages/whisper
-      dockerfile: Dockerfile
+      # FIX: Change the build context to the project root directory '.'
+      context: .
+      # FIX: Specify the path to the Dockerfile relative to the new context
+      dockerfile: packages/whisper/Dockerfile
     image: therascript/whisper
     container_name: therascript_whisper_service
     ports:
