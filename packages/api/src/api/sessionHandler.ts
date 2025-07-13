@@ -420,6 +420,20 @@ export const finalizeSessionHandler = async ({
   if (!currentSessionData)
     throw new NotFoundError(`Session ${sessionId} not found for finalization.`);
 
+  // ==========================================================
+  // CHANGE START: Idempotency and Resiliency Fix
+  // ==========================================================
+  if (currentSessionData.status === 'completed') {
+    console.log(
+      `[API Finalize] Session ${sessionId} is already completed. Returning current data.`
+    );
+    set.status = 200;
+    return currentSessionData;
+  }
+  // ==========================================================
+  // CHANGE END
+  // ==========================================================
+
   if (currentSessionData.status !== 'transcribing') {
     throw new ConflictError(
       `Session ${sessionId} status is '${currentSessionData.status}', not 'transcribing'.`
@@ -526,6 +540,12 @@ export const finalizeSessionHandler = async ({
     return finalSessionState;
   } catch (error) {
     console.error(`[API Error] Finalize Session ${sessionId}:`, error);
+
+    // ==========================================================
+    // CHANGE START: Remove logic that sets status to 'failed'
+    // ==========================================================
+    // *This entire try/catch block is removed*
+    /*
     try {
       sessionRepository.updateMetadata(sessionId, { status: 'failed' });
     } catch (updateError) {
@@ -534,6 +554,11 @@ export const finalizeSessionHandler = async ({
         updateError
       );
     }
+    */
+    // ==========================================================
+    // CHANGE END
+    // ==========================================================
+
     if (error instanceof ApiError) throw error;
     throw new InternalServerError(
       `Failed to finalize session ${sessionId}`,
