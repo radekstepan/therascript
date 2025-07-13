@@ -8,6 +8,7 @@ WORKDIR /app
 
 # Install system dependencies: Python, pip (for transcribe.py) and ffmpeg (for Whisper).
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
     python3 \
     python3-pip \
     ffmpeg \
