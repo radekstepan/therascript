@@ -128,7 +128,17 @@ export async function runTranscriptionProcess(
             const statusUpdate = JSON.parse(line);
             const currentJob = jobs.get(job_id);
             if (!currentJob) continue;
-            if (statusUpdate.status) currentJob.status = statusUpdate.status;
+
+            // ==========================================================
+            // CHANGE START: Prevent premature 'completed' status update
+            // ==========================================================
+            if (statusUpdate.status && statusUpdate.status !== 'completed') {
+              currentJob.status = statusUpdate.status;
+            }
+            // ==========================================================
+            // CHANGE END
+            // ==========================================================
+
             if (statusUpdate.message) currentJob.message = statusUpdate.message;
             if (statusUpdate.progress)
               currentJob.progress = statusUpdate.progress;
@@ -215,12 +225,17 @@ export async function runTranscriptionProcess(
   const finalJobState = jobs.get(job_id);
   if (!finalJobState) return;
 
-  if (exitCode === 0 && finalJobState.status === 'completed') {
+  // ==========================================================
+  // CHANGE START: Update final job state logic
+  // ==========================================================
+  if (exitCode === 0) {
     try {
       if (existsSync(output_path)) {
         const resultData = await fs.readFile(output_path, 'utf-8');
         finalJobState.result = JSON.parse(resultData);
         finalJobState.progress = 100;
+        finalJobState.status = 'completed'; // Set status to 'completed' ONLY after result is attached
+        finalJobState.message = 'Transcription and result processing complete.';
       } else {
         throw new Error('Output file not found after successful exit.');
       }
@@ -235,6 +250,9 @@ export async function runTranscriptionProcess(
     finalJobState.status = 'failed';
     finalJobState.error = `Process exited with code: ${exitCode ?? 'unknown'}. The final status was '${finalJobState.status}'.`;
   }
+  // ==========================================================
+  // CHANGE END
+  // ==========================================================
 
   finalJobState.end_time = Date.now();
   processes.delete(job_id);

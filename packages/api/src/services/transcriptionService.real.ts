@@ -330,8 +330,8 @@ export const getTranscriptionStatus = async (
     // Make GET request to the status endpoint
     const statusResponse = await axios.get<WhisperJobStatus>(
       `${WHISPER_API_URL}/status/${jobId}`,
-      { timeout: 10000 }
-    ); // 10s timeout
+      { timeout: 120000 } // CHANGE: Increased timeout to 2 minutes (120,000 ms) to deal with initial model load
+    );
 
     // Basic validation of the response structure
     if (
