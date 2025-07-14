@@ -162,7 +162,9 @@ export interface UITranscriptionStatus {
     | 'transcribing'
     | 'completed'
     | 'failed'
-    | 'canceled';
+    | 'canceled'
+    | 'started'
+    | 'canceling';
   progress?: number | null;
   error?: string | null;
   duration?: number | null;

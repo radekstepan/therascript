@@ -203,6 +203,9 @@ export function UploadModal({ isOpen }: UploadModalProps) {
   const overallIsLoading =
     isUploading ||
     isPolling ||
+    transcriptionStatus?.status === 'queued' ||
+    transcriptionStatus?.status === 'started' ||
+    transcriptionStatus?.status === 'canceling' ||
     isModelLoadingOrDownloading ||
     isProcessingTranscription ||
     isFinalizing;
@@ -374,6 +377,8 @@ export function UploadModal({ isOpen }: UploadModalProps) {
       switch (status) {
         case 'queued':
           return jobMessage || 'Transcription queued...';
+        case 'started':
+          return jobMessage || 'Transcription process initiated...';
         case 'model_loading':
           return jobMessage || 'Loading transcription model...';
         case 'model_downloading':
@@ -384,6 +389,8 @@ export function UploadModal({ isOpen }: UploadModalProps) {
           );
         case 'transcribing':
           return jobMessage || `Transcribing (${progressPercent}%)...`;
+        case 'canceling':
+          return jobMessage || 'Canceling...';
         case 'completed':
           if (!isFinalizing) return jobMessage || 'Transcription Complete!';
           break;
