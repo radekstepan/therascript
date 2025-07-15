@@ -26,6 +26,13 @@ const selectParagraphsStmt = (): DbStatement => {
   return _selectParagraphsStmt;
 };
 
+const selectAllParagraphsStmt = (): DbStatement => {
+  // Simple, no need to cache
+  return db.prepare(
+    'SELECT * FROM transcript_paragraphs ORDER BY sessionId, paragraphIndex ASC'
+  );
+};
+
 let _insertParagraphStmt: DbStatement | null = null;
 const insertParagraphStmt = (): DbStatement => {
   if (!_insertParagraphStmt) {
@@ -78,6 +85,15 @@ export const transcriptRepository = {
       throw new Error(
         `Database error fetching transcript paragraphs for session ${sessionId}.`
       );
+    }
+  },
+
+  findAll: (): BackendTranscriptParagraph[] => {
+    try {
+      return selectAllParagraphsStmt().all() as BackendTranscriptParagraph[];
+    } catch (error) {
+      console.error(`[TranscriptRepo] Error fetching all paragraphs:`, error);
+      throw new Error('Database error fetching all transcript paragraphs.');
     }
   },
 

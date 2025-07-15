@@ -1,7 +1,9 @@
-import { Elysia, t } from 'elysia';
+import { Elysia, t, type Context } from 'elysia';
 import {
-  handleReindexElasticsearch,
-  handleResetAllData,
+  reindexElasticsearchService,
+  resetAllDataService,
+  exportDataService,
+  importDataService,
 } from '../api/adminHandler.js';
 import { InternalServerError } from '../errors.js'; // For error schema
 
@@ -19,10 +21,25 @@ const ResetAllDataResponseSchema = t.Object({
   errors: t.Array(t.String()),
 });
 
+// --- NEW SCHEMAS ---
+const ImportBodySchema = t.Object({
+  backupFile: t.File({
+    type: ['application/x-tar'],
+    error: 'A single .tar backup file is required.',
+  }),
+});
+
+const ImportResponseSchema = t.Object({
+  message: t.String(),
+});
+// --- END NEW ---
+
 export const adminRoutes = new Elysia({ prefix: '/api/admin' })
   .model({
     reindexResponse: ReindexResponseSchema,
-    resetAllDataResponse: ResetAllDataResponseSchema, // Add new schema
+    resetAllDataResponse: ResetAllDataResponseSchema,
+    importBody: ImportBodySchema,
+    importResponse: ImportResponseSchema,
     errorResponse: t.Object({
       error: t.String(),
       message: t.String(),
@@ -34,14 +51,19 @@ export const adminRoutes = new Elysia({ prefix: '/api/admin' })
       .post(
         '/reindex-elasticsearch',
         async (context) => {
-          // TODO: Add authentication/authorization here for production
-          return handleReindexElasticsearch(context);
+          const result = await reindexElasticsearchService();
+          if (result.errors.length > 0) {
+            context.set.status = 500;
+          } else {
+            context.set.status = 200;
+          }
+          return result;
         },
         {
           response: {
             200: 'reindexResponse',
             207: 'reindexResponse',
-            500: 'reindexResponse', // Return ReindexResponse even for 500 to include errors array
+            500: 'reindexResponse',
           },
           detail: {
             summary: 'Delete and Re-index all Elasticsearch Data',
@@ -53,8 +75,13 @@ export const adminRoutes = new Elysia({ prefix: '/api/admin' })
       .post(
         '/reset-all-data',
         async (context) => {
-          // TODO: Add authentication/authorization here for production
-          return handleResetAllData(context);
+          const result = await resetAllDataService();
+          if (result.errors.length > 0) {
+            context.set.status = 500;
+          } else {
+            context.set.status = 200;
+          }
+          return result;
         },
         {
           response: {
@@ -64,7 +91,52 @@ export const adminRoutes = new Elysia({ prefix: '/api/admin' })
           detail: {
             summary: 'Reset All Application Data',
             description:
-              'WARNING: This is a highly destructive operation. It deletes all data from the SQLite database and all Elasticsearch indices, then re-initializes them to a blank state. This action cannot be undone.',
+              'WARNING: This is a highly destructive operation. It deletes all data from the SQLite database, all uploaded files, and all Elasticsearch indices, then re-initializes them to a blank state. This action cannot be undone.',
+          },
+        }
+      )
+      .get(
+        '/export-data',
+        async (context: Context) => {
+          const readableStream = await exportDataService();
+          context.set.headers['Content-Type'] = 'application/x-tar';
+          context.set.headers['Content-Disposition'] =
+            `attachment; filename="therascript-backup-${new Date().toISOString().split('T')[0]}.tar"`;
+          context.set.status = 200;
+          return new Response(readableStream as any);
+        },
+        {
+          response: {
+            200: t.Unknown({
+              description: 'A tar archive of all application data.',
+            }),
+            500: 'errorResponse',
+          },
+          detail: {
+            summary: 'Export all application data as a TAR archive',
+            produces: ['application/x-tar'],
+          },
+        }
+      )
+      .post(
+        '/import-data',
+        async (context) => {
+          const { body, set } = context;
+          const result = await importDataService(body.backupFile);
+          set.status = 200;
+          return result;
+        },
+        {
+          body: 'importBody',
+          response: {
+            200: 'importResponse',
+            400: 'errorResponse',
+            500: 'errorResponse',
+          },
+          detail: {
+            summary:
+              'Import data from a TAR archive, overwriting all existing data',
+            consumes: ['multipart/form-data'],
           },
         }
       )

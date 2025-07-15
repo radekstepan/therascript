@@ -2,12 +2,8 @@
 import axios from 'axios';
 
 const SHUTDOWN_SERVICE_URL = 'http://localhost:9999';
+const API_BASE_URL = axios.defaults.baseURL || 'http://localhost:3001';
 
-/**
- * Sends a request to the backend script's shutdown service.
- * @returns {Promise<{ message: string }>} A promise resolving to a confirmation message.
- * @throws {Error} If the API request fails or the service is unreachable.
- */
 export const requestAppShutdown = async (): Promise<{ message: string }> => {
   try {
     const response = await axios.post(
@@ -49,7 +45,6 @@ export const requestAppShutdown = async (): Promise<{ message: string }> => {
   }
 };
 
-// New function for re-indexing
 interface ReindexResponse {
   message: string;
   transcriptsIndexed: number;
@@ -65,7 +60,6 @@ export const requestReindexElasticsearch =
     return response.data;
   };
 
-// --- NEW FUNCTION ---
 interface ResetAllDataResponse {
   message: string;
   errors: string[];
@@ -77,4 +71,15 @@ export const requestResetAllData = async (): Promise<ResetAllDataResponse> => {
   );
   return response.data;
 };
-// --- END NEW FUNCTION ---
+
+export const requestImportData = async (
+  formData: FormData
+): Promise<{ message: string }> => {
+  const response = await axios.post('/api/admin/import-data', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+    timeout: 300000, // 5 minute timeout for import
+  });
+  return response.data;
+};

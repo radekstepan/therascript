@@ -12,6 +12,8 @@ const selectMessagesByChatIdSql = `
 const selectMessageByIdSql = `
     SELECT * FROM messages WHERE id = ?
 `;
+const selectAllMessagesSql = `SELECT * FROM messages ORDER BY id ASC`; // For backup
+
 // --- End SQL Statements ---
 
 export const messageRepository = {
@@ -98,6 +100,20 @@ export const messageRepository = {
     } catch (error) {
       console.error(`DB error fetching message ${messageId}:`, error);
       throw new Error(`Database error fetching message.`); // Rethrow generic error
+    }
+  },
+
+  /**
+   * Finds all messages in the database.
+   * @returns An array of all message objects.
+   * @throws If there's a database error during fetching.
+   */
+  findAll: (): BackendChatMessage[] => {
+    try {
+      return all<BackendChatMessage>(selectAllMessagesSql);
+    } catch (error) {
+      console.error(`DB error fetching all messages:`, error);
+      throw new Error(`Database error fetching all messages.`);
     }
   },
 };
