@@ -1,6 +1,6 @@
 import { Elysia, t } from 'elysia';
 import { InternalServerError } from '../errors.js';
-import { checkDatabaseHealth } from '../db/sqliteService.js';
+import { checkDatabaseHealth } from '@therascript/db';
 import {
   getElasticsearchClient,
   checkEsHealth,

@@ -1,75 +1,92 @@
-import { db } from '../db/sqliteService.js';
+import { db, type DbStatement, type DbRunResult } from '@therascript/db';
 import type { BackendSession, BackendSessionMetadata } from '../types/index.js';
-import { Statement, RunResult } from 'better-sqlite3';
 import path from 'node:path'; // Import path for checking
 
-// Helper function to safely prepare statements
-const prepareStmt = (sql: string): Statement => {
-  try {
-    return db.prepare(sql);
-  } catch (error) {
-    throw new Error(`DB stmt prep failed: ${sql}. Error: ${error}`);
+// --- Lazy Statement Getters ---
+let _insertSessionStmt: DbStatement | null = null;
+const insertSessionStmt = (): DbStatement => {
+  if (!_insertSessionStmt) {
+    _insertSessionStmt = db.prepare(
+      'INSERT INTO sessions (fileName, clientName, sessionName, date, sessionType, therapy, audioPath, status, whisperJobId, transcriptTokenCount) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    );
   }
+  return _insertSessionStmt;
 };
 
-// Prepare statements (removed transcriptPath)
-const insertSessionStmt = prepareStmt(
-  'INSERT INTO sessions (fileName, clientName, sessionName, date, sessionType, therapy, audioPath, status, whisperJobId, transcriptTokenCount) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-);
-const selectAllSessionsStmt = prepareStmt(
-  'SELECT id, fileName, clientName, sessionName, date, sessionType, therapy, audioPath, status, whisperJobId, transcriptTokenCount FROM sessions ORDER BY date DESC, id DESC'
-);
-const selectSessionByIdStmt = prepareStmt(
-  'SELECT id, fileName, clientName, sessionName, date, sessionType, therapy, audioPath, status, whisperJobId, transcriptTokenCount FROM sessions WHERE id = ?'
-);
-const updateSessionMetadataStmt = prepareStmt(
-  `UPDATE sessions SET clientName = ?, sessionName = ?, date = ?, sessionType = ?, therapy = ?, fileName = ?, audioPath = ?, status = ?, whisperJobId = ?, transcriptTokenCount = ? WHERE id = ?`
-);
-// SQL statement to delete a session by ID. Foreign key constraints handle related chats/messages/paragraphs.
-const deleteSessionStmt = prepareStmt('DELETE FROM sessions WHERE id = ?');
-// --- Removed findSessionByTranscriptPathStmt ---
-// *** ADDED Statement to find session by audioPath ***
-const findSessionByAudioPathStmt = prepareStmt(
-  'SELECT * FROM sessions WHERE audioPath = ?'
-);
+let _selectAllSessionsStmt: DbStatement | null = null;
+const selectAllSessionsStmt = (): DbStatement => {
+  if (!_selectAllSessionsStmt) {
+    _selectAllSessionsStmt = db.prepare(
+      'SELECT id, fileName, clientName, sessionName, date, sessionType, therapy, audioPath, status, whisperJobId, transcriptTokenCount FROM sessions ORDER BY date DESC, id DESC'
+    );
+  }
+  return _selectAllSessionsStmt;
+};
+
+let _selectSessionByIdStmt: DbStatement | null = null;
+const selectSessionByIdStmt = (): DbStatement => {
+  if (!_selectSessionByIdStmt) {
+    _selectSessionByIdStmt = db.prepare(
+      'SELECT id, fileName, clientName, sessionName, date, sessionType, therapy, audioPath, status, whisperJobId, transcriptTokenCount FROM sessions WHERE id = ?'
+    );
+  }
+  return _selectSessionByIdStmt;
+};
+
+let _updateSessionMetadataStmt: DbStatement | null = null;
+const updateSessionMetadataStmt = (): DbStatement => {
+  if (!_updateSessionMetadataStmt) {
+    _updateSessionMetadataStmt = db.prepare(
+      `UPDATE sessions SET clientName = ?, sessionName = ?, date = ?, sessionType = ?, therapy = ?, fileName = ?, audioPath = ?, status = ?, whisperJobId = ?, transcriptTokenCount = ? WHERE id = ?`
+    );
+  }
+  return _updateSessionMetadataStmt;
+};
+
+let _deleteSessionStmt: DbStatement | null = null;
+const deleteSessionStmt = (): DbStatement => {
+  if (!_deleteSessionStmt) {
+    _deleteSessionStmt = db.prepare('DELETE FROM sessions WHERE id = ?');
+  }
+  return _deleteSessionStmt;
+};
+
+let _findSessionByAudioPathStmt: DbStatement | null = null;
+const findSessionByAudioPathStmt = (): DbStatement => {
+  if (!_findSessionByAudioPathStmt) {
+    _findSessionByAudioPathStmt = db.prepare(
+      'SELECT * FROM sessions WHERE audioPath = ?'
+    );
+  }
+  return _findSessionByAudioPathStmt;
+};
+// --- End Lazy Statement Getters ---
 
 export const sessionRepository = {
   create: (
     metadata: BackendSessionMetadata,
-    originalFileName: string, // Changed parameter name for clarity
-    // --- Removed transcriptPath parameter ---
-    // transcriptPath: string | null, // Path should be relative or null
-    audioIdentifier: string | null, // Changed parameter name - should be relative filename or null
-    sessionTimestamp: string // ISO 8601 string
+    originalFileName: string,
+    audioIdentifier: string | null,
+    sessionTimestamp: string
   ): BackendSession => {
     console.log(
       `[SessionRepo:create] Received parameters - originalFileName: ${originalFileName}, audioIdentifier: ${audioIdentifier}`
     );
 
-    // --- ADDED CHECK ---
-    // Check if audioIdentifier looks absolute (add a warning/error)
     if (audioIdentifier && path.isAbsolute(audioIdentifier)) {
       console.error(
         `[SessionRepo:create] FATAL: Received an absolute path for audioIdentifier: ${audioIdentifier}. Attempting to store only filename.`
       );
-      // Attempt to recover by storing only the basename, but this indicates an upstream issue.
       audioIdentifier = path.basename(audioIdentifier);
       console.log(
         `[SessionRepo:create] Corrected audioIdentifier to (basename only): ${audioIdentifier}`
       );
-      // Alternatively, throw an error:
-      // throw new Error(`[SessionRepo:create] FATAL: Received an absolute path for audioIdentifier: ${audioIdentifier}. Expected relative filename.`);
     }
-    // --- Removed transcriptPath checks ---
-    // --- END CHECK ---
 
     try {
-      // --- Removed transcriptPath existence check ---
-      // *** ADDED Check for existing audio path ***
       if (audioIdentifier) {
-        const existingAudio = findSessionByAudioPathStmt.get(audioIdentifier);
+        const existingAudio = findSessionByAudioPathStmt().get(audioIdentifier);
         if (existingAudio) {
-          // This should ideally not happen if identifiers are unique, but good to check.
           throw new Error(
             `Audio identifier ${audioIdentifier} already linked to session ${(existingAudio as BackendSession).id}.`
           );
@@ -77,19 +94,18 @@ export const sessionRepository = {
       }
       console.log(
         `[SessionRepo:create] Executing insert with audioIdentifier: ${audioIdentifier}`
-      ); // Log before execution
-      const info: RunResult = insertSessionStmt.run(
-        originalFileName, // Store original file name for display/reference
+      );
+      const info: DbRunResult = insertSessionStmt().run(
+        originalFileName,
         metadata.clientName,
         metadata.sessionName,
         sessionTimestamp,
         metadata.sessionType,
         metadata.therapy,
-        // --- Removed transcriptPath ---
-        audioIdentifier, // Store relative audio filename/identifier
-        'pending', // Default status
-        null, // Default whisperJobId
-        null // Default transcriptTokenCount
+        audioIdentifier,
+        'pending',
+        null,
+        null
       );
       const newId = info.lastInsertRowid as number;
       console.log(`[SessionRepo:create] Insert successful. New ID: ${newId}`);
@@ -118,7 +134,7 @@ export const sessionRepository = {
 
   findAll: (): BackendSession[] => {
     try {
-      return selectAllSessionsStmt.all() as BackendSession[];
+      return selectAllSessionsStmt().all() as BackendSession[];
     } catch (error) {
       throw new Error(`DB error fetching sessions: ${error}`);
     }
@@ -126,7 +142,7 @@ export const sessionRepository = {
 
   findById: (id: number): BackendSession | null => {
     try {
-      const session = selectSessionByIdStmt.get(id) as
+      const session = selectSessionByIdStmt().get(id) as
         | BackendSession
         | undefined;
       return session ?? null;
@@ -135,8 +151,6 @@ export const sessionRepository = {
     }
   },
 
-  // Update function now accepts the extended partial type including audioPath (relative identifier) and token count
-  // REMOVED transcriptPath from update type
   updateMetadata: (
     id: number,
     metadataUpdate: Partial<
@@ -148,31 +162,26 @@ export const sessionRepository = {
         date?: string;
         transcriptTokenCount?: number | null;
       }
-    > // <-- Added transcriptTokenCount, Removed transcriptPath
+    >
   ): BackendSession | null => {
     try {
       const existingSession = sessionRepository.findById(id);
       if (!existingSession) return null;
 
-      // Merge updates
       const updatedData = { ...existingSession, ...metadataUpdate };
 
-      // Ensure paths are relative or null before checking/saving
-      // --- Removed transcriptPath check ---
       if (updatedData.audioPath && path.isAbsolute(updatedData.audioPath)) {
         console.warn(
           `[SessionRepo:update] Attempted to update audioPath with absolute path: ${updatedData.audioPath}. Storing basename only.`
         );
-        updatedData.audioPath = path.basename(updatedData.audioPath); // Store only filename if absolute path provided
+        updatedData.audioPath = path.basename(updatedData.audioPath);
       }
 
-      // --- Removed transcriptPath conflict check ---
-      // *** ADDED Check for audio path conflict ***
       if (
         updatedData.audioPath &&
         updatedData.audioPath !== existingSession.audioPath
       ) {
-        const existingAudio = findSessionByAudioPathStmt.get(
+        const existingAudio = findSessionByAudioPathStmt().get(
           updatedData.audioPath
         );
         if (existingAudio && (existingAudio as BackendSession).id !== id) {
@@ -184,21 +193,18 @@ export const sessionRepository = {
 
       console.log(
         `[SessionRepo:update] Executing update for ID ${id} with audioPath: ${updatedData.audioPath}, tokenCount: ${updatedData.transcriptTokenCount ?? 'N/A'}`
-      ); // Log before execution
-      // Execute the update using all fields, including audioPath (relative identifier) and token count
-      // REMOVED transcriptPath from update
-      const info: RunResult = updateSessionMetadataStmt.run(
+      );
+      const info: DbRunResult = updateSessionMetadataStmt().run(
         updatedData.clientName,
         updatedData.sessionName,
         updatedData.date,
         updatedData.sessionType,
         updatedData.therapy,
         updatedData.fileName,
-        // --- Removed transcriptPath ---
-        updatedData.audioPath, // Relative filename/identifier or null
+        updatedData.audioPath,
         updatedData.status,
         updatedData.whisperJobId,
-        updatedData.transcriptTokenCount, // <-- Pass token count
+        updatedData.transcriptTokenCount,
         id
       );
       if (info.changes === 0) {
@@ -212,15 +218,12 @@ export const sessionRepository = {
     }
   },
 
-  // Performs a hard delete on the session record.
-  // Associated audio files should be deleted separately in the service/route layer.
-  // Related chat/message/paragraph records are deleted automatically due to `ON DELETE CASCADE`.
   deleteById: (id: number): boolean => {
     try {
       console.log(
         `[SessionRepo:deleteById] Executing DELETE for session ID: ${id}`
       );
-      const info: RunResult = deleteSessionStmt.run(id);
+      const info: DbRunResult = deleteSessionStmt().run(id);
       console.log(
         `[SessionRepo:deleteById] Delete result for session ID ${id}: ${info.changes} row(s) affected.`
       );

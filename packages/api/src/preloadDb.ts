@@ -1,27 +1,25 @@
-import Database from 'better-sqlite3';
+// Add configuration at the top
+import { configureDb, db, closeDb } from '@therascript/db';
+import config from './config/index.js';
+configureDb({
+  dbPath: config.db.sqlitePath,
+  isDev: !config.server.isProduction,
+});
+
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@elastic/elasticsearch';
 import { calculateTokenCount } from './services/tokenizerService.js';
-import {
-  schema as sqliteSchema,
-  initializeDatabase as initializeSqliteDatabase,
-} from './db/sqliteService.js'; // Renamed to avoid conflict
-import type {
-  BackendTranscriptParagraph,
-  TranscriptParagraphData,
-} from './types/index.js';
+import type { TranscriptParagraphData } from './types/index.js';
 import {
   getElasticsearchClient,
-  initializeIndices as initializeEsIndices, // Renamed ES init
-  deleteIndex as deleteEsIndex, // Renamed ES delete
-  bulkIndexDocuments as bulkIndexEsDocuments, // Renamed ES bulk
+  initializeIndices as initializeEsIndices,
+  deleteIndex as deleteEsIndex,
+  bulkIndexDocuments as bulkIndexEsDocuments,
   TRANSCRIPTS_INDEX,
   MESSAGES_INDEX,
 } from '@therascript/elasticsearch-client';
-import config from './config/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const packageApiDir = path.resolve(__filename, '../../');
@@ -277,7 +275,6 @@ async function preloadDatabase() {
     process.exit(1);
   }
 
-  let db: Database.Database | null = null;
   let esClientInstance: Client | null = null;
   let success = false;
   const sessionsToVerify: Array<{
@@ -288,13 +285,17 @@ async function preloadDatabase() {
   }> = [];
 
   try {
-    db = new Database(targetDbPath, { verbose: console.log });
-    initializeSqliteDatabase(db); // Initializes SQLite schema & verifies hash
+    // The db file and schema will be created on first access to the `db` object.
+    // No manual instantiation or initialization is needed here.
 
     esClientInstance = getElasticsearchClient(config.elasticsearch.url);
     console.log('[Preload ES] Deleting existing Elasticsearch indices...');
-    await deleteEsIndex(esClientInstance, TRANSCRIPTS_INDEX);
-    await deleteEsIndex(esClientInstance, MESSAGES_INDEX);
+    await deleteEsIndex(esClientInstance, TRANSCRIPTS_INDEX).catch((e) => {
+      if (!e.message?.includes('index_not_found_exception')) throw e;
+    });
+    await deleteEsIndex(esClientInstance, MESSAGES_INDEX).catch((e) => {
+      if (!e.message?.includes('index_not_found_exception')) throw e;
+    });
     console.log('[Preload ES] Initializing Elasticsearch indices...');
     await initializeEsIndices(esClientInstance);
 
@@ -471,7 +472,7 @@ async function preloadDatabase() {
     console.error('[Preload] Error during preload execution:', error);
     success = false;
   } finally {
-    if (success && db && db.open) {
+    if (success) {
       console.log('[Preload Verification] Checking database entries...');
       try {
         const verifySessionStmt = db.prepare(
@@ -482,7 +483,7 @@ async function preloadDatabase() {
         );
         let verificationPassed = true;
         for (const sessionToVerify of sessionsToVerify) {
-          const dbSession = verifySessionStmt.get(sessionToVerify.name) as any; // Cast for simplicity
+          const dbSession = verifySessionStmt.get(sessionToVerify.name) as any;
           if (!dbSession) {
             verificationPassed = false;
             console.error(
@@ -513,7 +514,7 @@ async function preloadDatabase() {
           }
           const paraCountResult = verifyParagraphCountStmt.get(
             dbSession.id
-          ) as any; // Cast
+          ) as any;
           if (
             !paraCountResult ||
             paraCountResult.count !== sessionToVerify.expectedParagraphCount
@@ -524,9 +525,9 @@ async function preloadDatabase() {
             );
           }
         }
-        if (verificationPassed)
+        if (verificationPassed) {
           console.log('[Preload Verification] All DB entries/counts look OK.');
-        else {
+        } else {
           console.error('[PV] FAILED.');
           success = false;
         }
@@ -534,18 +535,13 @@ async function preloadDatabase() {
         console.error('[PV] Error:', verifyError);
         success = false;
       }
-    } else if (!db) {
-      console.error(
-        '[Preload] DB connection not established during verification.'
-      );
-      success = false;
     }
-    if (db && db.open) {
-      db.close();
-      console.log('[Preload] DB closed.');
-    }
-    if (success) console.log('[Preload] Success!');
-    else {
+
+    closeDb();
+
+    if (success) {
+      console.log('[Preload] Success!');
+    } else {
       console.error('[Preload] FAILED.');
       process.exitCode = 1;
     }

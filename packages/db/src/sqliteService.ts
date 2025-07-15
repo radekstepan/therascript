@@ -1,24 +1,15 @@
-// packages/api/src/db/sqliteService.ts
+// packages/db/src/sqliteService.ts
 import crypto from 'node:crypto';
 import Database, {
   type Database as DB,
   type Statement,
   type RunResult,
-  type Transaction, // Import Transaction type
+  type Transaction,
 } from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs';
-import config from '../config/index.js';
-
-const isDev = !config.server.isProduction;
-const dbFilePath = config.db.sqlitePath;
-const dbDir = path.dirname(dbFilePath);
-const SCHEMA_HASH_KEY = 'schema_md5_v2';
-
-if (!fs.existsSync(dbDir)) {
-  console.log(`[db]: Creating database directory: ${dbDir}`);
-  fs.mkdirSync(dbDir, { recursive: true });
-}
+import { getConfig } from './config.js';
+import type { DbRunResult, DbStatement } from './types.js';
 
 export const schema = `
     -- Sessions Table
@@ -89,19 +80,63 @@ export const schema = `
     );
 `;
 
-let db: DB;
+let dbInstance: DB | null = null;
+const SCHEMA_HASH_KEY = 'schema_md5_v2';
 
-const closeDb = (): void => {
-  if (db && db.open) {
+const getDb = (): DB => {
+  if (dbInstance === null) {
+    // Get config lazily on first access
+    const { dbPath, isDev } = getConfig();
+    const dbDir = path.dirname(dbPath);
+
+    if (!fs.existsSync(dbDir)) {
+      console.log(`[db]: Creating database directory: ${dbDir}`);
+      fs.mkdirSync(dbDir, { recursive: true });
+    }
+
+    console.log(`[db]: Initializing SQLite database connection for: ${dbPath}`);
+    try {
+      dbInstance = new Database(dbPath, {
+        verbose: isDev ? console.log : undefined,
+      });
+      console.log(`[db]: Successfully connected to database: ${dbPath}`);
+      initializeDatabase(dbInstance);
+    } catch (err) {
+      console.error(
+        `[db]: FATAL: Could not connect or initialize database at ${dbPath}:`,
+        (err as Error).message
+      );
+      process.exit(1);
+    }
+  }
+  return dbInstance;
+};
+
+const dbProxyHandler: ProxyHandler<DB> = {
+  get(target, prop, receiver) {
+    const db = getDb();
+    const value = Reflect.get(db, prop, receiver);
+    if (typeof value === 'function') {
+      return value.bind(db);
+    }
+    return value;
+  },
+};
+
+export const db: DB = new Proxy({} as DB, dbProxyHandler);
+
+export function closeDb(): void {
+  if (dbInstance && dbInstance.open) {
     console.log('[db]: Closing database connection...');
     try {
-      db.close();
+      dbInstance.close();
       console.log('[db]: Database connection closed.');
+      dbInstance = null; // Important to reset
     } catch (error) {
       console.error('[db]: Error closing the database connection:', error);
     }
   }
-};
+}
 
 export function calculateSchemaHash(schemaString: string): string {
   return crypto.createHash('md5').update(schemaString).digest('hex');
@@ -219,24 +254,13 @@ export function initializeDatabase(dbInstance: DB) {
   }
 }
 
-console.log(`[db]: Initializing SQLite database connection for: ${dbFilePath}`);
-try {
-  db = new Database(dbFilePath, { verbose: isDev ? console.log : undefined });
-  console.log(`[db]: Successfully connected to database: ${dbFilePath}`);
-  initializeDatabase(db);
-} catch (err) {
-  console.error(
-    `[db]: FATAL: Could not connect or initialize database at ${dbFilePath}:`,
-    (err as Error).message
-  );
-  process.exit(1);
-}
-
-const statementCache = new Map<string, Statement>();
-function prepare(sql: string): Statement {
+const statementCache = new Map<string, DbStatement>();
+function prepare(sql: string): DbStatement {
+  const db = getDb();
   let stmt = statementCache.get(sql);
   if (!stmt) {
     try {
+      // The `better-sqlite3.Statement` is structurally compatible with our `DbStatement` interface.
       stmt = db.prepare(sql);
       statementCache.set(sql, stmt);
     } catch (error) {
@@ -247,25 +271,26 @@ function prepare(sql: string): Statement {
   return stmt;
 }
 
-function run(sql: string, ...params: any[]): RunResult {
-  return prepare(sql).run(params);
+export function run(sql: string, ...params: any[]): DbRunResult {
+  return prepare(sql).run(...params);
 }
-function get<T = any>(sql: string, ...params: any[]): T | undefined {
-  return prepare(sql).get(params) as T | undefined;
+export function get<T = any>(sql: string, ...params: any[]): T | undefined {
+  return prepare(sql).get(...params) as T | undefined;
 }
-function all<T = any>(sql: string, ...params: any[]): T[] {
-  return prepare(sql).all(params) as T[];
+export function all<T = any>(sql: string, ...params: any[]): T[] {
+  return prepare(sql).all(...params) as T[];
 }
-function exec(sql: string): void {
-  db.exec(sql);
+export function exec(sql: string): void {
+  getDb().exec(sql);
 }
-// Correctly type the transaction function
-function transaction<F extends (...args: any[]) => any>(fn: F): Transaction<F> {
-  return db.transaction(fn);
+export function transaction<F extends (...args: any[]) => any>(
+  fn: F
+): Transaction<F> {
+  return getDb().transaction(fn);
 }
 
 export const checkDatabaseHealth = (): void => {
-  db.pragma('quick_check');
+  getDb().pragma('quick_check');
 };
 process.on('exit', closeDb);
 process.on('SIGHUP', () => process.exit(128 + 1));
@@ -281,4 +306,3 @@ process.on('unhandledRejection', (reason, promise) => {
   closeDb();
   process.exit(1);
 });
-export { db, run, get, all, exec, transaction, closeDb };
