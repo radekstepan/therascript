@@ -1,7 +1,7 @@
 // packages/ui/src/components/Layout/TopToolbar.tsx
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
-import { useSetAtom } from 'jotai';
+import { useSetAtom, useAtomValue } from 'jotai';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Box,
@@ -19,7 +19,11 @@ import {
   ChatBubbleIcon,
   PlusCircledIcon,
 } from '@radix-ui/react-icons';
-import { openUploadModalAtom, toastMessageAtom } from '../../store';
+import {
+  openUploadModalAtom,
+  toastMessageAtom,
+  isSystemReadyAtom,
+} from '../../store';
 import { createStandaloneChat as createStandaloneChatApi } from '../../api/api';
 import type { StandaloneChatListItem } from '../../types';
 import { cn } from '../../utils';
@@ -31,6 +35,7 @@ export function TopToolbar() {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
+  const isSystemReady = useAtomValue(isSystemReadyAtom);
 
   const initialSearchQuery = searchParams.get('q') || '';
   const [searchInput, setSearchInput] = useState(initialSearchQuery);
@@ -113,7 +118,19 @@ export function TopToolbar() {
   };
 
   const handleNewStandaloneChat = () => {
+    if (!isSystemReady) {
+      setToast('System is not ready, please wait.');
+      return;
+    }
     createStandaloneChatMutation.mutate();
+  };
+
+  const handleOpenUploadModal = () => {
+    if (!isSystemReady) {
+      setToast('System is not ready, please wait.');
+      return;
+    }
+    openUploadModal();
   };
 
   return (
@@ -178,12 +195,17 @@ export function TopToolbar() {
             variant="outline"
             size="2"
             onClick={handleNewStandaloneChat}
-            disabled={createStandaloneChatMutation.isPending}
+            disabled={createStandaloneChatMutation.isPending || !isSystemReady}
           >
             <ChatBubbleIcon width="16" height="16" />
             <Text ml="2">New Chat</Text>
           </RadixButton>
-          <RadixButton variant="soft" size="2" onClick={openUploadModal}>
+          <RadixButton
+            variant="soft"
+            size="2"
+            onClick={handleOpenUploadModal}
+            disabled={!isSystemReady}
+          >
             <PlusCircledIcon width="16" height="16" />
             <Text ml="2">New Session</Text>
           </RadixButton>

@@ -29,5 +29,6 @@ export * from './ui/sidebarWidthAtom';
 export * from './ui/themeAtom'; // This exports themeAtom and Theme type from its dedicated file
 export * from './ui/isPersistentSidebarOpenAtom'; // Added in previous step
 export * from './ui/accentColorAtom'; // <-- ADDED EXPORT
+export * from './ui/isSystemReadyAtom'; // <-- ADDED EXPORT
 
 export * from './navigation/currentPageAtom'; // Added in previous step

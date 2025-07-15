@@ -4,7 +4,16 @@ import type { StructuredTranscript, WhisperJobStatus } from '../types/index.js';
 import type * as RealService from './transcriptionService.real.js'; // Use .real suffix
 import type * as MockService from './transcriptionService.mock.js';
 
-let service: typeof RealService | typeof MockService;
+interface TranscriptionServiceInterface {
+  startTranscriptionJob: (filePath: string) => Promise<string>;
+  getTranscriptionStatus: (jobId: string) => Promise<WhisperJobStatus>;
+  getStructuredTranscriptionResult: (
+    jobId: string
+  ) => Promise<StructuredTranscript>;
+  checkWhisperApiHealth: () => Promise<boolean>;
+}
+
+let service: TranscriptionServiceInterface;
 
 // Conditionally import and assign the service based on APP_MODE
 if (config.server.appMode === 'mock') {
@@ -22,6 +31,4 @@ export const startTranscriptionJob = service.startTranscriptionJob;
 export const getTranscriptionStatus = service.getTranscriptionStatus;
 export const getStructuredTranscriptionResult =
   service.getStructuredTranscriptionResult;
-
-// Optionally export other functions if they exist in both real/mock
-// export const checkWhisperApiHealth = service.checkWhisperApiHealth; // Only if needed and implemented in both
+export const checkWhisperApiHealth = service.checkWhisperApiHealth;

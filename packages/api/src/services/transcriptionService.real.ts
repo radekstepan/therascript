@@ -1,6 +1,3 @@
-// Purpose: Contains the actual implementation for interacting with the
-//          external Whisper transcription service (FastAPI endpoint).
-
 import fs from 'node:fs/promises'; // Use promise-based fs for async operations
 import path from 'node:path'; // For path manipulation (basename, resolve)
 import axios, { AxiosError } from 'axios'; // For making HTTP requests to the Whisper service
@@ -34,7 +31,7 @@ console.log('[Real Service] Using Real Transcription Service');
  *
  * @returns {Promise<boolean>} True if the service is healthy, false otherwise.
  */
-async function checkWhisperApiHealth(): Promise<boolean> {
+export async function checkWhisperApiHealth(): Promise<boolean> {
   try {
     // Log the health check attempt
     console.log(
