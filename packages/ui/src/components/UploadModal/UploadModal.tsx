@@ -15,6 +15,7 @@ import {
   Strong,
   Callout,
   Progress,
+  ScrollArea,
 } from '@radix-ui/themes';
 import {
   UploadIcon,
@@ -22,24 +23,27 @@ import {
   CheckCircledIcon,
   Cross2Icon,
   ExclamationTriangleIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
 } from '@radix-ui/react-icons';
 import {
   SESSION_TYPES,
   THERAPY_TYPES,
-  ALLOWED_AUDIO_VIDEO_MIME_TYPES, // Use updated constant
-  ALLOWED_AUDIO_VIDEO_EXTENSIONS_DISPLAY, // Use updated constant
+  ALLOWED_AUDIO_VIDEO_MIME_TYPES,
+  ALLOWED_AUDIO_VIDEO_EXTENSIONS_DISPLAY,
 } from '../../constants';
 import { getTodayDateString } from '../../helpers';
 import {
   uploadSession,
   fetchTranscriptionStatus,
   finalizeSession,
+  fetchContainerLogs,
 } from '../../api/api';
 import type {
   SessionMetadata,
   UITranscriptionStatus,
   Session,
-} from '../../types'; // Added Session type
+} from '../../types';
 import { closeUploadModalAtom } from '../../store';
 import { cn } from '../../utils';
 
@@ -64,8 +68,22 @@ export function UploadModal({ isOpen }: UploadModalProps) {
 
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
   const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
+  const [showLogs, setShowLogs] = useState(false);
 
   const sessionNameRef = useRef<HTMLInputElement>(null);
+
+  const {
+    data: logs,
+    isLoading: isLoadingLogs,
+    isFetching: isFetchingLogs,
+  } = useQuery({
+    queryKey: ['whisperContainerLogs'],
+    queryFn: () => fetchContainerLogs('therascript_whisper_service'),
+    enabled: isOpen && showLogs,
+    refetchInterval: isOpen && showLogs ? 5000 : false,
+    refetchOnWindowFocus: false,
+    staleTime: 1000,
+  });
 
   useEffect(() => {
     if (isOpen && !currentJobId) {
@@ -127,14 +145,13 @@ export function UploadModal({ isOpen }: UploadModalProps) {
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: false,
     retry: (failureCount: number, error: Error) => {
-      // Explicitly type error
       if (
         error.message.includes('not found') ||
         error.message.includes('404')
       ) {
-        return false; // Don't retry if job not found
+        return false;
       }
-      return failureCount < 3; // Default retry for other errors
+      return failureCount < 3;
     },
   });
 
@@ -144,7 +161,6 @@ export function UploadModal({ isOpen }: UploadModalProps) {
       return finalizeSession(currentSessionId);
     },
     onSuccess: (finalizedSession: Session) => {
-      // Type for finalizedSession
       console.log(
         `[UploadModal] Finalization successful for SessionID: ${finalizedSession.id}`
       );
@@ -179,8 +195,10 @@ export function UploadModal({ isOpen }: UploadModalProps) {
     }
   }, [
     transcriptionStatus,
-    currentJobId, // Keep for logging consistency
+    currentJobId,
     finalizeMutation,
+    finalizeMutation.isPending,
+    finalizeMutation.isSuccess,
   ]);
 
   const isUploading = uploadMutation.isPending;
@@ -210,6 +228,8 @@ export function UploadModal({ isOpen }: UploadModalProps) {
     isProcessingTranscription ||
     isFinalizing;
 
+  const showLogsButton = overallIsLoading && !hasFailed;
+
   const overallError =
     formError ||
     (uploadMutation.isError ? uploadMutation.error.message : null) ||
@@ -228,8 +248,9 @@ export function UploadModal({ isOpen }: UploadModalProps) {
     setTherapyInput(THERAPY_TYPES[0]);
     setDragActive(false);
     setFormError(null);
+    setShowLogs(false);
 
-    const L_currentJobId = currentJobId; // Capture before resetting
+    const L_currentJobId = currentJobId;
     setCurrentJobId(null);
     setCurrentSessionId(null);
 
@@ -237,12 +258,11 @@ export function UploadModal({ isOpen }: UploadModalProps) {
     uploadMutation.reset();
     finalizeMutation.reset();
     if (L_currentJobId) {
-      // Use captured value for query removal
       queryClient.removeQueries({
         queryKey: ['transcriptionStatus', L_currentJobId],
       });
     }
-  }, [uploadMutation, finalizeMutation, queryClient, currentJobId]); // currentJobId is needed to capture its value
+  }, [uploadMutation, finalizeMutation, queryClient, currentJobId]);
 
   const handleDrag = (
     e: React.DragEvent<HTMLDivElement | HTMLLabelElement>
@@ -256,7 +276,6 @@ export function UploadModal({ isOpen }: UploadModalProps) {
 
   const handleFileSelection = (file: File | null) => {
     if (file && ALLOWED_AUDIO_VIDEO_MIME_TYPES.includes(file.type)) {
-      // Use updated constant
       setModalFile(file);
       setFormError(null);
       if (!sessionNameInput)
@@ -265,7 +284,7 @@ export function UploadModal({ isOpen }: UploadModalProps) {
       setModalFile(null);
       if (file)
         setFormError(
-          `Invalid file type. Please upload an audio/video file (${ALLOWED_AUDIO_VIDEO_EXTENSIONS_DISPLAY.join(', ')}).` // Use updated constant
+          `Invalid file type. Please upload an audio/video file (${ALLOWED_AUDIO_VIDEO_EXTENSIONS_DISPLAY.join(', ')}).`
         );
       else setFormError(null);
     }
@@ -300,7 +319,7 @@ export function UploadModal({ isOpen }: UploadModalProps) {
     if (!modalFile)
       missingFields.push(
         `Audio/Video File (${ALLOWED_AUDIO_VIDEO_EXTENSIONS_DISPLAY.join(', ')})`
-      ); // Use updated constant
+      );
     if (!clientNameInput.trim()) missingFields.push('Client Name');
     if (!sessionNameInput.trim()) missingFields.push('Session Name');
     if (!sessionDate) missingFields.push('Date');
@@ -326,7 +345,7 @@ export function UploadModal({ isOpen }: UploadModalProps) {
       }
     } else {
       setFormError(
-        `Please select an audio/video file (${ALLOWED_AUDIO_VIDEO_EXTENSIONS_DISPLAY.join(', ')}).` // Use updated constant
+        `Please select an audio/video file (${ALLOWED_AUDIO_VIDEO_EXTENSIONS_DISPLAY.join(', ')}).`
       );
     }
   };
@@ -360,11 +379,9 @@ export function UploadModal({ isOpen }: UploadModalProps) {
 
   const getProgressText = () => {
     if (isUploading) return 'Uploading file...';
-
     if (transcriptionStatus) {
       const { status, progress, message: jobMessage } = transcriptionStatus;
       const progressPercent = progress?.toFixed(0) ?? '0';
-
       if (
         jobMessage &&
         (status === 'model_loading' ||
@@ -407,13 +424,12 @@ export function UploadModal({ isOpen }: UploadModalProps) {
       return 'Waiting for transcription to start...';
     if (isFinalizing) return 'Finalizing session...';
     if (hasFailed) return overallError || 'Processing Failed';
-
     return modalFile ? (
       <>
         Selected: <Strong>{modalFile.name}</Strong>
       </>
     ) : dragActive ? (
-      `Drop file (${ALLOWED_AUDIO_VIDEO_EXTENSIONS_DISPLAY.join(', ')}) here` // Use updated constant
+      `Drop file (${ALLOWED_AUDIO_VIDEO_EXTENSIONS_DISPLAY.join(', ')}) here`
     ) : (
       `Drag & drop or click to choose file`
     );
@@ -433,7 +449,7 @@ export function UploadModal({ isOpen }: UploadModalProps) {
         <Dialog.Description size="2" mb="4" color="gray">
           Add session details and upload an audio/video file (
           {ALLOWED_AUDIO_VIDEO_EXTENSIONS_DISPLAY.join(', ')}) to start
-          analysis. {/* Use updated constant */}
+          analysis.
         </Dialog.Description>
         <Flex direction="column" gap="4">
           <label
@@ -447,13 +463,13 @@ export function UploadModal({ isOpen }: UploadModalProps) {
             aria-label={
               modalFile
                 ? `Selected file: ${modalFile.name}. Click to change.`
-                : `Drag and drop audio/video file (${ALLOWED_AUDIO_VIDEO_EXTENSIONS_DISPLAY.join(', ')}) or click here to upload` // Use updated constant
+                : `Drag and drop audio/video file (${ALLOWED_AUDIO_VIDEO_EXTENSIONS_DISPLAY.join(', ')}) or click here to upload`
             }
           >
             <input
               ref={fileInputRef}
               type="file"
-              accept={ALLOWED_AUDIO_VIDEO_MIME_TYPES.join(',')} // Use updated constant
+              accept={ALLOWED_AUDIO_VIDEO_MIME_TYPES.join(',')}
               className="hidden"
               id="audio-upload-input"
               onChange={handleFileChange}
@@ -489,7 +505,7 @@ export function UploadModal({ isOpen }: UploadModalProps) {
                 {getProgressText()}
               </Text>
               {(isProcessingTranscription || isModelLoadingOrDownloading) &&
-                transcriptionStatus?.progress !== null && // Check for null explicitly
+                transcriptionStatus?.progress !== null &&
                 transcriptionStatus?.progress !== undefined &&
                 transcriptionStatus.status !== 'queued' && (
                   <Box width="100%" mt="2">
@@ -514,8 +530,64 @@ export function UploadModal({ isOpen }: UploadModalProps) {
                   </Button>
                 </Box>
               )}
+              {showLogsButton && (
+                <Box mt="2">
+                  <Button
+                    variant="soft"
+                    color="gray"
+                    size="1"
+                    onClick={() => setShowLogs(!showLogs)}
+                  >
+                    {showLogs ? 'Hide' : 'Show'} Detailed Logs
+                    {showLogs ? (
+                      <ChevronUpIcon className="ml-1" />
+                    ) : (
+                      <ChevronDownIcon className="ml-1" />
+                    )}
+                  </Button>
+                </Box>
+              )}
             </Flex>
           </label>
+
+          {showLogs && (
+            <Box mt="-2" width="100%">
+              <ScrollArea
+                type="auto"
+                scrollbars="vertical"
+                style={{
+                  maxHeight: '200px',
+                  backgroundColor: 'var(--gray-a2)',
+                  borderRadius: 'var(--radius-3)',
+                  border: '1px solid var(--gray-a5)',
+                }}
+              >
+                <Box p="2">
+                  {isLoadingLogs && !isFetchingLogs ? (
+                    <Flex align="center" justify="center" p="4">
+                      <Spinner size="1" />
+                      <Text ml="2" color="gray" size="1">
+                        Loading logs...
+                      </Text>
+                    </Flex>
+                  ) : (
+                    <pre
+                      style={{
+                        margin: 0,
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-all',
+                        fontSize: '11px',
+                        fontFamily: 'var(--font-mono)',
+                        color: 'var(--gray-a11)',
+                      }}
+                    >
+                      <code>{logs || 'No log output available.'}</code>
+                    </pre>
+                  )}
+                </Box>
+              </ScrollArea>
+            </Box>
+          )}
 
           <Flex direction="column" gap="3">
             <label>

@@ -1,6 +1,6 @@
 {
   "name": "@therascript/api",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Backend for Therapy Analyzer using Ollama, SQLite, and ElysiaJS",
   "main": "dist/server.js",
   "type": "module",

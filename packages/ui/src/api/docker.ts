@@ -18,3 +18,17 @@ export const fetchDockerStatus = async (): Promise<DockerContainerStatus[]> => {
   // Return the 'containers' array from the response data
   return response.data.containers;
 };
+
+/**
+ * Fetches recent logs for a specific container from the backend API.
+ * @param containerName The name of the container (e.g., 'therascript_whisper_service').
+ * @returns A promise resolving to a string containing the logs.
+ */
+export const fetchContainerLogs = async (
+  containerName: string
+): Promise<string> => {
+  const response = await axios.get<{ logs: string }>(
+    `/api/docker/logs/${containerName}`
+  );
+  return response.data.logs;
+};
