@@ -9,7 +9,7 @@ import {
   type MessageSource,
 } from '@therascript/elasticsearch-client';
 import config from '../config/index.js';
-import { db, schema, verifySchemaVersion } from '../db/sqliteService.js';
+import { db, schema, verifySchemaVersion } from '@therascript/db';
 import { sessionRepository } from '../repositories/sessionRepository.js';
 import { transcriptRepository } from '../repositories/transcriptRepository.js';
 import { chatRepository } from '../repositories/chatRepository.js';
@@ -239,6 +239,7 @@ export const handleResetAllData = async ({
       db.exec('DROP TABLE IF EXISTS chats');
       db.exec('DROP TABLE IF EXISTS transcript_paragraphs');
       db.exec('DROP TABLE IF EXISTS sessions');
+      db.exec('DROP TABLE IF EXISTS templates'); // Also drop templates
       db.exec('DROP TABLE IF EXISTS schema_metadata');
     });
     dropTransaction();

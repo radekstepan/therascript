@@ -1,4 +1,4 @@
-import { db, run, all, get } from '../db/sqliteService.js';
+import { db, run, all, get } from '@therascript/db';
 import type {
   BackendChatSession,
   BackendChatMessage,

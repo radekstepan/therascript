@@ -1,3 +1,11 @@
+// Configure the database connection before any other modules are loaded
+import { configureDb } from '@therascript/db';
+import config from './config/index.js';
+configureDb({
+  dbPath: config.db.sqlitePath,
+  isDev: !config.server.isProduction,
+});
+
 import http from 'node:http';
 import { WritableStream, ReadableStream } from 'node:stream/web';
 import {
@@ -10,7 +18,6 @@ import {
 } from 'elysia';
 import { cors } from '@elysiajs/cors';
 import { swagger } from '@elysiajs/swagger';
-import config from './config/index.js';
 import { sessionRoutes } from './routes/sessionRoutes.js';
 import { chatRoutes } from './routes/chatRoutes.js';
 import { standaloneChatRoutes } from './routes/standaloneChatRoutes.js';
@@ -36,7 +43,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import axios from 'axios';
-import { closeDb } from './db/sqliteService.js';
+import { closeDb } from '@therascript/db';
 import {
   getElasticsearchClient,
   initializeIndices,

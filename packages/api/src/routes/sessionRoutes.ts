@@ -54,6 +54,7 @@ import {
   MESSAGES_INDEX,
   deleteByQuery,
 } from '@therascript/elasticsearch-client';
+import { checkDatabaseHealth } from '@therascript/db';
 
 const esClient = getElasticsearchClient(config.elasticsearch.url);
 
