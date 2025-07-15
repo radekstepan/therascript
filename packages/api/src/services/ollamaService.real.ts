@@ -156,6 +156,16 @@ export async function ensureOllamaReady(timeoutMs = 30000): Promise<void> {
   );
 }
 
+// --- ADDED ---
+/**
+ * Checks if the Ollama API is reachable and responsive.
+ * @returns {Promise<boolean>} True if the service is healthy, false otherwise.
+ */
+export const checkOllamaApiHealth = async (): Promise<boolean> => {
+  return isOllamaApiResponsive();
+};
+// --- END ADDED ---
+
 // --- Keep original Ollama prompt constants ---
 const SYSTEM_PROMPT = `You are an AI assistant analyzing a therapy session transcript. You will be provided with the transcript context and chat history. Answer user questions based *only* on the provided information. Be concise. If the answer isn't present, state that clearly. Do not invent information. Refer to participants as "Therapist" and "Patient" unless names are explicitly clear in the transcript.`;
 const STANDALONE_SYSTEM_PROMPT = `You are a helpful AI assistant. Answer the user's questions directly and concisely.`;

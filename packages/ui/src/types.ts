@@ -177,3 +177,14 @@ export interface StandaloneChatListItem {
   name?: string | null;
   tags?: string[] | null;
 }
+
+export interface ReadinessStatus {
+  ready: boolean;
+  services: {
+    database: 'connected' | 'disconnected';
+    elasticsearch: 'connected' | 'disconnected';
+    ollama: 'connected' | 'disconnected';
+    whisper: 'connected' | 'disconnected';
+  };
+  timestamp: string;
+}

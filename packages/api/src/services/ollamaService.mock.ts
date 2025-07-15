@@ -58,6 +58,16 @@ console.log('[Mock Service] Using Mock Ollama Service');
 
 // --- Mock Service Implementation ---
 
+/**
+ * Simulates checking the health of the Ollama API. Always returns true in mock mode.
+ * @returns {Promise<boolean>} A promise resolving to true.
+ */
+export const checkOllamaApiHealth = async (): Promise<boolean> => {
+  console.log('[Mock Ollama] Health check requested. Reporting healthy.');
+  await new Promise((resolve) => setTimeout(resolve, 50)); // Simulate tiny delay
+  return true;
+};
+
 export const listModels = async (): Promise<OllamaModelInfo[]> => {
   console.log(`[Mock Ollama] Request to list available models.`);
   await new Promise((resolve) => setTimeout(resolve, MOCK_DELAY_MS / 5));

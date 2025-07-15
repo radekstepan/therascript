@@ -16,7 +16,7 @@ interface OllamaServiceInterface {
     modelToCheck: string
   ) => Promise<OllamaModelInfo | null | { status: 'unavailable' }>;
   loadOllamaModel: (modelName: string) => Promise<void>;
-  unloadActiveModel: () => Promise<string>; // <-- Added unloadActiveModel
+  unloadActiveModel: (modelToUnloadOverride?: string) => Promise<string>;
   ensureOllamaReady: (timeoutMs?: number) => Promise<void>;
   reloadActiveModelContext: () => Promise<void>;
   streamChatResponse: (
@@ -25,11 +25,10 @@ interface OllamaServiceInterface {
     retryAttempt?: boolean
   ) => Promise<AsyncIterable<ChatResponse>>;
   startPullModelJob: (modelName: string) => string;
-  getPullModelJobStatus: (jobId: string) => OllamaPullJobStatus | null; // <-- Defined return type
+  getPullModelJobStatus: (jobId: string) => OllamaPullJobStatus | null;
   cancelPullModelJob: (jobId: string) => boolean;
   deleteOllamaModel: (modelName: string) => Promise<string>;
-  // Deprecated non-streaming function (optional to include if mock needs it for some reason)
-  // generateChatResponse?: (contextTranscript: string | null, chatHistory: BackendChatMessage[], retryAttempt?: boolean) => Promise<{ content: string; promptTokens?: number; completionTokens?: number }>;
+  checkOllamaApiHealth: () => Promise<boolean>;
 }
 
 let service: OllamaServiceInterface;
@@ -48,7 +47,7 @@ if (config.server.appMode === 'mock') {
 export const listModels = service.listModels;
 export const checkModelStatus = service.checkModelStatus;
 export const loadOllamaModel = service.loadOllamaModel;
-export const unloadActiveModel = service.unloadActiveModel; // <-- Export the new function
+export const unloadActiveModel = service.unloadActiveModel;
 export const ensureOllamaReady = service.ensureOllamaReady;
 export const reloadActiveModelContext = service.reloadActiveModelContext;
 export const streamChatResponse = service.streamChatResponse;
@@ -56,6 +55,4 @@ export const startPullModelJob = service.startPullModelJob;
 export const getPullModelJobStatus = service.getPullModelJobStatus;
 export const cancelPullModelJob = service.cancelPullModelJob;
 export const deleteOllamaModel = service.deleteOllamaModel;
-
-// Optionally re-export deprecated non-streaming function if needed and implemented in both
-// export const generateChatResponse = service.generateChatResponse; // Only if needed
+export const checkOllamaApiHealth = service.checkOllamaApiHealth;

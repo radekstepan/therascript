@@ -6,6 +6,7 @@ import {
   checkEsHealth,
 } from '@therascript/elasticsearch-client'; // Import ES client utils
 import config from '../config/index.js';
+import { getReadinessStatus } from '../api/metaHandler.js';
 
 const HealthResponseSchema = t.Object({
   status: t.String(),
@@ -14,9 +15,21 @@ const HealthResponseSchema = t.Object({
   timestamp: t.String(),
 });
 
+const ReadinessStatusResponseSchema = t.Object({
+  ready: t.Boolean(),
+  services: t.Object({
+    database: t.String(),
+    elasticsearch: t.String(),
+    ollama: t.String(),
+    whisper: t.String(),
+  }),
+  timestamp: t.String(),
+});
+
 export const metaRoutes = new Elysia({ prefix: '/api' })
   .model({
     healthResponse: HealthResponseSchema, // Add health response schema
+    readinessStatusResponse: ReadinessStatusResponseSchema,
   })
   .group('', { detail: { tags: ['Meta'] } }, (app) =>
     app
@@ -59,6 +72,15 @@ export const metaRoutes = new Elysia({ prefix: '/api' })
           response: { 200: 'healthResponse', 503: 'healthResponse' }, // Use defined schema
         }
       )
+      .get('/status/readiness', getReadinessStatus, {
+        detail: {
+          summary: 'Check if all dependent backend services are ready',
+        },
+        response: {
+          200: 'readinessStatusResponse',
+          503: 'readinessStatusResponse',
+        },
+      })
       .get(
         '/schema',
         ({ set }) => {

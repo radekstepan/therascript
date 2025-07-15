@@ -1,11 +1,21 @@
-// packages/ui/src/App.tsx
 import React, { useEffect, useState, useLayoutEffect } from 'react';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import { Theme as RadixTheme, IconButton, Text } from '@radix-ui/themes';
+import {
+  Theme as RadixTheme,
+  IconButton,
+  Text,
+  Flex,
+  Spinner,
+  Box,
+  Card,
+  Badge,
+  Callout,
+} from '@radix-ui/themes';
 import * as Toast from '@radix-ui/react-toast';
-import { Cross2Icon } from '@radix-ui/react-icons';
+import { Cross2Icon, ExclamationTriangleIcon } from '@radix-ui/react-icons';
 import axios from 'axios';
+import { useQuery } from '@tanstack/react-query';
 
 // Page Components
 import { LandingPage } from './components/LandingPage/LandingPage';
@@ -29,13 +39,71 @@ import {
   toastMessageAtom,
   themeAtom,
   accentColorAtom,
+  isSystemReadyAtom,
 } from './store';
 import { isPersistentSidebarOpenAtom } from './store/ui/isPersistentSidebarOpenAtom';
 import { currentPageAtom } from './store/navigation/currentPageAtom';
 import { cn } from './utils';
+import type { ReadinessStatus } from './types';
+import { fetchReadinessStatus } from './api/meta';
 
 const API_BASE_URL = 'http://localhost:3001';
 axios.defaults.baseURL = API_BASE_URL;
+
+function ReadinessOverlay({
+  status,
+  error,
+}: {
+  status?: ReadinessStatus | null;
+  error?: Error | null;
+}) {
+  let message = 'Initializing system, please wait...';
+  if (error) {
+    message = 'Could not connect to backend service.';
+  } else if (status && !status.ready) {
+    const disconnected = Object.entries(status.services)
+      .filter(([, serviceStatus]) => serviceStatus === 'disconnected')
+      .map(([serviceName]) => serviceName);
+    if (disconnected.length > 0) {
+      message = `Waiting for services: ${disconnected.join(', ')}...`;
+    }
+  }
+
+  return (
+    <Flex
+      align="center"
+      justify="center"
+      direction="column"
+      gap="4"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        backgroundColor: 'var(--color-overlay)',
+        zIndex: 1000,
+      }}
+    >
+      <Card size="3">
+        <Flex align="center" gap="4">
+          <Spinner size="3" />
+          <Flex direction="column" gap="1">
+            <Text weight="bold" size="3">
+              System Initializing
+            </Text>
+            <Text color="gray">{message}</Text>
+            {error && (
+              <Callout.Root color="red" size="1" mt="2">
+                <Callout.Icon>
+                  <ExclamationTriangleIcon />
+                </Callout.Icon>
+                <Callout.Text>{error.message}</Callout.Text>
+              </Callout.Root>
+            )}
+          </Flex>
+        </Flex>
+      </Card>
+    </Flex>
+  );
+}
 
 const PageContentManager: React.FC = () => {
   const location = useLocation();
@@ -95,6 +163,44 @@ function App() {
     isPersistentSidebarOpenAtom
   );
   const currentAccentColor = useAtomValue(accentColorAtom);
+  const [isSystemReady, setIsSystemReady] = useAtom(isSystemReadyAtom);
+
+  const { data: readinessStatus, error: readinessError } = useQuery<
+    ReadinessStatus,
+    Error
+  >({
+    queryKey: ['systemReadiness'],
+    queryFn: fetchReadinessStatus,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      // If ready, stop polling. If not, poll every 3 seconds.
+      return data?.ready ? false : 3000;
+    },
+    refetchOnWindowFocus: true,
+    retry: (failureCount, error) => {
+      // If it's a network error, retry a few times.
+      if (error.message.includes('Network Error')) {
+        return failureCount < 5;
+      }
+      return false;
+    },
+  });
+
+  useEffect(() => {
+    if (readinessStatus) {
+      if (readinessStatus.ready && !isSystemReady) {
+        setIsSystemReady(true);
+      } else if (!readinessStatus.ready && isSystemReady) {
+        setIsSystemReady(false);
+      }
+    }
+  }, [readinessStatus, isSystemReady, setIsSystemReady]);
+
+  useEffect(() => {
+    if (readinessError && isSystemReady) {
+      setIsSystemReady(false);
+    }
+  }, [readinessError, isSystemReady, setIsSystemReady]);
 
   useLayoutEffect(() => {
     const handleResize = () => {
@@ -132,6 +238,9 @@ function App() {
         <GeneratedBackground />
         {/* Root container ensures RadixTheme styles apply globally and takes full viewport height */}
         <div className="flex flex-col h-screen">
+          {!isSystemReady && (
+            <ReadinessOverlay status={readinessStatus} error={readinessError} />
+          )}
           {/* Main layout flex container: Sidebar + Content Area */}
           <div className="flex flex-grow overflow-hidden">
             {' '}

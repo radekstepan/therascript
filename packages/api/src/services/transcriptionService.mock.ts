@@ -102,6 +102,18 @@ const mockTranscriptStructure: StructuredTranscript = [
 console.log('[Mock Service] Using Mock Transcription Service');
 
 /**
+ * Simulates checking the health of the Whisper API. Always returns true in mock mode.
+ * @returns {Promise<boolean>} A promise resolving to true.
+ */
+export const checkWhisperApiHealth = async (): Promise<boolean> => {
+  console.log(
+    '[Mock Transcription] Health check requested. Reporting healthy.'
+  );
+  await new Promise((resolve) => setTimeout(resolve, 50)); // Simulate tiny delay
+  return true;
+};
+
+/**
  * Simulates starting a transcription job.
  * Creates a job entry in the mock store and simulates progress updates using setTimeout.
  *
