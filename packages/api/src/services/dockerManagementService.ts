@@ -1,12 +1,13 @@
 // Purpose: Provides functions to interact with the Docker daemon, specifically
 //          to get the status of containers related to the Therascript project.
 import Dockerode from 'dockerode'; // Library to interact with the Docker Engine API
-import { InternalServerError } from '../errors.js'; // Custom error class
+import { PassThrough, Readable, Writable } from 'node:stream';
+import { InternalServerError, NotFoundError } from '../errors.js'; // Custom error class
 import type { DockerContainerStatus } from '../types/index.js'; // Type definition for container status
 
 // --- Project Specific Containers ---
 // These names MUST match the `container_name` specified in the relevant docker-compose files.
-const PROJECT_CONTAINER_NAMES = [
+export const PROJECT_CONTAINER_NAMES = [
   'ollama_server_managed', // From packages/ollama/docker-compose.yml
   'therascript_whisper_service', // From the root docker-compose.yml
   'therascript_elasticsearch_service', // From the root docker-compose.yml - ADDED
@@ -140,4 +141,66 @@ export const getProjectContainerStatus = async (): Promise<
       error
     );
   }
+};
+
+/**
+ * Fetches the most recent logs from a specific Docker container.
+ * @param containerName The name of the container to get logs from.
+ * @returns A promise resolving to a string containing the container logs.
+ * @throws {InternalServerError} If the Docker client is unavailable or an unexpected error occurs.
+ */
+export const getContainerLogs = async (
+  containerName: string
+): Promise<string> => {
+  if (!docker) {
+    throw new InternalServerError(
+      'Docker client unavailable. Cannot fetch container logs.'
+    );
+  }
+
+  const container = docker.getContainer(containerName);
+
+  try {
+    await container.inspect();
+  } catch (error: any) {
+    if (error.statusCode === 404) {
+      // Return a user-friendly message instead of throwing
+      return `Container '${containerName}' not found. It may have already been removed or failed to start.`;
+    }
+    throw new InternalServerError(
+      `Failed to inspect container '${containerName}'`,
+      error
+    );
+  }
+
+  const logBuffer = (await container.logs({
+    stdout: true,
+    stderr: true,
+    timestamps: true,
+    tail: 200,
+    follow: false,
+  })) as Buffer;
+
+  const logs: string[] = [];
+  const stdout = new Writable({
+    write(chunk, encoding, callback) {
+      logs.push(chunk.toString());
+      callback();
+    },
+  });
+
+  const stderr = new Writable({
+    write(chunk, encoding, callback) {
+      logs.push(chunk.toString());
+      callback();
+    },
+  });
+
+  const bufferStream = Readable.from(logBuffer);
+
+  return new Promise((resolve, reject) => {
+    bufferStream.on('end', () => resolve(logs.join('')));
+    bufferStream.on('error', reject);
+    container.modem.demuxStream(bufferStream, stdout, stderr);
+  });
 };
