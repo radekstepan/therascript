@@ -9,10 +9,10 @@ const execPromise = util.promisify(exec);
 // Docker Container Names (must match your docker-compose files)
 const OLLAMA_CONTAINER_NAME = 'ollama_server_managed';
 const WHISPER_CONTAINER_NAME = 'therascript_whisper_service';
+const VOXTRAL_CONTAINER_NAME = 'therascript_voxtral_service'; // Added
 const ELASTICSEARCH_CONTAINER_NAME = 'therascript_elasticsearch_service'; // Added
 
 // --- UI Port for Cleanup ---
-// Read CORS_ORIGIN from environment. If not set, default (less ideal but provides a fallback).
 const UI_ORIGIN_FROM_ENV = process.env.CORS_ORIGIN || 'http://localhost:3002';
 let UI_PORT;
 try {
@@ -87,6 +87,7 @@ async function cleanupDocker() {
   await Promise.allSettled([
     stopAndRemoveContainer(OLLAMA_CONTAINER_NAME),
     stopAndRemoveContainer(WHISPER_CONTAINER_NAME),
+    stopAndRemoveContainer(VOXTRAL_CONTAINER_NAME), // Added
     stopAndRemoveContainer(ELASTICSEARCH_CONTAINER_NAME), // Added
   ]);
   console.log('[RunProd Cleanup] Docker cleanup process finished.');
@@ -145,12 +146,13 @@ const concurrentlyArgs = [
   'concurrently',
   '--kill-others-on-fail',
   '--names',
-  'API,UI,WHISPER,ES', // Added ES
+  'API,UI,WHISPER,VOXTRAL,ES', // Added VOXTRAL
   '--prefix-colors',
-  'bgGreen.bold,bgMagenta.bold,bgCyan.bold,bgYellow.bold', // Added color for ES
+  'bgGreen.bold,bgMagenta.bold,bgCyan.bold,bgYellow.bold,bgBlue.bold', // Added color
   '"yarn start:api:prod"',
   '"yarn dev:ui"', // Typically for prod you'd serve static UI assets, but dev:ui is fine for this setup
   '"yarn start:whisper"',
+  '"yarn start:voxtral-manager"', // Added
   '"yarn start:elasticsearch-manager"', // Added Elasticsearch manager
 ];
 

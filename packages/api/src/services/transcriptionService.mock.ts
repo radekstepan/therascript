@@ -102,10 +102,10 @@ const mockTranscriptStructure: StructuredTranscript = [
 console.log('[Mock Service] Using Mock Transcription Service');
 
 /**
- * Simulates checking the health of the Whisper API. Always returns true in mock mode.
+ * Simulates checking the health of the transcription API. Always returns true in mock mode.
  * @returns {Promise<boolean>} A promise resolving to true.
  */
-export const checkWhisperApiHealth = async (): Promise<boolean> => {
+export const checkTranscriptionSvcHealth = async (): Promise<boolean> => {
   console.log(
     '[Mock Transcription] Health check requested. Reporting healthy.'
   );
@@ -256,4 +256,3 @@ export const getStructuredTranscriptionResult = async (
   // Return the pre-defined structured mock data
   return mockTranscriptStructure;
 };
-// --- End Mock Service Implementation ---

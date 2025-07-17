@@ -2,12 +2,10 @@
 # Ollama is managed by a separate compose file in `packages/ollama/docker-compose.yml`.
 
 services:
-  # Whisper Transcription Service
+  # Whisper Transcription Service (Existing)
   whisper:
     build:
-      # FIX: Change the build context to the project root directory '.'
       context: .
-      # FIX: Specify the path to the Dockerfile relative to the new context
       dockerfile: packages/whisper/Dockerfile
     image: therascript/whisper
     container_name: therascript_whisper_service
@@ -30,16 +28,65 @@ services:
       retries: 3
       start_period: 30s
 
+  # --- VOXTRAL SERVICE (Corrected to be a full executable command) ---
+  voxtral:
+    build:
+      context: .
+      dockerfile: packages/voxtral/Dockerfile
+      args:
+        - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN}
+    image: therascript/voxtral
+    container_name: therascript_voxtral_service
+    environment:
+      - VLLM_USE_TRITON=0
+      - CUDA_VISIBLE_DEVICES=0
+    command:
+      - "python3"
+      - "-m"
+      - "vllm.entrypoints.openai.api_server"
+      - "--model"
+      - "mistralai/Voxtral-Mini-3B-2507"
+      - "--tokenizer_mode"
+      - "mistral"
+      - "--config_format"
+      - "mistral" 
+      - "--load_format"
+      - "mistral"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8000"
+      - "--gpu-memory-utilization"
+      - "0.80"
+    ports:
+      - "127.0.0.1:8001:8000"
+    volumes:
+      - voxtral_models:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/v1/models"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 300s
+
   # Elasticsearch Service
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.14.1 # Using a specific recent version
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.14.1
     container_name: therascript_elasticsearch_service
     environment:
       - discovery.type=single-node
-      - ES_JAVA_OPTS=-Xms512m -Xmx512m # Adjust RAM as needed for dev
-      - xpack.security.enabled=false # Disable security for local dev (NOT for production)
-      - TAKE_FILE_OWNERSHIP=true # For Docker volume permissions
-    ulimits: # Recommended settings for Elasticsearch
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - xpack.security.enabled=false
+      - TAKE_FILE_OWNERSHIP=true
+    ulimits:
       memlock:
         soft: -1
         hard: -1
@@ -47,8 +94,7 @@ services:
         soft: 65536
         hard: 65536
     ports:
-      - "127.0.0.1:9200:9200" # Elasticsearch API
-      # - "127.0.0.1:9300:9300" # Elasticsearch transport (typically not needed for client)
+      - "127.0.0.1:9200:9200"
     volumes:
       - es_data:/usr/share/elasticsearch/data
     healthcheck:
@@ -56,14 +102,14 @@ services:
       interval: 10s
       timeout: 10s
       retries: 10
-      start_period: 120s # Give ES more time to start up, especially first time
+      start_period: 120s
 
-  # Kibana Service (Optional, for development and exploring ES data)
+  # Kibana Service
   kibana:
-    image: docker.elastic.co/kibana/kibana:8.14.1 # Match Elasticsearch version
+    image: docker.elastic.co/kibana/kibana:8.14.1
     container_name: therascript_kibana_service
     environment:
-      - ELASTICSEARCH_HOSTS=http://therascript_elasticsearch_service:9200 # Connect to ES container
+      - ELASTICSEARCH_HOSTS=http://therascript_elasticsearch_service:9200
     ports:
       - "127.0.0.1:5601:5601"
     depends_on:
@@ -72,5 +118,7 @@ services:
     restart: unless-stopped
 
 volumes:
-  es_data: # Volume for Elasticsearch data persistence
+  es_data:
+    driver: local
+  voxtral_models:
     driver: local

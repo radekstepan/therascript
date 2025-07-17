@@ -13,6 +13,7 @@ const execPromise = util.promisify(exec);
 // --- Configuration: Docker Container Names ---
 const OLLAMA_CONTAINER_NAME = 'ollama_server_managed';
 const WHISPER_CONTAINER_NAME = 'therascript_whisper_service';
+const VOXTRAL_CONTAINER_NAME = 'therascript_voxtral_service'; // Added
 const ELASTICSEARCH_CONTAINER_NAME = 'therascript_elasticsearch_service'; // Added
 // --- End Configuration ---
 
@@ -89,6 +90,7 @@ async function cleanupDocker() {
   await Promise.allSettled([
     stopAndRemoveContainer(OLLAMA_CONTAINER_NAME),
     stopAndRemoveContainer(WHISPER_CONTAINER_NAME),
+    stopAndRemoveContainer(VOXTRAL_CONTAINER_NAME), // Added
     stopAndRemoveContainer(ELASTICSEARCH_CONTAINER_NAME), // Added
   ]);
   console.log('[RunDev Cleanup] Docker cleanup process finished.');
@@ -148,12 +150,13 @@ const concurrentlyArgs = [
   'concurrently',
   '--kill-others-on-fail',
   '--names',
-  'API,UI,WHISPER,ES', // Added ES
+  'API,UI,WHISPER,VOXTRAL,ES', // Added VOXTRAL
   '--prefix-colors',
-  'bgBlue.bold,bgMagenta.bold,bgCyan.bold,bgYellow.bold', // Added color for ES
+  'bgBlue.bold,bgMagenta.bold,bgCyan.bold,bgYellow.bold,bgGreen.bold', // Added color for Voxtral
   '"yarn dev:api"',
   '"yarn dev:ui"',
   '"yarn start:whisper"',
+  '"yarn start:voxtral-manager"', // Added Voxtral manager
   '"yarn start:elasticsearch-manager"', // Added Elasticsearch manager
 ];
 // --- End Concurrently Command Setup ---

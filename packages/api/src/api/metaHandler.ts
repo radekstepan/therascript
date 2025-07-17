@@ -7,7 +7,7 @@ import {
   checkEsHealth,
 } from '@therascript/elasticsearch-client';
 import { checkOllamaApiHealth } from '../services/ollamaService.js';
-import { checkWhisperApiHealth } from '../services/transcriptionService.js';
+import { checkTranscriptionSvcHealth } from '../services/transcriptionService.js';
 import config from '../config/index.js';
 
 interface ServiceStatus {
@@ -51,7 +51,7 @@ export const getReadinessStatus = async ({ set }: any) => {
       }
     })(),
     (async () => {
-      if (await checkWhisperApiHealth()) {
+      if (await checkTranscriptionSvcHealth()) {
         statuses.whisper = 'connected';
       }
     })(),

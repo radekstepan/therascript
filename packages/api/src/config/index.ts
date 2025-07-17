@@ -31,8 +31,14 @@ const corsOrigin = getEnvVar('CORS_ORIGIN', 'http://localhost:3002');
 const ollamaBaseURL = getEnvVar('OLLAMA_BASE_URL', 'http://localhost:11434');
 const ollamaModel = getEnvVar('OLLAMA_MODEL', 'llama3');
 const ollamaKeepAlive = getEnvVar('OLLAMA_CHAT_KEEP_ALIVE', '5m');
+
+// --- NEW Transcription Service Config ---
+const transcriptionService = getEnvVar('TRANSCRIPTION_SERVICE', 'whisper');
 const whisperApiURL = getEnvVar('WHISPER_API_URL', 'http://localhost:8000');
 const whisperModel = getEnvVar('WHISPER_MODEL', 'tiny');
+const voxtralApiURL = getEnvVar('VOXTRAL_API_URL', 'http://localhost:8001');
+// --- END NEW ---
+
 const elasticsearchUrl = getEnvVar(
   'ELASTICSEARCH_URL',
   'http://localhost:9200'
@@ -88,9 +94,15 @@ const config = {
     model: ollamaModel,
     keepAlive: ollamaKeepAlive,
   },
+  transcription: {
+    service: transcriptionService as 'whisper' | 'voxtral',
+    whisper: { apiUrl: whisperApiURL, model: whisperModel },
+    voxtral: { apiUrl: voxtralApiURL },
+  },
+  // DEPRECATED: Keep for backward compatibility during transition if needed
   whisper: { apiUrl: whisperApiURL, model: whisperModel },
+  // END DEPRECATED
   elasticsearch: {
-    // Added Elasticsearch config section
     url: elasticsearchUrl,
   },
   db: {
@@ -134,7 +146,10 @@ console.log(`  - NODE_ENV: ${config.server.nodeEnv}`);
 console.log(`  - Port: ${config.server.port}`);
 console.log(`  - CORS Origin: ${config.server.corsOrigin}`);
 console.log(`  - Ollama Model (in config object): ${config.ollama.model}`);
-console.log(`  - Whisper Model: ${config.whisper.model}`);
+console.log(
+  `  - Active Transcription Service: ${config.transcription.service}`
+);
+console.log(`  - Whisper Model: ${config.transcription.whisper.model}`);
 console.log(`  - Elasticsearch URL: ${config.elasticsearch.url}`);
 console.log(`  - DB Path: ${config.db.sqlitePath}`);
 console.log(`  - Transcripts Path: ${config.db.transcriptsDir}`);
