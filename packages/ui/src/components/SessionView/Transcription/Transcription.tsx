@@ -2,7 +2,11 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useLocation } from 'react-router-dom'; // Import useLocation
-import type { Session, StructuredTranscript } from '../../../types';
+import type {
+  Session,
+  StructuredTranscript,
+  TranscriptParagraphData,
+} from '../../../types';
 import { TranscriptParagraph } from '../../Transcription/TranscriptParagraph';
 import {
   Box,
@@ -31,6 +35,7 @@ import { cn } from '../../../utils';
 import {
   updateTranscriptParagraph,
   deleteSessionAudio,
+  deleteTranscriptParagraph,
 } from '../../../api/api';
 import { sessionColorMap, therapyColorMap } from '../../../constants';
 import { debounce, formatIsoDateToYMD } from '../../../helpers';
@@ -145,6 +150,10 @@ export function Transcription({
   const [isAudioLoading, setIsAudioLoading] = useState(false);
   const [isDeleteAudioConfirmOpen, setIsDeleteAudioConfirmOpen] =
     useState(false);
+
+  const [paragraphToDelete, setParagraphToDelete] =
+    useState<TranscriptParagraphData | null>(null);
+  const [isDeleteParaConfirmOpen, setIsDeleteParaConfirmOpen] = useState(false);
 
   const transcriptTokenCount = session?.transcriptTokenCount;
   const isAudioAvailable = !!session?.audioPath;
@@ -339,8 +348,13 @@ export function Transcription({
   );
 
   const saveParagraphMutation = useMutation({
-    mutationFn: ({ index, newText }: { index: number; newText: string }) =>
-      updateTranscriptParagraph(session.id, index, newText),
+    mutationFn: ({
+      paragraphIndex,
+      newText,
+    }: {
+      paragraphIndex: number;
+      newText: string;
+    }) => updateTranscriptParagraph(session.id, paragraphIndex, newText),
     onSuccess: (updatedStructuredTranscript, variables) => {
       queryClient.setQueryData(
         ['transcript', session.id],
@@ -353,6 +367,23 @@ export function Transcription({
     onError: (error, variables) => {
       setToast(`Error saving paragraph: ${error.message}`);
       setActiveEditIndex(null);
+    },
+  });
+
+  const deleteParagraphMutation = useMutation({
+    mutationFn: ({ paragraphId }: { paragraphId: number }) =>
+      deleteTranscriptParagraph(session.id, paragraphId),
+    onSuccess: (updatedTranscript) => {
+      queryClient.setQueryData(['transcript', session.id], updatedTranscript);
+      queryClient.invalidateQueries({ queryKey: ['sessionMeta', session.id] });
+      setToast('Paragraph deleted successfully.');
+    },
+    onError: (error: Error) => {
+      setToast(`Error deleting paragraph: ${error.message}`);
+    },
+    onSettled: () => {
+      setIsDeleteParaConfirmOpen(false);
+      setParagraphToDelete(null);
     },
   });
 
@@ -442,11 +473,22 @@ export function Transcription({
   const paragraphs = transcriptContent || [];
 
   const handleSaveParagraphInternal = async (
-    index: number,
+    paragraphId: number,
     newText: string
   ) => {
-    if (isPlaying && playingParagraphIndex === index) pauseAudio();
-    saveParagraphMutation.mutate({ index, newText });
+    if (isPlaying && playingParagraphIndex === paragraphId) pauseAudio();
+    saveParagraphMutation.mutate({ paragraphIndex: paragraphId, newText });
+  };
+
+  const handleDeleteParagraphRequest = (paragraph: TranscriptParagraphData) => {
+    setParagraphToDelete(paragraph);
+    setIsDeleteParaConfirmOpen(true);
+  };
+
+  const handleConfirmDeleteParagraph = () => {
+    if (paragraphToDelete) {
+      deleteParagraphMutation.mutate({ paragraphId: paragraphToDelete.id });
+    }
   };
 
   const handleDeleteAudioClick = () => setIsDeleteAudioConfirmOpen(true);
@@ -631,15 +673,17 @@ export function Transcription({
               paragraphs.length > 0 &&
               paragraphs.map((paragraph, index) => (
                 <TranscriptParagraph
-                  key={paragraph.id ?? `p-${index}`} // Use paragraph.id as it is the paragraphIndex
+                  key={paragraph.id} // Use stable ID for key
                   paragraph={paragraph}
-                  index={index} // This is the array index, paragraph.id is the original index
+                  index={index} // Pass array index for playback logic
                   onSave={handleSaveParagraphInternal}
+                  onDelete={handleDeleteParagraphRequest}
                   activeEditIndex={activeEditIndex}
                   setActiveEditIndex={setActiveEditIndex}
                   isSaving={
                     saveParagraphMutation.isPending &&
-                    saveParagraphMutation.variables?.index === index
+                    saveParagraphMutation.variables?.paragraphIndex ===
+                      paragraph.id
                   }
                   onPlayToggle={togglePlayback}
                   isPlaying={isPlaying && playingParagraphIndex === index}
@@ -713,6 +757,67 @@ export function Transcription({
               )}
               <Text ml="1">Delete Audio</Text>
             </Button>
+          </Flex>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
+      <AlertDialog.Root
+        open={isDeleteParaConfirmOpen}
+        onOpenChange={setIsDeleteParaConfirmOpen}
+      >
+        <AlertDialog.Content style={{ maxWidth: 450 }}>
+          <AlertDialog.Title>Delete Paragraph</AlertDialog.Title>
+          <AlertDialog.Description size="2">
+            Are you sure you want to permanently delete this paragraph? This
+            action cannot be undone.
+          </AlertDialog.Description>
+          <Box
+            my="3"
+            p="2"
+            style={{
+              backgroundColor: 'var(--gray-a3)',
+              borderRadius: 'var(--radius-3)',
+              border: '1px solid var(--gray-a5)',
+              maxHeight: '120px',
+              overflowY: 'auto',
+            }}
+          >
+            <Text
+              as="p"
+              size="1"
+              color="gray"
+              style={{
+                fontStyle: 'italic',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              }}
+            >
+              {paragraphToDelete?.text}
+            </Text>
+          </Box>
+          <Flex gap="3" mt="4" justify="end">
+            <AlertDialog.Cancel>
+              <Button
+                variant="soft"
+                color="gray"
+                disabled={deleteParagraphMutation.isPending}
+              >
+                Cancel
+              </Button>
+            </AlertDialog.Cancel>
+            <AlertDialog.Action>
+              <Button
+                color="red"
+                onClick={handleConfirmDeleteParagraph}
+                disabled={deleteParagraphMutation.isPending}
+              >
+                {deleteParagraphMutation.isPending ? (
+                  <Spinner size="1" />
+                ) : (
+                  <TrashIcon />
+                )}
+                <Text ml="1">Delete Paragraph</Text>
+              </Button>
+            </AlertDialog.Action>
           </Flex>
         </AlertDialog.Content>
       </AlertDialog.Root>

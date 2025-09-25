@@ -1,18 +1,8 @@
-import {
-  Elysia,
-  t,
-  type Static,
-  type Context as ElysiaContext,
-  type Cookie,
-} from 'elysia';
+import { Elysia, t, type Static } from 'elysia';
 import path from 'node:path';
-import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import { Readable } from 'node:stream';
 import { sessionRepository } from '../repositories/sessionRepository.js';
-import { chatRepository } from '../repositories/chatRepository.js';
-import { transcriptRepository } from '../repositories/transcriptRepository.js';
-import { messageRepository } from '../repositories/messageRepository.js';
 import {
   listSessions,
   getSessionDetails,
@@ -21,8 +11,8 @@ import {
   updateTranscriptParagraph,
   deleteSessionAudioHandler,
   finalizeSessionHandler,
+  deleteTranscriptParagraph,
 } from '../api/sessionHandler.js';
-import { calculateTokenCount } from '../services/tokenizerService.js';
 import {
   deleteUploadedAudioFile,
   saveUploadedAudio,
@@ -31,21 +21,13 @@ import {
 import {
   startTranscriptionJob,
   getTranscriptionStatus,
-  getStructuredTranscriptionResult,
 } from '../services/transcriptionService.js';
-import type {
-  BackendSession,
-  StructuredTranscript,
-  WhisperJobStatus,
-  ChatMetadata,
-  BackendChatSession,
-} from '../types/index.js';
+import type { BackendSession } from '../types/index.js';
 import {
   NotFoundError,
   InternalServerError,
   ApiError,
   BadRequestError,
-  ConflictError,
 } from '../errors.js';
 import config from '../config/index.js';
 import {
@@ -54,7 +36,6 @@ import {
   MESSAGES_INDEX,
   deleteByQuery,
 } from '@therascript/elasticsearch-client';
-import { checkDatabaseHealth } from '@therascript/db';
 
 const esClient = getElasticsearchClient(config.elasticsearch.url);
 
@@ -75,6 +56,16 @@ const ParagraphUpdateBodySchema = t.Object({
   }),
   newText: t.String(),
 });
+const ParagraphIndexParamSchema = t.Object({
+  paragraphIndex: t.String({
+    pattern: '^[0-9]+$',
+    error: 'Paragraph Index must be a non-negative integer string.',
+  }),
+});
+const SessionAndParagraphParamsSchema = t.Intersect([
+  SessionIdParamSchema,
+  ParagraphIndexParamSchema,
+]);
 const SessionMetadataUpdateBodySchema = t.Partial(
   t.Object({
     clientName: t.Optional(t.String({ minLength: 1 })),
@@ -191,6 +182,8 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
   .model({
     sessionIdParam: SessionIdParamSchema,
     jobIdParam: JobIdParamSchema,
+    paragraphIndexParam: ParagraphIndexParamSchema,
+    sessionAndParagraphParams: SessionAndParagraphParamsSchema,
     paragraphUpdateBody: ParagraphUpdateBodySchema,
     metadataUpdateBody: SessionMetadataUpdateBodySchema,
     uploadBody: UploadBodySchema,
@@ -393,6 +386,15 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
               body: 'paragraphUpdateBody',
               response: { 200: 'transcriptResponse' },
               detail: { summary: 'Update transcript paragraph' },
+            }
+          )
+          .delete(
+            '/:sessionId/transcript/:paragraphIndex',
+            (context) => deleteTranscriptParagraph(context as any),
+            {
+              params: 'sessionAndParagraphParams',
+              response: { 200: 'transcriptResponse' },
+              detail: { summary: 'Delete a single transcript paragraph' },
             }
           )
           .get(
