@@ -55,6 +55,16 @@ const updateParagraphStmt = (): DbStatement => {
   return _updateParagraphStmt;
 };
 
+let _deleteParagraphByIndexStmt: DbStatement | null = null;
+const deleteParagraphByIndexStmt = (): DbStatement => {
+  if (!_deleteParagraphByIndexStmt) {
+    _deleteParagraphByIndexStmt = db.prepare(
+      `DELETE FROM transcript_paragraphs WHERE sessionId = ? AND paragraphIndex = ?`
+    );
+  }
+  return _deleteParagraphByIndexStmt;
+};
+
 let _deleteParagraphsStmt: DbStatement | null = null;
 const deleteParagraphsStmt = (): DbStatement => {
   if (!_deleteParagraphsStmt) {
@@ -161,6 +171,24 @@ export const transcriptRepository = {
       );
       throw new Error(
         `Database error updating transcript paragraph ${paragraphIndex} for session ${sessionId}.`
+      );
+    }
+  },
+
+  deleteParagraphByIndex: (
+    sessionId: number,
+    paragraphIndex: number
+  ): boolean => {
+    try {
+      const info = deleteParagraphByIndexStmt().run(sessionId, paragraphIndex);
+      return info.changes > 0;
+    } catch (error) {
+      console.error(
+        `[TranscriptRepo] Error deleting paragraph ${paragraphIndex} for session ${sessionId}:`,
+        error
+      );
+      throw new Error(
+        `Database error deleting paragraph ${paragraphIndex} for session ${sessionId}.`
       );
     }
   },

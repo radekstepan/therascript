@@ -23,6 +23,7 @@ import {
   PauseIcon,
   UpdateIcon,
   ClockIcon,
+  TrashIcon,
 } from '@radix-ui/react-icons';
 import { cn } from '../../utils';
 import type { TranscriptParagraphData } from '../../types';
@@ -47,7 +48,8 @@ const formatParagraphTimestamp = (ms: number | undefined): string => {
 interface TranscriptParagraphProps {
   paragraph: TranscriptParagraphData;
   index: number;
-  onSave: (index: number, newText: string) => Promise<void> | void;
+  onSave: (paragraphId: number, newText: string) => Promise<void> | void; // Changed from index to paragraphId
+  onDelete: (paragraph: TranscriptParagraphData) => void;
   activeEditIndex: number | null;
   setActiveEditIndex: Dispatch<SetStateAction<number | null>>;
   isSaving: boolean;
@@ -60,6 +62,7 @@ export function TranscriptParagraph({
   paragraph,
   index,
   onSave,
+  onDelete,
   activeEditIndex,
   setActiveEditIndex,
   isSaving,
@@ -71,7 +74,7 @@ export function TranscriptParagraph({
   const containerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
-  const isEditing = activeEditIndex === index;
+  const isEditing = activeEditIndex === paragraph.id; // Use paragraph.id for active check
 
   const paragraphDomId = `paragraph-${paragraph.id}`;
 
@@ -96,17 +99,10 @@ export function TranscriptParagraph({
   // Effect for syncing `editValue` with `paragraph.text` prop changes when NOT editing
   useEffect(() => {
     if (!isEditing) {
-      // If not editing, and the paragraph text prop changes, update local editValue.
-      // Also ensures editValue is reset if isEditing becomes false (e.g., on cancel).
-      // The check `paragraph.text !== editValue` prevents unnecessary re-renders if
-      // `setEditValue` was already called with the same `paragraph.text` (e.g., in handleCancel).
       if (paragraph.text !== editValue) {
         setEditValue(paragraph.text);
       }
     }
-    // If `isEditing` is true, user input controls `editValue`.
-    // Prop changes to `paragraph.text` during an active edit are intentionally ignored
-    // by this effect to preserve the user's current unsaved changes.
   }, [paragraph.text, isEditing, editValue]);
 
   const handleEditClick = () => {
@@ -114,7 +110,7 @@ export function TranscriptParagraph({
       onPlayToggle(paragraph.timestamp, index);
     }
     setEditValue(paragraph.text); // Reset editValue to original text before editing
-    setActiveEditIndex(index); // This will set isEditing to true and trigger the above useEffect
+    setActiveEditIndex(paragraph.id); // Use the stable paragraph ID
   };
 
   const handleCancel = () => {
@@ -128,16 +124,18 @@ export function TranscriptParagraph({
     if (isSaving) return;
     if (trimmedValue !== paragraph.text.trim()) {
       try {
-        await onSave(index, trimmedValue);
-        // setActiveEditIndex(null) is called by onSave success/error in parent or here if needed
+        // --- FIX: Pass paragraph.id instead of the array index ---
+        await onSave(paragraph.id, trimmedValue);
       } catch (error) {
-        console.error(`Error saving paragraph ${index}:`, error);
-        // Optionally handle error display here if not handled by parent
+        console.error(`Error saving paragraph ${paragraph.id}:`, error);
       }
     } else {
-      // If no actual change, just exit edit mode
       setActiveEditIndex(null);
     }
+  };
+
+  const handleDeleteClick = () => {
+    onDelete(paragraph);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -224,7 +222,7 @@ export function TranscriptParagraph({
         )}
       </Box>
 
-      <Flex align="center" className="flex-shrink-0 mt-px pt-px">
+      <Flex align="center" className="flex-shrink-0 mt-px pt-px" gap="1">
         <Tooltip content="Edit paragraph">
           <IconButton
             variant="ghost"
@@ -240,6 +238,23 @@ export function TranscriptParagraph({
             disabled={isEditing}
           >
             <Pencil1Icon />
+          </IconButton>
+        </Tooltip>
+        <Tooltip content="Delete paragraph">
+          <IconButton
+            variant="ghost"
+            color="red"
+            size="1"
+            className={cn(
+              'transition-opacity p-0 h-5 w-5',
+              !isEditing &&
+                'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
+            )}
+            onClick={handleDeleteClick}
+            aria-label="Delete paragraph"
+            disabled={isEditing}
+          >
+            <TrashIcon />
           </IconButton>
         </Tooltip>
       </Flex>
@@ -304,7 +319,7 @@ export function TranscriptParagraph({
                   border: '1px solid var(--gray-a7)',
                 }}
                 onKeyDown={handleKeyDown}
-                aria-label={`Edit paragraph ${index + 1}`}
+                aria-label={`Edit paragraph ${paragraph.id}`}
                 disabled={isSaving}
               />
               <Flex justify="end" gap="2" mt="1">

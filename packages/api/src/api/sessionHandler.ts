@@ -32,6 +32,7 @@ import {
   bulkIndexDocuments,
   indexDocument,
   deleteByQuery,
+  deleteDocument,
 } from '@therascript/elasticsearch-client';
 import config from '../config/index.js';
 
@@ -308,9 +309,13 @@ export const updateTranscriptParagraph = async ({
   try {
     const currentTranscript: StructuredTranscript =
       transcriptRepository.findParagraphsBySessionId(sessionId);
-    if (paragraphIndex < 0 || paragraphIndex >= currentTranscript.length) {
+    if (
+      !currentTranscript.some(
+        (p: TranscriptParagraphData) => p.id === paragraphIndex
+      )
+    ) {
       throw new BadRequestError(
-        `Invalid paragraph index: ${paragraphIndex}. Transcript has ${currentTranscript.length} paragraphs.`
+        `Invalid paragraph index: ${paragraphIndex}. Paragraph not found.`
       );
     }
     const trimmedNewText = newText.trim();
@@ -405,6 +410,83 @@ export const updateTranscriptParagraph = async ({
   }
 };
 
+export const deleteTranscriptParagraph = async ({
+  sessionData,
+  params,
+  set,
+}: any): Promise<StructuredTranscript> => {
+  const sessionId = sessionData.id;
+  const paragraphIndex = parseInt(params.paragraphIndex, 10);
+
+  if (isNaN(paragraphIndex) || paragraphIndex < 0) {
+    throw new BadRequestError(
+      `Invalid paragraph index: ${params.paragraphIndex}.`
+    );
+  }
+
+  if (sessionData.status !== 'completed') {
+    throw new BadRequestError(
+      `Cannot delete transcript paragraph for session ${sessionId}: Status is ${sessionData.status}.`
+    );
+  }
+
+  try {
+    const deleted = transcriptRepository.deleteParagraphByIndex(
+      sessionId,
+      paragraphIndex
+    );
+    if (!deleted) {
+      throw new NotFoundError(
+        `Paragraph with index ${paragraphIndex} not found in session ${sessionId}.`
+      );
+    }
+
+    // After deleting, we need to update token count and ES
+    const updatedTranscript =
+      transcriptRepository.findParagraphsBySessionId(sessionId);
+    const fullTextForTokens = updatedTranscript
+      .map((p: TranscriptParagraphData) => p.text)
+      .join('\n\n');
+    const tokenCount = calculateTokenCount(fullTextForTokens);
+
+    sessionRepository.updateMetadata(sessionId, {
+      transcriptTokenCount: tokenCount,
+    });
+
+    // Delete from Elasticsearch
+    const esDocId = `${sessionId}_${paragraphIndex}`;
+    await deleteDocument(esClient, TRANSCRIPTS_INDEX, esDocId);
+    console.log(
+      `[API ES Delete] Deleted document ${esDocId} from Elasticsearch.`
+    );
+
+    console.log(
+      `[API] Deleted paragraph ${paragraphIndex} for session ${sessionId}. New token count: ${tokenCount ?? 'N/A'}`
+    );
+
+    // Trigger Ollama context reload in the background, don't wait for it
+    reloadActiveModelContext().catch((reloadError) => {
+      console.error(
+        `[API deleteTranscriptParagraph] WARNING: Failed to trigger Ollama model context reload:`,
+        reloadError
+      );
+    });
+
+    set.status = 200;
+    return updatedTranscript;
+  } catch (error) {
+    console.error(
+      `[API Error] deleteTranscriptParagraph (ID: ${sessionId}, Index: ${paragraphIndex}):`,
+      error
+    );
+    if (error instanceof ApiError) throw error;
+    throw new InternalServerError(
+      'Failed to delete transcript paragraph',
+      error instanceof Error ? error : undefined
+    );
+  }
+};
+
 export const finalizeSessionHandler = async ({
   params,
   set,
@@ -420,19 +502,17 @@ export const finalizeSessionHandler = async ({
   if (!currentSessionData)
     throw new NotFoundError(`Session ${sessionId} not found for finalization.`);
 
-  // ==========================================================
-  // CHANGE START: Idempotency and Resiliency Fix
-  // ==========================================================
   if (currentSessionData.status === 'completed') {
     console.log(
       `[API Finalize] Session ${sessionId} is already completed. Returning current data.`
     );
+    const chats = chatRepository.findChatsBySessionId(sessionId);
+    currentSessionData.chats = chats.map(
+      ({ tags, ...rest }) => rest
+    ) as BackendSession['chats'];
     set.status = 200;
     return currentSessionData;
   }
-  // ==========================================================
-  // CHANGE END
-  // ==========================================================
 
   if (currentSessionData.status !== 'transcribing') {
     throw new ConflictError(
@@ -540,24 +620,6 @@ export const finalizeSessionHandler = async ({
     return finalSessionState;
   } catch (error) {
     console.error(`[API Error] Finalize Session ${sessionId}:`, error);
-
-    // ==========================================================
-    // CHANGE START: Remove logic that sets status to 'failed'
-    // ==========================================================
-    // *This entire try/catch block is removed*
-    /*
-    try {
-      sessionRepository.updateMetadata(sessionId, { status: 'failed' });
-    } catch (updateError) {
-      console.error(
-        `[API Finalize] CRITICAL: Failed to mark session ${sessionId} as failed:`,
-        updateError
-      );
-    }
-    */
-    // ==========================================================
-    // CHANGE END
-    // ==========================================================
 
     if (error instanceof ApiError) throw error;
     throw new InternalServerError(

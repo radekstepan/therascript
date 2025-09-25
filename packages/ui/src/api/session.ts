@@ -155,6 +155,25 @@ export const updateTranscriptParagraph = async (
 };
 
 /**
+ * Deletes a specific paragraph from a session's transcript.
+ * Makes a DELETE request to `/api/sessions/{sessionId}/transcript/{paragraphIndex}`.
+ *
+ * @param {number} sessionId - The ID of the session.
+ * @param {number} paragraphIndex - The index of the paragraph to delete.
+ * @returns {Promise<StructuredTranscript>} A promise resolving to the *entire* updated structured transcript after deletion.
+ * @throws {Error} If the API request fails.
+ */
+export const deleteTranscriptParagraph = async (
+  sessionId: number,
+  paragraphIndex: number
+): Promise<StructuredTranscript> => {
+  const response = await axios.delete<StructuredTranscript>(
+    `/api/sessions/${sessionId}/transcript/${paragraphIndex}`
+  );
+  return response.data;
+};
+
+/**
  * Deletes the original uploaded audio file associated with a session.
  * Makes a DELETE request to `/api/sessions/{sessionId}/audio`.
  * Note: This only deletes the file; the session record itself remains unless deleted separately.
