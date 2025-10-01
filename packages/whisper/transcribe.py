@@ -43,6 +43,9 @@ def transcribe_audio(file_path, output_file, model_name):
     should_exit = False 
     last_progress_report_time = time.time() 
 
+    # --- NEW LOG ---
+    print(json.dumps({"status": "info", "message": "transcribe.py script started."}), flush=True)
+
     try:
         output_dir = os.path.dirname(output_file)
         if output_dir: os.makedirs(output_dir, exist_ok=True)
@@ -62,21 +65,23 @@ def transcribe_audio(file_path, output_file, model_name):
         
         if should_exit: return
 
-        print(json.dumps({"status": "model_loading", "message": f"Loading Whisper model: '{model_name}'. This may take time if not cached..."}), flush=True)
-        # Whisper library itself prints download progress for uncached models to stderr.
-        # server.py will capture and log these stderr lines.
+        # --- NEW, MORE DETAILED LOGS AROUND THE CRITICAL SECTION ---
+        print(json.dumps({"status": "model_loading", "message": f"About to call whisper.load_model('{model_name}'). This is the memory-intensive step."}), flush=True)
+        
+        # This is the line that causes the OOM error on cold start
         model = whisper.load_model(model_name)
+        
+        # If this log appears, it means the model loaded successfully
+        print(json.dumps({"status": "loading_complete", "message": f"Model '{model_name}' loaded successfully into memory."}), flush=True)
+        # --- END OF NEW LOGS ---
+
         if should_exit: # Check immediately after potentially long load_model call
             print(json.dumps({"status": "canceled", "message": "Canceled after model load attempt."}), flush=True)
             return
-        print(json.dumps({"status": "loading_complete", "message": f"Model '{model_name}' loaded successfully."}), flush=True)
 
-        print(json.dumps({"status": "started", "message": "Transcription process initiated."}), flush=True)
+        # --- NEW LOG ---
+        print(json.dumps({"status": "transcribing", "message": "Starting actual transcription..."}), flush=True)
         
-        # The verbose=True flag in model.transcribe() causes Whisper to print
-        # its own progress updates (like "[00:00.000 --> 00:05.000] ...") to stderr.
-        # server.py's process_stderr_stream will log these, and process_stdout_stream
-        # will attempt to parse them if they somehow end up on stdout (though less likely for verbose).
         result = model.transcribe(file_path, language="en", verbose=True) 
 
         if should_exit:

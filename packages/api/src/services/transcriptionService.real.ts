@@ -327,7 +327,10 @@ export const getTranscriptionStatus = async (
     // Make GET request to the status endpoint
     const statusResponse = await axios.get<WhisperJobStatus>(
       `${WHISPER_API_URL}/status/${jobId}`,
-      { timeout: 120000 } // CHANGE: Increased timeout to 2 minutes (120,000 ms) to deal with initial model load
+      {
+        // Use a shorter timeout to quickly detect an unresponsive service
+        timeout: 10000, // 10 seconds
+      }
     );
 
     // Basic validation of the response structure
@@ -349,24 +352,34 @@ export const getTranscriptionStatus = async (
   } catch (error: any) {
     console.error(
       `[Real TranscriptionService] Error polling status for job ${jobId}:`,
-      error
+      error.message
     );
     // Handle specific Axios errors
     if (axios.isAxiosError(error)) {
       const axiosError = error as AxiosError;
+      // Gracefully handle timeouts or connection refused errors, which are expected during model loading.
+      if (
+        axiosError.code === 'ECONNABORTED' || // Timeout
+        axiosError.code === 'ETIMEDOUT' || // Timeout
+        axiosError.code === 'ECONNREFUSED' // Service busy/down
+      ) {
+        console.warn(
+          `[Real TranscriptionService] Whisper service for job ${jobId} is unresponsive. Assuming model is loading.`
+        );
+        // Return a synthetic "model_loading" status to the client.
+        return {
+          job_id: jobId,
+          status: 'model_loading',
+          message:
+            'Transcription service is starting up. This may take a few minutes on the first run...',
+          progress: 5, // Show a small amount of progress
+        };
+      }
+
       if (axiosError.response?.status === 404) {
         // Job ID not found on the service
         throw new NotFoundError(
           `Job ID ${jobId} not found on Whisper service.`
-        );
-      }
-      // Handle connection errors
-      if (
-        axiosError.code === 'ECONNREFUSED' ||
-        axiosError.code === 'ENOTFOUND'
-      ) {
-        throw new InternalServerError(
-          `Could not connect to Whisper service at ${WHISPER_API_URL} to check status.`
         );
       }
       // Other network/request errors

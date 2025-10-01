@@ -84,7 +84,6 @@ export function cancelJob(jobId: string): {
   }
 }
 
-// FIX: Rewrite the entire function to be async and properly await stream completion.
 export async function runTranscriptionProcess(
   job_id: string,
   input_path: string,
@@ -129,15 +128,9 @@ export async function runTranscriptionProcess(
             const currentJob = jobs.get(job_id);
             if (!currentJob) continue;
 
-            // ==========================================================
-            // CHANGE START: Prevent premature 'completed' status update
-            // ==========================================================
             if (statusUpdate.status && statusUpdate.status !== 'completed') {
               currentJob.status = statusUpdate.status;
             }
-            // ==========================================================
-            // CHANGE END
-            // ==========================================================
 
             if (statusUpdate.message) currentJob.message = statusUpdate.message;
             if (statusUpdate.progress)
@@ -200,8 +193,11 @@ export async function runTranscriptionProcess(
     streamClosedPromises.push(stderrPromise);
   }
 
-  const exitPromise = new Promise<number | null>((resolve) => {
-    process.on('exit', (code) => resolve(code));
+  const exitPromise = new Promise<{
+    code: number | null;
+    signal: NodeJS.Signals | null;
+  }>((resolve) => {
+    process.on('exit', (code, signal) => resolve({ code, signal }));
     process.on('error', (err) => {
       console.error(
         `[ProcessRunner] Failed to start subprocess for job ${job_id}:`,
@@ -212,22 +208,22 @@ export async function runTranscriptionProcess(
         currentJob.status = 'failed';
         currentJob.error = `Failed to start process: ${err.message}`;
       }
-      resolve(null); // Resolve with null on spawn error
+      resolve({ code: null, signal: null }); // Resolve with nulls on spawn error
     });
   });
 
   // Wait for streams to close *and* for the process to exit.
-  const [exitCode] = await Promise.all([exitPromise, ...streamClosedPromises]);
+  const [{ code: exitCode, signal: exitSignal }] = await Promise.all([
+    exitPromise,
+    ...streamClosedPromises,
+  ]);
 
   console.log(
-    `[ProcessRunner] Job ${job_id}: All streams closed. Process exited with code ${exitCode}.`
+    `[ProcessRunner] Job ${job_id}: All streams closed. Process exited with code ${exitCode} and signal ${exitSignal}.`
   );
   const finalJobState = jobs.get(job_id);
   if (!finalJobState) return;
 
-  // ==========================================================
-  // CHANGE START: Update final job state logic
-  // ==========================================================
   if (exitCode === 0) {
     try {
       if (existsSync(output_path)) {
@@ -243,16 +239,19 @@ export async function runTranscriptionProcess(
       finalJobState.status = 'failed';
       finalJobState.error = `Failed to read or parse result file: ${err.message}`;
     }
+  } else if (exitSignal) {
+    finalJobState.status = 'failed';
+    finalJobState.error = `Process was terminated by signal: ${exitSignal}. This is often caused by an Out-Of-Memory (OOM) error. Please try increasing the RAM available to Docker.`;
+    console.error(
+      `[ProcessRunner] Job ${job_id} failed due to signal ${exitSignal}.`
+    );
   } else if (
     finalJobState.status !== 'canceled' &&
     finalJobState.status !== 'failed'
   ) {
     finalJobState.status = 'failed';
-    finalJobState.error = `Process exited with code: ${exitCode ?? 'unknown'}. The final status was '${finalJobState.status}'.`;
+    finalJobState.error = `Process exited unexpectedly with code: ${exitCode ?? 'unknown'}. The final status was '${finalJobState.status}'. Check container logs for details.`;
   }
-  // ==========================================================
-  // CHANGE END
-  // ==========================================================
 
   finalJobState.end_time = Date.now();
   processes.delete(job_id);
