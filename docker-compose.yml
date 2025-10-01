@@ -14,7 +14,8 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
-      - ./packages/whisper/.cache:/root/.cache
+      # MODIFIED: Use a named volume for persisting downloaded models
+      - whisper_models:/root/.cache/whisper
     deploy:
       resources:
         reservations:
@@ -73,4 +74,6 @@ services:
 
 volumes:
   es_data: # Volume for Elasticsearch data persistence
+    driver: local
+  whisper_models:
     driver: local
