@@ -20,9 +20,9 @@ const AnalysisJobSchema = t.Object({
   completed_at: t.Union([t.Number(), t.Null()]),
   model_name: t.Union([t.String(), t.Null()]),
   context_size: t.Union([t.Number(), t.Null()]),
+  strategy_json: t.Union([t.String(), t.Null()]), // Raw JSON from DB
 });
 
-// NEW Schema for Intermediate Summary
 const IntermediateSummarySchema = t.Object({
   id: t.Number(),
   analysis_job_id: t.Number(),
@@ -33,11 +33,17 @@ const IntermediateSummarySchema = t.Object({
   sessionName: t.String(),
 });
 
-// NEW Schema for enriched job details
+// Parsed strategy for the UI
+const AnalysisStrategySchema = t.Object({
+  intermediate_question: t.String(),
+  final_synthesis_instructions: t.String(),
+});
+
 const AnalysisJobWithDetailsSchema = t.Intersect([
   AnalysisJobSchema,
   t.Object({
     summaries: t.Array(IntermediateSummarySchema),
+    strategy: t.Union([AnalysisStrategySchema, t.Null()]), // Parsed object
   }),
 ]);
 
@@ -52,6 +58,7 @@ const CreateAnalysisJobBodySchema = t.Object({
   }),
   modelName: t.Optional(t.String()),
   contextSize: t.Optional(t.Number({ minimum: 1 })),
+  useAdvancedStrategy: t.Optional(t.Boolean()), // <-- THE FIX IS HERE
 });
 
 const JobIdParamSchema = t.Object({

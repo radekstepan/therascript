@@ -32,6 +32,8 @@ import {
   ChevronDownIcon,
   FileTextIcon,
   ChevronRightIcon,
+  InfoCircledIcon,
+  CalendarIcon,
 } from '@radix-ui/react-icons';
 import ReactMarkdown from 'react-markdown';
 import {
@@ -45,7 +47,7 @@ import type {
   AnalysisJobSortCriteria,
   IntermediateSummaryWithSessionName,
 } from '../../types';
-import { formatTimestamp } from '../../helpers';
+import { formatTimestamp, formatIsoDateToYMD } from '../../helpers';
 import {
   toastMessageAtom,
   analysisJobSortCriteriaAtom,
@@ -88,53 +90,70 @@ const IntermediateSummaryItem: React.FC<{
   const isProcessing = summary.status === 'processing';
 
   return (
-    <Card size="2">
-      <Flex direction="column" gap="2">
-        <Flex justify="between" align="center">
-          <Flex align="center" gap="2" style={{ minWidth: 0 }}>
-            <FileTextIcon className="text-[--gray-a10]" />
-            <Text weight="medium" truncate title={summary.sessionName}>
-              {summary.sessionName}
-            </Text>
+    <Card size="2" style={{ width: '100%' }}>
+      <Flex direction="column" gap="2" height="100%">
+        <Flex justify="between" align="start">
+          <Flex direction="column" gap="1" style={{ minWidth: 0 }}>
+            <Flex align="center" gap="2">
+              <FileTextIcon className="text-[--gray-a10] flex-shrink-0" />
+              <Text weight="medium" truncate title={summary.sessionName}>
+                {summary.sessionName}
+              </Text>
+            </Flex>
+            <Flex align="center" gap="1" pl="1">
+              <CalendarIcon className="text-[--gray-a9]" />
+              <Text size="1" color="gray">
+                {formatIsoDateToYMD(summary.sessionDate)}
+              </Text>
+            </Flex>
           </Flex>
-          <Badge color={getStatusBadgeColor(summary.status)} variant="soft">
+          <Badge
+            color={getStatusBadgeColor(summary.status)}
+            variant="soft"
+            style={{ flexShrink: 0 }}
+          >
             {isProcessing && <Spinner size="1" />}
             <Text ml={isProcessing ? '1' : '0'}>{summary.status}</Text>
           </Badge>
         </Flex>
 
-        {(isSuccess || isFailed) && (
-          <Button
-            variant="soft"
-            size="1"
-            color="gray"
-            onClick={() => setIsOpen(!isOpen)}
-            style={{ width: 'fit-content' }}
-          >
-            {isOpen ? 'Hide' : 'Show'} {isSuccess ? 'Summary' : 'Error'}
-            <ChevronRightIcon
-              className="transition-transform"
-              style={{ transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}
-            />
-          </Button>
-        )}
+        <Box mt="auto">
+          {(isSuccess || isFailed) && (
+            <Button
+              variant="soft"
+              size="1"
+              color="gray"
+              onClick={() => setIsOpen(!isOpen)}
+              style={{ width: 'fit-content' }}
+            >
+              {isOpen ? 'Hide' : 'Show'} {isSuccess ? 'Analysis' : 'Error'}
+              <ChevronRightIcon
+                className="transition-transform"
+                style={{
+                  transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)',
+                }}
+              />
+            </Button>
+          )}
+        </Box>
 
         {isOpen && isSuccess && summary.summary_text && (
           <Box
             p="2"
+            mt="2"
             style={{
-              backgroundColor: 'var(--gray-a2)',
+              backgroundColor: 'var(--gray-a3)',
               borderRadius: 'var(--radius-3)',
             }}
           >
-            <Text as="p" size="2" style={{ whiteSpace: 'pre-wrap' }}>
-              {summary.summary_text}
-            </Text>
+            <div className="markdown-ai-message">
+              <ReactMarkdown>{summary.summary_text}</ReactMarkdown>
+            </div>
           </Box>
         )}
 
         {isOpen && isFailed && summary.error_message && (
-          <Callout.Root color="red" size="1">
+          <Callout.Root color="red" size="1" mt="2">
             <Callout.Icon>
               <ExclamationTriangleIcon />
             </Callout.Icon>
@@ -228,14 +247,10 @@ const JobDetailView: React.FC<{
               ? 100
               : 0;
 
-  const completedSummaries = job.summaries
-    ? job.summaries.filter((s) => s.status === 'completed').length
-    : 0;
-  const totalSummaries = job.summaries ? job.summaries.length : 0;
-
   return (
     <Card>
-      <Flex direction="column" gap="4">
+      <Flex direction="column" gap="5">
+        {/* === HEADER === */}
         <Flex justify="between" align="center">
           <Heading as="h2" size="6">
             Analysis #{job.id}
@@ -265,8 +280,9 @@ const JobDetailView: React.FC<{
           </Flex>
         </Flex>
 
+        {/* === METADATA & PROGRESS === */}
         <Flex direction="column" gap="4">
-          <Grid columns={{ initial: '1', sm: '2' }} gap="4">
+          <Flex gap="6" wrap="wrap">
             <Box>
               <Text as="div" size="2" color="gray" mb="1">
                 Status
@@ -276,50 +292,89 @@ const JobDetailView: React.FC<{
                 size="2"
                 variant="soft"
               >
-                {isFetching &&
-                job.status !== 'completed' &&
-                job.status !== 'failed' ? (
-                  <Spinner size="1" />
-                ) : null}
-                <Text ml={isFetching ? '1' : '0'}>{job.status}</Text>
+                {isFetching && !isDeletable ? <Spinner size="1" /> : null}
+                <Text ml={isFetching && !isDeletable ? '1' : '0'}>
+                  {job.status}
+                </Text>
               </Badge>
             </Box>
+            <Box>
+              <Text as="div" size="2" color="gray" mb="1">
+                Model
+              </Text>
+              <Text>{job.model_name || 'Default'}</Text>
+            </Box>
+            <Box>
+              <Text as="div" size="2" color="gray" mb="1">
+                Created
+              </Text>
+              <Text>{formatTimestamp(job.created_at)}</Text>
+            </Box>
+          </Flex>
 
-            {isProcessing && (
-              <Box>
-                <Text as="div" size="2" color="gray" mb="1">
-                  Progress
-                </Text>
-                <Progress value={overallProgress} size="2" />
-                <Text as="p" size="1" color="gray" mt="1">
-                  The job is currently processing. This page will update
-                  automatically.
-                </Text>
-              </Box>
-            )}
-          </Grid>
-
-          <Box>
-            <Text as="div" size="2" color="gray" mb="1">
-              Original Prompt
-            </Text>
-            <Text
-              as="p"
-              size="3"
-              style={{ fontStyle: 'italic', whiteSpace: 'pre-wrap' }}
-            >
-              "{job.original_prompt}"
-            </Text>
-          </Box>
+          {isProcessing && (
+            <Box>
+              <Text as="div" size="2" color="gray" mb="1">
+                Progress
+              </Text>
+              <Progress value={overallProgress} size="2" />
+            </Box>
+          )}
         </Flex>
 
+        {/* === ORIGINAL PROMPT === */}
+        <Box>
+          <Heading as="h3" size="4" mb="2">
+            Original Prompt
+          </Heading>
+          <Box
+            p="3"
+            style={{
+              backgroundColor: 'var(--accent-a3)',
+              borderRadius: 'var(--radius-3)',
+            }}
+          >
+            <Text
+              as="p"
+              size="2"
+              style={{
+                fontStyle: 'italic',
+                whiteSpace: 'pre-wrap',
+                color: 'var(--accent-a11)',
+              }}
+            >
+              {job.original_prompt}
+            </Text>
+          </Box>
+        </Box>
+
+        {/* === INTERMEDIATE TASK === */}
+        {job.strategy && (
+          <Box>
+            <Heading as="h3" size="4" mb="2">
+              Intermediate Task
+            </Heading>
+            <Box
+              p="3"
+              style={{
+                backgroundColor: 'var(--gray-a3)',
+                borderRadius: 'var(--radius-3)',
+              }}
+            >
+              <Text as="p" size="2" style={{ whiteSpace: 'pre-wrap' }}>
+                {job.strategy.intermediate_question}
+              </Text>
+            </Box>
+          </Box>
+        )}
+
+        {/* === INTERMEDIATE ANALYSIS === */}
         {job.summaries && job.summaries.length > 0 && (
           <Box>
-            <Text as="div" size="2" color="gray" mb="2" weight="medium">
-              Intermediate Summaries ({completedSummaries} / {totalSummaries}{' '}
-              complete)
-            </Text>
-            <Grid columns={{ initial: '1', sm: '2' }} gap="3">
+            <Heading as="h3" size="4" mb="3">
+              Intermediate Analysis
+            </Heading>
+            <Grid columns="1" gap="3">
               {job.summaries
                 .sort((a, b) => a.sessionName.localeCompare(b.sessionName))
                 .map((summary) => (
@@ -329,11 +384,12 @@ const JobDetailView: React.FC<{
           </Box>
         )}
 
+        {/* === ERROR DETAILS === */}
         {job.status === 'failed' && (
           <Box>
-            <Text as="div" size="2" color="red" mb="1" weight="bold">
+            <Heading as="h3" size="4" mb="2" color="red">
               Error Details
-            </Text>
+            </Heading>
             <Callout.Root color="red" role="alert">
               <Callout.Icon>
                 <ExclamationTriangleIcon />
@@ -345,15 +401,16 @@ const JobDetailView: React.FC<{
           </Box>
         )}
 
+        {/* === FINAL ANSWER === */}
         {job.status === 'completed' && (
           <Box>
-            <Text as="div" size="2" color="green" mb="1" weight="bold">
+            <Heading as="h3" size="4" mb="2" color="green">
               Final Synthesized Answer
-            </Text>
+            </Heading>
             <Box
               p="4"
               style={{
-                backgroundColor: 'var(--gray-a2)',
+                backgroundColor: 'var(--gray-a3)',
                 borderRadius: 'var(--radius-3)',
               }}
             >

@@ -1,6 +1,4 @@
-// =========================================
-// File: packages/api/src/types/index.ts
-// =========================================
+// packages/api/src/types/index.ts
 
 export interface Template {
   id: number;
@@ -12,7 +10,7 @@ export interface Template {
 export interface BackendChatMessage {
   id: number;
   chatId: number;
-  sender: 'user' | 'ai';
+  sender: 'user' | 'ai' | 'system';
   text: string;
   timestamp: number; // UNIX Milliseconds
   promptTokens?: number | null;
@@ -199,7 +197,7 @@ export interface ApiSearchResultItem {
   type: 'chat' | 'transcript';
   chatId: number | null;
   sessionId: number | null;
-  sender: 'user' | 'ai' | null;
+  sender: 'user' | 'ai' | 'system' | null;
   timestamp: number;
   snippet: string;
   score?: number;
@@ -216,6 +214,11 @@ export interface ApiSearchResponse {
 }
 
 // --- NEW ANALYSIS JOB TYPES ---
+
+export interface AnalysisStrategy {
+  intermediate_question: string;
+  final_synthesis_instructions: string;
+}
 
 export interface AnalysisJob {
   id: number;
@@ -235,6 +238,7 @@ export interface AnalysisJob {
   completed_at: number | null; // UNIX Milliseconds
   model_name: string | null;
   context_size: number | null;
+  strategy_json: string | null; // Stored as a JSON string
 }
 
 export interface IntermediateSummary {
@@ -249,10 +253,12 @@ export interface IntermediateSummary {
 export interface IntermediateSummaryWithSessionName
   extends IntermediateSummary {
   sessionName: string;
+  sessionDate: string;
 }
 
 export interface AnalysisJobWithDetails extends AnalysisJob {
   summaries: IntermediateSummaryWithSessionName[];
+  strategy: AnalysisStrategy | null; // Parsed for the UI
 }
 
 // --- END NEW ANALYSIS JOB TYPES ---

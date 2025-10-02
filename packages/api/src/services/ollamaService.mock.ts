@@ -1,3 +1,4 @@
+// packages/api/src/services/ollamaService.mock.ts
 import type { ChatResponse, ListResponse, ProgressResponse } from 'ollama'; // Keep ChatResponse
 // --- Use imported types from central location ---
 import type {
@@ -152,12 +153,14 @@ export const streamChatResponse = async (
     options?.contextSize !== undefined
       ? options.contextSize
       : getConfiguredContextSize();
-  const isStandalone = contextTranscript === null;
-  console.log(
-    `[Mock Ollama] Starting STREAM chat (${isStandalone ? 'standalone' : 'session'}) with model: ${modelToUse}, Context: ${contextSize ?? 'default'}`
-  );
+  const hasSystemPrompt = chatHistory.some((msg) => msg.sender === 'system');
   const lastUserMessage =
-    chatHistory[chatHistory.length - 1]?.text || 'No message found';
+    chatHistory.find((msg) => msg.sender === 'user')?.text ||
+    'No user message found';
+
+  console.log(
+    `[Mock Ollama] Starting STREAM chat (System Prompt Provided: ${hasSystemPrompt}) with model: ${modelToUse}, Context: ${contextSize ?? 'default'}`
+  );
 
   const mockResponseText = `This is a mocked streaming response to: "${lastUserMessage.substring(0, 50)}${lastUserMessage.length > 50 ? '...' : ''}". The mock model (${modelToUse}) processed this.`;
   const words = mockResponseText.split(' ');

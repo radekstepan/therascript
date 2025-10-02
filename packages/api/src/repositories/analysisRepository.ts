@@ -6,8 +6,8 @@ import type { AnalysisJob, IntermediateSummary } from '../types/index.js';
 
 // Analysis Jobs
 const insertJobSql = `
-    INSERT INTO analysis_jobs (original_prompt, short_prompt, status, created_at, model_name, context_size) 
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO analysis_jobs (original_prompt, short_prompt, status, created_at, model_name, context_size, strategy_json) 
+    VALUES (?, ?, ?, ?, ?, ?, ?)
 `;
 const selectJobByIdSql = 'SELECT * FROM analysis_jobs WHERE id = ?';
 const selectAllJobsSql = 'SELECT * FROM analysis_jobs ORDER BY created_at DESC';
@@ -56,7 +56,8 @@ export const analysisRepository = {
     shortPrompt: string,
     sessionIds: number[],
     modelName: string | null,
-    contextSize: number | null
+    contextSize: number | null,
+    strategyJson: string | null
   ): AnalysisJob => {
     try {
       const createdAt = Date.now();
@@ -69,7 +70,8 @@ export const analysisRepository = {
           'pending',
           createdAt,
           modelName,
-          contextSize
+          contextSize,
+          strategyJson
         );
         const jobId = jobInfo.lastInsertRowid as number;
 

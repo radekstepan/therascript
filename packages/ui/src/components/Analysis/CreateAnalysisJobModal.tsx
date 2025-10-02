@@ -18,6 +18,7 @@ import {
   TextField,
   Tooltip,
   Table,
+  Checkbox,
 } from '@radix-ui/themes';
 import {
   InfoCircledIcon,
@@ -157,6 +158,7 @@ export function CreateAnalysisJobModal({
   const [selectedModel, setSelectedModel] = useState<string>('');
   const [contextSizeInput, setContextSizeInput] = useState('');
   const [isTemplatePopoverOpen, setIsTemplatePopoverOpen] = useState(false);
+  const [useAdvancedStrategy, setUseAdvancedStrategy] = useState(false);
 
   const { data: availableModelsData, isLoading: isLoadingModels } = useQuery({
     queryKey: ['availableOllamaModels'],
@@ -213,6 +215,7 @@ export function CreateAnalysisJobModal({
       setPrompt('');
       setValidationError(null);
       setIsTemplatePopoverOpen(false);
+      setUseAdvancedStrategy(true); // Reset to default
       const timer = setTimeout(() => {
         textAreaRef.current?.focus();
       }, 100);
@@ -266,6 +269,7 @@ export function CreateAnalysisJobModal({
       prompt,
       modelName: selectedModel,
       contextSize,
+      useAdvancedStrategy,
     });
   };
 
@@ -421,6 +425,21 @@ export function CreateAnalysisJobModal({
                 />
               </Box>
             </Flex>
+            <Text as="label" size="2">
+              <Flex gap="2" align="center">
+                <Checkbox
+                  checked={useAdvancedStrategy}
+                  onCheckedChange={(checked) =>
+                    setUseAdvancedStrategy(checked as boolean)
+                  }
+                  disabled={isMutationPending}
+                />
+                Use Advanced Analysis Strategy
+                <Tooltip content="When checked, the AI will create a dynamic two-step plan to better answer complex questions about trends or patterns. When unchecked, it uses a simpler, faster summarization approach.">
+                  <QuestionMarkCircledIcon className="text-[--gray-a10]" />
+                </Tooltip>
+              </Flex>
+            </Text>
           </Flex>
 
           {(validationError || createJobMutation.isError) && (

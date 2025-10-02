@@ -907,7 +907,7 @@ export const reloadActiveModelContext = async (): Promise<void> => {
   );
 };
 
-// --- MODIFIED: Stream Chat Response to accept options ---
+// --- MODIFIED: Stream Chat Response to accept options and handle system prompts ---
 export const streamChatResponse = async (
   contextTranscript: string | null,
   chatHistory: BackendChatMessage[],
@@ -934,36 +934,61 @@ export const streamChatResponse = async (
     throw new InternalServerError(
       'Internal Error: Cannot stream response without chat history.'
     );
-  if (chatHistory[chatHistory.length - 1].sender !== 'user')
-    throw new InternalServerError(
-      'Internal Error: Malformed chat history for LLM.'
-    );
 
-  const latestUserMessage = chatHistory[chatHistory.length - 1];
-  const previousHistory = chatHistory.slice(0, -1);
+  // --- MODIFICATION START ---
+  const hasSystemPrompt = chatHistory.some((msg) => msg.sender === 'system');
+  const messages: OllamaApiMessage[] = [];
 
-  const messages: OllamaApiMessage[] = [
-    {
+  const mapSenderToRole = (
+    sender: 'user' | 'ai' | 'system'
+  ): 'user' | 'assistant' | 'system' => {
+    if (sender === 'ai') return 'assistant';
+    return sender;
+  };
+
+  if (hasSystemPrompt) {
+    // New behavior for analysis jobs: Trust the provided message array completely
+    chatHistory.forEach((msg) => {
+      messages.push({
+        role: mapSenderToRole(msg.sender),
+        content: msg.text,
+      });
+    });
+  } else {
+    // Original behavior for interactive chat
+    if (chatHistory[chatHistory.length - 1].sender !== 'user') {
+      throw new InternalServerError(
+        'Internal Error: Malformed chat history for LLM.'
+      );
+    }
+    const latestUserMessage = chatHistory[chatHistory.length - 1];
+    const previousHistory = chatHistory.slice(0, -1);
+
+    messages.push({
       role: 'system',
       content: isStandalone ? STANDALONE_SYSTEM_PROMPT : SYSTEM_PROMPT,
-    },
-    ...previousHistory.map(
-      (msg): OllamaApiMessage => ({
-        role: msg.sender === 'ai' ? 'assistant' : 'user',
-        content: msg.text,
-      })
-    ),
-  ];
+    });
 
-  if (!isStandalone) {
-    const transcriptContextMessage: OllamaApiMessage = {
-      role: 'user',
-      content: `CONTEXT TRANSCRIPT:\n"""\n${contextTranscript || 'No transcript available.'}\n"""`,
-    };
-    messages.push(transcriptContextMessage);
+    messages.push(
+      ...previousHistory.map(
+        (msg): OllamaApiMessage => ({
+          role: mapSenderToRole(msg.sender),
+          content: msg.text,
+        })
+      )
+    );
+
+    if (!isStandalone) {
+      const transcriptContextMessage: OllamaApiMessage = {
+        role: 'user',
+        content: `CONTEXT TRANSCRIPT:\n"""\n${contextTranscript || 'No transcript available.'}\n"""`,
+      };
+      messages.push(transcriptContextMessage);
+    }
+
+    messages.push({ role: 'user', content: latestUserMessage.text });
   }
-
-  messages.push({ role: 'user', content: latestUserMessage.text });
+  // --- MODIFICATION END ---
 
   console.log(
     `[Real OllamaService] Streaming response (model: ${modelToUse})...`
