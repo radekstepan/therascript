@@ -10,7 +10,6 @@ import {
   getTranscript,
   updateTranscriptParagraph,
   deleteSessionAudioHandler,
-  finalizeSessionHandler,
   deleteTranscriptParagraph,
 } from '../api/sessionHandler.js';
 import {
@@ -18,10 +17,7 @@ import {
   saveUploadedAudio,
   getAudioAbsolutePath,
 } from '../services/fileService.js';
-import {
-  startTranscriptionJob,
-  getTranscriptionStatus,
-} from '../services/transcriptionService.js';
+import { startTranscriptionJob } from '../services/transcriptionService.js';
 import type { BackendSession } from '../types/index.js';
 import {
   NotFoundError,
@@ -45,9 +41,6 @@ const SessionIdParamSchema = t.Object({
     pattern: '^[0-9]+$',
     error: 'Session ID must be a positive number',
   }),
-});
-const JobIdParamSchema = t.Object({
-  jobId: t.String({ minLength: 1, error: 'Job ID must be provided' }),
 });
 const ParagraphUpdateBodySchema = t.Object({
   paragraphIndex: t.Numeric({
@@ -79,6 +72,7 @@ const SessionMetadataUpdateBodySchema = t.Partial(
     status: t.Optional(
       t.Union([
         t.Literal('pending'),
+        t.Literal('queued'),
         t.Literal('transcribing'),
         t.Literal('completed'),
         t.Literal('failed'),
@@ -141,26 +135,6 @@ const UploadBodySchema = t.Object({
   sessionType: t.String({ minLength: 1, error: 'Session type required.' }),
   therapy: t.String({ minLength: 1, error: 'Therapy type required.' }),
 });
-const TranscriptionStatusResponseSchema = t.Object({
-  job_id: t.String(),
-  // FIX: Added 'started' and 'canceling' to the Elysia schema enum.
-  status: t.Union([
-    t.Literal('queued'),
-    t.Literal('model_loading'),
-    t.Literal('model_downloading'),
-    t.Literal('processing'),
-    t.Literal('transcribing'),
-    t.Literal('completed'),
-    t.Literal('failed'),
-    t.Literal('canceled'),
-    t.Literal('started'),
-    t.Literal('canceling'),
-  ]),
-  progress: t.Optional(t.Number()),
-  error: t.Optional(t.Union([t.String(), t.Null()])),
-  duration: t.Optional(t.Union([t.Number(), t.Null()])),
-  message: t.Optional(t.String()),
-});
 const DeleteResponseSchema = t.Object({ message: t.String() });
 
 const dateToIsoStringForStorage = (dateString: string): string => {
@@ -181,7 +155,6 @@ const parseSize = (sizeStr: string): number => {
 export const sessionRoutes = new Elysia({ prefix: '/api' })
   .model({
     sessionIdParam: SessionIdParamSchema,
-    jobIdParam: JobIdParamSchema,
     paragraphIndexParam: ParagraphIndexParamSchema,
     sessionAndParagraphParams: SessionAndParagraphParamsSchema,
     paragraphUpdateBody: ParagraphUpdateBodySchema,
@@ -190,37 +163,8 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
     sessionMetadataResponse: SessionMetadataResponseSchema,
     sessionWithChatsMetadataResponse: SessionWithChatsMetadataResponseSchema,
     transcriptResponse: TranscriptResponseSchema,
-    transcriptionStatusResponse: TranscriptionStatusResponseSchema,
     deleteResponse: DeleteResponseSchema,
   })
-  .group('/transcription', { detail: { tags: ['Transcription'] } }, (app) =>
-    app.get(
-      '/status/:jobId',
-      async ({ params }) => {
-        const { jobId } = params;
-        try {
-          const statusData = await getTranscriptionStatus(jobId);
-          return statusData;
-        } catch (err) {
-          console.error(`[API Err] Tx Status ${jobId}:`, err);
-          if (err instanceof ApiError) throw err;
-          throw new InternalServerError(
-            'Failed get tx status',
-            err instanceof Error ? err : undefined
-          );
-        }
-      },
-      {
-        params: 'jobIdParam',
-        response: {
-          200: 'transcriptionStatusResponse',
-          404: t.Any(),
-          500: t.Any(),
-        },
-        detail: { summary: 'Get transcription job status' },
-      }
-    )
-  )
   .group('/sessions', { detail: { tags: ['Session'] } }, (app) =>
     app
       .get('/', listSessions, {
@@ -235,9 +179,7 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
             date: dateInput,
             ...metadata
           } = body as Static<typeof UploadBodySchema>;
-          let savedAudioId: string | null = null;
           let newSess: BackendSession | null = null;
-          let tempAudioPath: string | null = null;
           try {
             const isoDate = dateToIsoStringForStorage(dateInput);
             newSess = sessionRepository.create(
@@ -247,40 +189,26 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
               new Date().toISOString()
             );
             if (!newSess)
-              throw new InternalServerError(
-                'Failed create initial session in DB.'
-              );
+              throw new InternalServerError('Failed to create session in DB.');
 
-            const sid = newSess.id;
             const buffer = await audioFile.arrayBuffer();
-            savedAudioId = await saveUploadedAudio(
-              sid,
+            const savedAudioId = await saveUploadedAudio(
+              newSess.id,
               audioFile.name,
               Buffer.from(buffer)
             );
 
-            sessionRepository.updateMetadata(sid, { audioPath: savedAudioId });
-            tempAudioPath = getAudioAbsolutePath(savedAudioId);
-            if (!tempAudioPath)
-              throw new InternalServerError(
-                'Could not resolve absolute audio path after saving.'
-              );
-
-            const jobId = await startTranscriptionJob(tempAudioPath);
-            const finalSess = sessionRepository.updateMetadata(sid, {
-              status: 'transcribing',
-              whisperJobId: jobId,
+            sessionRepository.updateMetadata(newSess.id, {
+              audioPath: savedAudioId,
+              status: 'queued',
             });
-            if (!finalSess)
-              throw new InternalServerError(
-                'Failed update session status/jobId after starting transcription.'
-              );
+
+            await startTranscriptionJob(newSess.id);
 
             set.status = 202;
             return {
-              sessionId: finalSess.id,
-              jobId,
-              message: 'Upload successful, transcription started.',
+              sessionId: newSess.id,
+              message: 'Upload successful, transcription queued.',
             };
           } catch (err) {
             const origErr = err instanceof Error ? err : new Error(String(err));
@@ -293,12 +221,12 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
               try {
                 const current = sessionRepository.findById(newSess.id);
                 if (current) {
-                  if (savedAudioId) {
+                  if (current.audioPath) {
                     try {
-                      await deleteUploadedAudioFile(savedAudioId);
+                      await deleteUploadedAudioFile(current.audioPath);
                     } catch (delErr) {
                       console.error(
-                        `Cleanup audio err for ${savedAudioId}:`,
+                        `Cleanup audio err for ${current.audioPath}:`,
                         delErr
                       );
                     }
@@ -338,7 +266,6 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
           response: {
             202: t.Object({
               sessionId: t.Number(),
-              jobId: t.String(),
               message: t.String(),
             }),
             400: t.Any(),
@@ -423,8 +350,8 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
                   mimeTypes[ext] || 'application/octet-stream';
                 if (range) {
                   const parts = range.replace(/bytes=/, '').split('-');
-                  const start = parseInt(parts[0], 10);
-                  const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+                  const start = parseInt(parts, 10);
+                  const end = parts ? parseInt(parts, 10) : fileSize - 1;
                   const chunksize = end - start + 1;
                   if (start >= fileSize || end >= fileSize || start > end) {
                     set.status = 416;
@@ -469,20 +396,6 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
                 500: t.Any(),
               },
               detail: { summary: 'Stream the original session audio file' },
-            }
-          )
-          .post(
-            '/:sessionId/finalize',
-            async (context) => finalizeSessionHandler(context),
-            {
-              response: {
-                200: 'sessionWithChatsMetadataResponse',
-                409: t.Any(),
-                500: t.Any(),
-              },
-              detail: {
-                summary: 'Finalize session after successful transcription',
-              },
             }
           )
           .delete(

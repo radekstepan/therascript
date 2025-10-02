@@ -9,7 +9,8 @@ const execPromise = util.promisify(exec);
 // Docker Container Names (must match your docker-compose files)
 const OLLAMA_CONTAINER_NAME = 'ollama_server_managed';
 const WHISPER_CONTAINER_NAME = 'therascript_whisper_service';
-const ELASTICSEARCH_CONTAINER_NAME = 'therascript_elasticsearch_service'; // Added
+const ELASTICSEARCH_CONTAINER_NAME = 'therascript_elasticsearch_service';
+const REDIS_CONTAINER_NAME = 'therascript_redis_service';
 
 // --- UI Port for Cleanup ---
 // Read CORS_ORIGIN from environment. If not set, default (less ideal but provides a fallback).
@@ -87,7 +88,8 @@ async function cleanupDocker() {
   await Promise.allSettled([
     stopAndRemoveContainer(OLLAMA_CONTAINER_NAME),
     stopAndRemoveContainer(WHISPER_CONTAINER_NAME),
-    stopAndRemoveContainer(ELASTICSEARCH_CONTAINER_NAME), // Added
+    stopAndRemoveContainer(ELASTICSEARCH_CONTAINER_NAME),
+    stopAndRemoveContainer(REDIS_CONTAINER_NAME),
   ]);
   console.log('[RunProd Cleanup] Docker cleanup process finished.');
 }
@@ -145,51 +147,75 @@ const concurrentlyArgs = [
   'concurrently',
   '--kill-others-on-fail',
   '--names',
-  'API,UI,WHISPER,ES', // Added ES
+  'API,UI,WORKER,WHISPER,ES',
   '--prefix-colors',
-  'bgGreen.bold,bgMagenta.bold,bgCyan.bold,bgYellow.bold', // Added color for ES
+  'bgGreen.bold,bgMagenta.bold,bgYellow.bold,bgCyan.bold,bgBlue.bold',
   '"yarn start:api:prod"',
   '"yarn dev:ui"', // Typically for prod you'd serve static UI assets, but dev:ui is fine for this setup
+  '"yarn start:worker"',
   '"yarn start:whisper"',
-  '"yarn start:elasticsearch-manager"', // Added Elasticsearch manager
+  '"yarn start:elasticsearch-manager"',
 ];
 
-const appProcess = spawn(concurrentlyArgs[0], concurrentlyArgs.slice(1), {
-  stdio: 'inherit',
-  shell: true,
-  detached: process.platform !== 'win32',
-});
-
-appProcess.on('spawn', () => {
-  console.log(
-    '[RunProd] Concurrently process for production-like start spawned successfully.'
-  );
-});
-
-appProcess.on('error', (error) => {
-  console.error('[RunProd] Error spawning concurrently:', error);
-  cleanupDocker()
-    .then(() => cleanupUiProcess(UI_PORT))
-    .finally(() => process.exit(1));
-});
-
+let appProcess;
 let isShuttingDown = false;
 
-appProcess.on('close', (code, signal) => {
-  console.log(
-    `[RunProd] Concurrently process exited with code ${code}, signal ${signal}.`
-  );
-  if (!isShuttingDown) {
-    console.log(
-      '[RunProd] Concurrently closed unexpectedly, running cleanup...'
+async function main() {
+  console.log('[RunProd] Ensuring Redis service is running...');
+  try {
+    await execPromise('docker compose up -d --wait redis');
+    console.log('[RunProd] ✅ Redis service is up and healthy.');
+  } catch (error) {
+    console.error(
+      '[RunProd] ❌ Failed to start Redis container. Aborting.',
+      error
     );
+    process.exit(1);
+  }
+
+  appProcess = spawn(concurrentlyArgs[0], concurrentlyArgs.slice(1), {
+    stdio: 'inherit',
+    shell: true,
+    detached: process.platform !== 'win32',
+  });
+
+  appProcess.on('spawn', () => {
+    console.log(
+      '[RunProd] Concurrently process for production-like start spawned successfully.'
+    );
+  });
+
+  appProcess.on('error', (error) => {
+    console.error('[RunProd] Error spawning concurrently:', error);
     cleanupDocker()
       .then(() => cleanupUiProcess(UI_PORT))
-      .finally(() => {
-        process.exit(code ?? 1);
-      });
+      .finally(() => process.exit(1));
+  });
+
+  appProcess.on('close', (code, signal) => {
+    console.log(
+      `[RunProd] Concurrently process exited with code ${code}, signal ${signal}.`
+    );
+    if (!isShuttingDown) {
+      console.log(
+        '[RunProd] Concurrently closed unexpectedly, running cleanup...'
+      );
+      cleanupDocker()
+        .then(() => cleanupUiProcess(UI_PORT))
+        .finally(() => {
+          process.exit(code ?? 1);
+        });
+    }
+  });
+
+  if (appProcess && !appProcess.killed) {
+    shutdownHttpServer = createShutdownService(handleShutdown);
+  } else {
+    console.warn(
+      '[RunProd] Concurrently process failed to start or exited prematurely. Shutdown service not started.'
+    );
   }
-});
+}
 
 async function handleShutdown(reason) {
   if (isShuttingDown) return;
@@ -292,10 +318,7 @@ function createShutdownService(shutdownHandlerCallback) {
   return server;
 }
 
-if (appProcess && !appProcess.killed) {
-  shutdownHttpServer = createShutdownService(handleShutdown);
-} else {
-  console.warn(
-    '[RunProd] Concurrently process failed to start or exited prematurely. Shutdown service not started.'
-  );
-}
+main().catch((err) => {
+  console.error('[RunProd] A critical error occurred in main():', err);
+  process.exit(1);
+});

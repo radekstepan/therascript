@@ -24,6 +24,7 @@ import {
   deleteByQuery,
 } from '@therascript/elasticsearch-client';
 import config from '../config/index.js';
+import { cleanLlmOutput } from '../utils/helpers.js';
 
 const esClient = getElasticsearchClient(config.elasticsearch.url);
 
@@ -217,10 +218,11 @@ export const addSessionChatMessage = async ({
         );
         if (fullAiText.trim()) {
           try {
+            const cleanedAiText = cleanLlmOutput(fullAiText);
             const aiMessage = messageRepository.addMessage(
               chatData.id,
               'ai',
-              fullAiText.trim(),
+              cleanedAiText,
               finalPromptTokens,
               finalCompletionTokens
             );
@@ -248,7 +250,7 @@ export const addSessionChatMessage = async ({
               `[API ES] Indexed AI message ${aiMessage.id} for session chat ${chatData.id}.`
             );
             console.log(
-              `[API ProcessStream Finally ${chatData.id}] Saved AI message (length: ${fullAiText.trim().length}) to DB.`
+              `[API ProcessStream Finally ${chatData.id}] Saved AI message (length: ${cleanedAiText.length}) to DB.`
             );
           } catch (dbError) {
             console.error(

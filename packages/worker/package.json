@@ -1,0 +1,30 @@
+{
+  "name": "@therascript/worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Background job processor for Therascript",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "concurrently --kill-others-on-fail \"tsc --watch --preserveWatchOutput\" \"nodemon\"",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@therascript/api": "*",
+    "@therascript/db": "*",
+    "@therascript/elasticsearch-client": "*",
+    "axios": "^1.8.4",
+    "bullmq": "^5.10.3",
+    "form-data": "^4.0.0",
+    "ioredis": "^5.4.1",
+    "ollama": "^0.5.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.2",
+    "concurrently": "^8.2.2",
+    "nodemon": "^3.1.4",
+    "typescript": "^5.5.4"
+  }
+}

@@ -157,7 +157,7 @@ export const sessionRepository = {
       BackendSessionMetadata & {
         fileName?: string;
         audioPath?: string | null;
-        status?: 'pending' | 'transcribing' | 'completed' | 'failed';
+        status?: 'pending' | 'queued' | 'transcribing' | 'completed' | 'failed';
         whisperJobId?: string | null;
         date?: string;
         transcriptTokenCount?: number | null;
