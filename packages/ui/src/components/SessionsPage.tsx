@@ -12,9 +12,10 @@ import {
   AlertDialog,
   Button,
 } from '@radix-ui/themes';
-import { TrashIcon } from '@radix-ui/react-icons';
+import { TrashIcon, BarChartIcon } from '@radix-ui/react-icons'; // <-- ADD BarChartIcon
 import { SessionListTable } from './LandingPage/SessionListTable';
 import { EditDetailsModal } from './SessionView/Modals/EditDetailsModal';
+import { CreateAnalysisJobModal } from './Analysis/CreateAnalysisJobModal'; // <-- IMPORT a new modal
 import { fetchSessions, deleteSession as deleteSessionApi } from '../api/api';
 import {
   sessionSortCriteriaAtom,
@@ -39,6 +40,13 @@ export function SessionsPage() {
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null);
 
+  // --- NEW STATE for session selection and analysis modal ---
+  const [selectedSessionIds, setSelectedSessionIds] = useState<Set<number>>(
+    new Set()
+  );
+  const [isAnalysisModalOpen, setIsAnalysisModalOpen] = useState(false);
+  // --- END NEW STATE ---
+
   const {
     data: sessions,
     isLoading,
@@ -55,6 +63,12 @@ export function SessionsPage() {
       onSuccess: (data, deletedId) => {
         setToast(data.message || `Session ${deletedId} deleted`);
         queryClient.invalidateQueries({ queryKey: ['sessions'] });
+        // Deselect if it was selected
+        setSelectedSessionIds((prev) => {
+          const newSet = new Set(prev);
+          newSet.delete(deletedId);
+          return newSet;
+        });
       },
       onError: (e, deletedId) => {
         setToast(`Error deleting session ${deletedId}: ${e.message}`);
@@ -195,6 +209,16 @@ export function SessionsPage() {
           >
             All Sessions
           </Heading>
+          {/* --- NEW "Analyze" BUTTON --- */}
+          <Button
+            variant="solid"
+            size="2"
+            onClick={() => setIsAnalysisModalOpen(true)}
+            disabled={selectedSessionIds.size === 0}
+          >
+            <BarChartIcon />
+            Analyze Selected ({selectedSessionIds.size})
+          </Button>
         </Flex>
 
         {sortedSessions && sortedSessions.length > 0 ? (
@@ -213,6 +237,8 @@ export function SessionsPage() {
                 onSort={(criteria) => setSort(criteria)}
                 onEditSession={handleEditSession}
                 onDeleteSessionRequest={handleDeleteSessionRequest}
+                selectedIds={selectedSessionIds}
+                onSelectionChange={setSelectedSessionIds}
               />
             </Box>
           </Card>
@@ -236,6 +262,13 @@ export function SessionsPage() {
         }}
         session={sessionToEdit}
         onSaveSuccess={handleEditSaveSuccess}
+      />
+
+      {/* --- RENDER THE NEW MODAL --- */}
+      <CreateAnalysisJobModal
+        isOpen={isAnalysisModalOpen}
+        onOpenChange={setIsAnalysisModalOpen}
+        sessionIds={Array.from(selectedSessionIds)}
       />
 
       <AlertDialog.Root

@@ -6,6 +6,7 @@ import {
   CounterClockwiseClockIcon,
   TrashIcon,
   ChatBubbleIcon,
+  BarChartIcon, // <-- ADDED
 } from '@radix-ui/react-icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { SessionListTable } from './SessionListTable';
@@ -24,6 +25,7 @@ import {
 } from '@radix-ui/themes';
 import { EditDetailsModal } from '../SessionView/Modals/EditDetailsModal';
 import { EditStandaloneChatModal } from '../StandaloneChatView/EditStandaloneChatModal';
+import { CreateAnalysisJobModal } from '../Analysis/CreateAnalysisJobModal'; // <-- ADDED
 import {
   fetchSessions,
   deleteSession as deleteSessionApi,
@@ -71,6 +73,12 @@ export function LandingPage() {
   const [isDeleteSessionConfirmOpen, setIsDeleteSessionConfirmOpen] =
     useState(false);
   const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null);
+  // --- FIX: ADDED STATE FOR LANDING PAGE SELECTION ---
+  const [selectedSessionIds, setSelectedSessionIds] = useState<Set<number>>(
+    new Set()
+  );
+  const [isAnalysisModalOpen, setIsAnalysisModalOpen] = useState(false);
+  // --- END FIX ---
 
   // Standalone Chat states
   const currentStandaloneChatSortCriteria = useAtomValue(
@@ -139,6 +147,13 @@ export function LandingPage() {
       onSuccess: (data, id) => {
         setToast(data.message || `Session ${id} deleted`);
         queryClient.invalidateQueries({ queryKey: ['sessions'] });
+        // --- FIX: Deselect on delete ---
+        setSelectedSessionIds((prev) => {
+          const newSet = new Set(prev);
+          newSet.delete(id);
+          return newSet;
+        });
+        // --- END FIX ---
       },
       onError: (e, id) => {
         setToast(`Error deleting session ${id}: ${e.message}`);
@@ -455,6 +470,17 @@ export function LandingPage() {
                     <CounterClockwiseClockIcon /> Session History
                   </Flex>
                 </Heading>
+                {/* --- FIX: ADDED ANALYSIS BUTTON --- */}
+                <Button
+                  variant="solid"
+                  size="2"
+                  onClick={() => setIsAnalysisModalOpen(true)}
+                  disabled={selectedSessionIds.size === 0}
+                >
+                  <BarChartIcon />
+                  Analyze Selected ({selectedSessionIds.size})
+                </Button>
+                {/* --- END FIX --- */}
               </Flex>
               <Box className="flex-grow flex flex-col overflow-hidden">
                 {sortedSessions.length === 0 ? (
@@ -464,6 +490,7 @@ export function LandingPage() {
                     </Text>
                   </Flex>
                 ) : (
+                  // --- FIX: PASS SELECTION PROPS ---
                   <SessionListTable
                     sessions={sortedSessions}
                     sortCriteria={currentSessionSortCriteria}
@@ -471,7 +498,10 @@ export function LandingPage() {
                     onSort={handleSessionSort}
                     onEditSession={handleEditSession}
                     onDeleteSessionRequest={handleDeleteSessionRequest}
+                    selectedIds={selectedSessionIds}
+                    onSelectionChange={setSelectedSessionIds}
                   />
+                  // --- END FIX ---
                 )}
               </Box>
             </Card>
@@ -529,6 +559,13 @@ export function LandingPage() {
         session={sessionToEdit}
         onSaveSuccess={handleEditSaveSuccess}
       />
+      {/* --- FIX: ADD ANALYSIS MODAL --- */}
+      <CreateAnalysisJobModal
+        isOpen={isAnalysisModalOpen}
+        onOpenChange={setIsAnalysisModalOpen}
+        sessionIds={Array.from(selectedSessionIds)}
+      />
+      {/* --- END FIX --- */}
       <AlertDialog.Root
         open={isDeleteSessionConfirmOpen}
         onOpenChange={setIsDeleteSessionConfirmOpen}

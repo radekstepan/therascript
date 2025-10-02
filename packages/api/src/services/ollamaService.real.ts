@@ -1,3 +1,4 @@
+// packages/api/src/services/ollamaService.real.ts
 // Contains the original, real implementation of ollamaService.ts
 
 // --- Keep original imports for ollama, axios, crypto, etc. ---
@@ -906,26 +907,29 @@ export const reloadActiveModelContext = async (): Promise<void> => {
   );
 };
 
-// --- Keep original Stream Chat Response ---
+// --- MODIFIED: Stream Chat Response to accept options ---
 export const streamChatResponse = async (
   contextTranscript: string | null,
   chatHistory: BackendChatMessage[],
-  retryAttempt: boolean = false
+  options?: { model?: string; contextSize?: number }
 ): Promise<AsyncIterable<ChatResponse>> => {
-  const modelToUse = getActiveModel();
-  const contextSize = getConfiguredContextSize();
+  const modelToUse = options?.model || getActiveModel();
+  const contextSize =
+    options?.contextSize !== undefined
+      ? options.contextSize
+      : getConfiguredContextSize();
+
   const isStandalone = contextTranscript === null;
   console.log(
-    `[Real OllamaService:streamChatResponse] Attempting streaming chat (${isStandalone ? 'standalone' : 'session'}) with ACTIVE model: ${modelToUse}, Context Size: ${contextSize ?? 'default'}`
+    `[Real OllamaService:streamChatResponse] Attempting stream with MODEL: ${modelToUse}, Context Size: ${contextSize ?? 'default'}`
   );
+
   try {
     await ensureOllamaReady();
-    console.log(
-      `[Real OllamaService:streamChatResponse] Ollama service is ready.`
-    );
   } catch (error) {
     throw error;
   }
+
   if (!chatHistory || chatHistory.length === 0)
     throw new InternalServerError(
       'Internal Error: Cannot stream response without chat history.'
@@ -934,10 +938,10 @@ export const streamChatResponse = async (
     throw new InternalServerError(
       'Internal Error: Malformed chat history for LLM.'
     );
+
   const latestUserMessage = chatHistory[chatHistory.length - 1];
   const previousHistory = chatHistory.slice(0, -1);
 
-  // Prepare messages based on whether it's standalone or session-based
   const messages: OllamaApiMessage[] = [
     {
       role: 'system',
@@ -950,35 +954,35 @@ export const streamChatResponse = async (
       })
     ),
   ];
+
   if (!isStandalone) {
     const transcriptContextMessage: OllamaApiMessage = {
       role: 'user',
       content: `CONTEXT TRANSCRIPT:\n"""\n${contextTranscript || 'No transcript available.'}\n"""`,
     };
     messages.push(transcriptContextMessage);
-    console.log(
-      `[Real OllamaService] Transcript context string provided (length: ${contextTranscript?.length ?? 0}).`
-    );
-  } else {
-    console.log(
-      `[Real OllamaService] Standalone chat, no transcript context provided.`
-    );
   }
+
   messages.push({ role: 'user', content: latestUserMessage.text });
 
   console.log(
     `[Real OllamaService] Streaming response (model: ${modelToUse})...`
   );
-  console.log(
-    `[Real OllamaService] Sending ${messages.length} messages to Ollama for streaming.`
-  );
+
   try {
+    const ollamaOptions: any = {
+      stop: ['</end_of_turn>'],
+    };
+    if (contextSize !== null && contextSize !== undefined) {
+      ollamaOptions.num_ctx = contextSize;
+    }
+
     const stream = await ollama.chat({
       model: modelToUse,
       messages: messages,
       stream: true,
       keep_alive: config.ollama.keepAlive,
-      options: { ...(contextSize !== null && { num_ctx: contextSize }) },
+      options: ollamaOptions,
     });
     console.log(
       `[Real OllamaService] Stream initiated for model ${modelToUse}.`
@@ -993,7 +997,7 @@ export const streamChatResponse = async (
           error.message?.includes('missing')));
     if (isModelNotFoundError) {
       console.error(
-        `[Real OllamaService] Active Model '${modelToUse}' not found during stream init.`
+        `[Real OllamaService] Model '${modelToUse}' not found during stream init.`
       );
       throw new BadRequestError(
         `Model '${modelToUse}' not found. Please pull or select an available model.`

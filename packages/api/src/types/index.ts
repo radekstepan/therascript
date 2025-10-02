@@ -214,3 +214,45 @@ export interface ApiSearchResponse {
   results: ApiSearchResultItem[];
   total: number;
 }
+
+// --- NEW ANALYSIS JOB TYPES ---
+
+export interface AnalysisJob {
+  id: number;
+  original_prompt: string;
+  short_prompt: string;
+  status:
+    | 'pending'
+    | 'mapping'
+    | 'reducing'
+    | 'completed'
+    | 'failed'
+    | 'canceling'
+    | 'canceled';
+  final_result: string | null;
+  error_message: string | null;
+  created_at: number; // UNIX Milliseconds
+  completed_at: number | null; // UNIX Milliseconds
+  model_name: string | null;
+  context_size: number | null;
+}
+
+export interface IntermediateSummary {
+  id: number;
+  analysis_job_id: number;
+  session_id: number;
+  summary_text: string | null;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  error_message: string | null;
+}
+
+export interface IntermediateSummaryWithSessionName
+  extends IntermediateSummary {
+  sessionName: string;
+}
+
+export interface AnalysisJobWithDetails extends AnalysisJob {
+  summaries: IntermediateSummaryWithSessionName[];
+}
+
+// --- END NEW ANALYSIS JOB TYPES ---

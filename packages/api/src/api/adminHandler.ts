@@ -9,12 +9,13 @@ import {
   type MessageSource,
 } from '@therascript/elasticsearch-client';
 import config from '../config/index.js';
-import { db, schema, verifySchemaVersion } from '@therascript/db';
+import { db, schema } from '@therascript/db';
 import { sessionRepository } from '../repositories/sessionRepository.js';
 import { transcriptRepository } from '../repositories/transcriptRepository.js';
 import { chatRepository } from '../repositories/chatRepository.js';
 import { messageRepository } from '../repositories/messageRepository.js';
 import { templateRepository } from '../repositories/templateRepository.js';
+import { analysisRepository } from '../repositories/analysisRepository.js';
 import { InternalServerError } from '../errors.js';
 import type {
   BackendSession,
@@ -174,15 +175,68 @@ export async function resetAllDataService(): Promise<ResetResult> {
   }
   try {
     db.transaction(() => {
+      // Drop new tables first due to foreign key constraints
+      db.exec('DROP TABLE IF EXISTS intermediate_summaries');
+      db.exec('DROP TABLE IF EXISTS analysis_job_sessions');
+      db.exec('DROP TABLE IF EXISTS analysis_jobs');
+      // Drop old tables
       db.exec('DROP TABLE IF EXISTS messages');
       db.exec('DROP TABLE IF EXISTS chats');
       db.exec('DROP TABLE IF EXISTS transcript_paragraphs');
       db.exec('DROP TABLE IF EXISTS sessions');
       db.exec('DROP TABLE IF EXISTS templates');
+      // This table is no longer used, but good to clean up from old versions
       db.exec('DROP TABLE IF EXISTS schema_metadata');
     })();
+
+    // Re-create schema from scratch, mimicking the migration process
+    // This establishes the "Version 1" state
     db.exec(schema);
-    verifySchemaVersion(db, schema);
+
+    // Manually apply the "Version 2" migration
+    db.exec(`
+      -- Analysis Jobs Table
+      CREATE TABLE IF NOT EXISTS analysis_jobs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          original_prompt TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending', -- e.g., pending, mapping, reducing, completed, failed
+          final_result TEXT,
+          error_message TEXT,
+          created_at INTEGER NOT NULL,
+          completed_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_analysis_jobs_status ON analysis_jobs (status);
+      CREATE INDEX IF NOT EXISTS idx_analysis_jobs_created_at ON analysis_jobs (created_at);
+
+      -- Join table for Analysis Jobs and Sessions
+      CREATE TABLE IF NOT EXISTS analysis_job_sessions (
+          analysis_job_id INTEGER NOT NULL,
+          session_id INTEGER NOT NULL,
+          PRIMARY KEY (analysis_job_id, session_id),
+          FOREIGN KEY (analysis_job_id) REFERENCES analysis_jobs (id) ON DELETE CASCADE,
+          FOREIGN KEY (session_id) REFERENCES sessions (id) ON DELETE CASCADE
+      );
+
+      -- Intermediate Summaries from the "Map" step
+      CREATE TABLE IF NOT EXISTS intermediate_summaries (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          analysis_job_id INTEGER NOT NULL,
+          session_id INTEGER NOT NULL,
+          summary_text TEXT,
+          status TEXT NOT NULL DEFAULT 'pending', -- e.g., pending, processing, completed, failed
+          error_message TEXT,
+          FOREIGN KEY (analysis_job_id) REFERENCES analysis_jobs (id) ON DELETE CASCADE,
+          FOREIGN KEY (session_id) REFERENCES sessions (id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_intermediate_summaries_job_id ON intermediate_summaries (analysis_job_id);
+    `);
+
+    // Manually apply "Version 3" migration
+    db.exec('ALTER TABLE analysis_jobs ADD COLUMN model_name TEXT');
+    db.exec('ALTER TABLE analysis_jobs ADD COLUMN context_size INTEGER');
+
+    // Set the database version to the latest known version
+    db.pragma('user_version = 3');
   } catch (e: any) {
     errors.push(`Error resetting SQLite database: ${e.message || String(e)}`);
   }
@@ -216,6 +270,10 @@ export const exportDataService = async (): Promise<Readable> => {
         messages: messageRepository.findAll(),
         templates: templateRepository.findAll(),
         transcript_paragraphs: transcriptRepository.findAll(),
+        analysis_jobs: analysisRepository.listJobs(),
+        analysis_job_sessions: analysisRepository.findAllJobSessions(),
+        intermediate_summaries:
+          analysisRepository.findAllIntermediateSummaries(),
       };
       for (const [key, value] of Object.entries(dbData)) {
         pack.entry({ name: `${key}.json` }, JSON.stringify(value, null, 2));
@@ -283,6 +341,39 @@ const TranscriptParagraphSchema = z.object({
   timestampMs: z.number(),
   text: z.string(),
 });
+const AnalysisJobSchema = z.object({
+  id: z.number(),
+  original_prompt: z.string(),
+  status: z.enum([
+    'pending',
+    'mapping',
+    'reducing',
+    'completed',
+    'failed',
+    'canceling',
+    'canceled',
+  ]),
+  final_result: z.string().nullable(),
+  error_message: z.string().nullable(),
+  created_at: z.number(),
+  completed_at: z.number().nullable(),
+  model_name: z.string().nullable(),
+  context_size: z.number().nullable(),
+});
+
+const AnalysisJobSessionSchema = z.object({
+  analysis_job_id: z.number(),
+  session_id: z.number(),
+});
+
+const IntermediateSummarySchema = z.object({
+  id: z.number(),
+  analysis_job_id: z.number(),
+  session_id: z.number(),
+  summary_text: z.string().nullable(),
+  status: z.enum(['pending', 'processing', 'completed', 'failed']),
+  error_message: z.string().nullable(),
+});
 
 export const importDataService = async (
   backupFile: File
@@ -331,11 +422,21 @@ export const importDataService = async (
     const transcript_paragraphs = z
       .array(TranscriptParagraphSchema)
       .parse(dataFiles['transcript_paragraphs.json']);
+    const analysis_jobs = z
+      .array(AnalysisJobSchema)
+      .parse(dataFiles['analysis_jobs.json']);
+    const analysis_job_sessions = z
+      .array(AnalysisJobSessionSchema)
+      .parse(dataFiles['analysis_job_sessions.json']);
+    const intermediate_summaries = z
+      .array(IntermediateSummarySchema)
+      .parse(dataFiles['intermediate_summaries.json']);
 
     await resetAllDataService();
 
     const oldToNewSessionIdMap: Record<number, number> = {};
     const oldToNewChatIdMap: Record<number, number> = {};
+    const oldToNewAnalysisJobIdMap: Record<number, number> = {};
     db.transaction(() => {
       sessions.forEach((s) => {
         const { id, ...rest } = s;
@@ -356,6 +457,49 @@ export const importDataService = async (
             rest.transcriptTokenCount
           );
         oldToNewSessionIdMap[id] = res.lastInsertRowid as number;
+      });
+      analysis_jobs.forEach((job) => {
+        const { id, ...rest } = job;
+        const res = db
+          .prepare(
+            'INSERT INTO analysis_jobs (original_prompt, status, final_result, error_message, created_at, completed_at, model_name, context_size) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+          )
+          .run(
+            rest.original_prompt,
+            rest.status,
+            rest.final_result,
+            rest.error_message,
+            rest.created_at,
+            rest.completed_at,
+            rest.model_name,
+            rest.context_size
+          );
+        oldToNewAnalysisJobIdMap[id] = res.lastInsertRowid as number;
+      });
+      analysis_job_sessions.forEach((ajs) => {
+        const newJobId = oldToNewAnalysisJobIdMap[ajs.analysis_job_id];
+        const newSessionId = oldToNewSessionIdMap[ajs.session_id];
+        if (newJobId && newSessionId) {
+          db.prepare(
+            'INSERT INTO analysis_job_sessions (analysis_job_id, session_id) VALUES (?, ?)'
+          ).run(newJobId, newSessionId);
+        }
+      });
+      intermediate_summaries.forEach((is) => {
+        const { id, ...rest } = is;
+        const newJobId = oldToNewAnalysisJobIdMap[rest.analysis_job_id];
+        const newSessionId = oldToNewSessionIdMap[rest.session_id];
+        if (newJobId && newSessionId) {
+          db.prepare(
+            'INSERT INTO intermediate_summaries (analysis_job_id, session_id, summary_text, status, error_message) VALUES (?, ?, ?, ?, ?)'
+          ).run(
+            newJobId,
+            newSessionId,
+            rest.summary_text,
+            rest.status,
+            rest.error_message
+          );
+        }
       });
       chats.forEach((c) => {
         const { id, ...rest } = c;

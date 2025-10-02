@@ -6,6 +6,7 @@ export * from './action/closeUploadModalAtom';
 export * from './action/openUploadModalAtom';
 export * from './action/setSessionSortAtom';
 export * from './action/setStandaloneChatSortAtom';
+export * from './action/setAnalysisJobSortAtom'; // <-- ADDED
 
 export * from './chat/chatErrorAtom';
 export * from './chat/currentQueryAtom';
@@ -20,6 +21,9 @@ export * from './session/sessionSortDirectionAtom';
 
 export * from './standaloneChatSortCriteriaAtom';
 export * from './standaloneChatSortDirectionAtom';
+
+export * from './analysisJobSortCriteriaAtom'; // <-- ADDED
+export * from './analysisJobSortDirectionAtom'; // <-- ADDED
 
 export * from './ui/clampedSidebarWidthAtom';
 export * from './ui/effectiveThemeAtom'; // This will now correctly point to the dedicated file

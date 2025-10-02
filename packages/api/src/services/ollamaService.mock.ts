@@ -144,10 +144,14 @@ export const reloadActiveModelContext = async (): Promise<void> => {
 
 export const streamChatResponse = async (
   contextTranscript: string | null,
-  chatHistory: BackendChatMessage[]
+  chatHistory: BackendChatMessage[],
+  options?: { model?: string; contextSize?: number }
 ): Promise<AsyncIterable<ChatResponse>> => {
-  const modelToUse = getActiveModel();
-  const contextSize = getConfiguredContextSize();
+  const modelToUse = options?.model || getActiveModel();
+  const contextSize =
+    options?.contextSize !== undefined
+      ? options.contextSize
+      : getConfiguredContextSize();
   const isStandalone = contextTranscript === null;
   console.log(
     `[Mock Ollama] Starting STREAM chat (${isStandalone ? 'standalone' : 'session'}) with model: ${modelToUse}, Context: ${contextSize ?? 'default'}`

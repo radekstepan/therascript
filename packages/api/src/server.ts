@@ -21,13 +21,14 @@ import { swagger } from '@elysiajs/swagger';
 import { sessionRoutes } from './routes/sessionRoutes.js';
 import { chatRoutes } from './routes/chatRoutes.js';
 import { standaloneChatRoutes } from './routes/standaloneChatRoutes.js';
-import { templateRoutes } from './routes/templateRoutes.js'; // IMPORT
+import { templateRoutes } from './routes/templateRoutes.js';
 import { ollamaRoutes } from './routes/ollamaRoutes.js';
 import { dockerRoutes } from './routes/dockerRoutes.js';
 import { metaRoutes } from './routes/metaRoutes.js';
 import { systemRoutes } from './routes/systemRoutes.js';
-import { adminRoutes } from './routes/adminRoutes.js'; // Import admin routes
+import { adminRoutes } from './routes/adminRoutes.js';
 import { searchRoutes } from './routes/searchRoutes.js';
+import { analysisRoutes } from './routes/analysisRoutes.js'; // <-- IMPORT NEW ROUTES
 import {
   ApiError,
   InternalServerError,
@@ -124,7 +125,8 @@ const app = new Elysia()
           {
             name: 'Templates',
             description: 'Manage reusable text templates',
-          }, // ADDED
+          },
+          { name: 'Analysis', description: 'Multi-session analysis jobs' }, // <-- ADDED TAG
           {
             name: 'Search',
             description: 'Elasticsearch Full-Text Search Endpoints',
@@ -139,7 +141,7 @@ const app = new Elysia()
           {
             name: 'Admin',
             description: 'Administrative Actions (e.g., re-indexing)',
-          }, // Added Admin tag
+          },
           { name: 'Meta', description: 'API Metadata and Health' },
         ],
       },
@@ -275,12 +277,13 @@ const app = new Elysia()
   .use(ollamaRoutes)
   .use(dockerRoutes)
   .use(systemRoutes)
-  .use(adminRoutes) // Added admin routes
+  .use(adminRoutes)
   .use(searchRoutes)
+  .use(analysisRoutes) // <-- USE NEW ROUTES
   .use(sessionRoutes)
   .use(chatRoutes)
   .use(standaloneChatRoutes)
-  .use(templateRoutes); // ADDED
+  .use(templateRoutes);
 
 async function checkOllamaConnectionOnStartup() {
   /* ... */
