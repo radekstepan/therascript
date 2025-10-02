@@ -16,6 +16,7 @@ import {
   IconButton,
   DropdownMenu,
   ScrollArea,
+  Checkbox,
 } from '@radix-ui/themes';
 import type { Session } from '../../types';
 import type { SessionSortCriteria, SortDirection } from '../../store';
@@ -29,6 +30,9 @@ interface SessionListTableProps {
   onSort: (criteria: SessionSortCriteria) => void;
   onEditSession: (session: Session) => void;
   onDeleteSessionRequest: (session: Session) => void;
+  // --- NEW PROPS for selection ---
+  selectedIds: Set<number>;
+  onSelectionChange: (ids: Set<number>) => void;
 }
 
 type AriaSort = 'none' | 'ascending' | 'descending' | 'other' | undefined;
@@ -48,6 +52,9 @@ export function SessionListTable({
   onSort,
   onEditSession,
   onDeleteSessionRequest,
+  // --- DESTRUCTURE NEW PROPS ---
+  selectedIds,
+  onSelectionChange,
 }: SessionListTableProps) {
   const navigate = useNavigate();
 
@@ -56,10 +63,8 @@ export function SessionListTable({
     sessionId: number
   ) => {
     const target = e.target as HTMLElement;
-    if (target.closest('button[aria-label="Session options"]')) {
-      return;
-    }
-    if (target.closest('[role="menu"]')) {
+    // Prevent navigation when clicking on interactive elements
+    if (target.closest('button, [role="menu"], [role="checkbox"]')) {
       return;
     }
     navigate(`/sessions/${sessionId}`);
@@ -71,11 +76,39 @@ export function SessionListTable({
   ) => {
     if (
       e.key === 'Enter' &&
-      !(e.target as HTMLElement).closest('button[aria-label="Session options"]')
+      !(e.target as HTMLElement).closest(
+        'button, [role="menu"], [role="checkbox"]'
+      )
     ) {
       navigate(`/sessions/${sessionId}`);
     }
   };
+
+  // --- NEW SELECTION HANDLERS ---
+  const handleRowCheckboxChange = (sessionId: number, checked: boolean) => {
+    const newSelectedIds = new Set(selectedIds);
+    if (checked) {
+      newSelectedIds.add(sessionId);
+    } else {
+      newSelectedIds.delete(sessionId);
+    }
+    onSelectionChange(newSelectedIds);
+  };
+
+  const handleSelectAllChange = (checked: boolean) => {
+    if (checked) {
+      const allIds = new Set(sessions.map((s) => s.id));
+      onSelectionChange(allIds);
+    } else {
+      onSelectionChange(new Set());
+    }
+  };
+
+  const allSelected =
+    sessions.length > 0 && selectedIds.size === sessions.length;
+  const someSelected =
+    selectedIds.size > 0 && selectedIds.size < sessions.length;
+  // --- END NEW SELECTION HANDLERS ---
 
   const renderSortIcon = useCallback(
     (criteria: SessionSortCriteria) => {
@@ -128,6 +161,22 @@ export function SessionListTable({
           }}
         >
           <Table.Row>
+            {/* --- NEW CHECKBOX HEADER --- */}
+            <Table.ColumnHeaderCell style={{ width: '1%' }}>
+              <Checkbox
+                checked={
+                  allSelected || someSelected
+                    ? someSelected
+                      ? 'indeterminate'
+                      : true
+                    : false
+                }
+                onCheckedChange={(checked) =>
+                  handleSelectAllChange(checked === true)
+                }
+                aria-label="Select all sessions"
+              />
+            </Table.ColumnHeaderCell>
             <Table.ColumnHeaderCell
               {...getHeaderCellProps('sessionName')}
               justify="start"
@@ -174,6 +223,16 @@ export function SessionListTable({
               tabIndex={0}
               onKeyDown={(e) => handleKeyDown(e, session.id)}
             >
+              {/* --- NEW CHECKBOX CELL --- */}
+              <Table.Cell onClick={(e) => e.stopPropagation()}>
+                <Checkbox
+                  checked={selectedIds.has(session.id)}
+                  onCheckedChange={(checked) =>
+                    handleRowCheckboxChange(session.id, checked === true)
+                  }
+                  aria-label={`Select session ${session.id}`}
+                />
+              </Table.Cell>
               <Table.RowHeaderCell justify="start">
                 <Flex align="center" gap="2">
                   <FileTextIcon className="text-[--gray-a10]" />

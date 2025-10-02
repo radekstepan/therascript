@@ -1,3 +1,4 @@
+// packages/api/src/utils/helpers.ts
 import { BackendSession } from '../types/index.js';
 
 // Type guard for file system errors
@@ -5,39 +6,52 @@ export const isNodeError = (error: unknown): error is NodeJS.ErrnoException => {
   return error instanceof Error && 'code' in error;
 };
 
-// --- REMOVED transcript file helpers ---
-// Function to reliably split transcript into paragraphs
-// export const splitTranscriptIntoParagraphs = (transcript: string): string[] => {
-//     if (!transcript) return [];
-//     return transcript.replace(/\r\n/g, '\n').split(/\n\s*\n/).filter(p => p.trim() !== '');
-// };
-//
-// Function to update a specific paragraph
-// export const updateParagraphInTranscript = (transcript: string, index: number, newText: string): string => {
-//     const paragraphsWithBlanks = transcript.replace(/\r\n/g, '\n').split(/(\n\s*\n)/);
-//     let paragraphIndexInFullSplit = -1;
-//     let visibleIndexCounter = -1;
-//
-//     for (let i = 0; i < paragraphsWithBlanks.length; i += 2) {
-//         const contentPart = paragraphsWithBlanks[i];
-//         if (contentPart.trim() !== '') {
-//             visibleIndexCounter++;
-//             if (visibleIndexCounter === index) {
-//                 paragraphIndexInFullSplit = i;
-//                 break;
-//             }
-//         }
-//     }
-//
-//     if (paragraphIndexInFullSplit !== -1) {
-//         paragraphsWithBlanks[paragraphIndexInFullSplit] = newText.trim();
-//         return paragraphsWithBlanks.join('');
-//     } else {
-//         console.warn(`Paragraph index ${index} not found during update.`);
-//         return transcript;
-//     }
-// };
-// --- END REMOVAL ---
+/**
+ * Cleans common model-specific tokens (like end-of-turn) from LLM output.
+ * @param text The raw text from the language model.
+ * @returns The cleaned text.
+ */
+export const cleanLlmOutput = (text: string): string => {
+  // Comprehensive list of end-of-turn and similar tokens that might appear in LLM output
+  const tokensToRemove = [
+    '</end_of_turn>',
+    '<end_of_turn>',
+    '<end_of_turn',
+    'end_of_turn>',
+    '<|end_of_turn|>',
+    '<|endofturn|>',
+    '<|eot|>',
+    '<eos>',
+    '</s>',
+    '<s>',
+    '[/INST]',
+    '[INST]',
+  ];
+
+  console.log({ text });
+
+  // Remove all tokens from anywhere in the text
+  let cleanedText = text;
+  for (const token of tokensToRemove) {
+    // Use word boundaries and case-insensitive matching for more robust cleaning
+    const escapedToken = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(escapedToken, 'gi');
+    cleanedText = cleanedText.replace(regex, '');
+  }
+
+  // Additional cleanup for common LLM artifacts
+  cleanedText = cleanedText
+    // Remove multiple spaces
+    .replace(/\s+/g, ' ')
+    // Remove leading/trailing whitespace from each line
+    .replace(/^\s+|\s+$/gm, '')
+    // Remove empty lines
+    .replace(/^\s*[\r\n]/gm, '')
+    // Trim final result
+    .trim();
+
+  return cleanedText;
+};
 
 // Helper to create session DTO for list views
 // Removed transcriptPath from DTO creation

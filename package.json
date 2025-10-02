@@ -28,6 +28,7 @@
     "lint": "lerna run lint --parallel",
     "format": "yarn prettier --write .",
     "preload:db": "node --env-file=.env.api.dev packages/api/dist/preloadDb.js",
+    "db:upgrade": "node --env-file=.env.api.prod ./scripts/upgrade-db.js",
     "clean": "lerna run clean --parallel && rm -rf node_modules",
     "clean:dist": "lerna run clean --parallel",
     "_node_path_linux": "echo /home/susie/.nvm/versions/node/v23.10.0/bin/node",

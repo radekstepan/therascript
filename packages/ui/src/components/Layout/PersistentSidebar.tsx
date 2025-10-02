@@ -16,7 +16,8 @@ import {
   Container as ContainerIcon,
   Power,
   AlertTriangle,
-  Star, // IMPORT Star icon
+  Star,
+  BarChart, // <-- IMPORT BarChart icon
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -49,8 +50,9 @@ const navItems: NavItemType[] = [
     icon: ListOrdered,
     page: '/sessions-list',
   },
+  { id: 'analysis', label: 'Analysis', icon: BarChart, page: '/analysis-jobs' },
   { id: 'chats', label: 'All Chats', icon: MessageSquare, page: '/chats-list' },
-  { id: 'templates', label: 'Templates', icon: Star, page: '/templates' }, // CHANGED icon
+  { id: 'templates', label: 'Templates', icon: Star, page: '/templates' },
   { id: 'settings', label: 'Settings', icon: Settings, page: '/settings' },
 ];
 

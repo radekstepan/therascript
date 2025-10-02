@@ -24,7 +24,8 @@ import { StandaloneChatView } from './components/StandaloneChatView/StandaloneCh
 import { SettingsPage } from './components/SettingsPage';
 import { StandaloneChatsPage } from './components/StandaloneChatsPage';
 import { SessionsPage } from './components/SessionsPage';
-import { TemplatesPage } from './components/TemplatesPage'; // IMPORT
+import { TemplatesPage } from './components/TemplatesPage';
+import { AnalysisJobsPage } from './components/Analysis/AnalysisJobsPage'; // <-- IMPORT NEW PAGE
 
 // Layout and Modals
 import { UploadModal } from './components/UploadModal/UploadModal';
@@ -116,8 +117,9 @@ const PageContentManager: React.FC = () => {
       pageKey = '/sessions-list';
     else if (location.pathname.startsWith('/chats-list'))
       pageKey = '/chats-list';
-    else if (location.pathname.startsWith('/templates'))
-      pageKey = '/templates'; // ADDED
+    else if (location.pathname.startsWith('/templates')) pageKey = '/templates';
+    else if (location.pathname.startsWith('/analysis-jobs'))
+      pageKey = '/analysis-jobs';
     else if (location.pathname.startsWith('/settings')) pageKey = '/settings';
     else if (location.pathname.startsWith('/sessions/'))
       pageKey = '/sessions-list';
@@ -146,7 +148,9 @@ const PageContentManager: React.FC = () => {
         <Route path="/chats/:chatId" element={<StandaloneChatView />} />
         <Route path="/sessions-list" element={<SessionsPage />} />
         <Route path="/chats-list" element={<StandaloneChatsPage />} />
-        <Route path="/templates" element={<TemplatesPage />} /> {/* ADDED */}
+        <Route path="/templates" element={<TemplatesPage />} />
+        <Route path="/analysis-jobs" element={<AnalysisJobsPage />} />
+        <Route path="/analysis-jobs/:jobId" element={<AnalysisJobsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate replace to="/" />} />
       </Routes>

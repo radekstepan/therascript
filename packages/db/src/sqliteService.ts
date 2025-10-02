@@ -11,6 +11,8 @@ import fs from 'node:fs';
 import { getConfig } from './config.js';
 import type { DbRunResult, DbStatement } from './types.js';
 
+// MODIFIED: We will no longer hash this entire block.
+// It now represents the initial state of the database schema (Version 1).
 export const schema = `
     -- Sessions Table
     CREATE TABLE IF NOT EXISTS sessions (
@@ -74,18 +76,134 @@ export const schema = `
     );
     CREATE INDEX IF NOT EXISTS idx_template_created_at ON templates (createdAt);
 
-    CREATE TABLE IF NOT EXISTS schema_metadata (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-    );
+    -- REMOVED: schema_metadata table creation is now handled by the migration logic
 `;
 
+// --- NEW MIGRATION LOGIC ---
+export const LATEST_SCHEMA_VERSION = 4;
+
+function runMigrations(dbInstance: DB) {
+  // FIX: With { simple: true }, the pragma returns the value directly as a number.
+  let currentVersion = dbInstance.pragma('user_version', {
+    simple: true,
+  }) as number;
+
+  console.log(
+    `[db Migrator] Database schema version: ${currentVersion}. Latest version: ${LATEST_SCHEMA_VERSION}.`
+  );
+
+  if (currentVersion < LATEST_SCHEMA_VERSION) {
+    console.log(
+      `[db Migrator] New schema version detected. Running migrations...`
+    );
+    dbInstance.transaction(() => {
+      // Version 1: The initial schema
+      if (currentVersion < 1) {
+        console.log('[db Migrator] Applying version 1...');
+        // The initial `db.exec(schema)` will handle creating the base tables.
+        // We ensure all base tables exist here.
+        dbInstance.exec(schema);
+        // The old logic for adding transcriptTokenCount can be considered part of V1
+        const sessionColumns = dbInstance.pragma('table_info(sessions)') as {
+          name: string;
+          type: string;
+        }[];
+        if (
+          !sessionColumns.some((col) => col.name === 'transcriptTokenCount')
+        ) {
+          console.log(
+            '[db Migrator V1] Adding "transcriptTokenCount" to sessions...'
+          );
+          dbInstance.exec(
+            'ALTER TABLE sessions ADD COLUMN transcriptTokenCount INTEGER NULL'
+          );
+        }
+        dbInstance.pragma(`user_version = 1`);
+        currentVersion = 1;
+        console.log('[db Migrator] Version 1 applied.');
+      }
+
+      // Version 2: Add analysis-related tables
+      if (currentVersion < 2) {
+        console.log('[db Migrator] Applying version 2...');
+        dbInstance.exec(`
+          -- Analysis Jobs Table
+          CREATE TABLE IF NOT EXISTS analysis_jobs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              original_prompt TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'pending', -- e.g., pending, mapping, reducing, completed, failed
+              final_result TEXT,
+              error_message TEXT,
+              created_at INTEGER NOT NULL,
+              completed_at INTEGER
+          );
+          CREATE INDEX IF NOT EXISTS idx_analysis_jobs_status ON analysis_jobs (status);
+          CREATE INDEX IF NOT EXISTS idx_analysis_jobs_created_at ON analysis_jobs (created_at);
+
+          -- Join table for Analysis Jobs and Sessions
+          CREATE TABLE IF NOT EXISTS analysis_job_sessions (
+              analysis_job_id INTEGER NOT NULL,
+              session_id INTEGER NOT NULL,
+              PRIMARY KEY (analysis_job_id, session_id),
+              FOREIGN KEY (analysis_job_id) REFERENCES analysis_jobs (id) ON DELETE CASCADE,
+              FOREIGN KEY (session_id) REFERENCES sessions (id) ON DELETE CASCADE
+          );
+
+          -- Intermediate Summaries from the "Map" step
+          CREATE TABLE IF NOT EXISTS intermediate_summaries (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              analysis_job_id INTEGER NOT NULL,
+              session_id INTEGER NOT NULL,
+              summary_text TEXT,
+              status TEXT NOT NULL DEFAULT 'pending', -- e.g., pending, processing, completed, failed
+              error_message TEXT,
+              FOREIGN KEY (analysis_job_id) REFERENCES analysis_jobs (id) ON DELETE CASCADE,
+              FOREIGN KEY (session_id) REFERENCES sessions (id) ON DELETE CASCADE
+          );
+          CREATE INDEX IF NOT EXISTS idx_intermediate_summaries_job_id ON intermediate_summaries (analysis_job_id);
+        `);
+        dbInstance.pragma(`user_version = 2`);
+        currentVersion = 2;
+        console.log('[db Migrator] Version 2 applied.');
+      }
+
+      // Version 3: Add model and context size to analysis jobs
+      if (currentVersion < 3) {
+        console.log('[db Migrator] Applying version 3...');
+        dbInstance.exec('ALTER TABLE analysis_jobs ADD COLUMN model_name TEXT');
+        dbInstance.exec(
+          'ALTER TABLE analysis_jobs ADD COLUMN context_size INTEGER'
+        );
+        dbInstance.pragma('user_version = 3');
+        currentVersion = 3;
+        console.log('[db Migrator] Version 3 applied.');
+      }
+
+      // Version 4: Add short_prompt to analysis_jobs
+      if (currentVersion < 4) {
+        console.log('[db Migrator] Applying version 4...');
+        dbInstance.exec(
+          "ALTER TABLE analysis_jobs ADD COLUMN short_prompt TEXT NOT NULL DEFAULT 'Analysis Job'"
+        );
+        dbInstance.pragma('user_version = 4');
+        currentVersion = 4;
+        console.log('[db Migrator] Version 4 applied.');
+      }
+    })();
+    console.log(
+      `[db Migrator] Migrations complete. Database is now at version ${currentVersion}.`
+    );
+  } else {
+    console.log('[db Migrator] Database schema is up to date.');
+  }
+}
+// --- END NEW MIGRATION LOGIC ---
+
 let dbInstance: DB | null = null;
-const SCHEMA_HASH_KEY = 'schema_md5_v2';
+// REMOVED: const SCHEMA_HASH_KEY = 'schema_md5_v2';
 
 const getDb = (): DB => {
   if (dbInstance === null) {
-    // Get config lazily on first access
     const { dbPath, isDev } = getConfig();
     const dbDir = path.dirname(dbPath);
 
@@ -138,84 +256,11 @@ export function closeDb(): void {
   }
 }
 
-export function calculateSchemaHash(schemaString: string): string {
-  return crypto.createHash('md5').update(schemaString).digest('hex');
-}
+// REMOVED: calculateSchemaHash and verifySchemaVersion functions
+// export function calculateSchemaHash(...) { ... }
+// export function verifySchemaVersion(...) { ... }
 
-export function verifySchemaVersion(
-  dbInstance: DB,
-  currentSchemaDefinition: string
-) {
-  console.log('[db Schema Check]: Verifying schema version...');
-  const currentSchemaHash = calculateSchemaHash(currentSchemaDefinition);
-  console.log(
-    `[db Schema Check]: Current schema definition hash: ${currentSchemaHash}`
-  );
-  let storedSchemaHash: string | undefined;
-  try {
-    dbInstance.exec(
-      `CREATE TABLE IF NOT EXISTS schema_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);`
-    );
-    const row = dbInstance
-      .prepare('SELECT value FROM schema_metadata WHERE key = ?')
-      .get(SCHEMA_HASH_KEY) as { value: string } | undefined;
-    storedSchemaHash = row?.value;
-  } catch (error) {
-    console.warn(
-      `[db Schema Check]: Could not read stored schema hash:`,
-      error
-    );
-    storedSchemaHash = undefined;
-  }
-
-  if (storedSchemaHash) {
-    console.log(
-      `[db Schema Check]: Stored schema hash found: ${storedSchemaHash}`
-    );
-    if (currentSchemaHash === storedSchemaHash) {
-      console.log('[db Schema Check]: Schema version matches stored hash. OK.');
-    } else {
-      console.error(
-        '---------------------------------------------------------------------'
-      );
-      console.error(
-        '[db Schema Check]: FATAL ERROR: Schema definition mismatch!'
-      );
-      console.error(`  > Current schema hash in code : ${currentSchemaHash}`);
-      console.error(`  > Stored schema hash in DB    : ${storedSchemaHash}`);
-      console.error(
-        '  > To resolve, backup your DB and delete it to allow re-initialization, OR implement a proper migration strategy.'
-      );
-      console.error(
-        '---------------------------------------------------------------------'
-      );
-      closeDb();
-      process.exit(1);
-    }
-  } else {
-    console.log(
-      '[db Schema Check]: No stored schema hash found. Assuming first run.'
-    );
-    try {
-      dbInstance
-        .prepare(
-          'INSERT OR REPLACE INTO schema_metadata (key, value) VALUES (?, ?)'
-        )
-        .run(SCHEMA_HASH_KEY, currentSchemaHash);
-      console.log(
-        `[db Schema Check]: Stored current schema hash (${currentSchemaHash}) in database.`
-      );
-    } catch (insertError) {
-      console.error(
-        `[db Schema Check]: FATAL: Failed to store initial schema hash:`,
-        insertError
-      );
-      closeDb();
-      process.exit(1);
-    }
-  }
-}
-
+// MODIFIED: initializeDatabase now runs migrations instead of hash check
 export function initializeDatabase(dbInstance: DB) {
   console.log('[db Init Func]: Attempting to initialize schema...');
   try {
@@ -223,24 +268,20 @@ export function initializeDatabase(dbInstance: DB) {
     dbInstance.pragma('busy_timeout = 5000');
     dbInstance.pragma('foreign_keys = ON');
     console.log('[db Init Func]: WAL mode and foreign keys enabled.');
-    dbInstance.exec(schema);
-    console.log('[db Init Func]: Main database schema exec command executed.');
+
+    // Run the migration logic
+    runMigrations(dbInstance);
+
+    // This part is now handled inside the migration, but we can keep the warning.
     const sessionColumns = dbInstance.pragma('table_info(sessions)') as {
       name: string;
       type: string;
     }[];
-    if (!sessionColumns.some((col) => col.name === 'transcriptTokenCount')) {
-      console.log('[db Mig]: Adding "transcriptTokenCount" to sessions...');
-      dbInstance.exec(
-        'ALTER TABLE sessions ADD COLUMN transcriptTokenCount INTEGER NULL'
-      );
-    }
     if (sessionColumns.some((col) => col.name === 'transcriptPath')) {
       console.warn(
         '[db Mig]: "transcriptPath" column found on sessions table. It is no longer used and can be manually dropped.'
       );
     }
-    verifySchemaVersion(dbInstance, schema);
   } catch (error) {
     console.error('[db Init Func]: Error initializing database:', error);
     if (dbInstance && dbInstance.open) {
@@ -260,7 +301,6 @@ function prepare(sql: string): DbStatement {
   let stmt = statementCache.get(sql);
   if (!stmt) {
     try {
-      // The `better-sqlite3.Statement` is structurally compatible with our `DbStatement` interface.
       stmt = db.prepare(sql);
       statementCache.set(sql, stmt);
     } catch (error) {

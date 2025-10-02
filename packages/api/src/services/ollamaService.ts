@@ -10,7 +10,7 @@ import type * as MockService from './ollamaService.mock.js';
 
 // Define a common interface that both real and mock services should implement
 // This helps ensure consistency.
-interface OllamaServiceInterface {
+export interface OllamaServiceInterface {
   listModels: () => Promise<OllamaModelInfo[]>;
   checkModelStatus: (
     modelToCheck: string
@@ -19,10 +19,11 @@ interface OllamaServiceInterface {
   unloadActiveModel: (modelToUnloadOverride?: string) => Promise<string>;
   ensureOllamaReady: (timeoutMs?: number) => Promise<void>;
   reloadActiveModelContext: () => Promise<void>;
+  // --- MODIFIED streamChatResponse SIGNATURE ---
   streamChatResponse: (
     contextTranscript: string | null,
     chatHistory: BackendChatMessage[],
-    retryAttempt?: boolean
+    options?: { model?: string; contextSize?: number }
   ) => Promise<AsyncIterable<ChatResponse>>;
   startPullModelJob: (modelName: string) => string;
   getPullModelJobStatus: (jobId: string) => OllamaPullJobStatus | null;

@@ -188,3 +188,43 @@ export interface ReadinessStatus {
   };
   timestamp: string;
 }
+
+// --- NEW ANALYSIS JOB TYPES ---
+export interface IntermediateSummaryWithSessionName {
+  id: number;
+  analysis_job_id: number;
+  session_id: number;
+  summary_text: string | null;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  error_message: string | null;
+  sessionName: string;
+}
+
+export interface AnalysisJob {
+  id: number;
+  original_prompt: string;
+  short_prompt: string;
+  status:
+    | 'pending'
+    | 'mapping'
+    | 'reducing'
+    | 'completed'
+    | 'failed'
+    | 'canceling'
+    | 'canceled';
+  final_result: string | null;
+  error_message: string | null;
+  created_at: number; // UNIX Milliseconds
+  completed_at: number | null; // UNIX Milliseconds
+  model_name: string | null;
+  context_size: number | null;
+  summaries?: IntermediateSummaryWithSessionName[];
+}
+
+export type AnalysisJobSortCriteria =
+  | 'original_prompt'
+  | 'short_prompt'
+  | 'status'
+  | 'created_at'
+  | 'completed_at'
+  | 'model_name';
