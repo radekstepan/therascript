@@ -25,7 +25,7 @@ import { SettingsPage } from './components/SettingsPage';
 import { StandaloneChatsPage } from './components/StandaloneChatsPage';
 import { SessionsPage } from './components/SessionsPage';
 import { TemplatesPage } from './components/TemplatesPage';
-import { AnalysisJobsPage } from './components/Analysis/AnalysisJobsPage'; // <-- IMPORT NEW PAGE
+import { AnalysisJobsPage } from './components/Analysis/AnalysisJobsPage';
 
 // Layout and Modals
 import { UploadModal } from './components/UploadModal/UploadModal';

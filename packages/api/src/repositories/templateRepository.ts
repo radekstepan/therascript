@@ -6,6 +6,7 @@ const insertTemplateSql =
   'INSERT INTO templates (title, text, createdAt) VALUES (?, ?, ?)';
 const selectAllTemplatesSql = 'SELECT * FROM templates ORDER BY createdAt DESC';
 const selectTemplateByIdSql = 'SELECT * FROM templates WHERE id = ?';
+const selectTemplateByTitleSql = 'SELECT * FROM templates WHERE title = ?'; // <-- NEW
 const updateTemplateSql =
   'UPDATE templates SET title = ?, text = ? WHERE id = ?';
 const deleteTemplateSql = 'DELETE FROM templates WHERE id = ?';
@@ -47,6 +48,21 @@ export const templateRepository = {
       throw new Error('Database error fetching template.');
     }
   },
+
+  // --- NEW METHOD ---
+  findByTitle: (title: string): Template | null => {
+    try {
+      const template = get<Template>(selectTemplateByTitleSql, title);
+      return template ?? null;
+    } catch (error) {
+      console.error(
+        `[TemplateRepo] Error finding template by title "${title}":`,
+        error
+      );
+      throw new Error('Database error fetching template by title.');
+    }
+  },
+  // --- END NEW METHOD ---
 
   update: (id: number, title: string, text: string): Template | null => {
     try {

@@ -1,6 +1,8 @@
 // packages/api/src/api/analysisHandler.ts
 import { analysisRepository } from '../repositories/analysisRepository.js';
 import { sessionRepository } from '../repositories/sessionRepository.js';
+import { templateRepository } from '../repositories/templateRepository.js';
+import { SYSTEM_PROMPT_TEMPLATES } from '@therascript/db/dist/sqliteService.js';
 import { processAnalysisJob } from '../services/analysisJobService.js';
 import {
   InternalServerError,
@@ -32,33 +34,21 @@ async function accumulateStreamResponse(
   return cleanLlmOutput(fullText);
 }
 
-const STRATEGIST_PROMPT = `You are an expert AI analysis strategist. Your job is to break down a complex, multi-document user query into a two-part MapReduce plan. The user's query will be run against a series of therapy session transcripts, which are ordered chronologically. Your plan must be in a JSON format with two keys:
-1. "intermediate_question": A question or task that can be executed on **each single transcript** independently to extract the necessary information. This question must be self-contained and make sense without seeing other documents.
-2. "final_synthesis_instructions": Instructions for a final AI on how to take all the intermediate answers (which will be provided in chronological order) and synthesize them into a single, cohesive answer to the user's original query.
-
----
-**EXAMPLE 1**
-**User's Query:** "How is the patient's depression progressing over time?"
-
-**Your JSON Output:**
-{
-  "intermediate_question": "From this single transcript, extract the following data points related to depression. If a point is not mentioned, state 'not mentioned'.\\n- Patient's Self-Reported Mood:\\n- Specific Depression Symptoms Mentioned (e.g., low energy, anhedonia):\\n- Mention of Coping Skills for Depression:\\n- Any Objective Scores Mentioned (e.g., PHQ-9, BDI):",
-  "final_synthesis_instructions": "You will be given a series of chronologically ordered data extractions from multiple therapy sessions. Your task is to write a narrative that describes the patient's progress with depression over time. Synthesize the data points to identify trends, improvements, setbacks, and how the discussion of symptoms and skills has evolved across the sessions."
-}
----
-**EXAMPLE 2**
-**User's Query:** "What is the therapist consistently missing?"
-
-**Your JSON Output:**
-{
-  "intermediate_question": "Acting as a clinical supervisor, review this single transcript to identify potential missed opportunities. For each one you find, describe: \\n1. The Patient's Cue/Statement.\\n2. The specific opportunity the therapist missed (e.g., chance to validate, opportunity for Socratic questioning, deeper emotional exploration). \\nIf no significant opportunities were missed, state that clearly.",
-  "final_synthesis_instructions": "You will receive a list of potential missed opportunities from several sessions. Your task is to identify and summarize any *consistent patterns* of missed opportunities that appear across multiple sessions. Focus on recurring themes in the therapist's approach that could be areas for growth."
-}
----
-
-**User's Query:** "{{USER_PROMPT}}"
-
-**Your JSON Output:**`;
+const getSystemPrompt = (
+  title: 'system_analysis_strategist' | 'system_short_prompt_generator'
+): string => {
+  const template = templateRepository.findByTitle(title);
+  if (template) {
+    return template.text;
+  }
+  console.warn(
+    `[AnalysisHandler] System template "${title}" not found in DB. Using hardcoded fallback.`
+  );
+  if (title === 'system_analysis_strategist') {
+    return SYSTEM_PROMPT_TEMPLATES.ANALYSIS_STRATEGIST.text;
+  }
+  return SYSTEM_PROMPT_TEMPLATES.SHORT_PROMPT_GENERATOR.text;
+};
 
 const generateShortPromptInBackground = async (
   jobId: number,
@@ -67,9 +57,12 @@ const generateShortPromptInBackground = async (
 ) => {
   try {
     console.log(`[Analysis BG ${jobId}] Generating short prompt...`);
-    const summarizePrompt = `Summarize the following user request into a very short, title-like phrase of no more than 5 words. Do not use quotes or introductory phrases.
 
-REQUEST: "${originalPrompt}"`;
+    const promptTemplate = getSystemPrompt('system_short_prompt_generator');
+    const summarizePrompt = promptTemplate.replace(
+      '{{USER_PROMPT}}',
+      originalPrompt
+    );
 
     const stream = await streamChatResponse(
       null,
@@ -119,7 +112,8 @@ const generateStrategyAndUpdateJob = async (
 ) => {
   try {
     console.log(`[Analysis BG ${jobId}] Generating advanced strategy...`);
-    const strategistSystemPrompt = STRATEGIST_PROMPT.replace(
+    const promptTemplate = getSystemPrompt('system_analysis_strategist');
+    const strategistSystemPrompt = promptTemplate.replace(
       '{{USER_PROMPT}}',
       originalPrompt
     );

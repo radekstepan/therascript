@@ -34,7 +34,7 @@ import { cn } from '../../utils';
 import { toastMessageAtom } from '../../store';
 import { JobsQueueModal } from '../Jobs/JobsQueueModal';
 import { requestAppShutdown } from '../../api/api';
-import { GpuStatusIndicator } from '../User/GpuStatusIndicator'; // <-- IMPORT NEW COMPONENT
+import { GpuStatusIndicator } from '../User/GpuStatusIndicator';
 
 interface NavItemType {
   id: string;
@@ -271,9 +271,7 @@ export function PersistentSidebar() {
             {isSidebarOpen && 'Active Jobs'}
           </button>
 
-          {/* --- NEW GPU STATUS INDICATOR --- */}
           <GpuStatusIndicator isSidebarOpen={isSidebarOpen} />
-          {/* --- END GPU STATUS INDICATOR --- */}
 
           <button
             title="Shutdown App"
