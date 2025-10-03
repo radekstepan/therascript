@@ -29,6 +29,7 @@
     "@sinclair/typebox": "^0.34.0",
     "@therascript/db": "*",
     "@therascript/elasticsearch-client": "*",
+    "@therascript/gpu-utils": "*",
     "axios": "^1.8.4",
     "bullmq": "^5.10.3",
     "dockerode": "^4.0.6",

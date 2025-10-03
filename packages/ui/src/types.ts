@@ -1,5 +1,54 @@
 // packages/ui/src/types.ts
 
+// --- NEW GPU STATS TYPES ---
+export interface GpuProcess {
+  pid: number;
+  name: string;
+  memoryUsedMb: number;
+}
+
+export interface GpuDeviceStats {
+  id: number;
+  name: string;
+  fanSpeedPercent: number | null;
+  performanceState: string;
+  memory: {
+    totalMb: number;
+    usedMb: number;
+    freeMb: number;
+  };
+  utilization: {
+    gpuPercent: number | null;
+    memoryPercent: number | null;
+  };
+  temperature: {
+    currentCelsius: number | null;
+  };
+  power: {
+    drawWatts: number | null;
+    limitWatts: number | null;
+  };
+  processes: GpuProcess[];
+}
+
+export interface GpuStats {
+  available: boolean;
+  driverVersion: string | null;
+  cudaVersion: string | null;
+  gpus: GpuDeviceStats[];
+  summary: {
+    gpuCount: number;
+    totalMemoryMb: number;
+    totalMemoryUsedMb: number;
+    avgGpuUtilizationPercent: number | null;
+    avgMemoryUtilizationPercent: number | null;
+    avgTemperatureCelsius: number | null;
+    totalPowerDrawWatts: number | null;
+    totalPowerLimitWatts: number | null;
+  };
+}
+// --- END NEW GPU STATS TYPES ---
+
 export interface Template {
   id: number;
   title: string;

@@ -34,6 +34,7 @@ import { cn } from '../../utils';
 import { toastMessageAtom } from '../../store';
 import { JobsQueueModal } from '../Jobs/JobsQueueModal';
 import { requestAppShutdown } from '../../api/api';
+import { GpuStatusIndicator } from '../User/GpuStatusIndicator'; // <-- IMPORT NEW COMPONENT
 
 interface NavItemType {
   id: string;
@@ -116,7 +117,6 @@ export function PersistentSidebar() {
       <div
         className={cn(
           'fixed top-0 left-0 h-full flex flex-col shadow-lg z-40 transition-all duration-300 ease-in-out',
-          // MODIFIED: Use Radix accent variables for background, text, and border
           'bg-[var(--accent-2)] text-[var(--accent-11)]',
           'border-r border-[var(--accent-6)]',
           isSidebarOpen ? 'w-64' : 'w-20'
@@ -127,20 +127,17 @@ export function PersistentSidebar() {
         <div
           className={cn(
             'flex items-center h-16 p-4',
-            // MODIFIED: Use Radix accent variable for border
             'border-b border-[var(--accent-6)]',
             isSidebarOpen ? 'justify-between' : 'justify-center'
           )}
         >
           {isSidebarOpen && (
-            // MODIFIED: Use Radix accent variable for brand text color
             <h1 className="text-xl font-semibold text-[var(--accent-12)]">
               Therascript
             </h1>
           )}
           <button
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            // MODIFIED: Use Radix accent variables for hover and focus ring
             className="p-2 rounded-md hover:bg-[var(--accent-a4)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-8)]"
             aria-label={isSidebarOpen ? 'Close sidebar' : 'Open sidebar'}
             aria-expanded={isSidebarOpen}
@@ -163,7 +160,6 @@ export function PersistentSidebar() {
                   title={item.label}
                   className={cn(
                     'flex items-center w-full py-3 text-left transition-colors duration-150 ease-in-out',
-                    // MODIFIED: Use Radix accent variables for hover, focus, active states
                     !isActive(item.page) &&
                       'hover:bg-[var(--accent-a3)] hover:text-[var(--accent-12)]',
                     'focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent-8)]',
@@ -190,7 +186,6 @@ export function PersistentSidebar() {
         <div
           className={cn(
             'absolute bottom-0 w-full p-4',
-            // MODIFIED: Use Radix accent variable for border
             'border-t border-[var(--accent-6)]',
             !isSidebarOpen && 'flex flex-col items-center space-y-2'
           )}
@@ -199,7 +194,6 @@ export function PersistentSidebar() {
             <select
               value={theme}
               onChange={(e) => setTheme(e.target.value as Theme)}
-              // MODIFIED: Use Radix accent variables for theme select styling
               className="w-full p-2 text-sm bg-[var(--accent-3)] border border-[var(--accent-7)] text-[var(--accent-12)] rounded-md focus:outline-none focus:ring-2 focus:ring-[var(--accent-8)] focus:border-[var(--accent-8)]"
               aria-label="Select theme"
             >
@@ -217,11 +211,10 @@ export function PersistentSidebar() {
                 <button
                   onClick={() => setTheme('light')}
                   className={cn(
-                    // MODIFIED: Use Radix accent variables for theme buttons
                     'p-2 rounded-md hover:bg-[var(--accent-a4)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-8)]',
                     effectiveTheme === 'light' &&
                       theme !== 'system' &&
-                      'text-[var(--accent-9)]' // Active theme icon color
+                      'text-[var(--accent-9)]'
                   )}
                   aria-label="Set light theme"
                   aria-pressed={
@@ -235,11 +228,10 @@ export function PersistentSidebar() {
                 <button
                   onClick={() => setTheme('dark')}
                   className={cn(
-                    // MODIFIED: Use Radix accent variables
                     'p-2 rounded-md hover:bg-[var(--accent-a4)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-8)]',
                     effectiveTheme === 'dark' &&
                       theme !== 'system' &&
-                      'text-[var(--accent-9)]' // Active theme icon color
+                      'text-[var(--accent-9)]'
                   )}
                   aria-label="Set dark theme"
                   aria-pressed={effectiveTheme === 'dark' && theme !== 'system'}
@@ -251,9 +243,8 @@ export function PersistentSidebar() {
                 <button
                   onClick={() => setTheme('system')}
                   className={cn(
-                    // MODIFIED: Use Radix accent variables
                     'p-2 rounded-md hover:bg-[var(--accent-a4)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-8)]',
-                    theme === 'system' && 'text-[var(--accent-9)]' // Active theme icon color
+                    theme === 'system' && 'text-[var(--accent-9)]'
                   )}
                   aria-label="Set system theme"
                   aria-pressed={theme === 'system'}
@@ -280,7 +271,10 @@ export function PersistentSidebar() {
             {isSidebarOpen && 'Active Jobs'}
           </button>
 
-          {/* Shutdown button - kept red styling for destructive action */}
+          {/* --- NEW GPU STATUS INDICATOR --- */}
+          <GpuStatusIndicator isSidebarOpen={isSidebarOpen} />
+          {/* --- END GPU STATUS INDICATOR --- */}
+
           <button
             title="Shutdown App"
             onClick={handleShutdownAppClick}

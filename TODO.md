@@ -1,3 +1,0 @@
-- start_of_turn tokens appear in results
-- Show in sidebar and also how much VRAM each image/job takes up?
-- What if you try to submit analysis and the context is smaller than currently laoded context?

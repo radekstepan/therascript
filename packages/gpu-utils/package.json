@@ -1,0 +1,22 @@
+{
+  "name": "@therascript/gpu-utils",
+  "version": "1.0.0",
+  "private": true,
+  "description": "NVIDIA GPU monitoring utilities for Therascript",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^4.4.0",
+    "which": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "@types/which": "^3.0.4",
+    "typescript": "^5.8.2"
+  }
+}

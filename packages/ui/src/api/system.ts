@@ -1,5 +1,6 @@
 // packages/ui/src/api/system.ts
 import axios from 'axios';
+import type { GpuStats } from '../types';
 
 const SHUTDOWN_SERVICE_URL = 'http://localhost:9999';
 const API_BASE_URL = axios.defaults.baseURL || 'http://localhost:3001';
@@ -81,5 +82,14 @@ export const requestImportData = async (
     },
     timeout: 300000, // 5 minute timeout for import
   });
+  return response.data;
+};
+
+/**
+ * Fetches NVIDIA GPU statistics from the backend.
+ * @returns {Promise<GpuStats>} A promise resolving to the GPU statistics object.
+ */
+export const fetchGpuStats = async (): Promise<GpuStats> => {
+  const response = await axios.get<GpuStats>('/api/system/gpu-stats');
   return response.data;
 };

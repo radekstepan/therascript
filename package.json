@@ -15,6 +15,7 @@
     "build:ollama": "lerna run build --scope=@therascript/ollama",
     "build:whisper": "lerna run build --scope=@therascript/whisper",
     "build:docker-utils": "lerna run build --scope=@therascript/docker-utils",
+    "build:gpu-utils": "lerna run build --scope=@therascript/gpu-utils",
     "build:elasticsearch-manager": "lerna run build --scope=@therascript/elasticsearch-manager",
     "dev": "node ./scripts/run-dev.js",
     "dev:ui": "lerna run dev --scope=@therascript/ui",
