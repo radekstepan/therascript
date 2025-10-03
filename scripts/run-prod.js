@@ -152,7 +152,7 @@ const concurrentlyArgs = [
   'bgGreen.bold,bgMagenta.bold,bgYellow.bold,bgCyan.bold,bgBlue.bold',
   '"yarn start:api:prod"',
   '"yarn dev:ui"', // Typically for prod you'd serve static UI assets, but dev:ui is fine for this setup
-  '"yarn start:worker"',
+  '"yarn start:worker:prod"',
   '"yarn start:whisper"',
   '"yarn start:elasticsearch-manager"',
 ];

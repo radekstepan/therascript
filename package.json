@@ -25,7 +25,7 @@
     "dev:mock": "concurrently --kill-others-on-fail --names API,UI,WHISPER,ES \"yarn dev:mock:api\" \"yarn dev:ui\" \"echo [MOCK MODE] Worker not started\" \"echo [MOCK MODE] Whisper process not needed\" \"echo [MOCK MODE] ES process not needed\"",
     "start": "node ./scripts/run-prod.js",
     "start:api:prod": "node --env-file=.env.api.prod packages/api/dist/server.js",
-    "start:worker": "node --env-file=.env.worker.dev packages/worker/dist/index.js",
+    "start:worker:prod": "node --env-file=.env.worker.prod packages/worker/dist/index.js",
     "start:ollama": "lerna run start --scope=@therascript/ollama",
     "start:whisper": "lerna run start --scope=@therascript/whisper",
     "start:elasticsearch-manager": "lerna run start --scope=@therascript/elasticsearch-manager",
