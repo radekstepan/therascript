@@ -1,7 +1,6 @@
 - start_of_turn tokens appear in results
 - Finalize the queue strategy.
 - Do not block the prompt summary creation when submiting an Analysis job. Put a spinner and pop in the summary once done, submit it like any regular job.
-- Show instead of Docker Status the jobs queue
 - Show in sidebar and also how much VRAM each image/job takes up?
 - What if you try to submit analysis and the context is smaller than currently laoded context?
 - we no longer see the progress bar when Transciption in progress...
