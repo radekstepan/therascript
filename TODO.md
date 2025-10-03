@@ -1,6 +1,4 @@
 - start_of_turn tokens appear in results
-- Finalize the queue strategy.
 - Show in sidebar and also how much VRAM each image/job takes up?
 - What if you try to submit analysis and the context is smaller than currently laoded context?
-- we no longer see the progress bar when Transciption in progress...
 - Loading audio... stuck when opening transcript page

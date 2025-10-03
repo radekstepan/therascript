@@ -28,7 +28,8 @@ import { metaRoutes } from './routes/metaRoutes.js';
 import { systemRoutes } from './routes/systemRoutes.js';
 import { adminRoutes } from './routes/adminRoutes.js';
 import { searchRoutes } from './routes/searchRoutes.js';
-import { analysisRoutes } from './routes/analysisRoutes.js'; // <-- IMPORT NEW ROUTES
+import { analysisRoutes } from './routes/analysisRoutes.js';
+import { transcriptionRoutes } from './routes/transcriptionRoutes.js';
 import {
   ApiError,
   InternalServerError,
@@ -126,7 +127,7 @@ const app = new Elysia()
             name: 'Templates',
             description: 'Manage reusable text templates',
           },
-          { name: 'Analysis', description: 'Multi-session analysis jobs' }, // <-- ADDED TAG
+          { name: 'Analysis', description: 'Multi-session analysis jobs' },
           {
             name: 'Search',
             description: 'Elasticsearch Full-Text Search Endpoints',
@@ -279,7 +280,8 @@ const app = new Elysia()
   .use(systemRoutes)
   .use(adminRoutes)
   .use(searchRoutes)
-  .use(analysisRoutes) // <-- USE NEW ROUTES
+  .use(analysisRoutes)
+  .use(transcriptionRoutes)
   .use(sessionRoutes)
   .use(chatRoutes)
   .use(standaloneChatRoutes)

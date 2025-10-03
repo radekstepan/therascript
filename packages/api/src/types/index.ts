@@ -68,7 +68,6 @@ export interface WhisperTranscriptionResult {
 
 export interface WhisperJobStatus {
   job_id: string;
-  // FIX: Added 'started' to the list of valid statuses.
   status:
     | 'queued'
     | 'processing'
@@ -80,13 +79,13 @@ export interface WhisperJobStatus {
     | 'transcribing'
     | 'started'
     | 'canceling';
-  progress?: number; // Percentage 0-100
-  result?: WhisperTranscriptionResult;
-  error?: string;
-  start_time?: number; // UNIX Milliseconds
-  end_time?: number; // UNIX Milliseconds
-  duration?: number; // Audio duration in seconds
-  message?: string; // Optional descriptive message from Whisper service
+  progress?: number | null; // Percentage 0-100
+  result?: WhisperTranscriptionResult | null;
+  error?: string | null;
+  start_time?: number | null; // UNIX Milliseconds
+  end_time?: number | null; // UNIX Milliseconds
+  duration?: number | null; // Audio duration in seconds
+  message?: string | null; // Optional descriptive message from Whisper service
 }
 
 export interface BackendSession {
