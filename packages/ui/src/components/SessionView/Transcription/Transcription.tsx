@@ -281,7 +281,7 @@ export function Transcription({
         setAudioError('Audio element or source not available.');
         return;
       }
-      if (audioRef.current.currentSrc !== audioSrc) {
+      if (audioRef.current.src !== audioSrc) {
         audioRef.current.src = audioSrc;
         audioRef.current.load();
         setIsAudioLoading(true);
@@ -443,16 +443,14 @@ export function Transcription({
   }, [isTabActive, initialScrollTop]);
 
   useEffect(() => {
-    if (
-      audioRef.current &&
-      audioSrc &&
-      audioRef.current.currentSrc !== audioSrc
-    ) {
+    if (audioRef.current && audioSrc && audioRef.current.src !== audioSrc) {
       audioRef.current.src = audioSrc;
       audioRef.current.load();
       setIsAudioLoading(true);
       setAudioReady(false);
-    } else if (!audioSrc) {
+    } else if (!audioSrc && audioRef.current) {
+      audioRef.current.removeAttribute('src');
+      audioRef.current.load(); // This stops playback and resets state
       setAudioReady(false);
       setIsPlaying(false);
       setPlayingParagraphIndex(null);

@@ -350,8 +350,8 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
                   mimeTypes[ext] || 'application/octet-stream';
                 if (range) {
                   const parts = range.replace(/bytes=/, '').split('-');
-                  const start = parseInt(parts, 10);
-                  const end = parts ? parseInt(parts, 10) : fileSize - 1;
+                  const start = parseInt(parts[0], 10);
+                  const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
                   const chunksize = end - start + 1;
                   if (start >= fileSize || end >= fileSize || start > end) {
                     set.status = 416;
