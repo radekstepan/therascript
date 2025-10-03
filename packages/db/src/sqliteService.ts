@@ -70,7 +70,7 @@ export const schema = `
     -- Templates Table
     CREATE TABLE IF NOT EXISTS templates (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT NOT NULL,
+        title TEXT NOT NULL UNIQUE,
         text TEXT NOT NULL,
         createdAt INTEGER NOT NULL
     );
@@ -80,7 +80,66 @@ export const schema = `
 `;
 
 // --- NEW MIGRATION LOGIC ---
-export const LATEST_SCHEMA_VERSION = 5;
+export const LATEST_SCHEMA_VERSION = 6;
+
+// --- NEW SYSTEM PROMPTS ---
+export const SYSTEM_PROMPT_TEMPLATES = {
+  ANALYSIS_STRATEGIST: {
+    title: 'system_analysis_strategist',
+    text: `You are an expert AI analysis strategist. Your job is to break down a complex, multi-document user query into a two-part MapReduce plan. The user's query will be run against a series of therapy session transcripts, which are ordered chronologically. Your plan must be in a JSON format with two keys:
+1. "intermediate_question": A question or task that can be executed on **each single transcript** independently to extract the necessary information. This question must be self-contained and make sense without seeing other documents.
+2. "final_synthesis_instructions": Instructions for a final AI on how to take all the intermediate answers (which will be provided in chronological order) and synthesize them into a single, cohesive answer to the user's original query.
+
+---
+**EXAMPLE 1**
+**User's Query:** "How is the patient's depression progressing over time?"
+
+**Your JSON Output:**
+{
+  "intermediate_question": "From this single transcript, extract the following data points related to depression. If a point is not mentioned, state 'not mentioned'.\\n- Patient's Self-Reported Mood:\\n- Specific Depression Symptoms Mentioned (e.g., low energy, anhedonia):\\n- Mention of Coping Skills for Depression:\\n- Any Objective Scores Mentioned (e.g., PHQ-9, BDI):",
+  "final_synthesis_instructions": "You will be given a series of chronologically ordered data extractions from multiple therapy sessions. Your task is to write a narrative that describes the patient's progress with depression over time. Synthesize the data points to identify trends, improvements, setbacks, and how the discussion of symptoms and skills has evolved across the sessions."
+}
+---
+**EXAMPLE 2**
+**User's Query:** "What is the therapist consistently missing?"
+
+**Your JSON Output:**
+{
+  "intermediate_question": "Acting as a clinical supervisor, review this single transcript to identify potential missed opportunities. For each one you find, describe: \\n1. The Patient's Cue/Statement.\\n2. The specific opportunity the therapist missed (e.g., chance to validate, opportunity for Socratic questioning, deeper emotional exploration). \\nIf no significant opportunities were missed, state that clearly.",
+  "final_synthesis_instructions": "You will receive a list of potential missed opportunities from several sessions. Your task is to identify and summarize any *consistent patterns* of missed opportunities that appear across multiple sessions. Focus on recurring themes in the therapist's approach that could be areas for growth."
+}
+---
+
+**User's Query:** "{{USER_PROMPT}}"
+
+**Your JSON Output:**`,
+  },
+  SHORT_PROMPT_GENERATOR: {
+    title: 'system_short_prompt_generator',
+    text: `Summarize the following user request into a very short, title-like phrase of no more than 5 words. Do not use quotes or introductory phrases.
+
+REQUEST: "{{USER_PROMPT}}"`,
+  },
+};
+// --- END NEW SYSTEM PROMPTS ---
+
+function seedSystemTemplates(dbInstance: DB) {
+  console.log('[db Seeder] Checking for system prompt templates...');
+  const checkStmt = dbInstance.prepare(
+    'SELECT 1 FROM templates WHERE title = ?'
+  );
+  const insertStmt = dbInstance.prepare(
+    'INSERT INTO templates (title, text, createdAt) VALUES (?, ?, ?)'
+  );
+
+  for (const template of Object.values(SYSTEM_PROMPT_TEMPLATES)) {
+    const exists = checkStmt.get(template.title);
+    if (!exists) {
+      insertStmt.run(template.title, template.text, Date.now());
+      console.log(`[db Seeder] Seeded system template: "${template.title}"`);
+    }
+  }
+}
 
 function runMigrations(dbInstance: DB) {
   // FIX: With { simple: true }, the pragma returns the value directly as a number.
@@ -100,10 +159,7 @@ function runMigrations(dbInstance: DB) {
       // Version 1: The initial schema
       if (currentVersion < 1) {
         console.log('[db Migrator] Applying version 1...');
-        // The initial `db.exec(schema)` will handle creating the base tables.
-        // We ensure all base tables exist here.
         dbInstance.exec(schema);
-        // The old logic for adding transcriptTokenCount can be considered part of V1
         const sessionColumns = dbInstance.pragma('table_info(sessions)') as {
           name: string;
           type: string;
@@ -127,11 +183,10 @@ function runMigrations(dbInstance: DB) {
       if (currentVersion < 2) {
         console.log('[db Migrator] Applying version 2...');
         dbInstance.exec(`
-          -- Analysis Jobs Table
           CREATE TABLE IF NOT EXISTS analysis_jobs (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               original_prompt TEXT NOT NULL,
-              status TEXT NOT NULL DEFAULT 'pending', -- e.g., pending, mapping, reducing, completed, failed
+              status TEXT NOT NULL DEFAULT 'pending',
               final_result TEXT,
               error_message TEXT,
               created_at INTEGER NOT NULL,
@@ -139,8 +194,6 @@ function runMigrations(dbInstance: DB) {
           );
           CREATE INDEX IF NOT EXISTS idx_analysis_jobs_status ON analysis_jobs (status);
           CREATE INDEX IF NOT EXISTS idx_analysis_jobs_created_at ON analysis_jobs (created_at);
-
-          -- Join table for Analysis Jobs and Sessions
           CREATE TABLE IF NOT EXISTS analysis_job_sessions (
               analysis_job_id INTEGER NOT NULL,
               session_id INTEGER NOT NULL,
@@ -148,14 +201,12 @@ function runMigrations(dbInstance: DB) {
               FOREIGN KEY (analysis_job_id) REFERENCES analysis_jobs (id) ON DELETE CASCADE,
               FOREIGN KEY (session_id) REFERENCES sessions (id) ON DELETE CASCADE
           );
-
-          -- Intermediate Summaries from the "Map" step
           CREATE TABLE IF NOT EXISTS intermediate_summaries (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               analysis_job_id INTEGER NOT NULL,
               session_id INTEGER NOT NULL,
               summary_text TEXT,
-              status TEXT NOT NULL DEFAULT 'pending', -- e.g., pending, processing, completed, failed
+              status TEXT NOT NULL DEFAULT 'pending',
               error_message TEXT,
               FOREIGN KEY (analysis_job_id) REFERENCES analysis_jobs (id) ON DELETE CASCADE,
               FOREIGN KEY (session_id) REFERENCES sessions (id) ON DELETE CASCADE
@@ -199,6 +250,28 @@ function runMigrations(dbInstance: DB) {
         dbInstance.pragma('user_version = 5');
         currentVersion = 5;
         console.log('[db Migrator] Version 5 applied.');
+      }
+
+      // Version 6: Add UNIQUE constraint to template titles
+      if (currentVersion < 6) {
+        console.log('[db Migrator] Applying version 6...');
+        // This is a complex migration for SQLite. We'll recreate the table.
+        dbInstance.exec(`
+          CREATE TABLE templates_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL UNIQUE,
+            text TEXT NOT NULL,
+            createdAt INTEGER NOT NULL
+          );
+          INSERT INTO templates_new (id, title, text, createdAt)
+          SELECT id, title, text, createdAt FROM templates;
+          DROP TABLE templates;
+          ALTER TABLE templates_new RENAME TO templates;
+          CREATE INDEX idx_template_created_at ON templates (createdAt);
+        `);
+        dbInstance.pragma('user_version = 6');
+        currentVersion = 6;
+        console.log('[db Migrator] Version 6 applied.');
       }
     })();
     console.log(
@@ -267,11 +340,7 @@ export function closeDb(): void {
   }
 }
 
-// REMOVED: calculateSchemaHash and verifySchemaVersion functions
-// export function calculateSchemaHash(...) { ... }
-// export function verifySchemaVersion(...) { ... }
-
-// MODIFIED: initializeDatabase now runs migrations instead of hash check
+// MODIFIED: initializeDatabase now runs migrations and seeds system prompts
 export function initializeDatabase(dbInstance: DB) {
   console.log('[db Init Func]: Attempting to initialize schema...');
   try {
@@ -282,6 +351,9 @@ export function initializeDatabase(dbInstance: DB) {
 
     // Run the migration logic
     runMigrations(dbInstance);
+
+    // Seed system templates after migrations are complete
+    seedSystemTemplates(dbInstance);
 
     // This part is now handled inside the migration, but we can keep the warning.
     const sessionColumns = dbInstance.pragma('table_info(sessions)') as {

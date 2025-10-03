@@ -536,13 +536,19 @@ export const importDataService = async (
             'INSERT INTO transcript_paragraphs (sessionId, paragraphIndex, timestampMs, text) VALUES (?, ?, ?, ?)'
           ).run(newSid, p.paragraphIndex, p.timestampMs, p.text);
       });
-      templates.forEach((t) =>
-        db
-          .prepare(
-            'INSERT INTO templates (title, text, createdAt) VALUES (?, ?, ?)'
-          )
-          .run(t.title, t.text, t.createdAt)
+
+      // --- FIX: Use UPSERT for templates to handle system prompts ---
+      const upsertTemplateStmt = db.prepare(
+        `INSERT INTO templates (title, text, createdAt) 
+         VALUES (?, ?, ?) 
+         ON CONFLICT(title) DO UPDATE SET 
+           text=excluded.text, 
+           createdAt=excluded.createdAt`
       );
+      for (const t of templates) {
+        upsertTemplateStmt.run(t.title, t.text, t.createdAt);
+      }
+      // --- END FIX ---
     })();
 
     const uploadsSrcDir = path.join(tempDir, 'uploads');
