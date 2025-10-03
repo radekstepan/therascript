@@ -66,6 +66,7 @@ const getStatusBadgeColor = (
       return 'green';
     case 'failed':
       return 'red';
+    case 'generating_strategy':
     case 'mapping':
     case 'reducing':
     case 'processing':
@@ -219,9 +220,10 @@ const JobDetailView: React.FC<{
 
   const isProcessing =
     job.status === 'pending' ||
+    job.status === 'generating_strategy' ||
     job.status === 'mapping' ||
     job.status === 'reducing';
-  const isCancellable = isProcessing || job.status === 'pending';
+  const isCancellable = isProcessing;
   const isDeletable =
     job.status === 'completed' ||
     job.status === 'failed' ||
@@ -235,17 +237,19 @@ const JobDetailView: React.FC<{
       50
     : 0;
   const overallProgress =
-    job.status === 'pending'
-      ? 5
-      : job.status === 'mapping'
-        ? 10 + mapProgress
-        : job.status === 'reducing'
-          ? 60
-          : job.status === 'completed'
-            ? 100
-            : job.status === 'failed' || job.status === 'canceled'
+    job.status === 'generating_strategy'
+      ? 2
+      : job.status === 'pending'
+        ? 5
+        : job.status === 'mapping'
+          ? 10 + mapProgress
+          : job.status === 'reducing'
+            ? 60
+            : job.status === 'completed'
               ? 100
-              : 0;
+              : job.status === 'failed' || job.status === 'canceled'
+                ? 100
+                : 0;
 
   return (
     <Card>
@@ -516,12 +520,15 @@ const JobList: React.FC<{
           {jobs.map((job) => {
             const isCancellable =
               job.status === 'pending' ||
+              job.status === 'generating_strategy' ||
               job.status === 'mapping' ||
               job.status === 'reducing';
             const isDeletable =
               job.status === 'completed' ||
               job.status === 'failed' ||
               job.status === 'canceled';
+            const isSummarizing = job.short_prompt.includes('(summarizing)');
+
             return (
               <Table.Row
                 key={job.id}
@@ -532,6 +539,7 @@ const JobList: React.FC<{
                 <Table.Cell>
                   <Badge color={getStatusBadgeColor(job.status)} variant="soft">
                     {job.status === 'pending' ||
+                    job.status === 'generating_strategy' ||
                     job.status === 'mapping' ||
                     job.status === 'reducing' ? (
                       <LapTimerIcon width="12" height="12" />
@@ -544,9 +552,12 @@ const JobList: React.FC<{
                   </Badge>
                 </Table.Cell>
                 <Table.Cell>
-                  <Text truncate title={job.original_prompt}>
-                    {job.short_prompt}
-                  </Text>
+                  <Flex align="center" gap="2">
+                    {isSummarizing && <Spinner size="1" />}
+                    <Text truncate title={job.original_prompt}>
+                      {job.short_prompt}
+                    </Text>
+                  </Flex>
                 </Table.Cell>
                 <Table.Cell>
                   <Text color="gray" size="2">
@@ -629,10 +640,11 @@ export function AnalysisJobsPage() {
           (job) =>
             job.status === 'completed' ||
             job.status === 'failed' ||
-            job.status === 'canceled'
+            job.status === 'canceled' ||
+            !job.short_prompt.includes('(summarizing)') // also stop if all are summarized
         )
       ) {
-        return false; // Stop polling if all jobs are done
+        return false; // Stop polling
       }
       return 5000; // Poll every 5 seconds
     },

@@ -13,7 +13,16 @@ const AnalysisJobSchema = t.Object({
   id: t.Number(),
   original_prompt: t.String(),
   short_prompt: t.String(),
-  status: t.String(),
+  status: t.Union([
+    t.Literal('pending'),
+    t.Literal('generating_strategy'),
+    t.Literal('mapping'),
+    t.Literal('reducing'),
+    t.Literal('completed'),
+    t.Literal('failed'),
+    t.Literal('canceling'),
+    t.Literal('canceled'),
+  ]),
   final_result: t.Union([t.String(), t.Null()]),
   error_message: t.Union([t.String(), t.Null()]),
   created_at: t.Number(),
@@ -31,6 +40,7 @@ const IntermediateSummarySchema = t.Object({
   status: t.String(),
   error_message: t.Union([t.String(), t.Null()]),
   sessionName: t.String(),
+  sessionDate: t.String(),
 });
 
 // Parsed strategy for the UI
@@ -58,7 +68,7 @@ const CreateAnalysisJobBodySchema = t.Object({
   }),
   modelName: t.Optional(t.String()),
   contextSize: t.Optional(t.Number({ minimum: 1 })),
-  useAdvancedStrategy: t.Optional(t.Boolean()), // <-- THE FIX IS HERE
+  useAdvancedStrategy: t.Optional(t.Boolean()),
 });
 
 const JobIdParamSchema = t.Object({

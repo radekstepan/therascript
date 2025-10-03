@@ -226,6 +226,7 @@ export interface AnalysisJob {
   short_prompt: string;
   status:
     | 'pending'
+    | 'generating_strategy'
     | 'mapping'
     | 'reducing'
     | 'completed'
