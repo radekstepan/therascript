@@ -57,7 +57,7 @@ export const schema = `
     CREATE TABLE IF NOT EXISTS messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         chatId INTEGER NOT NULL,
-        sender TEXT NOT NULL CHECK(sender IN ('user', 'ai')),
+        sender TEXT NOT NULL CHECK(sender IN ('user', 'ai', 'system')),
         text TEXT NOT NULL,
         timestamp INTEGER NOT NULL,
         promptTokens INTEGER,
@@ -80,7 +80,7 @@ export const schema = `
 `;
 
 // --- NEW MIGRATION LOGIC ---
-export const LATEST_SCHEMA_VERSION = 4;
+export const LATEST_SCHEMA_VERSION = 5;
 
 function runMigrations(dbInstance: DB) {
   // FIX: With { simple: true }, the pragma returns the value directly as a number.
@@ -188,6 +188,17 @@ function runMigrations(dbInstance: DB) {
         dbInstance.pragma('user_version = 4');
         currentVersion = 4;
         console.log('[db Migrator] Version 4 applied.');
+      }
+
+      // Version 5: Add strategy_json to analysis_jobs
+      if (currentVersion < 5) {
+        console.log('[db Migrator] Applying version 5...');
+        dbInstance.exec(
+          'ALTER TABLE analysis_jobs ADD COLUMN strategy_json TEXT'
+        );
+        dbInstance.pragma('user_version = 5');
+        currentVersion = 5;
+        console.log('[db Migrator] Version 5 applied.');
       }
     })();
     console.log(

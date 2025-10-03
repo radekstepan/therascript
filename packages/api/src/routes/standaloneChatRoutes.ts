@@ -47,7 +47,7 @@ const StandaloneChatListResponseSchema = t.Array(
 const ChatMessageResponseSchema = t.Object({
   id: t.Number(),
   chatId: t.Number(),
-  sender: t.Union([t.Literal('user'), t.Literal('ai')]),
+  sender: t.Union([t.Literal('user'), t.Literal('ai'), t.Literal('system')]), // <-- THE FIX IS HERE
   text: t.String(),
   timestamp: t.Number(),
   promptTokens: t.Optional(t.Union([t.Number(), t.Null()])),

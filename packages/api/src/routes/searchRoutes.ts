@@ -41,7 +41,9 @@ const SearchResultItemSchema = t.Object({
   type: t.Union([t.Literal('chat'), t.Literal('transcript')]),
   chatId: t.Optional(t.Union([t.Number(), t.Null()])),
   sessionId: t.Optional(t.Union([t.Number(), t.Null()])),
-  sender: t.Optional(t.Union([t.Literal('user'), t.Literal('ai'), t.Null()])),
+  sender: t.Optional(
+    t.Union([t.Literal('user'), t.Literal('ai'), t.Literal('system'), t.Null()]) // <-- THE FIX IS HERE
+  ),
   timestamp: t.Number(),
   snippet: t.String(),
   score: t.Optional(t.Number()),

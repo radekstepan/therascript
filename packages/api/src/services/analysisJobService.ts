@@ -5,6 +5,12 @@ import { sessionRepository } from '../repositories/sessionRepository.js';
 import { streamChatResponse } from './ollamaService.js';
 import { cleanLlmOutput } from '../utils/helpers.js';
 import type { ChatResponse } from 'ollama';
+import type {
+  IntermediateSummary,
+  BackendSession as Session,
+  AnalysisStrategy,
+  BackendChatMessage,
+} from '../types/index.js';
 
 /**
  * Consumes an async iterable stream from the Ollama service and concatenates the content.
@@ -41,6 +47,24 @@ export async function processAnalysisJob(jobId: number): Promise<void> {
       );
       analysisRepository.updateJobStatus(jobId, 'canceled');
       return;
+    }
+
+    // --- STRATEGY DECODING ---
+    let strategy: AnalysisStrategy | null = null;
+    if (job.strategy_json) {
+      try {
+        strategy = JSON.parse(job.strategy_json);
+      } catch (e) {
+        // If JSON is invalid, we can treat it as if there's no strategy
+        console.error(
+          `[AnalysisService Job ${jobId}] Invalid analysis strategy JSON. Falling back to simple mode. Error:`,
+          e
+        );
+      }
+    } else {
+      console.log(
+        `[AnalysisService Job ${jobId}] No advanced strategy found. Using simple summarization mode.`
+      );
     }
 
     // --- MAP PHASE ---
@@ -91,37 +115,65 @@ export async function processAnalysisJob(jobId: number): Promise<void> {
           throw new Error('Transcript is empty or not available.');
         }
 
-        const mapPrompt = `
-          USER'S QUESTION: "${job.original_prompt}"
+        let mapMessages: BackendChatMessage[];
 
-          SESSION NAME: "${sessionName}"
+        if (strategy) {
+          // ADVANCED STRATEGY
+          mapMessages = [
+            {
+              id: 0,
+              chatId: 0,
+              sender: 'system',
+              text: `You are an AI assistant analyzing a single therapy session transcript. Your task is to follow the user's instructions precisely. The user's original high-level question was: "${job.original_prompt}"`,
+              timestamp: Date.now(),
+            },
+            {
+              id: 1,
+              chatId: 0,
+              sender: 'user',
+              text: `
+TASK:
+${strategy.intermediate_question}
 
-          TRANSCRIPT FOR SESSION "${sessionName}":
-          """
-          ${transcriptText}
-          """
+TRANSCRIPT TO ANALYZE (Session: "${sessionName}"):
+"""
+${transcriptText}
+"""
+            `,
+              timestamp: Date.now(),
+            },
+          ];
+        } else {
+          // SIMPLE (FALLBACK) STRATEGY
+          const simpleMapPrompt = `
+USER'S QUESTION: "${job.original_prompt}"
 
-          YOUR TASK: Analyze the single transcript for the session named "${sessionName}" provided above and write a concise summary that directly answers the user's question *only for this specific session*. 
-          Extract only the most relevant information. Do not add any introductory or concluding phrases like "In this session..." or "To summarize...".
-          Do not synthesize an answer across multiple sessions. Stick strictly to the provided transcript.
+SESSION NAME: "${sessionName}"
+
+TRANSCRIPT FOR SESSION "${sessionName}":
+"""
+${transcriptText}
+"""
+
+YOUR TASK: Analyze the single transcript for the session named "${sessionName}" provided above and write a concise summary that directly answers the user's question *only for this specific session*.
+Extract only the most relevant information. Do not add any introductory or concluding phrases like "In this session..." or "To summarize...".
+Do not synthesize an answer across multiple sessions. Stick strictly to the provided transcript.
         `;
-
-        const stream = await streamChatResponse(
-          null,
-          [
+          mapMessages = [
             {
               id: 0,
               chatId: 0,
               sender: 'user',
-              text: mapPrompt,
+              text: simpleMapPrompt,
               timestamp: Date.now(),
             },
-          ],
-          {
-            model: job.model_name || undefined,
-            contextSize: job.context_size || undefined,
-          }
-        );
+          ];
+        }
+
+        const stream = await streamChatResponse(null, mapMessages, {
+          model: job.model_name || undefined,
+          contextSize: job.context_size || undefined,
+        });
         const summaryText = await accumulateStreamResponse(stream);
 
         if (!summaryText) {
@@ -188,48 +240,93 @@ export async function processAnalysisJob(jobId: number): Promise<void> {
     if (!job)
       throw new Error(`Main job ${jobId} disappeared before reduce phase.`);
 
-    const intermediateSummariesText = successfulSummaries
-      .map((s) => {
-        const session = sessionRepository.findById(s.session_id);
+    const enrichedSummaries = successfulSummaries
+      .map((summary) => {
+        const session = sessionRepository.findById(summary.session_id);
+        return { summary, session };
+      })
+      .filter(
+        (
+          item
+        ): item is {
+          summary: IntermediateSummary;
+          session: NonNullable<Session>;
+        } => !!item.session
+      )
+      .sort(
+        (a, b) =>
+          new Date(a.session.date).getTime() -
+          new Date(b.session.date).getTime()
+      );
+
+    const intermediateSummariesText = enrichedSummaries
+      .map(({ summary, session }) => {
         const sessionName =
-          session?.sessionName ||
-          session?.fileName ||
-          `Session ID ${s.session_id}`;
-        return `--- Summary from Session "${sessionName}" ---\n${s.summary_text}`;
+          session.sessionName ||
+          session.fileName ||
+          `Session ID ${summary.session_id}`;
+        return `--- Analysis from Session "${sessionName}" ---\n${summary.summary_text}`;
       })
       .join('\n\n');
 
-    const reducePrompt = `
-      USER'S ORIGINAL QUESTION: "${job.original_prompt}"
+    let reduceMessages: BackendChatMessage[];
 
-      INTERMEDIATE SUMMARIES:
-      """
-      ${intermediateSummariesText}
-      """
+    if (strategy) {
+      // ADVANCED STRATEGY
+      reduceMessages = [
+        {
+          id: 0,
+          chatId: 0,
+          sender: 'system',
+          text: strategy.final_synthesis_instructions,
+          timestamp: Date.now(),
+        },
+        {
+          id: 1,
+          chatId: 0,
+          sender: 'user',
+          text: `
+USER'S ORIGINAL QUESTION: "${job.original_prompt}"
 
-      YOUR TASK: You are an expert synthesizer. Your job is to create a single, cohesive, high-level answer to the user's original question.
-      Base your answer *only* on the information provided in the "INTERMEDIATE SUMMARIES" section above.
-      Do not simply list the summaries. Integrate the findings into a comprehensive response.
-      If the summaries provide conflicting information, note the discrepancy.
-      If a theme is present in multiple summaries, highlight it.
+INTERMEDIATE ANSWERS (in chronological order):
+"""
+${intermediateSummariesText}
+"""
+        `,
+          timestamp: Date.now(),
+        },
+      ];
+    } else {
+      // SIMPLE (FALLBACK) STRATEGY
+      const simpleReducePrompt = `
+USER'S ORIGINAL QUESTION: "${job.original_prompt}"
+
+INTERMEDIATE SUMMARIES:
+"""
+${intermediateSummariesText}
+"""
+
+YOUR TASK: You are an expert synthesizer. Your job is to create a single, cohesive, high-level answer to the user's original question.
+Base your answer *only* on the information provided in the "INTERMEDIATE SUMMARIES" section above.
+Do not simply list the summaries. Integrate the findings into a comprehensive response.
+If the summaries provide conflicting information, note the discrepancy.
+If a theme is present in multiple summaries, highlight it.
     `;
-
-    const stream = await streamChatResponse(
-      null,
-      [
+      reduceMessages = [
         {
           id: 0,
           chatId: 0,
           sender: 'user',
-          text: reducePrompt,
+          text: simpleReducePrompt,
           timestamp: Date.now(),
         },
-      ],
-      {
-        model: job.model_name || undefined,
-        contextSize: job.context_size || undefined,
-      }
-    );
+      ];
+    }
+
+    const stream = await streamChatResponse(null, reduceMessages, {
+      model: job.model_name || undefined,
+      contextSize: job.context_size || undefined,
+    });
     const finalResult = await accumulateStreamResponse(stream);
 
     if (!finalResult) {

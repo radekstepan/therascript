@@ -27,7 +27,7 @@ export interface MessageSource {
   message_id: string;
   chat_id: number;
   session_id?: number | null;
-  sender: 'user' | 'ai';
+  sender: 'user' | 'ai' | 'system'; // <-- THE FIX IS HERE
   text: string;
   timestamp: number; // epoch_millis
   chat_name?: string | null;

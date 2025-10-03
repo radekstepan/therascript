@@ -190,6 +190,11 @@ export interface ReadinessStatus {
 }
 
 // --- NEW ANALYSIS JOB TYPES ---
+export interface AnalysisStrategy {
+  intermediate_question: string;
+  final_synthesis_instructions: string;
+}
+
 export interface IntermediateSummaryWithSessionName {
   id: number;
   analysis_job_id: number;
@@ -198,6 +203,7 @@ export interface IntermediateSummaryWithSessionName {
   status: 'pending' | 'processing' | 'completed' | 'failed';
   error_message: string | null;
   sessionName: string;
+  sessionDate: string;
 }
 
 export interface AnalysisJob {
@@ -219,6 +225,7 @@ export interface AnalysisJob {
   model_name: string | null;
   context_size: number | null;
   summaries?: IntermediateSummaryWithSessionName[];
+  strategy?: AnalysisStrategy | null; // Parsed strategy object from API
 }
 
 export type AnalysisJobSortCriteria =

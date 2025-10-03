@@ -1,3 +1,4 @@
+// packages/api/src/repositories/messageRepository.ts
 import { db, run, all, get } from '@therascript/db';
 import type { BackendChatMessage } from '../types/index.js';
 
@@ -30,7 +31,7 @@ export const messageRepository = {
    */
   addMessage: (
     chatId: number,
-    sender: 'user' | 'ai',
+    sender: 'user' | 'ai' | 'system',
     text: string,
     promptTokens?: number | null,
     completionTokens?: number | null

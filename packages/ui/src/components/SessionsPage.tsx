@@ -12,10 +12,10 @@ import {
   AlertDialog,
   Button,
 } from '@radix-ui/themes';
-import { TrashIcon, BarChartIcon } from '@radix-ui/react-icons'; // <-- ADD BarChartIcon
+import { TrashIcon, BarChartIcon } from '@radix-ui/react-icons';
 import { SessionListTable } from './LandingPage/SessionListTable';
 import { EditDetailsModal } from './SessionView/Modals/EditDetailsModal';
-import { CreateAnalysisJobModal } from './Analysis/CreateAnalysisJobModal'; // <-- IMPORT a new modal
+import { CreateAnalysisJobModal } from './Analysis/CreateAnalysisJobModal';
 import { fetchSessions, deleteSession as deleteSessionApi } from '../api/api';
 import {
   sessionSortCriteriaAtom,
