@@ -16,6 +16,10 @@ const updateJobStatusSql = `
     SET status = ?, error_message = ?, final_result = ?, completed_at = ?
     WHERE id = ?
 `;
+const updateJobShortPromptSql =
+  'UPDATE analysis_jobs SET short_prompt = ? WHERE id = ?';
+const updateJobStrategyAndStatusSql =
+  "UPDATE analysis_jobs SET strategy_json = ?, status = 'pending' WHERE id = ?";
 const deleteJobSql = 'DELETE FROM analysis_jobs WHERE id = ?';
 
 // Analysis Job Sessions (Join Table)
@@ -57,7 +61,8 @@ export const analysisRepository = {
     sessionIds: number[],
     modelName: string | null,
     contextSize: number | null,
-    strategyJson: string | null
+    strategyJson: string | null,
+    initialStatus: AnalysisJob['status'] = 'pending'
   ): AnalysisJob => {
     try {
       const createdAt = Date.now();
@@ -67,7 +72,7 @@ export const analysisRepository = {
           insertJobSql,
           prompt,
           shortPrompt,
-          'pending',
+          initialStatus,
           createdAt,
           modelName,
           contextSize,
@@ -148,6 +153,35 @@ export const analysisRepository = {
         error
       );
       throw new Error('Database error updating job status.');
+    }
+  },
+
+  updateJobShortPrompt: (jobId: number, shortPrompt: string): boolean => {
+    try {
+      const info = run(updateJobShortPromptSql, shortPrompt, jobId);
+      return info.changes > 0;
+    } catch (error) {
+      console.error(
+        `[AnalysisRepo] Error updating short prompt for job ${jobId}:`,
+        error
+      );
+      throw new Error('Database error updating job short prompt.');
+    }
+  },
+
+  updateJobStrategyAndSetPending: (
+    jobId: number,
+    strategyJson: string
+  ): boolean => {
+    try {
+      const info = run(updateJobStrategyAndStatusSql, strategyJson, jobId);
+      return info.changes > 0;
+    } catch (error) {
+      console.error(
+        `[AnalysisRepo] Error updating strategy and status for job ${jobId}:`,
+        error
+      );
+      throw new Error('Database error updating job strategy and status.');
     }
   },
 

@@ -60,25 +60,18 @@ const STRATEGIST_PROMPT = `You are an expert AI analysis strategist. Your job is
 
 **Your JSON Output:**`;
 
-export const createAnalysisJobHandler = async ({
-  body,
-  set,
-}: any): Promise<{ jobId: number }> => {
-  const { sessionIds, prompt, modelName, contextSize, useAdvancedStrategy } =
-    body as {
-      sessionIds: number[];
-      prompt: string;
-      modelName?: string;
-      contextSize?: number;
-      useAdvancedStrategy?: boolean;
-    };
+const generateShortPromptInBackground = async (
+  jobId: number,
+  originalPrompt: string,
+  modelName?: string | null
+) => {
   try {
-    // 1. Generate short prompt for display
+    console.log(`[Analysis BG ${jobId}] Generating short prompt...`);
     const summarizePrompt = `Summarize the following user request into a very short, title-like phrase of no more than 5 words. Do not use quotes or introductory phrases.
 
-REQUEST: "${prompt}"`;
+REQUEST: "${originalPrompt}"`;
 
-    let stream = await streamChatResponse(
+    const stream = await streamChatResponse(
       null,
       [
         {
@@ -93,78 +86,136 @@ REQUEST: "${prompt}"`;
     );
     const shortPrompt = await accumulateStreamResponse(stream);
 
-    // 2. Conditionally generate the analysis strategy
-    let strategyJsonString: string | null = null;
-    if (useAdvancedStrategy === true) {
+    if (shortPrompt) {
+      analysisRepository.updateJobShortPrompt(jobId, shortPrompt);
       console.log(
-        '[AnalysisHandler] Using advanced strategy. Generating plan...'
+        `[Analysis BG ${jobId}] Updated short prompt to: "${shortPrompt}"`
       );
-      const strategistSystemPrompt = STRATEGIST_PROMPT.replace(
-        '{{USER_PROMPT}}',
-        prompt
-      );
-
-      stream = await streamChatResponse(
-        null,
-        [
-          {
-            id: 0,
-            chatId: 0,
-            sender: 'user',
-            text: strategistSystemPrompt,
-            timestamp: Date.now(),
-          },
-        ],
-        { model: modelName || undefined }
-      );
-      const rawStrategyOutput = await accumulateStreamResponse(stream);
-
-      // Clean and Validate the strategy
-      let cleanedJson = rawStrategyOutput;
-      const jsonRegex = /```json\s*([\s\S]*?)\s*```/;
-      const match = rawStrategyOutput.match(jsonRegex);
-      if (match && match[1]) {
-        cleanedJson = match[1];
-      }
-
-      try {
-        const strategy: AnalysisStrategy = JSON.parse(cleanedJson);
-        if (
-          !strategy ||
-          typeof strategy.intermediate_question !== 'string' ||
-          typeof strategy.final_synthesis_instructions !== 'string'
-        ) {
-          throw new Error('Invalid JSON structure.');
-        }
-        strategyJsonString = cleanedJson; // Store the cleaned, valid JSON string
-      } catch (e) {
-        console.error(
-          '[AnalysisHandler] Failed to generate a valid analysis strategy JSON:',
-          e
-        );
-        console.error('LLM Output for strategy was:', rawStrategyOutput);
-        throw new BadRequestError(
-          'The AI failed to generate a valid analysis plan for this query. Please try rephrasing your request.'
-        );
-      }
     } else {
-      console.log(
-        '[AnalysisHandler] Using simple strategy. Skipping plan generation.'
+      console.warn(
+        `[Analysis BG ${jobId}] Failed to generate a valid short prompt.`
+      );
+      analysisRepository.updateJobShortPrompt(
+        jobId,
+        `Analysis - ${originalPrompt.substring(0, 30)}...`
       );
     }
+  } catch (error) {
+    console.error(
+      `[Analysis BG ${jobId}] Error generating short prompt:`,
+      error
+    );
+    analysisRepository.updateJobShortPrompt(
+      jobId,
+      `Analysis - ${originalPrompt.substring(0, 30)}...`
+    );
+  }
+};
 
-    // 3. Create the job with the strategy (or null)
-    const newJob = analysisRepository.createJob(
-      prompt,
-      shortPrompt || `Analysis - ${prompt.substring(0, 20)}...`,
-      sessionIds,
-      modelName || null,
-      contextSize || null,
-      strategyJsonString
+const generateStrategyAndUpdateJob = async (
+  jobId: number,
+  originalPrompt: string,
+  modelName?: string | null
+) => {
+  try {
+    console.log(`[Analysis BG ${jobId}] Generating advanced strategy...`);
+    const strategistSystemPrompt = STRATEGIST_PROMPT.replace(
+      '{{USER_PROMPT}}',
+      originalPrompt
     );
 
-    // 4. Trigger background processing
-    void processAnalysisJob(newJob.id);
+    const stream = await streamChatResponse(
+      null,
+      [
+        {
+          id: 0,
+          chatId: 0,
+          sender: 'user',
+          text: strategistSystemPrompt,
+          timestamp: Date.now(),
+        },
+      ],
+      { model: modelName || undefined }
+    );
+    const rawStrategyOutput = await accumulateStreamResponse(stream);
+
+    let cleanedJson = rawStrategyOutput;
+    const jsonRegex = /```json\s*([\s\S]*?)\s*```/;
+    const match = rawStrategyOutput.match(jsonRegex);
+    if (match && match[1]) {
+      cleanedJson = match[1];
+    }
+
+    const strategy: AnalysisStrategy = JSON.parse(cleanedJson);
+    if (
+      !strategy ||
+      typeof strategy.intermediate_question !== 'string' ||
+      typeof strategy.final_synthesis_instructions !== 'string'
+    ) {
+      throw new Error('Invalid JSON structure from LLM.');
+    }
+
+    analysisRepository.updateJobStrategyAndSetPending(jobId, cleanedJson);
+    console.log(
+      `[Analysis BG ${jobId}] Successfully generated strategy and set status to 'pending'.`
+    );
+
+    // Now trigger the worker since the job is ready
+    void processAnalysisJob(jobId);
+  } catch (error) {
+    console.error(`[Analysis BG ${jobId}] Error generating strategy:`, error);
+    analysisRepository.updateJobStatus(
+      jobId,
+      'failed',
+      null,
+      'Failed to generate analysis strategy.'
+    );
+  }
+};
+
+export const createAnalysisJobHandler = async ({
+  body,
+  set,
+}: any): Promise<{ jobId: number }> => {
+  const { sessionIds, prompt, modelName, contextSize, useAdvancedStrategy } =
+    body as {
+      sessionIds: number[];
+      prompt: string;
+      modelName?: string;
+      contextSize?: number;
+      useAdvancedStrategy?: boolean;
+    };
+  try {
+    const placeholderShortPrompt = `Analysis of "${prompt.substring(0, 30)}..." (summarizing)`;
+
+    let newJob: AnalysisJob;
+
+    if (useAdvancedStrategy) {
+      newJob = analysisRepository.createJob(
+        prompt,
+        placeholderShortPrompt,
+        sessionIds,
+        modelName || null,
+        contextSize || null,
+        null, // strategyJson is null initially
+        'generating_strategy'
+      );
+      void generateStrategyAndUpdateJob(newJob.id, prompt, modelName);
+    } else {
+      newJob = analysisRepository.createJob(
+        prompt,
+        placeholderShortPrompt,
+        sessionIds,
+        modelName || null,
+        contextSize || null,
+        null, // No strategy for simple mode
+        'pending'
+      );
+      void processAnalysisJob(newJob.id);
+    }
+
+    // Generate short prompt in the background for both cases
+    void generateShortPromptInBackground(newJob.id, prompt, modelName);
 
     set.status = 202; // Accepted
     return { jobId: newJob.id };
