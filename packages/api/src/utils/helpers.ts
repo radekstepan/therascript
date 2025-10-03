@@ -14,18 +14,25 @@ export const isNodeError = (error: unknown): error is NodeJS.ErrnoException => {
 export const cleanLlmOutput = (text: string): string => {
   // Comprehensive list of end-of-turn and similar tokens that might appear in LLM output
   const tokensToRemove = [
+    // End of turn tokens
     '</end_of_turn>',
     '<end_of_turn>',
-    '<end_of_turn',
-    'end_of_turn>',
     '<|end_of_turn|>',
     '<|endofturn|>',
     '<|eot|>',
     '<eos>',
     '</s>',
-    '<s>',
+    // Start of turn tokens
+    '<start_of_turn>user',
+    '<start_of_turn>model',
+    '<start_of_turn>assistant',
+    '<start_of_turn>',
+    '<|start_of_turn|>',
+    '<|startofturn|>',
+    // Other common instruction/system tokens
     '[/INST]',
     '[INST]',
+    '<s>',
   ];
 
   console.log({ text });

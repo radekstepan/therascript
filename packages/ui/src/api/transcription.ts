@@ -1,36 +1,25 @@
 // packages/ui/src/api/transcription.ts
-// Purpose: Contains functions for interacting with the backend API endpoints
-//          related to monitoring transcription job status.
-import axios from 'axios'; // Import Axios for making HTTP requests
-import type { UITranscriptionStatus } from '../types'; // Import the specific UI type definition for transcription status
+import axios from 'axios';
+import type { UITranscriptionStatus } from '../types';
+
+// Re-export the type for convenience
+export type { UITranscriptionStatus };
 
 /**
- * Fetches the current status of a specific transcription job from the backend.
- * Makes a GET request to `/api/transcription/status/{jobId}`.
- *
- * @param {string} jobId - The ID of the transcription job to check.
- * @returns {Promise<UITranscriptionStatus>} A promise resolving to the transcription job status object.
- * @throws {Error} If the API request fails (e.g., job not found (404), server error).
+ * Fetches the current transcription status for a given job ID
+ * @param jobId - The job ID to check status for
+ * @returns Promise<UITranscriptionStatus> - The current transcription status
  */
 export const fetchTranscriptionStatus = async (
   jobId: string
 ): Promise<UITranscriptionStatus> => {
-  // Make a GET request to the specific job status endpoint
-  // ==========================================================
-  // CHANGE START: Add a long timeout to the axios request
-  // ==========================================================
-  const response = await axios.get<UITranscriptionStatus>(
-    `/api/transcription/status/${jobId}`,
-    {
-      // Give this request up to 3 minutes to complete.
-      // This needs to be longer than the API's timeout to the Whisper service.
-      timeout: 180000,
+  try {
+    const response = await axios.get(`/api/transcription/status/${jobId}`);
+    return response.data;
+  } catch (error: any) {
+    if (error.response?.status === 404) {
+      throw new Error('Transcription job not found');
     }
-  );
-  // ==========================================================
-  // CHANGE END
-  // ==========================================================
-
-  // Return the data part of the response, which should match UITranscriptionStatus
-  return response.data;
+    throw new Error(`Failed to fetch transcription status: ${error.message}`);
+  }
 };

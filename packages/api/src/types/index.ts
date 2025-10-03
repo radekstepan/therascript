@@ -98,7 +98,7 @@ export interface BackendSession {
   sessionType: string;
   therapy: string;
   audioPath: string | null; // Relative path/identifier for the audio file
-  status: 'pending' | 'transcribing' | 'completed' | 'failed';
+  status: 'pending' | 'queued' | 'transcribing' | 'completed' | 'failed';
   whisperJobId: string | null;
   transcriptTokenCount?: number | null;
   chats?: (Omit<ChatMetadata, 'tags'> & { sessionId: number })[]; // For session details endpoint, session chats don't have tags from this relation

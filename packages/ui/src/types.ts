@@ -45,7 +45,7 @@ export interface Session extends SessionMetadata {
   id: number;
   fileName: string;
   audioPath: string | null;
-  status: 'pending' | 'transcribing' | 'completed' | 'failed';
+  status: 'pending' | 'queued' | 'transcribing' | 'completed' | 'failed';
   whisperJobId: string | null;
   date: string; // ISO string from backend
   transcriptTokenCount?: number | null;

@@ -37,6 +37,8 @@ const elasticsearchUrl = getEnvVar(
   'ELASTICSEARCH_URL',
   'http://localhost:9200'
 );
+const redisHost = getEnvVar('REDIS_HOST', 'localhost');
+const redisPort = parseInt(getEnvVar('REDIS_PORT', '6379'), 10);
 
 const allowedAudioMimeTypes = [
   'audio/mpeg',
@@ -62,17 +64,9 @@ const allowedAudioMimeTypes = [
 const maxUploadFileSize = getEnvVar('UPLOAD_MAX_FILE_SIZE', '100m');
 
 const dbPathFromEnv = getEnvVar('DB_PATH', './data/therapy-analyzer.sqlite');
-const transcriptsDirFromEnv = getEnvVar(
-  'DB_TRANSCRIPTS_DIR',
-  './data/transcripts'
-);
 const uploadsDirFromEnv = getEnvVar('DB_UPLOADS_DIR', './data/uploads');
 
 const resolvedDbPath = path.resolve(packageApiDir, dbPathFromEnv);
-const resolvedTranscriptsDir = path.resolve(
-  packageApiDir,
-  transcriptsDirFromEnv
-);
 const resolvedUploadsDir = path.resolve(packageApiDir, uploadsDirFromEnv);
 
 const config = {
@@ -83,6 +77,10 @@ const config = {
     corsOrigin: corsOrigin,
     appMode: appMode as 'production' | 'development' | 'mock',
   },
+  redis: {
+    host: redisHost,
+    port: redisPort,
+  },
   ollama: {
     baseURL: ollamaBaseURL,
     model: ollamaModel,
@@ -90,12 +88,10 @@ const config = {
   },
   whisper: { apiUrl: whisperApiURL, model: whisperModel },
   elasticsearch: {
-    // Added Elasticsearch config section
     url: elasticsearchUrl,
   },
   db: {
     sqlitePath: resolvedDbPath,
-    transcriptsDir: resolvedTranscriptsDir,
     uploadsDir: resolvedUploadsDir,
   },
   upload: {
@@ -120,27 +116,14 @@ const ensureDirectoryExists = (dirPath: string, dirNameForLog: string) => {
   }
 };
 ensureDirectoryExists(path.dirname(config.db.sqlitePath), 'database');
-ensureDirectoryExists(config.db.transcriptsDir, 'transcripts');
 ensureDirectoryExists(config.db.uploadsDir, 'uploads');
 
-console.log('[Config] Final check before exporting config object:');
-console.log(`  - Value of APP_MODE in process.env: ${process.env.APP_MODE}`);
-console.log(
-  `  - Value of OLLAMA_MODEL in process.env: ${process.env.OLLAMA_MODEL}`
-);
 console.log('[Config] Effective Configuration Loaded:');
 console.log(`  - APP_MODE: ${config.server.appMode}`);
 console.log(`  - NODE_ENV: ${config.server.nodeEnv}`);
 console.log(`  - Port: ${config.server.port}`);
-console.log(`  - CORS Origin: ${config.server.corsOrigin}`);
-console.log(`  - Ollama Model (in config object): ${config.ollama.model}`);
-console.log(`  - Whisper Model: ${config.whisper.model}`);
-console.log(`  - Elasticsearch URL: ${config.elasticsearch.url}`);
+console.log(`  - Redis: ${config.redis.host}:${config.redis.port}`);
 console.log(`  - DB Path: ${config.db.sqlitePath}`);
-console.log(`  - Transcripts Path: ${config.db.transcriptsDir}`);
 console.log(`  - Uploads Path: ${config.db.uploadsDir}`);
-console.log(
-  `  - Allowed MIME Types for Upload: ${config.upload.allowedMimeTypes.length} types configured.`
-);
 
 export default config;

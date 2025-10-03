@@ -33,12 +33,7 @@ import {
   ALLOWED_AUDIO_VIDEO_EXTENSIONS_DISPLAY,
 } from '../../constants';
 import { getTodayDateString } from '../../helpers';
-import {
-  uploadSession,
-  fetchTranscriptionStatus,
-  finalizeSession,
-  fetchContainerLogs,
-} from '../../api/api';
+import { uploadSession, fetchSession, fetchContainerLogs } from '../../api/api';
 import type {
   SessionMetadata,
   UITranscriptionStatus,
@@ -66,39 +61,10 @@ export function UploadModal({ isOpen }: UploadModalProps) {
   const [therapyInput, setTherapyInput] = useState(THERAPY_TYPES[0]);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const [currentJobId, setCurrentJobId] = useState<string | null>(null);
   const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
   const [showLogs, setShowLogs] = useState(false);
 
   const sessionNameRef = useRef<HTMLInputElement>(null);
-
-  const {
-    data: logs,
-    isLoading: isLoadingLogs,
-    isFetching: isFetchingLogs,
-  } = useQuery({
-    queryKey: ['whisperContainerLogs'],
-    queryFn: () => fetchContainerLogs('therascript_whisper_service'),
-    enabled: isOpen && showLogs,
-    refetchInterval: isOpen && showLogs ? 5000 : false,
-    refetchOnWindowFocus: false,
-    staleTime: 1000,
-  });
-
-  useEffect(() => {
-    if (isOpen && !currentJobId) {
-      const timer = setTimeout(() => {
-        sessionNameRef.current?.focus();
-      }, 50);
-      return () => clearTimeout(timer);
-    }
-  }, [isOpen, currentJobId]);
-
-  useEffect(() => {
-    if (sessionTypeInput === 'Intake') {
-      setTherapyInput('N/A');
-    }
-  }, [sessionTypeInput]);
 
   const uploadMutation = useMutation({
     mutationFn: ({
@@ -110,134 +76,17 @@ export function UploadModal({ isOpen }: UploadModalProps) {
     }) => uploadSession(file, metadata),
     onSuccess: (data) => {
       console.log(
-        `[UploadModal] Upload accepted. SessionID: ${data.sessionId}, JobID: ${data.jobId}`
+        `[UploadModal] Upload accepted. SessionID: ${data.sessionId}`
       );
       setCurrentSessionId(data.sessionId);
-      setCurrentJobId(data.jobId);
       setFormError(null);
     },
     onError: (error: Error) => {
       console.error('Upload failed:', error);
       setFormError(`Upload failed: ${error.message}`);
-      setCurrentJobId(null);
       setCurrentSessionId(null);
     },
   });
-
-  const { data: transcriptionStatus, error: pollingError } = useQuery<
-    UITranscriptionStatus,
-    Error
-  >({
-    queryKey: ['transcriptionStatus', currentJobId],
-    queryFn: () => {
-      if (!currentJobId) throw new Error('No Job ID to poll');
-      return fetchTranscriptionStatus(currentJobId);
-    },
-    enabled: !!currentJobId,
-    refetchInterval: (query) => {
-      const d = query.state.data;
-      return d?.status === 'completed' ||
-        d?.status === 'failed' ||
-        d?.status === 'canceled'
-        ? false
-        : 2000;
-    },
-    refetchIntervalInBackground: false,
-    refetchOnWindowFocus: false,
-    retry: (failureCount: number, error: Error) => {
-      if (
-        error.message.includes('not found') ||
-        error.message.includes('404')
-      ) {
-        return false;
-      }
-      return failureCount < 3;
-    },
-  });
-
-  const finalizeMutation = useMutation({
-    mutationFn: () => {
-      if (!currentSessionId) throw new Error('No Session ID to finalize');
-      return finalizeSession(currentSessionId);
-    },
-    onSuccess: (finalizedSession: Session) => {
-      console.log(
-        `[UploadModal] Finalization successful for SessionID: ${finalizedSession.id}`
-      );
-      queryClient.invalidateQueries({ queryKey: ['sessions'] });
-      const firstChatId = finalizedSession.chats?.[0]?.id;
-      if (firstChatId) {
-        navigate(`/sessions/${finalizedSession.id}/chats/${firstChatId}`);
-      } else {
-        navigate(`/sessions/${finalizedSession.id}`);
-      }
-      closeModal();
-      resetModal();
-    },
-    onError: (error: Error) => {
-      console.error('Finalization failed:', error);
-      setFormError(
-        `Failed to finalize session: ${error.message}. Please check server logs.`
-      );
-    },
-  });
-
-  useEffect(() => {
-    if (
-      transcriptionStatus?.status === 'completed' &&
-      !finalizeMutation.isPending &&
-      !finalizeMutation.isSuccess
-    ) {
-      console.log(
-        `[UploadModal] Transcription completed for JobID: ${currentJobId}. Triggering finalization...`
-      );
-      finalizeMutation.mutate();
-    }
-  }, [
-    transcriptionStatus,
-    currentJobId,
-    finalizeMutation,
-    finalizeMutation.isPending,
-    finalizeMutation.isSuccess,
-  ]);
-
-  const isUploading = uploadMutation.isPending;
-  const isPolling = !!currentJobId && !transcriptionStatus && !pollingError;
-  const isModelLoadingOrDownloading =
-    transcriptionStatus?.status === 'model_loading' ||
-    transcriptionStatus?.status === 'model_downloading';
-  const isProcessingTranscription =
-    transcriptionStatus?.status === 'processing' ||
-    transcriptionStatus?.status === 'transcribing';
-  const isFinalizing = finalizeMutation.isPending;
-
-  const hasFailed =
-    uploadMutation.isError ||
-    transcriptionStatus?.status === 'failed' ||
-    transcriptionStatus?.status === 'canceled' ||
-    !!pollingError ||
-    finalizeMutation.isError;
-
-  const overallIsLoading =
-    isUploading ||
-    isPolling ||
-    transcriptionStatus?.status === 'queued' ||
-    transcriptionStatus?.status === 'started' ||
-    transcriptionStatus?.status === 'canceling' ||
-    isModelLoadingOrDownloading ||
-    isProcessingTranscription ||
-    isFinalizing;
-
-  const showLogsButton = overallIsLoading && !hasFailed;
-
-  const overallError =
-    formError ||
-    (uploadMutation.isError ? uploadMutation.error.message : null) ||
-    pollingError?.message ||
-    (transcriptionStatus?.status === 'failed' && transcriptionStatus.error
-      ? transcriptionStatus.error
-      : null) ||
-    (finalizeMutation.isError ? finalizeMutation.error.message : null);
 
   const resetModal = useCallback(() => {
     setModalFile(null);
@@ -249,20 +98,114 @@ export function UploadModal({ isOpen }: UploadModalProps) {
     setDragActive(false);
     setFormError(null);
     setShowLogs(false);
-
-    const L_currentJobId = currentJobId;
-    setCurrentJobId(null);
+    const prevSessionId = currentSessionId;
     setCurrentSessionId(null);
 
     if (fileInputRef.current) fileInputRef.current.value = '';
     uploadMutation.reset();
-    finalizeMutation.reset();
-    if (L_currentJobId) {
+    if (prevSessionId) {
       queryClient.removeQueries({
-        queryKey: ['transcriptionStatus', L_currentJobId],
+        queryKey: ['sessionMeta', prevSessionId],
       });
     }
-  }, [uploadMutation, finalizeMutation, queryClient, currentJobId]);
+  }, [uploadMutation, queryClient, currentSessionId]);
+
+  const {
+    data: logs,
+    isLoading: isLoadingLogs, // isFetching is also available if needed
+  } = useQuery({
+    queryKey: ['whisperContainerLogs'],
+    queryFn: () => fetchContainerLogs('therascript_whisper_service'),
+    enabled: isOpen && showLogs,
+    refetchInterval: isOpen && showLogs ? 5000 : false,
+    refetchOnWindowFocus: false,
+    staleTime: 4000,
+  });
+
+  useEffect(() => {
+    if (isOpen && !currentSessionId) {
+      const timer = setTimeout(() => {
+        sessionNameRef.current?.focus();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen, currentSessionId]);
+
+  useEffect(() => {
+    if (sessionTypeInput === 'Intake') {
+      setTherapyInput('N/A');
+    }
+  }, [sessionTypeInput]);
+
+  // New query to poll the session status
+  const { data: sessionStatus, error: sessionPollingError } = useQuery<
+    Session,
+    Error
+  >({
+    queryKey: ['sessionMeta', currentSessionId],
+    queryFn: () => {
+      if (!currentSessionId) throw new Error('No Session ID to poll');
+      return fetchSession(currentSessionId);
+    },
+    enabled: !!currentSessionId,
+    refetchInterval: (query) => {
+      const d = query.state.data;
+      return d?.status === 'completed' || d?.status === 'failed' ? false : 2000;
+    },
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: false,
+  });
+
+  // New useEffect to handle navigation when processing is complete
+  useEffect(() => {
+    if (sessionStatus?.status === 'completed' && currentSessionId) {
+      console.log(
+        `[UploadModal] Session ${currentSessionId} processing complete. Navigating...`
+      );
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      const firstChatId = sessionStatus.chats?.[0]?.id;
+      if (firstChatId) {
+        navigate(`/sessions/${currentSessionId}/chats/${firstChatId}`);
+      } else {
+        navigate(`/sessions/${currentSessionId}`);
+      }
+      closeModal();
+      resetModal();
+    }
+  }, [
+    sessionStatus,
+    currentSessionId,
+    navigate,
+    closeModal,
+    resetModal,
+    queryClient,
+  ]);
+
+  const isUploading = uploadMutation.isPending;
+  const isPolling =
+    !!currentSessionId && !sessionStatus && !sessionPollingError;
+  const isProcessing =
+    sessionStatus?.status === 'queued' ||
+    sessionStatus?.status === 'transcribing';
+  const isFinalizing = sessionStatus?.status === 'completed'; // Brief state before navigation
+
+  const hasFailed =
+    uploadMutation.isError ||
+    sessionStatus?.status === 'failed' ||
+    !!sessionPollingError;
+
+  const overallIsLoading =
+    isUploading || isPolling || isProcessing || isFinalizing;
+
+  const showLogsButton = overallIsLoading && !hasFailed;
+
+  const overallError =
+    formError ||
+    (uploadMutation.isError ? uploadMutation.error.message : null) ||
+    sessionPollingError?.message ||
+    (sessionStatus?.status === 'failed'
+      ? 'Processing failed. Check server logs.'
+      : null);
 
   const handleDrag = (
     e: React.DragEvent<HTMLDivElement | HTMLLabelElement>
@@ -313,8 +256,6 @@ export function UploadModal({ isOpen }: UploadModalProps) {
 
   const handleStartClick = async () => {
     setFormError(null);
-    uploadMutation.reset();
-    finalizeMutation.reset();
     let missingFields = [];
     if (!modalFile)
       missingFields.push(
@@ -330,6 +271,7 @@ export function UploadModal({ isOpen }: UploadModalProps) {
       return;
     }
     if (modalFile) {
+      uploadMutation.reset();
       try {
         const metadata: SessionMetadata = {
           clientName: clientNameInput.trim(),
@@ -379,49 +321,23 @@ export function UploadModal({ isOpen }: UploadModalProps) {
 
   const getProgressText = () => {
     if (isUploading) return 'Uploading file...';
-    if (transcriptionStatus) {
-      const { status, progress, message: jobMessage } = transcriptionStatus;
-      const progressPercent = progress?.toFixed(0) ?? '0';
-      if (
-        jobMessage &&
-        (status === 'model_loading' ||
-          status === 'model_downloading' ||
-          status === 'processing' ||
-          status === 'transcribing')
-      ) {
-        return jobMessage;
-      }
-      switch (status) {
+    if (sessionStatus) {
+      switch (sessionStatus.status) {
+        case 'pending':
+          return 'Upload complete, waiting to be queued...';
         case 'queued':
-          return jobMessage || 'Transcription queued...';
-        case 'started':
-          return jobMessage || 'Transcription process initiated...';
-        case 'model_loading':
-          return jobMessage || 'Loading transcription model...';
-        case 'model_downloading':
-          return jobMessage || `Downloading model (${progressPercent}%)...`;
-        case 'processing':
-          return (
-            jobMessage || `Preparing to transcribe (${progressPercent}%)...`
-          );
+          return 'Transcription job is in the queue...';
         case 'transcribing':
-          return jobMessage || `Transcribing (${progressPercent}%)...`;
-        case 'canceling':
-          return jobMessage || 'Canceling...';
+          return 'Transcription in progress...';
         case 'completed':
-          if (!isFinalizing) return jobMessage || 'Transcription Complete!';
-          break;
+          return 'Processing complete! Finalizing...';
         case 'failed':
-        case 'canceled':
-          return (
-            jobMessage ||
-            transcriptionStatus.error ||
-            'Processing Failed/Canceled'
-          );
+          return 'Processing failed.';
       }
     }
-    if (isPolling && !transcriptionStatus)
+    if (uploadMutation.isSuccess && !sessionStatus) {
       return 'Waiting for transcription to start...';
+    }
     if (isFinalizing) return 'Finalizing session...';
     if (hasFailed) return overallError || 'Processing Failed';
     return modalFile ? (
@@ -436,7 +352,7 @@ export function UploadModal({ isOpen }: UploadModalProps) {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && !overallIsLoading && !currentJobId) {
+    if (e.key === 'Enter' && !overallIsLoading && !currentSessionId) {
       e.preventDefault();
       handleStartClick();
     }
@@ -504,14 +420,6 @@ export function UploadModal({ isOpen }: UploadModalProps) {
               <Text size="2" color="gray" mt="2">
                 {getProgressText()}
               </Text>
-              {(isProcessingTranscription || isModelLoadingOrDownloading) &&
-                transcriptionStatus?.progress !== null &&
-                transcriptionStatus?.progress !== undefined &&
-                transcriptionStatus.status !== 'queued' && (
-                  <Box width="100%" mt="2">
-                    <Progress value={transcriptionStatus.progress} size="2" />
-                  </Box>
-                )}
               {modalFile && !overallIsLoading && !hasFailed && (
                 <Box mt="3" onClick={(e) => e.stopPropagation()}>
                   <Button
@@ -563,7 +471,7 @@ export function UploadModal({ isOpen }: UploadModalProps) {
                 }}
               >
                 <Box p="2">
-                  {isLoadingLogs && !isFetchingLogs ? (
+                  {isLoadingLogs ? (
                     <Flex align="center" justify="center" p="4">
                       <Spinner size="1" />
                       <Text ml="2" color="gray" size="1">
@@ -716,7 +624,7 @@ export function UploadModal({ isOpen }: UploadModalProps) {
             <Cross2Icon />{' '}
             {overallIsLoading && !hasFailed ? 'Processing...' : 'Cancel'}
           </Button>
-          {!currentJobId && !uploadMutation.isSuccess && (
+          {!currentSessionId && !uploadMutation.isSuccess && (
             <Button
               type="button"
               onClick={handleStartClick}

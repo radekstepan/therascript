@@ -1,15 +1,10 @@
 /* packages/api/src/services/transcriptionService.ts */
 import config from '../config/index.js';
-import type { StructuredTranscript, WhisperJobStatus } from '../types/index.js';
-import type * as RealService from './transcriptionService.real.js'; // Use .real suffix
+import type * as RealService from './transcriptionService.real.js';
 import type * as MockService from './transcriptionService.mock.js';
 
 interface TranscriptionServiceInterface {
-  startTranscriptionJob: (filePath: string) => Promise<string>;
-  getTranscriptionStatus: (jobId: string) => Promise<WhisperJobStatus>;
-  getStructuredTranscriptionResult: (
-    jobId: string
-  ) => Promise<StructuredTranscript>;
+  startTranscriptionJob: (sessionId: number) => Promise<void>;
   checkWhisperApiHealth: () => Promise<boolean>;
 }
 
@@ -20,15 +15,18 @@ if (config.server.appMode === 'mock') {
   const mockModule = await import('./transcriptionService.mock.js');
   service = mockModule;
 } else {
-  // Assume real implementation is in a separate file or defined here
-  // If you move the real logic, create transcriptionService.real.ts
   const realModule = await import('./transcriptionService.real.js');
   service = realModule;
 }
 
 // Export functions from the dynamically chosen service
 export const startTranscriptionJob = service.startTranscriptionJob;
-export const getTranscriptionStatus = service.getTranscriptionStatus;
-export const getStructuredTranscriptionResult =
-  service.getStructuredTranscriptionResult;
 export const checkWhisperApiHealth = service.checkWhisperApiHealth;
+
+// Re-export the getStructuredTranscriptionResult function from the real service
+export const getStructuredTranscriptionResult = async (
+  jobId: string
+): Promise<any> => {
+  const realModule = await import('./transcriptionService.real.js');
+  return realModule.getStructuredTranscriptionResult(jobId);
+};

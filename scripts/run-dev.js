@@ -13,7 +13,8 @@ const execPromise = util.promisify(exec);
 // --- Configuration: Docker Container Names ---
 const OLLAMA_CONTAINER_NAME = 'ollama_server_managed';
 const WHISPER_CONTAINER_NAME = 'therascript_whisper_service';
-const ELASTICSEARCH_CONTAINER_NAME = 'therascript_elasticsearch_service'; // Added
+const ELASTICSEARCH_CONTAINER_NAME = 'therascript_elasticsearch_service';
+const REDIS_CONTAINER_NAME = 'therascript_redis_service';
 // --- End Configuration ---
 
 // --- UI Port for Cleanup ---
@@ -89,7 +90,8 @@ async function cleanupDocker() {
   await Promise.allSettled([
     stopAndRemoveContainer(OLLAMA_CONTAINER_NAME),
     stopAndRemoveContainer(WHISPER_CONTAINER_NAME),
-    stopAndRemoveContainer(ELASTICSEARCH_CONTAINER_NAME), // Added
+    stopAndRemoveContainer(ELASTICSEARCH_CONTAINER_NAME),
+    stopAndRemoveContainer(REDIS_CONTAINER_NAME),
   ]);
   console.log('[RunDev Cleanup] Docker cleanup process finished.');
 }
@@ -148,54 +150,79 @@ const concurrentlyArgs = [
   'concurrently',
   '--kill-others-on-fail',
   '--names',
-  'API,UI,WHISPER,ES', // Added ES
+  'API,UI,WORKER,WHISPER,ES', // Added WORKER
   '--prefix-colors',
-  'bgBlue.bold,bgMagenta.bold,bgCyan.bold,bgYellow.bold', // Added color for ES
+  'bgBlue.bold,bgMagenta.bold,bgYellow.bold,bgCyan.bold,bgGreen.bold', // Added color for WORKER
   '"yarn dev:api"',
   '"yarn dev:ui"',
+  '"yarn dev:worker"', // Added WORKER
   '"yarn start:whisper"',
-  '"yarn start:elasticsearch-manager"', // Added Elasticsearch manager
+  '"yarn start:elasticsearch-manager"',
 ];
 // --- End Concurrently Command Setup ---
 
-// --- Spawn Concurrently Process ---
-const devProcess = spawn(concurrentlyArgs[0], concurrentlyArgs.slice(1), {
-  stdio: 'inherit',
-  shell: true,
-  detached: process.platform !== 'win32',
-});
-// --- End Spawn Concurrently Process ---
-
-// --- Process Event Handling ---
-devProcess.on('spawn', () => {
-  console.log('[RunDev] Concurrently process spawned successfully.');
-});
-
-devProcess.on('error', (error) => {
-  console.error('[RunDev] Error spawning concurrently:', error);
-  cleanupDocker()
-    .then(() => cleanupUiProcess(UI_PORT))
-    .finally(() => process.exit(1));
-});
-
+// --- Main Execution Block ---
+let devProcess; // To hold the concurrently process
 let isShuttingDown = false;
 
-devProcess.on('close', (code, signal) => {
-  console.log(
-    `[RunDev] Concurrently process exited with code ${code}, signal ${signal}.`
-  );
-  if (!isShuttingDown) {
-    console.log(
-      '[RunDev] Concurrently closed unexpectedly, running cleanup...'
+async function main() {
+  console.log('[RunDev] Ensuring Redis service is running...');
+  try {
+    // Start Redis and wait for its health check to pass before proceeding.
+    await execPromise('docker compose up -d --wait redis');
+    console.log('[RunDev] ✅ Redis service is up and healthy.');
+  } catch (error) {
+    console.error(
+      '[RunDev] ❌ Failed to start Redis container. Aborting.',
+      error
     );
+    process.exit(1);
+  }
+
+  // --- Spawn Concurrently Process ---
+  devProcess = spawn(concurrentlyArgs[0], concurrentlyArgs.slice(1), {
+    stdio: 'inherit',
+    shell: true,
+    detached: process.platform !== 'win32',
+  });
+
+  // --- Process Event Handling ---
+  devProcess.on('spawn', () => {
+    console.log('[RunDev] Concurrently process spawned successfully.');
+  });
+
+  devProcess.on('error', (error) => {
+    console.error('[RunDev] Error spawning concurrently:', error);
     cleanupDocker()
       .then(() => cleanupUiProcess(UI_PORT))
-      .finally(() => {
-        process.exit(code ?? 1);
-      });
+      .finally(() => process.exit(1));
+  });
+
+  devProcess.on('close', (code, signal) => {
+    console.log(
+      `[RunDev] Concurrently process exited with code ${code}, signal ${signal}.`
+    );
+    if (!isShuttingDown) {
+      console.log(
+        '[RunDev] Concurrently closed unexpectedly, running cleanup...'
+      );
+      cleanupDocker()
+        .then(() => cleanupUiProcess(UI_PORT))
+        .finally(() => {
+          process.exit(code ?? 1);
+        });
+    }
+  });
+
+  // --- Start Shutdown Service ---
+  if (devProcess && !devProcess.killed) {
+    shutdownHttpServer = createShutdownService(handleShutdown);
+  } else {
+    console.warn(
+      '[RunDev] Concurrently process failed to start. Shutdown service not started.'
+    );
   }
-});
-// --- End Process Event Handling ---
+}
 
 // --- Graceful Shutdown Handling ---
 async function handleShutdown(reason) {
@@ -297,10 +324,8 @@ function createShutdownService(shutdownHandlerCallback) {
   return server;
 }
 
-if (devProcess && !devProcess.killed) {
-  shutdownHttpServer = createShutdownService(handleShutdown);
-} else {
-  console.warn(
-    '[RunDev] Concurrently process failed to start or exited prematurely. Shutdown service not started.'
-  );
-}
+// Start the application
+main().catch((err) => {
+  console.error('[RunDev] A critical error occurred in main():', err);
+  process.exit(1);
+});
