@@ -11,6 +11,8 @@ Therascript is a comprehensive application designed to assist therapists by stre
 *   **AI-Powered Chat Analysis:**
     *   Interact with an AI (powered by local LLMs via Ollama) to ask questions about specific session transcripts.
     *   Engage in standalone AI chat sessions not tied to a specific therapy session.
+    *   **Message Templates:** Save useful prompts as templates for quick reuse.
+*   **Multi-Session Analysis:** Select multiple sessions and run a single high-level query across all of them. The system performs a MapReduce-style analysis to generate a synthesized answer.
 *   **Full-Text Search:** Search across all chat messages and transcript paragraphs to quickly find relevant information using Elasticsearch.
 *   **LLM Management:**
     *   View locally available Ollama models.
@@ -18,10 +20,16 @@ Therascript is a comprehensive application designed to assist therapists by stre
     *   Set the active model and context size for analysis.
     *   Delete locally stored models.
     *   Unload models from memory to free up resources.
+*   **System Monitoring:**
+    *   **GPU Monitoring:** A sidebar indicator shows real-time GPU and VRAM utilization. A detailed modal provides in-depth statistics for NVIDIA GPUs, including temperature, power draw, and per-process VRAM usage.
+    *   **Background Job Monitoring:** View the status of active background jobs (transcription and analysis) in a queue modal.
+*   **Advanced Data Management:**
+    *   **Export/Import:** Create a full backup of the database and uploaded files as a `.tar` archive, and restore from it.
+    *   **Re-index:** Rebuild the Elasticsearch search index from the database.
+    *   **Full Reset:** A "danger zone" function to wipe all application data.
 *   **User Interface:** A modern, responsive web UI built with React and Radix UI Themes for intuitive interaction.
-*   **Dockerized Services:** Ollama, Whisper, and Elasticsearch services are containerized for easy setup and management.
-*   **Customizable Experience:** Includes theme selection (light, dark, system) and options for rendering AI responses (Markdown or plain text).
-*   **Application Shutdown:** System control to gracefully shut down the application and its associated services.
+*   **Dockerized Services:** Ollama, Whisper, Elasticsearch, and Redis are containerized for easy setup and management.
+*   **Customizable Experience:** Includes theme selection (light, dark, system), customizable UI accent color, and options for rendering AI responses (Markdown or plain text).
 
 ## Technology Stack
 
@@ -34,10 +42,12 @@ Therascript is a comprehensive application designed to assist therapists by stre
     *   React Router DOM (Routing)
     *   Webpack (Build Tool)
     *   Axios (API Client)
-*   **Backend (API):**
+    *   Lucide React (Icons)
+*   **Backend (API & Worker):**
     *   ElysiaJS (Node.js Framework)
     *   TypeScript
     *   SQLite (via `better-sqlite3`)
+    *   **BullMQ & Redis:** For background job queuing.
     *   `@dqbd/tiktoken` (Token counting)
 *   **AI Services:**
     *   **Ollama:** For running local Large Language Models (LLMs).
@@ -51,35 +61,33 @@ Therascript is a comprehensive application designed to assist therapists by stre
 
 Therascript is a monorepo organized into several packages:
 
-*   `packages/api`: The backend ElysiaJS server. Handles business logic, database interactions, and communication with Ollama, Whisper, and Elasticsearch services.
+*   `packages/api`: The backend ElysiaJS server. Handles business logic, database interactions, and communication with other services.
+*   `packages/worker`: A separate Node.js process that consumes jobs from the Redis queue (e.g., transcription, analysis).
 *   `packages/ui`: The React-based frontend application that users interact with.
-*   `packages/ollama`: Contains Docker configuration (`docker-compose.yml`) and management scripts for the Ollama service.
-*   `packages/whisper`: Contains the Python FastAPI service for Whisper, its Dockerfile, and management scripts.
-*   `packages/elasticsearch-client`: A shared client and utilities for interacting with Elasticsearch.
-*   `packages/docker-utils`: Shared utilities for managing Docker containers, used by other packages.
-*   `scripts/`: Contains root-level scripts for running the application in different modes (e.g., `run-dev.js`, `run-prod.js`).
+*   `packages/ollama`: Contains Docker configuration and management scripts for the Ollama service.
+*   `packages/whisper`: Contains the Python service for Whisper, its Dockerfile, and management scripts.
+*   `packages/gpu-utils`: A shared utility for querying NVIDIA GPU stats via `nvidia-smi`.
+*   `packages/elasticsearch-client`: A shared client for interacting with Elasticsearch.
+*   `packages/docker-utils`: Shared utilities for managing Docker containers.
+*   `scripts/`: Root-level scripts for running the application in different modes (e.g., `run-dev.js`).
 
 ## Prerequisites
 
 Before you begin, ensure you have the following installed:
 
 1.  **Node.js and Yarn:**
-    *   It's recommended to use NVM (Node Version Manager) to manage Node.js versions.
-    *   The required Node.js version is specified in `.nvmrc` (currently `23.10.0`).
+    *   It's recommended to use NVM (Node Version Manager). The required Node.js version is in `.nvmrc`.
         ```bash
         nvm install
         nvm use
         ```
-    *   Yarn (Classic v1.x) is used as the package manager. Install it if you haven't: `npm install --global yarn`.
+    *   Yarn (Classic v1.x) is used as the package manager.
 2.  **Docker and Docker Compose:**
     *   Docker Desktop for Windows/macOS or Docker Engine + Docker Compose plugin for Linux.
     *   Ensure the Docker daemon is running.
-    *   On Windows (WSL), make sure to disable Resource Saver in Docker Desktop.
-    *   On Linux, you might need to add your user to the `docker` group: `sudo usermod -aG docker $USER` (then log out and log back in).
 3.  **NVIDIA GPU with CUDA (Recommended for AI Services):**
-    *   For optimal performance with Ollama and Whisper, an NVIDIA GPU with CUDA drivers and the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) installed is highly recommended.
-    *   Verify CUDA installation with `nvidia-smi`.
-    *   Ollama and Whisper *can* run on CPU, but performance will be significantly slower. Elasticsearch does not require a GPU.
+    *   For optimal performance, an NVIDIA GPU with CUDA drivers and the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) is highly recommended. The GPU monitoring feature specifically requires `nvidia-smi` to be available on the host.
+    *   Ollama and Whisper *can* run on CPU, but performance will be significantly slower.
 
 ## Setup and Installation
 
@@ -89,19 +97,16 @@ Before you begin, ensure you have the following installed:
     ```
 
 2.  **Install Dependencies:**
-    This will install dependencies for all packages in the monorepo.
     ```bash
     yarn install
     ```
 
 3.  **Configure Environment Variables:**
     *   Copy the example environment file `.env.example` to:
-        *   `.env.api.dev` (for local development with real services)
-        *   `.env.api.mock` (for local development with mocked API/AI services)
-        *   `.env.api.prod` (for production-like builds/runs)
-    *   Adjust the variables in these files as needed for your setup (e.g., `OLLAMA_MODEL`, `WHISPER_MODEL`, `ELASTICSEARCH_URL`, paths, ports if necessary).
-    *   Pay special attention to `APP_MODE` in each file.
-    *   **Important:** Paths like `DB_PATH` and `DB_UPLOADS_DIR` in the `.env.api.*` files are relative to the `packages/api` directory.
+        *   `.env.api.dev` (for the API in development)
+        *   `.env.worker.dev` (for the background worker in development)
+        *   And optionally `.env.api.mock`, `.env.api.prod`.
+    *   Adjust the variables as needed for your setup (e.g., `OLLAMA_MODEL`, `DB_PATH`).
 
 4.  **Build All Packages:**
     This compiles TypeScript code for all packages.
@@ -111,39 +116,47 @@ Before you begin, ensure you have the following installed:
 
 ## Running the Application
 
-The application uses helper scripts (`scripts/run-dev.js` and `scripts/run-prod.js`) to manage the API, UI, and ensure some Docker services (Ollama, Whisper) are managed. Elasticsearch and Kibana are typically started using the root `docker-compose.yml`.
+### Development Mode
 
-### Managing Docker Services (Elasticsearch, Whisper, Kibana)
+This mode starts the API, the background worker, the UI (with hot-reloading), and service managers for dependent Docker containers. It uses settings from `.env.api.dev` and `.env.worker.dev`.
 
-The primary Docker services (Elasticsearch, Whisper, Kibana) are defined in the root `docker-compose.yml` file.
-
-1.  **Start Services:**
-    To start all services defined in the root `docker-compose.yml` (this includes Elasticsearch, Whisper, and Kibana):
+1.  **Start Docker Services:**
+    The root `docker-compose.yml` manages the core background services. Start them first.
     ```bash
     # Run from the project root directory
     docker compose up -d --build
     ```
-    Elasticsearch can take a minute or two to initialize fully, especially on the first run.
+    This will start Whisper, Elasticsearch, and Redis. Kibana is also available for exploring search data.
 
-2.  **Check Status:**
+2.  **Start the Development Environment:**
+    The `yarn dev` script orchestrates all the Node.js processes and the Ollama Docker container.
     ```bash
-    docker ps
+    # Run from project root
+    yarn dev
     ```
-    Look for `therascript_elasticsearch_service`, `therascript_whisper_service`, and `therascript_kibana_service`.
+    This command will:
+    *   Start the **API** server.
+    *   Start the **UI** development server (usually at `http://localhost:3002`).
+    *   Start the background **Worker** process.
+    *   Ensure the **Whisper**, **Elasticsearch**, and **Ollama** Docker containers are running and healthy.
 
-3.  **View Logs (if issues):**
-    ```bash
-    docker logs therascript_elasticsearch_service
-    docker logs therascript_whisper_service
-    ```
+3.  **Access the Application:**
+    Open your browser and navigate to `http://localhost:3002`.
 
-### Development Mode
+### Mock Mode
 
-This mode starts the API, UI (with hot-reloading), and specific managers for Ollama and Whisper services. It relies on Elasticsearch being started as described above. It uses settings from `.env.api.dev`.
+For frontend development without running real AI/transcription services, you can use mock mode.
 
 ```bash
-# First, ensure Elasticsearch and Whisper Docker services are running (if not already):
-# docker compose up -d # (from project root)
+# Run from project root
+yarn dev:mock
+```
+This starts the UI and a mocked version of the API, providing placeholder data and responses.
 
-# Then, start the development environment:
-yarn dev
+### Stopping the Application
+
+*   Press `Ctrl+C` in the terminal where `yarn dev` is running. The shutdown script will attempt to gracefully stop all processes and Docker containers it manages.
+*   To stop the services managed by the root `docker-compose.yml` (like Elasticsearch), run:
+    ```bash
+    docker compose down
+    ```
