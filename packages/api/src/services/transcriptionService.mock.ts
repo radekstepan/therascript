@@ -14,6 +14,26 @@ export const checkWhisperApiHealth = async (): Promise<boolean> => {
   return true;
 };
 
+export const getTranscriptionStatus = async (
+  jobId: string
+): Promise<WhisperJobStatus> => {
+  console.log(`[Mock Transcription] Status check for job: ${jobId}`);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  // A simple mock: always return 'transcribing' with some progress
+  const progress = Math.min(90, ((Date.now() % 10000) / 10000) * 100);
+  return {
+    job_id: jobId,
+    status: 'transcribing',
+    progress: Math.floor(progress),
+    message: 'Mock transcription in progress...',
+    duration: 60,
+    result: null,
+    error: null,
+    start_time: Date.now() - 5000,
+    end_time: null,
+  };
+};
+
 export const startTranscriptionJob = async (
   sessionId: number
 ): Promise<void> => {

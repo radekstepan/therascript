@@ -1,9 +1,10 @@
 // packages/api/src/services/transcriptionService.real.ts
 import axios from 'axios';
 import config from '../config/index.js';
-import { ApiError } from '../errors.js';
+import { ApiError, InternalServerError, NotFoundError } from '../errors.js';
 import { addTranscriptionJob } from './jobQueueService.js';
 import { unloadActiveModel } from './ollamaService.js';
+import type { WhisperJobStatus } from '../types/index.js';
 
 console.log('[Real Service] Using Real Transcription Service');
 
@@ -15,6 +16,34 @@ export async function checkWhisperApiHealth(): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Fetches the current status of a transcription job from the Whisper service.
+ * @param jobId - The ID of the job to check.
+ * @returns A promise that resolves to the job's status.
+ */
+export const getTranscriptionStatus = async (
+  jobId: string
+): Promise<WhisperJobStatus> => {
+  try {
+    const response = await axios.get<WhisperJobStatus>(
+      `${config.whisper.apiUrl}/status/${jobId}`
+    );
+    return response.data;
+  } catch (error: any) {
+    if (axios.isAxiosError(error) && error.response?.status === 404) {
+      throw new NotFoundError(`Transcription job ${jobId}`);
+    }
+    console.error(
+      `[Real TranscriptionService] Error fetching status for job ${jobId}:`,
+      error
+    );
+    throw new InternalServerError(
+      'Failed to get transcription status from Whisper service.',
+      error
+    );
+  }
+};
 
 /**
  * Enqueues a transcription job in Redis. The actual processing is handled by a worker.
@@ -51,17 +80,6 @@ export const startTranscriptionJob = async (
   );
   await addTranscriptionJob({ sessionId });
 };
-
-// The following functions are now obsolete as their logic is handled by the worker
-// or by polling the session status directly. They are kept here as comments for reference.
-
-/*
-export const getTranscriptionStatus = async (jobId: string): Promise<WhisperJobStatus> => {
-  // This logic is now part of the worker's polling mechanism.
-  // The UI should poll the session status endpoint instead.
-  throw new Error("getTranscriptionStatus is obsolete. Poll session status directly.");
-};
-*/
 
 export const getStructuredTranscriptionResult = async (
   jobId: string

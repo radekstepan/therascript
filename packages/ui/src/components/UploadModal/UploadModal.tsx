@@ -33,7 +33,12 @@ import {
   ALLOWED_AUDIO_VIDEO_EXTENSIONS_DISPLAY,
 } from '../../constants';
 import { getTodayDateString } from '../../helpers';
-import { uploadSession, fetchSession, fetchContainerLogs } from '../../api/api';
+import {
+  uploadSession,
+  fetchSession,
+  fetchContainerLogs,
+  fetchTranscriptionStatus,
+} from '../../api/api';
 import type {
   SessionMetadata,
   UITranscriptionStatus,
@@ -107,6 +112,15 @@ export function UploadModal({ isOpen }: UploadModalProps) {
       queryClient.removeQueries({
         queryKey: ['sessionMeta', prevSessionId],
       });
+      const sessionData = queryClient.getQueryData<Session>([
+        'sessionMeta',
+        prevSessionId,
+      ]);
+      if (sessionData?.whisperJobId) {
+        queryClient.removeQueries({
+          queryKey: ['transcriptionStatus', sessionData.whisperJobId],
+        });
+      }
     }
   }, [uploadMutation, queryClient, currentSessionId]);
 
@@ -153,6 +167,28 @@ export function UploadModal({ isOpen }: UploadModalProps) {
       return d?.status === 'completed' || d?.status === 'failed' ? false : 2000;
     },
     refetchIntervalInBackground: false,
+    refetchOnWindowFocus: false,
+  });
+
+  // Query to poll transcription progress
+  const { data: transcriptionStatus } = useQuery<UITranscriptionStatus, Error>({
+    queryKey: ['transcriptionStatus', sessionStatus?.whisperJobId],
+    queryFn: () => {
+      if (!sessionStatus?.whisperJobId) {
+        throw new Error('No Whisper Job ID to poll');
+      }
+      return fetchTranscriptionStatus(sessionStatus.whisperJobId);
+    },
+    enabled:
+      !!sessionStatus?.whisperJobId && sessionStatus.status === 'transcribing',
+    refetchInterval: (query) => {
+      const d = query.state.data;
+      return d?.status === 'completed' ||
+        d?.status === 'failed' ||
+        d?.status === 'canceled'
+        ? false
+        : 2000;
+    },
     refetchOnWindowFocus: false,
   });
 
@@ -327,8 +363,19 @@ export function UploadModal({ isOpen }: UploadModalProps) {
           return 'Upload complete, waiting to be queued...';
         case 'queued':
           return 'Transcription job is in the queue...';
-        case 'transcribing':
-          return 'Transcription in progress...';
+        case 'transcribing': {
+          const progress = transcriptionStatus?.progress;
+          const message = transcriptionStatus?.message;
+          let text = 'Transcription in progress...';
+          // Use more specific message from whisper service if available
+          if (message && !message.toLowerCase().includes('transcribing')) {
+            text = message;
+          }
+          if (typeof progress === 'number' && progress > 0) {
+            return `${text} (${progress.toFixed(0)}%)`;
+          }
+          return text;
+        }
         case 'completed':
           return 'Processing complete! Finalizing...';
         case 'failed':
@@ -420,6 +467,16 @@ export function UploadModal({ isOpen }: UploadModalProps) {
               <Text size="2" color="gray" mt="2">
                 {getProgressText()}
               </Text>
+              {isProcessing && (
+                <Progress
+                  value={
+                    transcriptionStatus?.progress ??
+                    (sessionStatus?.status === 'queued' ? 5 : 2)
+                  }
+                  size="1"
+                  style={{ width: '80%', marginTop: 'var(--space-2)' }}
+                />
+              )}
               {modalFile && !overallIsLoading && !hasFailed && (
                 <Box mt="3" onClick={(e) => e.stopPropagation()}>
                   <Button
