@@ -18,7 +18,6 @@ import {
   ExitIcon,
   PersonIcon,
   ChatBubbleIcon,
-  CubeIcon,
 } from '@radix-ui/react-icons';
 import {
   themeAtom,
@@ -26,13 +25,11 @@ import {
   Theme as ThemeType,
   toastMessageAtom,
 } from '../../store';
-import { DockerStatusModal } from './DockerStatusModal';
-import { requestAppShutdown } from '../../api/api'; // Import the new shutdown API call
+import { requestAppShutdown } from '../../api/api';
 
 export function UserThemeDropdown() {
   const [theme, setTheme] = useAtom(themeAtom);
   const [renderMarkdown, setRenderMarkdown] = useAtom(renderMarkdownAtom);
-  const [isDockerModalOpen, setIsDockerModalOpen] = useState(false);
   const setToast = useSetAtom(toastMessageAtom);
 
   // State for shutdown confirmation dialog
@@ -158,17 +155,6 @@ export function UserThemeDropdown() {
             </Flex>
           </DropdownMenu.Item>
 
-          {/* Docker Status Item */}
-          <DropdownMenu.Separator />
-          <DropdownMenu.Item onSelect={() => setIsDockerModalOpen(true)}>
-            <CubeIcon
-              width="16"
-              height="16"
-              style={{ marginRight: 'var(--space-2)' }}
-            />{' '}
-            Docker Status
-          </DropdownMenu.Item>
-
           <DropdownMenu.Separator />
 
           {/* Shutdown Application Item */}
@@ -189,11 +175,6 @@ export function UserThemeDropdown() {
           </DropdownMenu.Item>
         </DropdownMenu.Content>
       </DropdownMenu.Root>
-
-      <DockerStatusModal
-        isOpen={isDockerModalOpen}
-        onOpenChange={setIsDockerModalOpen}
-      />
 
       {/* Shutdown Confirmation Dialog */}
       <AlertDialog.Root

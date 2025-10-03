@@ -13,11 +13,11 @@ import {
   Sun,
   Moon,
   Laptop,
-  Container as ContainerIcon,
+  Timer,
   Power,
   AlertTriangle,
   Star,
-  BarChart, // <-- IMPORT BarChart icon
+  BarChart,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -32,7 +32,7 @@ import { isPersistentSidebarOpenAtom } from '../../store/ui/isPersistentSidebarO
 import { currentPageAtom } from '../../store/navigation/currentPageAtom';
 import { cn } from '../../utils';
 import { toastMessageAtom } from '../../store';
-import { DockerStatusModal } from '../User/DockerStatusModal';
+import { JobsQueueModal } from '../Jobs/JobsQueueModal';
 import { requestAppShutdown } from '../../api/api';
 
 interface NavItemType {
@@ -66,7 +66,7 @@ export function PersistentSidebar() {
   const setToast = useSetAtom(toastMessageAtom);
   const reactRouterNavigate = useReactRouterNavigate();
 
-  const [isDockerModalOpen, setIsDockerModalOpen] = useState(false);
+  const [isJobsModalOpen, setIsJobsModalOpen] = useState(false);
   const [isShutdownConfirmOpen, setIsShutdownConfirmOpen] = useState(false);
 
   const navigateTo = (pagePath: string) => {
@@ -75,8 +75,8 @@ export function PersistentSidebar() {
 
   const isActive = (pagePath: string) => currentPage === pagePath;
 
-  const handleDockerStatusClick = () => {
-    setIsDockerModalOpen(true);
+  const handleJobsQueueClick = () => {
+    setIsJobsModalOpen(true);
   };
 
   const shutdownMutation = useMutation({
@@ -265,20 +265,19 @@ export function PersistentSidebar() {
           )}
 
           <button
-            title="Docker Status"
-            onClick={handleDockerStatusClick}
+            title="Active Jobs"
+            onClick={handleJobsQueueClick}
             className={cn(
-              // MODIFIED: Use Radix accent variables. Base text color inherited.
               'flex items-center mt-2 w-full py-2 text-left text-sm hover:bg-[var(--accent-a3)] rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-8)]',
               isSidebarOpen ? 'px-3' : 'justify-center px-0'
             )}
           >
-            <ContainerIcon
+            <Timer
               size={18}
               className={cn(isSidebarOpen ? 'mr-2' : 'mr-0')}
               aria-hidden="true"
             />
-            {isSidebarOpen && 'Docker Status'}
+            {isSidebarOpen && 'Active Jobs'}
           </button>
 
           {/* Shutdown button - kept red styling for destructive action */}
@@ -308,9 +307,9 @@ export function PersistentSidebar() {
         </div>
       </div>
 
-      <DockerStatusModal
-        isOpen={isDockerModalOpen}
-        onOpenChange={setIsDockerModalOpen}
+      <JobsQueueModal
+        isOpen={isJobsModalOpen}
+        onOpenChange={setIsJobsModalOpen}
       />
 
       <AlertDialog.Root
