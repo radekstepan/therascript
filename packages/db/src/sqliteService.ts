@@ -1,9 +1,6 @@
 // packages/db/src/sqliteService.ts
-import crypto from 'node:crypto';
 import Database, {
   type Database as DB,
-  type Statement,
-  type RunResult,
   type Transaction,
 } from 'better-sqlite3';
 import path from 'node:path';
@@ -80,7 +77,7 @@ export const schema = `
 `;
 
 // --- NEW MIGRATION LOGIC ---
-export const LATEST_SCHEMA_VERSION = 6;
+export const LATEST_SCHEMA_VERSION = 7;
 
 // --- NEW SYSTEM PROMPTS ---
 export const SYSTEM_PROMPT_TEMPLATES = {
@@ -150,7 +147,6 @@ function seedSystemTemplates(dbInstance: DB) {
 }
 
 function runMigrations(dbInstance: DB) {
-  // FIX: With { simple: true }, the pragma returns the value directly as a number.
   let currentVersion = dbInstance.pragma('user_version', {
     simple: true,
   }) as number;
@@ -164,13 +160,69 @@ function runMigrations(dbInstance: DB) {
       `[db Migrator] New schema version detected. Running migrations...`
     );
     dbInstance.transaction(() => {
-      // Version 1: The initial schema
+      // Version 1: Safely ensure all original tables and columns exist.
       if (currentVersion < 1) {
         console.log('[db Migrator] Applying version 1...');
-        dbInstance.exec(schema);
+
+        // MODIFICATION: Use CREATE TABLE IF NOT EXISTS for each table individually
+        // This ensures existing tables are not touched, and any missing ones are created.
+        dbInstance.exec(`
+            CREATE TABLE IF NOT EXISTS sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fileName TEXT NOT NULL,
+                clientName TEXT NOT NULL,
+                sessionName TEXT NOT NULL,
+                date TEXT NOT NULL,
+                sessionType TEXT NOT NULL,
+                therapy TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                whisperJobId TEXT NULL,
+                audioPath TEXT NULL
+            );
+            CREATE TABLE IF NOT EXISTS transcript_paragraphs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sessionId INTEGER NOT NULL,
+                paragraphIndex INTEGER NOT NULL,
+                timestampMs INTEGER NOT NULL,
+                text TEXT NOT NULL,
+                FOREIGN KEY (sessionId) REFERENCES sessions (id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_paragraph_session ON transcript_paragraphs (sessionId);
+            CREATE INDEX IF NOT EXISTS idx_paragraph_session_index ON transcript_paragraphs (sessionId, paragraphIndex);
+            CREATE TABLE IF NOT EXISTS chats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sessionId INTEGER NULL,
+                timestamp INTEGER NOT NULL,
+                name TEXT,
+                tags TEXT NULL,
+                FOREIGN KEY (sessionId) REFERENCES sessions (id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_chat_session ON chats (sessionId);
+            CREATE INDEX IF NOT EXISTS idx_chat_timestamp ON chats (timestamp);
+            CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chatId INTEGER NOT NULL,
+                sender TEXT NOT NULL CHECK(sender IN ('user', 'ai')),
+                text TEXT NOT NULL,
+                timestamp INTEGER NOT NULL,
+                promptTokens INTEGER,
+                completionTokens INTEGER,
+                FOREIGN KEY (chatId) REFERENCES chats (id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_message_chat ON messages (chatId);
+            CREATE INDEX IF NOT EXISTS idx_message_timestamp ON messages (timestamp);
+            CREATE TABLE IF NOT EXISTS templates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                text TEXT NOT NULL,
+                createdAt INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_template_created_at ON templates (createdAt);
+        `);
+
+        // This check for the column is already safe and correct.
         const sessionColumns = dbInstance.pragma('table_info(sessions)') as {
           name: string;
-          type: string;
         }[];
         if (
           !sessionColumns.some((col) => col.name === 'transcriptTokenCount')
@@ -182,12 +234,13 @@ function runMigrations(dbInstance: DB) {
             'ALTER TABLE sessions ADD COLUMN transcriptTokenCount INTEGER NULL'
           );
         }
+
         dbInstance.pragma(`user_version = 1`);
         currentVersion = 1;
         console.log('[db Migrator] Version 1 applied.');
       }
 
-      // Version 2: Add analysis-related tables
+      // Version 2: Add analysis-related tables (No changes needed)
       if (currentVersion < 2) {
         console.log('[db Migrator] Applying version 2...');
         dbInstance.exec(`
@@ -226,7 +279,7 @@ function runMigrations(dbInstance: DB) {
         console.log('[db Migrator] Version 2 applied.');
       }
 
-      // Version 3: Add model and context size to analysis jobs
+      // Version 3: Add model and context size to analysis jobs (No changes needed)
       if (currentVersion < 3) {
         console.log('[db Migrator] Applying version 3...');
         dbInstance.exec('ALTER TABLE analysis_jobs ADD COLUMN model_name TEXT');
@@ -238,7 +291,7 @@ function runMigrations(dbInstance: DB) {
         console.log('[db Migrator] Version 3 applied.');
       }
 
-      // Version 4: Add short_prompt to analysis_jobs
+      // Version 4: Add short_prompt to analysis_jobs (No changes needed)
       if (currentVersion < 4) {
         console.log('[db Migrator] Applying version 4...');
         dbInstance.exec(
@@ -249,7 +302,7 @@ function runMigrations(dbInstance: DB) {
         console.log('[db Migrator] Version 4 applied.');
       }
 
-      // Version 5: Add strategy_json to analysis_jobs
+      // Version 5: Add strategy_json to analysis_jobs (No changes needed)
       if (currentVersion < 5) {
         console.log('[db Migrator] Applying version 5...');
         dbInstance.exec(
@@ -260,10 +313,9 @@ function runMigrations(dbInstance: DB) {
         console.log('[db Migrator] Version 5 applied.');
       }
 
-      // Version 6: Add UNIQUE constraint to template titles
+      // Version 6: Add UNIQUE constraint to template titles (No changes needed)
       if (currentVersion < 6) {
         console.log('[db Migrator] Applying version 6...');
-        // This is a complex migration for SQLite. We'll recreate the table.
         dbInstance.exec(`
           CREATE TABLE templates_new (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -280,6 +332,33 @@ function runMigrations(dbInstance: DB) {
         dbInstance.pragma('user_version = 6');
         currentVersion = 6;
         console.log('[db Migrator] Version 6 applied.');
+      }
+
+      // NEW MIGRATION: Version 7 to update the CHECK constraint on messages.sender
+      if (currentVersion < 7) {
+        console.log('[db Migrator] Applying version 7...');
+        // Recreate the messages table with the new constraint, preserving data
+        dbInstance.exec(`
+            CREATE TABLE messages_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chatId INTEGER NOT NULL,
+                sender TEXT NOT NULL CHECK(sender IN ('user', 'ai', 'system')),
+                text TEXT NOT NULL,
+                timestamp INTEGER NOT NULL,
+                promptTokens INTEGER,
+                completionTokens INTEGER,
+                FOREIGN KEY (chatId) REFERENCES chats (id) ON DELETE CASCADE
+            );
+            INSERT INTO messages_new (id, chatId, sender, text, timestamp, promptTokens, completionTokens)
+            SELECT id, chatId, sender, text, timestamp, promptTokens, completionTokens FROM messages;
+            DROP TABLE messages;
+            ALTER TABLE messages_new RENAME TO messages;
+            CREATE INDEX IF NOT EXISTS idx_message_chat ON messages (chatId);
+            CREATE INDEX IF NOT EXISTS idx_message_timestamp ON messages (timestamp);
+        `);
+        dbInstance.pragma(`user_version = 7`);
+        currentVersion = 7;
+        console.log('[db Migrator] Version 7 applied.');
       }
     })();
     console.log(
