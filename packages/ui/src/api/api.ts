@@ -8,4 +8,5 @@ export * from './search';
 export * from './meta';
 export * from './system';
 export * from './templates';
-export * from './analysis'; // <-- ADDED EXPORT
+export * from './analysis';
+export * from './jobs';

@@ -24,7 +24,9 @@ import {
   deleteByQuery,
 } from '@therascript/elasticsearch-client';
 import config from '../config/index.js';
+// ============================= FIX START ==============================
 import { cleanLlmOutput } from '../utils/helpers.js';
+// ============================== FIX END ===============================
 
 const esClient = getElasticsearchClient(config.elasticsearch.url);
 
@@ -104,11 +106,15 @@ export const addSessionChatMessage = async ({
   }
 
   try {
+    // ============================= FIX START ==============================
+    // Fix the history concatenation bug by only saving the new message text.
     userMessage = messageRepository.addMessage(
       chatData.id,
       'user',
       trimmedText
     );
+    // ============================== FIX END ===============================
+
     // Index user message into Elasticsearch
     await indexDocument(esClient, MESSAGES_INDEX, String(userMessage.id), {
       message_id: String(userMessage.id),
@@ -218,6 +224,8 @@ export const addSessionChatMessage = async ({
         );
         if (fullAiText.trim()) {
           try {
+            // ============================= FIX START ==============================
+            // Clean the final AI response before saving to the database.
             const cleanedAiText = cleanLlmOutput(fullAiText);
             const aiMessage = messageRepository.addMessage(
               chatData.id,
@@ -226,6 +234,8 @@ export const addSessionChatMessage = async ({
               finalPromptTokens,
               finalCompletionTokens
             );
+            // ============================== FIX END ===============================
+
             // Index AI message into Elasticsearch
             await indexDocument(
               esClient,

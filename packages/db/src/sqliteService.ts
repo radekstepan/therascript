@@ -84,6 +84,14 @@ export const LATEST_SCHEMA_VERSION = 6;
 
 // --- NEW SYSTEM PROMPTS ---
 export const SYSTEM_PROMPT_TEMPLATES = {
+  SESSION_CHAT: {
+    title: 'system_prompt',
+    text: `You are an AI assistant analyzing a therapy session transcript. You will be provided with the transcript context and chat history. Answer user questions based *only* on the provided information. Be concise. If the answer isn't present, state that clearly. Do not invent information. Refer to participants as "Therapist" and "Patient" unless names are explicitly clear in the transcript.`,
+  },
+  STANDALONE_CHAT: {
+    title: 'system_standalone_prompt',
+    text: `You are a helpful AI assistant. Answer the user's questions directly and concisely.`,
+  },
   ANALYSIS_STRATEGIST: {
     title: 'system_analysis_strategist',
     text: `You are an expert AI analysis strategist. Your job is to break down a complex, multi-document user query into a two-part MapReduce plan. The user's query will be run against a series of therapy session transcripts, which are ordered chronologically. Your plan must be in a JSON format with two keys:

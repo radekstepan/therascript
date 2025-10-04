@@ -30,6 +30,7 @@ import { adminRoutes } from './routes/adminRoutes.js';
 import { searchRoutes } from './routes/searchRoutes.js';
 import { analysisRoutes } from './routes/analysisRoutes.js';
 import { transcriptionRoutes } from './routes/transcriptionRoutes.js';
+import { jobsRoutes } from './routes/jobsRoutes.js';
 import {
   ApiError,
   InternalServerError,
@@ -132,6 +133,7 @@ const app = new Elysia()
             name: 'Search',
             description: 'Elasticsearch Full-Text Search Endpoints',
           },
+          { name: 'Jobs', description: 'Background Job Management' },
           {
             name: 'Transcription',
             description: 'Transcription Job Management',
@@ -282,6 +284,7 @@ const app = new Elysia()
   .use(searchRoutes)
   .use(analysisRoutes)
   .use(transcriptionRoutes)
+  .use(jobsRoutes)
   .use(sessionRoutes)
   .use(chatRoutes)
   .use(standaloneChatRoutes)

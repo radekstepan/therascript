@@ -19,6 +19,7 @@ export const cleanLlmOutput = (text: string): string => {
     '<end_of_turn>',
     '<|end_of_turn|>',
     '<|endofturn|>',
+    '<|eot_id|>', // Llama 3
     '<|eot|>',
     '<eos>',
     '</s>',
@@ -29,18 +30,17 @@ export const cleanLlmOutput = (text: string): string => {
     '<start_of_turn>',
     '<|start_of_turn|>',
     '<|startofturn|>',
+    '<|start_header_id|>', // Llama 3
+    '<|end_header_id|>', // Llama 3
+    '<|eom_id|>', // Llama 3
     // Other common instruction/system tokens
     '[/INST]',
     '[INST]',
     '<s>',
   ];
 
-  console.log({ text });
-
-  // Remove all tokens from anywhere in the text
   let cleanedText = text;
   for (const token of tokensToRemove) {
-    // Use word boundaries and case-insensitive matching for more robust cleaning
     const escapedToken = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const regex = new RegExp(escapedToken, 'gi');
     cleanedText = cleanedText.replace(regex, '');
@@ -48,12 +48,12 @@ export const cleanLlmOutput = (text: string): string => {
 
   // Additional cleanup for common LLM artifacts
   cleanedText = cleanedText
-    // Remove multiple spaces
+    // Remove multiple spaces that might be left after token removal
     .replace(/\s+/g, ' ')
     // Remove leading/trailing whitespace from each line
     .replace(/^\s+|\s+$/gm, '')
-    // Remove empty lines
-    .replace(/^\s*[\r\n]/gm, '')
+    // Remove multiple consecutive newlines, leaving just one
+    .replace(/(\r\n|\n|\r){2,}/g, '\n')
     // Trim final result
     .trim();
 

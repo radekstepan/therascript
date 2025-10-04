@@ -40,6 +40,8 @@ import * as util from 'node:util';
 import * as path from 'node:path';
 import * as fs from 'node:fs'; // For checking compose file
 import { fileURLToPath } from 'node:url';
+import { templateRepository } from '../repositories/templateRepository.js';
+import { SYSTEM_PROMPT_TEMPLATES } from '@therascript/db/dist/sqliteService.js';
 
 const exec = util.promisify(callbackExec);
 
@@ -167,9 +169,23 @@ export const checkOllamaApiHealth = async (): Promise<boolean> => {
 };
 // --- END ADDED ---
 
-// --- Keep original Ollama prompt constants ---
-const SYSTEM_PROMPT = `You are an AI assistant analyzing a therapy session transcript. You will be provided with the transcript context and chat history. Answer user questions based *only* on the provided information. Be concise. If the answer isn't present, state that clearly. Do not invent information. Refer to participants as "Therapist" and "Patient" unless names are explicitly clear in the transcript.`;
-const STANDALONE_SYSTEM_PROMPT = `You are a helpful AI assistant. Answer the user's questions directly and concisely.`;
+// Helper to get system prompts from DB with fallback
+const getSystemPrompt = (
+  title: 'system_prompt' | 'system_standalone_prompt'
+): string => {
+  const template = templateRepository.findByTitle(title);
+  if (template) {
+    return template.text;
+  }
+  console.warn(
+    `[OllamaService] System template "${title}" not found in DB. Using hardcoded fallback.`
+  );
+  if (title === 'system_prompt') {
+    return SYSTEM_PROMPT_TEMPLATES.SESSION_CHAT.text;
+  }
+  // 'system_standalone_prompt'
+  return SYSTEM_PROMPT_TEMPLATES.STANDALONE_CHAT.text;
+};
 
 // --- Keep original Pull Job Status store ---
 // Make sure the type annotation uses the imported type
@@ -254,7 +270,7 @@ export const listModels = async (): Promise<OllamaModelInfo[]> => {
               parameter_size: model.details.parameter_size,
               quantization_level: model.details.quantization_level,
             },
-            defaultContextSize: defaultCtxSize, // <-- ADDED
+            defaultContextSize: defaultCtxSize,
             size_vram: model.size_vram,
             expires_at: expiresAtDate,
           };
@@ -964,9 +980,13 @@ export const streamChatResponse = async (
     const latestUserMessage = chatHistory[chatHistory.length - 1];
     const previousHistory = chatHistory.slice(0, -1);
 
+    const systemPromptContent = isStandalone
+      ? getSystemPrompt('system_standalone_prompt')
+      : getSystemPrompt('system_prompt');
+
     messages.push({
       role: 'system',
-      content: isStandalone ? STANDALONE_SYSTEM_PROMPT : SYSTEM_PROMPT,
+      content: systemPromptContent,
     });
 
     messages.push(
@@ -995,9 +1015,19 @@ export const streamChatResponse = async (
   );
 
   try {
+    // ============================= FIX START ==============================
+    // Expand the list of stop tokens to prevent the model from generating them.
     const ollamaOptions: any = {
-      stop: ['</end_of_turn>'],
+      stop: [
+        '<end_of_turn>',
+        '<start_of_turn>',
+        '<|eot_id|>',
+        '<|start_header_id|>',
+        '<|end_header_id|>',
+        '<|eom_id|>',
+      ],
     };
+    // ============================== FIX END ===============================
     if (contextSize !== null && contextSize !== undefined) {
       ollamaOptions.num_ctx = contextSize;
     }
