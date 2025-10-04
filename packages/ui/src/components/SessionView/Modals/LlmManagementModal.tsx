@@ -55,15 +55,12 @@ import type {
   UIPullJobStatusState,
 } from '../../../types';
 import { cn } from '../../../utils';
-import prettyBytes from 'pretty-bytes'; // <-- Import pretty-bytes
+import prettyBytes from 'pretty-bytes';
 
 interface LlmManagementModalProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
 }
-
-// REMOVED formatBytes helper function
-// const formatBytes = (bytes: number, decimals = 2): string => { ... };
 
 export function LlmManagementModal({
   isOpen,
@@ -595,13 +592,25 @@ export function LlmManagementModal({
                   {model.details.quantization_level}
                 </Badge>
               )}
+              {/* --- UPDATED BADGE FOR CONTEXT SIZE --- */}
+              {model.defaultContextSize && model.defaultContextSize > 0 && (
+                <Tooltip
+                  content={`Default Max Context Size: ${model.defaultContextSize.toLocaleString()} Tokens`}
+                >
+                  <Badge variant="outline" color="blue" radius="full" size="1">
+                    <LightningBoltIcon style={{ marginRight: '2px' }} />
+                    {prettyBytes(model.defaultContextSize).replace(' ', '')}
+                  </Badge>
+                </Tooltip>
+              )}
+              {/* --- END UPDATED BADGE --- */}
             </Flex>
           </Flex>
           {/* Right Block: Size Badge + Status/Actions */}
           <Flex align="center" gap="2" flexShrink="0">
             {/* Size Badge - Use prettyBytes */}
             <Badge variant="soft" color="gray">
-              {prettyBytes(model.size)} {/* <-- USE PRETTY BYTES HERE */}
+              {prettyBytes(model.size)}
             </Badge>
 
             {/* Status Badge or Actions Menu */}
@@ -712,7 +721,7 @@ export function LlmManagementModal({
             models.
           </Dialog.Description>
 
-          {/* Active Model Status (Unchanged) */}
+          {/* Active Model Status (UPDATED) */}
           <Box
             mb="4"
             p="3"
@@ -744,7 +753,9 @@ export function LlmManagementModal({
                 <Text size="3" weight="bold" truncate title={activeModelName}>
                   {activeModelName}
                 </Text>
-                <Tooltip content={`Configured Context Size (num_ctx)`}>
+                <Tooltip
+                  content={`Configured Context Size: ${activeConfiguredContextSize ? activeConfiguredContextSize.toLocaleString() : 'Default'}`}
+                >
                   <Badge
                     variant="soft"
                     color={activeConfiguredContextSize ? 'blue' : 'gray'}
@@ -752,11 +763,16 @@ export function LlmManagementModal({
                     className={cn(isLoadingStatus ? 'opacity-50' : '')}
                   >
                     <LightningBoltIcon style={{ marginRight: '2px' }} />
+                    {/* --- MODIFICATION FOR ACTIVE MODEL CONTEXT SIZE --- */}
                     {isLoadingStatus
                       ? '...'
                       : activeConfiguredContextSize
-                        ? activeConfiguredContextSize.toLocaleString()
+                        ? prettyBytes(activeConfiguredContextSize).replace(
+                            ' ',
+                            ''
+                          )
                         : 'Default'}
+                    {/* --- END MODIFICATION --- */}
                   </Badge>
                 </Tooltip>
                 {isAnyModelLoaded &&

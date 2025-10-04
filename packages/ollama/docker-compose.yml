@@ -6,7 +6,7 @@ services:
   ollama:
     # Use the official Ollama image. ':latest' is convenient but consider pinning
     # a specific version for production stability (e.g., ollama/ollama:0.1.32).
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.12.3
     # Define a specific, predictable container name for easier management by other services/scripts.
     # Renamed slightly to avoid potential conflicts if an older 'ollama_server' exists.
     container_name: ollama_server_managed

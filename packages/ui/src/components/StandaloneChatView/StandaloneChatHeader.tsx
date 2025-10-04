@@ -34,14 +34,15 @@ import type { StandaloneChatListItem, OllamaStatus } from '../../types';
 import { toastMessageAtom } from '../../store';
 import { formatTimestamp } from '../../helpers';
 import { cn } from '../../utils';
+import prettyBytes from 'pretty-bytes'; // <-- IMPORT PRETTY-BYTES
 
 interface StandaloneChatHeaderProps {
   activeChatId: number | null;
   ollamaStatus: OllamaStatus | undefined;
   isLoadingOllamaStatus: boolean;
   onOpenLlmModal: () => void;
-  latestPromptTokens?: number | null; // <-- NEW PROP
-  latestCompletionTokens?: number | null; // <-- NEW PROP
+  latestPromptTokens?: number | null;
+  latestCompletionTokens?: number | null;
 }
 
 export function StandaloneChatHeader({
@@ -49,8 +50,8 @@ export function StandaloneChatHeader({
   ollamaStatus,
   isLoadingOllamaStatus,
   onOpenLlmModal,
-  latestPromptTokens, // <-- Destructure
-  latestCompletionTokens, // <-- Destructure
+  latestPromptTokens,
+  latestCompletionTokens,
 }: StandaloneChatHeaderProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -143,7 +144,7 @@ export function StandaloneChatHeader({
     }
   }
 
-  const totalTokens = (latestPromptTokens ?? 0) + (latestCompletionTokens ?? 0); // <-- Calculate total tokens
+  const totalTokens = (latestPromptTokens ?? 0) + (latestCompletionTokens ?? 0);
 
   const isLoadingAny =
     isLoadingChats || deleteChatMutation.isPending || isLoadingOllamaStatus;
@@ -229,10 +230,11 @@ export function StandaloneChatHeader({
                     height="14"
                     style={{ marginRight: '2px' }}
                   />
+                  {/* --- *** UPDATED LINE *** --- */}
                   {isLoadingOllamaStatus
                     ? '...'
                     : configuredContextSize
-                      ? configuredContextSize.toLocaleString()
+                      ? prettyBytes(configuredContextSize).replace(' ', '')
                       : 'Default'}
                 </Badge>
               </Tooltip>
