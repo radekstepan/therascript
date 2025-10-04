@@ -26,6 +26,7 @@ import {
   CheckIcon,
   QuestionMarkCircledIcon,
   StarIcon,
+  LightningBoltIcon,
 } from '@radix-ui/react-icons';
 import {
   createAnalysisJob,
@@ -37,6 +38,7 @@ import type { Session, OllamaModelInfo, Template } from '../../types';
 import { toastMessageAtom } from '../../store';
 import { cn } from '../../utils';
 import { formatIsoDateToYMD } from '../../helpers';
+import prettyBytes from 'pretty-bytes';
 
 // --- Sub-component for the template picker popover ---
 const TemplatePicker: React.FC<{
@@ -165,7 +167,7 @@ export function CreateAnalysisJobModal({
   const [selectedModel, setSelectedModel] = useState<string>('');
   const [contextSizeInput, setContextSizeInput] = useState('');
   const [isTemplatePopoverOpen, setIsTemplatePopoverOpen] = useState(false);
-  const [useAdvancedStrategy, setUseAdvancedStrategy] = useState(false);
+  const [useAdvancedStrategy, setUseAdvancedStrategy] = useState(true); // Default to true
 
   const { data: availableModelsData, isLoading: isLoadingModels } = useQuery({
     queryKey: ['availableOllamaModels'],
@@ -412,11 +414,41 @@ export function CreateAnalysisJobModal({
                     style={{ width: '100%' }}
                   />
                   <Select.Content>
+                    {/* --- *** UPDATED SECTION *** --- */}
                     {availableModelsData?.models.map((model) => (
                       <Select.Item key={model.name} value={model.name}>
-                        {model.name}
+                        <Flex
+                          justify="between"
+                          align="center"
+                          gap="4"
+                          width="100%"
+                        >
+                          <Text truncate>{model.name}</Text>
+                          {model.defaultContextSize &&
+                            model.defaultContextSize > 0 && (
+                              <Tooltip
+                                content={`Default Max Context: ${model.defaultContextSize.toLocaleString()} Tokens`}
+                              >
+                                <Badge
+                                  variant="soft"
+                                  color="blue"
+                                  radius="full"
+                                  size="1"
+                                  style={{ flexShrink: 0 }}
+                                >
+                                  <LightningBoltIcon
+                                    style={{ marginRight: '2px' }}
+                                  />
+                                  {prettyBytes(
+                                    model.defaultContextSize
+                                  ).replace(' ', '')}
+                                </Badge>
+                              </Tooltip>
+                            )}
+                        </Flex>
                       </Select.Item>
                     ))}
+                    {/* --- *** END UPDATED SECTION *** --- */}
                   </Select.Content>
                 </Select.Root>
               </Box>

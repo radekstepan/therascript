@@ -5341,10 +5341,10 @@ lru-cache@^6.0.0:
   dependencies:
     yallist "^4.0.0"
 
-lucide-react@^0.300.0:
-  version "0.300.0"
-  resolved "https://registry.yarnpkg.com/lucide-react/-/lucide-react-0.300.0.tgz#a80025f7d15b13784456d9b2210421d01c5aa2ef"
-  integrity sha512-rQxUUCmWAvNLoAsMZ5j04b2+OJv6UuNLYMY7VK0eVlm4aTwUEjEEHc09/DipkNIlhXUSDn2xoyIzVT0uh7dRsg==
+lucide-react@^0.418.0:
+  version "0.418.0"
+  resolved "https://registry.yarnpkg.com/lucide-react/-/lucide-react-0.418.0.tgz#52c9d9498859ff9edde4ff1c72a77aa7f1c269e9"
+  integrity sha512-7TSd4CLfvT/U9504MSJ+e03pgAvqZQ5WbML4Pm+axjCbYBLTWuDu68bebFr/e51Z32uHMY7MO+SpaHX8NubveA==
 
 luxon@^3.2.1:
   version "3.7.2"
@@ -6390,10 +6390,10 @@ obuf@^1.0.0, obuf@^1.1.2:
   resolved "https://registry.yarnpkg.com/obuf/-/obuf-1.1.2.tgz#09bea3343d41859ebd446292d11c9d4db619084e"
   integrity sha512-PX1wu0AmAdPqOL1mWhqmlOd8kOIZQwGZw6rh7uby9fTc5lhaOWFLX3I6R1hrF9k3zUY40e6igsLGkDXK92LJNg==
 
-ollama@^0.5.3:
-  version "0.5.14"
-  resolved "https://registry.yarnpkg.com/ollama/-/ollama-0.5.14.tgz#bf1b72998491636ee89766bb0e3163e3c50a6970"
-  integrity sha512-pvOuEYa2WkkAumxzJP0RdEYHkbZ64AYyyUszXVX7ruLvk5L+EiO2G71da2GqEQ4IAk4j6eLoUbGk5arzFT1wJA==
+ollama@^0.6.0:
+  version "0.6.0"
+  resolved "https://registry.yarnpkg.com/ollama/-/ollama-0.6.0.tgz#3a4aefa155ff3e245d66b8aa78e17b132b5a05e5"
+  integrity sha512-FHjdU2Ok5x2HZsxPui/MBJZ5J+HzmxoWYa/p9wk736eT+uAhS8nvIICar5YgwlG5MFNjDR6UA5F3RSKq+JseOA==
   dependencies:
     whatwg-fetch "^3.6.20"
 

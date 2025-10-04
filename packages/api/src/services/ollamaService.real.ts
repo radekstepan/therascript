@@ -192,44 +192,87 @@ const getSystemPrompt = (
 const activePullJobs = new Map<string, OllamaPullJobStatus>();
 const pullJobCancellationFlags = new Map<string, boolean>();
 
-// --- NEW: Helper to fetch model details and parse context size ---
+// --- *** UPDATED FUNCTION *** ---
+// Helper to fetch model details and parse context size
 async function _fetchModelDefaultContextSize(
   modelName: string
 ): Promise<number | null> {
   try {
-    console.log(
-      `[Real OllamaService] Fetching details for ${modelName} to get context size...`
-    );
     const showResponse: ShowResponse = await ollama.show({ model: modelName });
+
+    // NEW: Prioritize the structured `model_info` object from newer library versions
+    if (
+      showResponse.model_info &&
+      typeof showResponse.model_info === 'object'
+    ) {
+      // Handle both Map and object types for model_info
+      let contextLengthKey: string | undefined;
+      let contextLength: number | undefined;
+
+      if (showResponse.model_info instanceof Map) {
+        // Handle Map type
+        for (const [key, value] of showResponse.model_info.entries()) {
+          if (typeof key === 'string' && key.endsWith('.context_length')) {
+            contextLengthKey = key;
+            contextLength = typeof value === 'number' ? value : undefined;
+            break;
+          }
+        }
+      } else {
+        // Handle object type
+        contextLengthKey = Object.keys(showResponse.model_info).find((key) =>
+          key.endsWith('.context_length')
+        );
+        if (contextLengthKey) {
+          contextLength = showResponse.model_info[contextLengthKey];
+        }
+      }
+
+      if (
+        contextLengthKey &&
+        typeof contextLength === 'number' &&
+        contextLength > 0
+      ) {
+        console.log(
+          `[Real OllamaService] Parsed default context size (${contextLengthKey}) ${contextLength} for model ${modelName}`
+        );
+        return contextLength;
+      }
+    }
+
+    // OLD FALLBACK: Check the `parameters` string for 'num_ctx' for older library versions
     if (showResponse.parameters) {
       const parametersString = showResponse.parameters;
       const lines = parametersString.split('\n');
+
       for (const line of lines) {
-        const parts = line.trim().split(/\s+/); // Split by one or more spaces
-        if (parts[0].toLowerCase() === 'num_ctx' && parts.length > 1) {
+        const parts = line.trim().split(/\s+/);
+        if (parts.length > 1 && parts[0].toLowerCase() === 'num_ctx') {
           const numCtx = parseInt(parts[1], 10);
           if (!isNaN(numCtx) && numCtx > 0) {
             console.log(
-              `[Real OllamaService] Parsed num_ctx ${numCtx} for ${modelName}`
+              `[Real OllamaService] Parsed default context size (num_ctx) ${numCtx} for model ${modelName}`
             );
             return numCtx;
           }
         }
       }
     }
-    console.warn(
-      `[Real OllamaService] Could not parse num_ctx from parameters for ${modelName}. Modelfile params string: ${showResponse.parameters}`
+
+    // If neither method found a context size, log it.
+    console.log(
+      `[Real OllamaService] Could not find a default context size parameter for model ${modelName}. Ollama will use its own default.`
     );
     return null;
   } catch (error: any) {
     console.error(
-      `[Real OllamaService] Error fetching/parsing details for ${modelName} for context size:`,
+      `[Real OllamaService] Error fetching details for ${modelName} to get context size:`,
       error.message || error
     );
-    return null; // Return null if 'ollama show' fails or parsing fails
+    return null;
   }
 }
-// --- END NEW HELPER ---
+// --- *** END UPDATED FUNCTION *** ---
 
 // --- MODIFIED: listModels to include defaultContextSize ---
 export const listModels = async (): Promise<OllamaModelInfo[]> => {
@@ -270,7 +313,7 @@ export const listModels = async (): Promise<OllamaModelInfo[]> => {
               parameter_size: model.details.parameter_size,
               quantization_level: model.details.quantization_level,
             },
-            defaultContextSize: defaultCtxSize,
+            defaultContextSize: defaultCtxSize, // <-- ADDED
             size_vram: model.size_vram,
             expires_at: expiresAtDate,
           };
