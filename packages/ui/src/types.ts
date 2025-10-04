@@ -1,5 +1,13 @@
 // packages/ui/src/types.ts
 
+// --- NEW JOB COUNT TYPE ---
+export interface ActiveJobCount {
+  total: number;
+  transcription: number;
+  analysis: number;
+}
+// --- END NEW ---
+
 // --- NEW GPU STATS TYPES ---
 export interface GpuProcess {
   pid: number;

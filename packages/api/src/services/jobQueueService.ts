@@ -22,6 +22,30 @@ const analysisQueue = new Queue<AnalysisJobData>(ANALYSIS_QUEUE_NAME, {
 
 console.log('[JobQueueService] BullMQ Queues initialized.');
 
+/**
+ * Gets the number of active and waiting jobs for all queues.
+ * @returns An object with total, transcription, and analysis counts.
+ */
+export const getActiveJobCounts = async () => {
+  const [transcriptionCounts, analysisCounts] = await Promise.all([
+    transcriptionQueue.getJobCounts('wait', 'active', 'delayed'),
+    analysisQueue.getJobCounts('wait', 'active', 'delayed'),
+  ]);
+
+  const transcriptionTotal =
+    transcriptionCounts.wait +
+    transcriptionCounts.active +
+    transcriptionCounts.delayed;
+  const analysisTotal =
+    analysisCounts.wait + analysisCounts.active + analysisCounts.delayed;
+
+  return {
+    total: transcriptionTotal + analysisTotal,
+    transcription: transcriptionTotal,
+    analysis: analysisTotal,
+  };
+};
+
 // --- Service Functions to Add Jobs ---
 
 /**

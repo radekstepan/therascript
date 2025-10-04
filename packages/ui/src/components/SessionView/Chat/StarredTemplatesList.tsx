@@ -1,5 +1,5 @@
 /* packages/ui/src/components/SessionView/Chat/StarredTemplatesList.tsx */
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Button,
@@ -33,6 +33,13 @@ export function StarredTemplatesList({
     queryFn: fetchTemplates,
     staleTime: 5 * 60 * 1000,
   });
+
+  const userTemplates = useMemo(() => {
+    if (!templates) return [];
+    return templates.filter(
+      (template) => !template.title.startsWith('system_')
+    );
+  }, [templates]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -110,7 +117,7 @@ export function StarredTemplatesList({
                 <Callout.Text>Error: {error.message}</Callout.Text>
               </Callout.Root>
             </Flex>
-          ) : !templates || templates.length === 0 ? (
+          ) : !userTemplates || userTemplates.length === 0 ? (
             <Flex
               align="center"
               justify="center"
@@ -123,25 +130,27 @@ export function StarredTemplatesList({
               </Text>
             </Flex>
           ) : (
-            [...templates]
+            [...userTemplates]
               .sort((a, b) => a.title.localeCompare(b.title))
-              .map((template) => (
-                <Button
-                  key={template.id}
-                  variant="ghost"
-                  onClick={() => onSelectTemplate(template.text)}
-                  className="block w-full h-auto text-left p-2 text-sm rounded whitespace-normal justify-start"
-                  style={{
-                    whiteSpace: 'normal',
-                    justifyContent: 'flex-start',
-                    textAlign: 'left',
-                  }}
-                  title={`Insert: "${template.text.substring(0, 100)}${template.text.length > 100 ? '...' : ''}"`}
-                  size="2"
-                >
-                  {template.title}
-                </Button>
-              ))
+              .map((template) => {
+                return (
+                  <Button
+                    key={template.id}
+                    variant="ghost"
+                    onClick={() => onSelectTemplate(template.text)}
+                    className="block w-full h-auto text-left p-2 text-sm rounded whitespace-normal justify-start"
+                    style={{
+                      whiteSpace: 'normal',
+                      justifyContent: 'flex-start',
+                      textAlign: 'left',
+                    }}
+                    title={`Insert: "${template.text.substring(0, 100)}${template.text.length > 100 ? '...' : ''}"`}
+                    size="2"
+                  >
+                    {template.title}
+                  </Button>
+                );
+              })
           )}
         </Box>
       </ScrollArea>

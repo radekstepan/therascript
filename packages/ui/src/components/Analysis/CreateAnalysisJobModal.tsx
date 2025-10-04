@@ -54,6 +54,13 @@ const TemplatePicker: React.FC<{
   });
   const popoverRef = useRef<HTMLDivElement>(null);
 
+  const userTemplates = useMemo(() => {
+    if (!templates) return [];
+    return templates.filter(
+      (template) => !template.title.startsWith('system_')
+    );
+  }, [templates]);
+
   // Close on Escape key or click outside
   useEffect(() => {
     const handler = (event: KeyboardEvent | MouseEvent) => {
@@ -101,14 +108,14 @@ const TemplatePicker: React.FC<{
                 Error: {error.message}
               </Text>
             </Flex>
-          ) : !templates || templates.length === 0 ? (
+          ) : !userTemplates || userTemplates.length === 0 ? (
             <Flex align="center" justify="center" p="4">
               <Text size="2" color="gray">
-                No templates found.
+                No user-created templates found.
               </Text>
             </Flex>
           ) : (
-            [...templates]
+            [...userTemplates]
               .sort((a, b) => a.title.localeCompare(b.title))
               .map((template) => (
                 <Button

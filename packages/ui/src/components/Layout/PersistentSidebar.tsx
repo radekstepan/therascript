@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { useNavigate as useReactRouterNavigate } from 'react-router-dom';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import {
   LayoutDashboard,
   ListOrdered,
@@ -18,6 +18,7 @@ import {
   AlertTriangle,
   Star,
   BarChart,
+  BrainCircuit,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -25,6 +26,7 @@ import {
   Flex,
   Spinner,
   Text,
+  Badge,
 } from '@radix-ui/themes';
 import { themeAtom, Theme } from '../../store/ui/themeAtom';
 import { effectiveThemeAtom } from '../../store';
@@ -33,8 +35,9 @@ import { currentPageAtom } from '../../store/navigation/currentPageAtom';
 import { cn } from '../../utils';
 import { toastMessageAtom } from '../../store';
 import { JobsQueueModal } from '../Jobs/JobsQueueModal';
-import { requestAppShutdown } from '../../api/api';
+import { requestAppShutdown, fetchActiveJobCount } from '../../api/api';
 import { GpuStatusIndicator } from '../User/GpuStatusIndicator';
+import type { ActiveJobCount } from '../../types';
 
 interface NavItemType {
   id: string;
@@ -69,6 +72,14 @@ export function PersistentSidebar() {
 
   const [isJobsModalOpen, setIsJobsModalOpen] = useState(false);
   const [isShutdownConfirmOpen, setIsShutdownConfirmOpen] = useState(false);
+
+  const { data: activeJobCountData } = useQuery<ActiveJobCount, Error>({
+    queryKey: ['activeJobCount'],
+    queryFn: fetchActiveJobCount,
+    refetchInterval: 5000,
+    staleTime: 4000,
+  });
+  const activeJobCount = activeJobCountData?.total ?? 0;
 
   const navigateTo = (pagePath: string) => {
     reactRouterNavigate(pagePath);
@@ -268,7 +279,16 @@ export function PersistentSidebar() {
               className={cn(isSidebarOpen ? 'mr-2' : 'mr-0')}
               aria-hidden="true"
             />
-            {isSidebarOpen && 'Active Jobs'}
+            {isSidebarOpen && (
+              <Flex align="center" justify="between" width="100%">
+                <span>Active Jobs</span>
+                {activeJobCount > 0 && (
+                  <Badge color="blue" variant="soft" radius="full">
+                    {activeJobCount}
+                  </Badge>
+                )}
+              </Flex>
+            )}
           </button>
 
           <GpuStatusIndicator isSidebarOpen={isSidebarOpen} />
