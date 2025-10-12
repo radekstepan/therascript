@@ -15,10 +15,11 @@ import {
   MixerVerticalIcon,
   LightningBoltIcon,
   ArchiveIcon,
+  ExclamationTriangleIcon,
 } from '@radix-ui/react-icons';
 import type { Session, OllamaStatus } from '../../../types';
 import { cn } from '../../../utils';
-import prettyBytes from 'pretty-bytes'; // <-- IMPORT PRETTY-BYTES
+import prettyBytes from 'pretty-bytes';
 
 interface ChatPanelHeaderProps {
   session: Session | null;
@@ -51,6 +52,20 @@ export function ChatPanelHeader({
 
   const totalTokens = (latestPromptTokens ?? 0) + (latestCompletionTokens ?? 0);
 
+  // --- CONTEXT USAGE WARNING LOGIC ---
+  const effectiveModelContextSize =
+    configuredContextSize || activeModelDefaultContextSize;
+
+  let contextUsagePercentage: number | null = null;
+  if (transcriptTokenCount && effectiveModelContextSize) {
+    contextUsagePercentage =
+      (transcriptTokenCount / effectiveModelContextSize) * 100;
+  }
+
+  const showContextWarning =
+    contextUsagePercentage !== null && contextUsagePercentage > 75;
+  // --- END WARNING LOGIC ---
+
   let statusTooltipContent = 'Loading status...';
   if (!isLoadingOllamaStatus) {
     if (!ollamaStatus?.activeModel) {
@@ -73,14 +88,6 @@ export function ChatPanelHeader({
       );
     return <SymbolIcon className="text-gray-500" width="14" height="14" />;
   };
-
-  const isContextSizeSufficient =
-    transcriptTokenCount !== null &&
-    transcriptTokenCount !== undefined &&
-    activeModelDefaultContextSize !== null &&
-    activeModelDefaultContextSize !== undefined
-      ? transcriptTokenCount <= activeModelDefaultContextSize
-      : true; // Default to true if info is missing
 
   return (
     <Box
@@ -120,13 +127,25 @@ export function ChatPanelHeader({
                   height="14"
                   style={{ marginRight: '2px' }}
                 />
-                {/* --- MODIFIED TO USE PRETTY-BYTES --- */}
                 {isLoadingOllamaStatus
                   ? '...'
                   : configuredContextSize
                     ? prettyBytes(configuredContextSize).replace(' ', '')
                     : 'Default'}
               </Badge>
+            </Tooltip>
+          )}
+
+          {/* --- NEW WARNING ICON --- */}
+          {showContextWarning && (
+            <Tooltip
+              content={`Transcript uses ~${Math.round(contextUsagePercentage!)}% of the model's context. Long conversations may lose earlier parts of the transcript context.`}
+            >
+              <ExclamationTriangleIcon
+                className="text-[--amber-9]"
+                width="14"
+                height="14"
+              />
             </Tooltip>
           )}
 
