@@ -22,6 +22,7 @@ import type { Session } from '../../types';
 import type { SessionSortCriteria, SortDirection } from '../../store';
 import { sessionColorMap, therapyColorMap } from '../../constants';
 import { formatIsoDateToYMD } from '../../helpers';
+import { cn } from '../../utils';
 
 interface SessionListTableProps {
   sessions: Session[];
@@ -43,6 +44,21 @@ const getBadgeColor = (
 ): React.ComponentProps<typeof Badge>['color'] => {
   const map = category === 'session' ? sessionColorMap : therapyColorMap;
   return type ? map[type.toLowerCase()] || map['default'] : map['default'];
+};
+
+const getStatusBadgeColor = (
+  status: Session['status']
+): React.ComponentProps<typeof Badge>['color'] => {
+  switch (status) {
+    case 'failed':
+      return 'red';
+    case 'transcribing':
+    case 'queued':
+      return 'blue';
+    case 'pending':
+    default:
+      return 'gray';
+  }
 };
 
 export function SessionListTable({
@@ -218,7 +234,15 @@ export function SessionListTable({
             <Table.Row
               key={session.id}
               onClick={(e) => handleSessionClick(e, session.id)}
-              className="cursor-pointer hover:bg-[--gray-a3] transition-colors duration-150 group"
+              className={cn(
+                'cursor-pointer hover:bg-[--gray-a3] transition-colors duration-150 group',
+                session.status === 'failed' &&
+                  'bg-[--red-a2] hover:bg-[--red-a4]',
+                (session.status === 'pending' ||
+                  session.status === 'queued' ||
+                  session.status === 'transcribing') &&
+                  'bg-[--blue-a2] hover:bg-[--blue-a4]'
+              )}
               aria-label={`Load session: ${session.sessionName || session.fileName}`}
               tabIndex={0}
               onKeyDown={(e) => handleKeyDown(e, session.id)}
@@ -239,6 +263,15 @@ export function SessionListTable({
                   <Text weight="medium" truncate>
                     {session.sessionName || session.fileName}
                   </Text>
+                  {session.status !== 'completed' && (
+                    <Badge
+                      color={getStatusBadgeColor(session.status)}
+                      variant="soft"
+                      radius="full"
+                    >
+                      {session.status}
+                    </Badge>
+                  )}
                 </Flex>
               </Table.RowHeaderCell>
               <Table.Cell>
