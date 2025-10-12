@@ -165,7 +165,6 @@ export function CreateAnalysisJobModal({
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
 
   const [selectedModel, setSelectedModel] = useState<string>('');
-  const [contextSizeInput, setContextSizeInput] = useState('');
   const [isTemplatePopoverOpen, setIsTemplatePopoverOpen] = useState(false);
   const [useAdvancedStrategy, setUseAdvancedStrategy] = useState(true); // Default to true
 
@@ -190,15 +189,6 @@ export function CreateAnalysisJobModal({
     [sessionQueries]
   );
 
-  const recommendedContextSize = useMemo(() => {
-    if (sessionData.length === 0) return null;
-    const maxTokens = Math.max(
-      ...sessionData.map((s) => s.transcriptTokenCount || 0)
-    );
-    if (maxTokens === 0) return 4096;
-    return Math.ceil((maxTokens + 1024) / 1024) * 1024;
-  }, [sessionData]);
-
   useEffect(() => {
     if (
       isOpen &&
@@ -212,12 +202,6 @@ export function CreateAnalysisJobModal({
       setSelectedModel(defaultModel.name);
     }
   }, [isOpen, availableModelsData, selectedModel]);
-
-  useEffect(() => {
-    if (isOpen && recommendedContextSize) {
-      setContextSizeInput(String(recommendedContextSize));
-    }
-  }, [isOpen, recommendedContextSize]);
 
   useEffect(() => {
     if (isOpen) {
@@ -265,19 +249,11 @@ export function CreateAnalysisJobModal({
       setValidationError('Please select a language model.');
       return;
     }
-    const contextSize = contextSizeInput
-      ? parseInt(contextSizeInput, 10)
-      : null;
-    if (contextSizeInput && (isNaN(contextSize!) || contextSize! <= 0)) {
-      setValidationError('Context size must be a positive number.');
-      return;
-    }
 
     createJobMutation.mutate({
       sessionIds,
       prompt,
       modelName: selectedModel,
-      contextSize,
       useAdvancedStrategy,
     });
   };
@@ -414,7 +390,6 @@ export function CreateAnalysisJobModal({
                     style={{ width: '100%' }}
                   />
                   <Select.Content>
-                    {/* --- *** UPDATED SECTION *** --- */}
                     {availableModelsData?.models.map((model) => (
                       <Select.Item key={model.name} value={model.name}>
                         <Flex
@@ -448,20 +423,8 @@ export function CreateAnalysisJobModal({
                         </Flex>
                       </Select.Item>
                     ))}
-                    {/* --- *** END UPDATED SECTION *** --- */}
                   </Select.Content>
                 </Select.Root>
-              </Box>
-              <Box>
-                <Text as="div" size="1" color="gray" mb="1">
-                  Context Size
-                </Text>
-                <TextField.Root
-                  placeholder={`Rec: ${recommendedContextSize || '4096'}`}
-                  value={contextSizeInput}
-                  onChange={(e) => setContextSizeInput(e.target.value)}
-                  disabled={isMutationPending}
-                />
               </Box>
             </Flex>
             <Text as="label" size="2">

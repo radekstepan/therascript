@@ -6,8 +6,7 @@ interface CreateJobPayload {
   sessionIds: number[];
   prompt: string;
   modelName?: string | null;
-  contextSize?: number | null;
-  useAdvancedStrategy?: boolean; // <-- THE FIX IS HERE
+  useAdvancedStrategy?: boolean;
 }
 
 /**
