@@ -67,7 +67,6 @@ const CreateAnalysisJobBodySchema = t.Object({
     error: 'At least one session ID is required.',
   }),
   modelName: t.Optional(t.String()),
-  contextSize: t.Optional(t.Number({ minimum: 1 })),
   useAdvancedStrategy: t.Optional(t.Boolean()),
 });
 

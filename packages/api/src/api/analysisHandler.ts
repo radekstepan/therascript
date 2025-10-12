@@ -4,6 +4,8 @@ import { sessionRepository } from '../repositories/sessionRepository.js';
 import { templateRepository } from '../repositories/templateRepository.js';
 import { SYSTEM_PROMPT_TEMPLATES } from '@therascript/db/dist/sqliteService.js';
 import { processAnalysisJob } from '../services/analysisJobService.js';
+import { listModels, streamChatResponse } from '../services/ollamaService.js';
+import { calculateTokenCount } from '../services/tokenizerService.js';
 import {
   InternalServerError,
   NotFoundError,
@@ -17,7 +19,6 @@ import type {
   IntermediateSummaryWithSessionName,
   AnalysisStrategy,
 } from '../types/index.js';
-import { streamChatResponse } from '../services/ollamaService.js';
 import { cleanLlmOutput } from '../utils/helpers.js';
 import type { ChatResponse } from 'ollama';
 
@@ -171,15 +172,41 @@ export const createAnalysisJobHandler = async ({
   body,
   set,
 }: any): Promise<{ jobId: number }> => {
-  const { sessionIds, prompt, modelName, contextSize, useAdvancedStrategy } =
-    body as {
-      sessionIds: number[];
-      prompt: string;
-      modelName?: string;
-      contextSize?: number;
-      useAdvancedStrategy?: boolean;
-    };
+  const { sessionIds, prompt, modelName, useAdvancedStrategy } = body as {
+    sessionIds: number[];
+    prompt: string;
+    modelName?: string;
+    useAdvancedStrategy?: boolean;
+  };
+
   try {
+    // --- AUTOMATIC CONTEXT SIZE CALCULATION ---
+    const promptTokens = calculateTokenCount(prompt) || 0;
+    let maxTranscriptTokens = 0;
+    for (const sessionId of sessionIds) {
+      const session = sessionRepository.findById(sessionId);
+      if (session && session.transcriptTokenCount) {
+        if (session.transcriptTokenCount > maxTranscriptTokens) {
+          maxTranscriptTokens = session.transcriptTokenCount;
+        }
+      }
+    }
+
+    const allModels = await listModels();
+    const selectedModelInfo = allModels.find((m) => m.name === modelName);
+    const modelMaxContext = selectedModelInfo?.defaultContextSize || 8192; // Fallback to 8k if not found
+
+    const ANSWER_BUFFER = 4096; // Generous buffer for the answer
+    const calculatedContextSize =
+      promptTokens + maxTranscriptTokens + ANSWER_BUFFER;
+
+    if (calculatedContextSize > modelMaxContext) {
+      throw new BadRequestError(
+        `Analysis requires a context of ~${calculatedContextSize.toLocaleString()} tokens, but model '${modelName}' only supports up to ${modelMaxContext.toLocaleString()}. Please select a model with a larger context window.`
+      );
+    }
+    // --- END CALCULATION ---
+
     const placeholderShortPrompt = `Analysis of "${prompt.substring(0, 30)}..." (summarizing)`;
 
     let newJob: AnalysisJob;
@@ -190,8 +217,8 @@ export const createAnalysisJobHandler = async ({
         placeholderShortPrompt,
         sessionIds,
         modelName || null,
-        contextSize || null,
-        null, // strategyJson is null initially
+        calculatedContextSize,
+        null,
         'generating_strategy'
       );
       void generateStrategyAndUpdateJob(newJob.id, prompt, modelName);
@@ -201,17 +228,16 @@ export const createAnalysisJobHandler = async ({
         placeholderShortPrompt,
         sessionIds,
         modelName || null,
-        contextSize || null,
-        null, // No strategy for simple mode
+        calculatedContextSize,
+        null,
         'pending'
       );
       void processAnalysisJob(newJob.id);
     }
 
-    // Generate short prompt in the background for both cases
     void generateShortPromptInBackground(newJob.id, prompt, modelName);
 
-    set.status = 202; // Accepted
+    set.status = 202;
     return { jobId: newJob.id };
   } catch (error) {
     console.error('[AnalysisHandler] Error creating analysis job:', error);
@@ -262,7 +288,6 @@ export const getAnalysisJobHandler = ({
         };
       });
 
-    // Parse the strategy for the UI
     let parsedStrategy: AnalysisStrategy | null = null;
     if (job.strategy_json) {
       try {
