@@ -18,6 +18,7 @@ import {
   DropdownMenu,
   AlertDialog,
   Grid,
+  Tooltip,
 } from '@radix-ui/themes';
 import {
   ExclamationTriangleIcon,
@@ -56,6 +57,7 @@ import {
   SortDirection,
 } from '../../store';
 import { useSetAtom, useAtomValue } from 'jotai';
+import { cn } from '../../utils';
 
 // Helper function to get badge color based on status
 const getStatusBadgeColor = (
@@ -224,10 +226,14 @@ const JobDetailView: React.FC<{
     job.status === 'mapping' ||
     job.status === 'reducing';
   const isCancellable = isProcessing;
-  const isDeletable =
-    job.status === 'completed' ||
-    job.status === 'failed' ||
-    job.status === 'canceled';
+
+  // --- MODIFICATION START ---
+  const isTerminal = ['completed', 'failed', 'canceled'].includes(job.status);
+  // A job stuck in 'canceling' for over 5 minutes is considered deletable.
+  const isStuckCanceling =
+    job.status === 'canceling' && Date.now() - job.created_at > 300000; // 5 minutes
+  const isDeletable = isTerminal || isStuckCanceling;
+  // --- MODIFICATION END ---
 
   const mapProgress = job.summaries
     ? (job.summaries.filter(
@@ -269,15 +275,17 @@ const JobDetailView: React.FC<{
                 <StopIcon /> Cancel Job
               </Button>
             )}
+            {/* --- MODIFICATION START --- */}
             {isDeletable && (
               <Button
                 variant="soft"
                 color="red"
                 onClick={() => onDeleteRequest(job)}
               >
-                <TrashIcon /> Delete Job
+                <TrashIcon /> {isStuckCanceling ? 'Force Delete' : 'Delete Job'}
               </Button>
             )}
+            {/* --- MODIFICATION END --- */}
             <Button variant="soft" onClick={() => navigate('/analysis-jobs')}>
               <ArrowLeftIcon /> Back to All Jobs
             </Button>
@@ -523,33 +531,54 @@ const JobList: React.FC<{
               job.status === 'generating_strategy' ||
               job.status === 'mapping' ||
               job.status === 'reducing';
-            const isDeletable =
-              job.status === 'completed' ||
-              job.status === 'failed' ||
-              job.status === 'canceled';
+            // --- MODIFICATION START ---
+            const isTerminal = ['completed', 'failed', 'canceled'].includes(
+              job.status
+            );
+            const isStuckCanceling =
+              job.status === 'canceling' &&
+              Date.now() - job.created_at > 300000; // 5 minutes
+            const isDeletable = isTerminal || isStuckCanceling;
+            // --- MODIFICATION END ---
             const isSummarizing = job.short_prompt.includes('(summarizing)');
 
             return (
               <Table.Row
                 key={job.id}
                 onClick={() => navigate(`/analysis-jobs/${job.id}`)}
-                className="cursor-pointer hover:bg-[--gray-a3]"
+                className={cn(
+                  'cursor-pointer hover:bg-[--gray-a3] transition-colors',
+                  job.status === 'canceling' &&
+                    'bg-[--orange-a2] hover:bg-[--orange-a4]'
+                )}
               >
                 <Table.Cell>{formatTimestamp(job.created_at)}</Table.Cell>
                 <Table.Cell>
-                  <Badge color={getStatusBadgeColor(job.status)} variant="soft">
-                    {job.status === 'pending' ||
-                    job.status === 'generating_strategy' ||
-                    job.status === 'mapping' ||
-                    job.status === 'reducing' ? (
-                      <LapTimerIcon width="12" height="12" />
-                    ) : job.status === 'completed' ? (
-                      <CheckCircledIcon width="12" height="12" />
-                    ) : (
-                      <CrossCircledIcon width="12" height="12" />
-                    )}
-                    <Text ml="1">{job.status}</Text>
-                  </Badge>
+                  <Tooltip
+                    content={
+                      job.status === 'canceling'
+                        ? 'Waiting for current step to finish before stopping.'
+                        : null
+                    }
+                  >
+                    <Badge
+                      color={getStatusBadgeColor(job.status)}
+                      variant="soft"
+                    >
+                      {job.status === 'pending' ||
+                      job.status === 'generating_strategy' ||
+                      job.status === 'mapping' ||
+                      job.status === 'reducing' ||
+                      job.status === 'canceling' ? (
+                        <LapTimerIcon width="12" height="12" />
+                      ) : job.status === 'completed' ? (
+                        <CheckCircledIcon width="12" height="12" />
+                      ) : (
+                        <CrossCircledIcon width="12" height="12" />
+                      )}
+                      <Text ml="1">{job.status}</Text>
+                    </Badge>
+                  </Tooltip>
                 </Table.Cell>
                 <Table.Cell>
                   <Flex align="center" gap="2">
@@ -589,14 +618,16 @@ const JobList: React.FC<{
                         Cancel Job
                       </DropdownMenu.Item>
                       <DropdownMenu.Separator />
+                      {/* --- MODIFICATION START --- */}
                       <DropdownMenu.Item
                         onSelect={() => onDeleteRequest(job)}
                         disabled={!isDeletable}
                         color="red"
                       >
                         <TrashIcon width="14" height="14" className="mr-2" />{' '}
-                        Delete Job
+                        {isStuckCanceling ? 'Force Delete' : 'Delete Job'}
                       </DropdownMenu.Item>
+                      {/* --- MODIFICATION END --- */}
                     </DropdownMenu.Content>
                   </DropdownMenu.Root>
                 </Table.Cell>
