@@ -67,13 +67,23 @@ export const startTranscriptionJob = async (
   }
 
   // Unload the Ollama model to free up GPU memory for Whisper.
-  // This is a "fire-and-forget" operation; we don't wait for it to complete.
-  unloadActiveModel().catch((error) => {
+  // FIX: Must await this operation to ensure VRAM is freed before Whisper starts.
+  // Previously this was fire-and-forget, leading to OOM race conditions.
+  console.log(
+    '[Real TranscriptionService] Attempting to unload Ollama model to ensure VRAM availability for Whisper...'
+  );
+  try {
+    await unloadActiveModel();
+    // Give a short pause for VRAM to actually be reclaimed by the OS/Driver
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    console.log('[Real TranscriptionService] Ollama unload request completed.');
+  } catch (error: any) {
     console.warn(
-      '[Real TranscriptionService] Could not unload Ollama model (this might be okay). Error:',
+      '[Real TranscriptionService] Warning: Could not explicitly unload Ollama model. If an LLM is currently loaded, transcription might fail due to Out-of-Memory (OOM). Error:',
       error.message
     );
-  });
+    // We proceed anyway. If Ollama is down, it's not using VRAM.
+  }
 
   console.log(
     `[Real TranscriptionService] Enqueuing transcription job for session ID: ${sessionId}`
