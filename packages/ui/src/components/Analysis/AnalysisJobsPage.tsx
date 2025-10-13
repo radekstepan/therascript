@@ -175,6 +175,8 @@ const JobDetailView: React.FC<{
   onDeleteRequest: (job: AnalysisJob) => void;
 }> = ({ jobId, onCancelRequest, onDeleteRequest }) => {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
   const {
     data: job,
     isLoading,
@@ -184,12 +186,19 @@ const JobDetailView: React.FC<{
     queryKey: ['analysisJob', jobId],
     queryFn: () => fetchAnalysisJob(jobId),
     refetchInterval: (query) => {
+      // FIX: Use the 'query' object passed by refetchInterval to access state.data
       const data = query.state.data;
-      if (
+      const isTerminal =
         data?.status === 'completed' ||
         data?.status === 'failed' ||
-        data?.status === 'canceled'
-      ) {
+        data?.status === 'canceled';
+
+      if (isTerminal) {
+        // When the job reaches a terminal state, invalidate the main list query.
+        console.log(
+          `[JobDetailView] Job ${jobId} reached terminal state '${data.status}'. Invalidating jobs list.`
+        );
+        queryClient.invalidateQueries({ queryKey: ['analysisJobs'] });
         return false; // Stop polling
       }
       return 5000; // Poll every 5 seconds
@@ -227,13 +236,10 @@ const JobDetailView: React.FC<{
     job.status === 'reducing';
   const isCancellable = isProcessing;
 
-  // --- MODIFICATION START ---
   const isTerminal = ['completed', 'failed', 'canceled'].includes(job.status);
-  // A job stuck in 'canceling' for over 5 minutes is considered deletable.
   const isStuckCanceling =
     job.status === 'canceling' && Date.now() - job.created_at > 300000; // 5 minutes
   const isDeletable = isTerminal || isStuckCanceling;
-  // --- MODIFICATION END ---
 
   const mapProgress = job.summaries
     ? (job.summaries.filter(
@@ -275,7 +281,6 @@ const JobDetailView: React.FC<{
                 <StopIcon /> Cancel Job
               </Button>
             )}
-            {/* --- MODIFICATION START --- */}
             {isDeletable && (
               <Button
                 variant="soft"
@@ -285,7 +290,6 @@ const JobDetailView: React.FC<{
                 <TrashIcon /> {isStuckCanceling ? 'Force Delete' : 'Delete Job'}
               </Button>
             )}
-            {/* --- MODIFICATION END --- */}
             <Button variant="soft" onClick={() => navigate('/analysis-jobs')}>
               <ArrowLeftIcon /> Back to All Jobs
             </Button>
@@ -531,7 +535,6 @@ const JobList: React.FC<{
               job.status === 'generating_strategy' ||
               job.status === 'mapping' ||
               job.status === 'reducing';
-            // --- MODIFICATION START ---
             const isTerminal = ['completed', 'failed', 'canceled'].includes(
               job.status
             );
@@ -539,7 +542,6 @@ const JobList: React.FC<{
               job.status === 'canceling' &&
               Date.now() - job.created_at > 300000; // 5 minutes
             const isDeletable = isTerminal || isStuckCanceling;
-            // --- MODIFICATION END ---
             const isSummarizing = job.short_prompt.includes('(summarizing)');
 
             return (
@@ -618,7 +620,6 @@ const JobList: React.FC<{
                         Cancel Job
                       </DropdownMenu.Item>
                       <DropdownMenu.Separator />
-                      {/* --- MODIFICATION START --- */}
                       <DropdownMenu.Item
                         onSelect={() => onDeleteRequest(job)}
                         disabled={!isDeletable}
@@ -627,7 +628,6 @@ const JobList: React.FC<{
                         <TrashIcon width="14" height="14" className="mr-2" />{' '}
                         {isStuckCanceling ? 'Force Delete' : 'Delete Job'}
                       </DropdownMenu.Item>
-                      {/* --- MODIFICATION END --- */}
                     </DropdownMenu.Content>
                   </DropdownMenu.Root>
                 </Table.Cell>
