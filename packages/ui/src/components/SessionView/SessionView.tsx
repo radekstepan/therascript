@@ -1,5 +1,11 @@
 // packages/ui/src/components/SessionView/SessionView.tsx
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, {
+  useEffect,
+  useState,
+  useRef,
+  useCallback,
+  useLayoutEffect,
+} from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -26,7 +32,11 @@ import {
   activeSessionIdAtom,
   activeChatIdAtom,
   toastMessageAtom,
+  sidebarWidthAtom,
+  clampedSidebarWidthAtom,
+  isPersistentSidebarOpenAtom,
 } from '../../store';
+import { SessionSidebar } from './Sidebar/SessionSidebar';
 
 export function SessionView() {
   const { sessionId: sessionIdParam, chatId: chatIdParam } = useParams<{
@@ -45,6 +55,51 @@ export function SessionView() {
   const queryClient = useQueryClient();
 
   const sessionIdNum = sessionIdParam ? parseInt(sessionIdParam, 10) : null;
+
+  // --- Sidebar Resizing Logic ---
+  const [isResizing, setIsResizing] = useState(false);
+  const setSidebarWidth = useSetAtom(sidebarWidthAtom);
+  const clampedSidebarWidth = useAtomValue(clampedSidebarWidthAtom);
+  const isPersistentSidebarOpen = useAtomValue(isPersistentSidebarOpenAtom);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+  };
+
+  const handleMouseUp = useCallback(() => {
+    setIsResizing(false);
+    // Remove selection in case user dragged over text
+    window.getSelection()?.removeAllRanges();
+  }, []);
+
+  const handleMouseMove = useCallback(
+    (e: MouseEvent) => {
+      // isResizing is captured in the closure
+      if (!isResizing) return;
+      // Adjust for the main persistent sidebar's width
+      const persistentSidebarWidth = isPersistentSidebarOpen ? 256 : 80; // Corresponds to w-64 and w-20
+      const newWidth = e.clientX - persistentSidebarWidth;
+      setSidebarWidth(newWidth);
+    },
+    [isResizing, setSidebarWidth, isPersistentSidebarOpen]
+  );
+
+  useEffect(() => {
+    if (isResizing) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    }
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [isResizing, handleMouseMove, handleMouseUp]);
+  // --- End Sidebar Resizing Logic ---
 
   const {
     data: sessionMetadata,
@@ -246,63 +301,104 @@ export function SessionView() {
       : null;
 
   return (
-    <Flex
-      direction="column"
-      style={{ height: '100%', overflow: 'hidden', minHeight: 0 }}
-    >
-      <Box
-        px={{ initial: '6' }}
-        py="3"
-        flexShrink="0"
-        style={{
-          backgroundColor: 'var(--color-panel-solid)',
-          borderBottom: '1px solid var(--gray-a6)',
-        }}
-      >
-        <Flex justify="between" align="center">
-          <Flex align="center" gap="2" style={{ minWidth: 0 }}>
-            <Text
-              size="2"
-              weight="bold"
-              truncate
-              title={displayTitle}
-              style={{ flexShrink: 1 }}
-              className="text-gray-800 dark:text-gray-200"
-            >
-              {displayTitle}
-            </Text>
-          </Flex>
+    <>
+      <Flex style={{ height: '100%', overflow: 'hidden', minHeight: 0 }}>
+        {/* Sidebar - for large screens */}
+        <Box
+          className="hidden lg:flex flex-col"
+          style={{
+            width: `${clampedSidebarWidth}px`,
+            flexShrink: 0,
+            height: '100%',
+            backgroundColor: 'var(--gray-a2)',
+          }}
+        >
+          <SessionSidebar
+            session={sessionMetadata}
+            isLoading={isFetchingSessionMeta}
+            error={sessionMetaError}
+          />
+        </Box>
+
+        {/* --- Resizer Handle --- */}
+        <div
+          onMouseDown={handleMouseDown}
+          className="hidden lg:block w-1.5 h-full cursor-col-resize group"
+          style={{
+            flexShrink: 0,
+            backgroundColor: 'var(--gray-a4)',
+          }}
+        >
+          <div className="w-full h-full bg-transparent group-hover:bg-[var(--accent-a7)] transition-colors duration-150" />
+        </div>
+        {/* --- End Resizer Handle --- */}
+
+        {/* Main Content Area */}
+        <Flex
+          direction="column"
+          style={{
+            height: '100%',
+            overflow: 'hidden',
+            minHeight: 0,
+            flexGrow: 1,
+          }}
+        >
+          <Box
+            px={{ initial: '4', md: '6' }}
+            py="3"
+            flexShrink="0"
+            style={{
+              backgroundColor: 'var(--color-panel-solid)',
+              borderBottom: '1px solid var(--gray-a6)',
+            }}
+          >
+            <Flex justify="between" align="center">
+              <Flex align="center" gap="2" style={{ minWidth: 0 }}>
+                <Text
+                  size="2"
+                  weight="bold"
+                  truncate
+                  title={displayTitle}
+                  style={{ flexShrink: 1 }}
+                  className="text-gray-800 dark:text-gray-200"
+                >
+                  {displayTitle}
+                </Text>
+              </Flex>
+            </Flex>
+          </Box>
+
+          <Box
+            flexGrow="1"
+            style={{
+              minHeight: 0,
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
+            <SessionContent
+              session={sessionMetadata}
+              transcriptContent={transcriptContent}
+              onEditDetailsClick={handleOpenEditMetadataModal}
+              activeChatId={currentActiveChatId}
+              hasChats={hasChats}
+              onStartFirstChat={handleStartFirstChat}
+              isLoadingSessionMeta={
+                isLoadingSessionMeta || isFetchingSessionMeta
+              }
+              sessionMetaError={sessionMetaError}
+              isLoadingTranscript={isLoadingTranscript}
+              transcriptError={transcriptError}
+              ollamaStatus={ollamaStatus}
+              isLoadingOllamaStatus={isLoadingOllamaStatus}
+              onOpenLlmModal={handleOpenConfigureLlmModal}
+              transcriptTokenCount={transcriptTokenCount}
+              activeModelDefaultContextSize={activeModelDefaultContextSize}
+            />
+          </Box>
         </Flex>
-      </Box>
-
-      <Box
-        flexGrow="1"
-        style={{
-          minHeight: 0,
-          overflow: 'hidden',
-          display: 'flex',
-          flexDirection: 'column',
-        }}
-      >
-        <SessionContent
-          session={sessionMetadata}
-          transcriptContent={transcriptContent}
-          onEditDetailsClick={handleOpenEditMetadataModal}
-          activeChatId={currentActiveChatId}
-          hasChats={hasChats}
-          onStartFirstChat={handleStartFirstChat}
-          isLoadingSessionMeta={isLoadingSessionMeta || isFetchingSessionMeta}
-          sessionMetaError={sessionMetaError}
-          isLoadingTranscript={isLoadingTranscript}
-          transcriptError={transcriptError}
-          ollamaStatus={ollamaStatus}
-          isLoadingOllamaStatus={isLoadingOllamaStatus}
-          onOpenLlmModal={handleOpenConfigureLlmModal}
-          transcriptTokenCount={transcriptTokenCount}
-          activeModelDefaultContextSize={activeModelDefaultContextSize}
-        />
-      </Box>
-
+      </Flex>
       <EditDetailsModal
         isOpen={isEditingMetadata}
         onOpenChange={setIsEditingMetadata}
@@ -319,6 +415,6 @@ export function SessionView() {
         activeTranscriptTokens={transcriptTokenCount}
         ollamaStatus={ollamaStatus}
       />
-    </Flex>
+    </>
   );
 }
