@@ -161,6 +161,26 @@ export function ChatInterface({
                     }
                   );
                 }
+              } else if (data.usage) {
+                // Early usage estimate from server to update header meter quickly
+                if (activeChatId) {
+                  if (isStandalone) {
+                    queryClient.setQueryData(
+                      ['contextUsage', 'standalone', activeChatId],
+                      data.usage
+                    );
+                  } else if (activeSessionId) {
+                    queryClient.setQueryData(
+                      [
+                        'contextUsage',
+                        'session',
+                        activeSessionId,
+                        activeChatId,
+                      ],
+                      data.usage
+                    );
+                  }
+                }
               } else if (data.chunk) {
                 queryClient.setQueryData<ChatSession>(
                   currentChatQueryKey,

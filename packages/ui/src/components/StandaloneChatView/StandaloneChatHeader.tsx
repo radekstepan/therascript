@@ -15,6 +15,7 @@ import {
   Badge,
   Tooltip,
   Box,
+  Progress,
 } from '@radix-ui/themes';
 import {
   DotsHorizontalIcon,
@@ -30,11 +31,16 @@ import {
 import { EntitySelectorDropdown } from '../Shared/EntitySelectorDropdown';
 import { EditStandaloneChatModal } from './EditStandaloneChatModal';
 import { fetchStandaloneChats, deleteStandaloneChat } from '../../api/api';
-import type { StandaloneChatListItem, OllamaStatus } from '../../types';
+import type {
+  StandaloneChatListItem,
+  OllamaStatus,
+  UIContextUsageResponse,
+} from '../../types';
 import { toastMessageAtom } from '../../store';
+import { fetchStandaloneContextUsage } from '../../api/chat';
 import { formatTimestamp } from '../../helpers';
 import { cn } from '../../utils';
-import prettyBytes from 'pretty-bytes'; // <-- IMPORT PRETTY-BYTES
+// import prettyBytes from 'pretty-bytes'; // not used for token counts
 
 interface StandaloneChatHeaderProps {
   activeChatId: number | null;
@@ -120,6 +126,92 @@ export function StandaloneChatHeader({
     ollamaStatus?.details?.name === ollamaStatus?.activeModel
       ? ollamaStatus?.details?.defaultContextSize
       : null;
+
+  // --- FETCH CONTEXT USAGE (standalone chats) ---
+  const { data: contextUsage } = useQuery<
+    UIContextUsageResponse | undefined,
+    Error
+  >({
+    queryKey: [
+      'contextUsage',
+      'standalone',
+      activeChatId,
+      configuredContextSize ?? 'default',
+    ],
+    queryFn: () => fetchStandaloneContextUsage(activeChatId!),
+    enabled: !!activeChatId,
+    staleTime: 15 * 1000,
+    refetchOnWindowFocus: true,
+  });
+
+  // --- CONTEXT USAGE WARNING & METER ---
+  const effectiveModelContextSize =
+    contextUsage?.model.effectiveContextSize ||
+    configuredContextSize ||
+    activeModelDefaultContextSize;
+
+  let contextUsagePercentage: number | null = null;
+  if (
+    contextUsage?.totals.percentUsed !== null &&
+    contextUsage?.totals.percentUsed !== undefined
+  ) {
+    contextUsagePercentage = Math.round(
+      (contextUsage.totals.percentUsed || 0) * 100
+    );
+  }
+
+  // Fallback: compute prompt tokens locally from breakdown if server percentUsed is null
+  const fallbackPromptTokens: number | null = (() => {
+    if (!contextUsage) return null;
+    const parts: Array<number> = [];
+    if (typeof contextUsage.breakdown.systemTokens === 'number')
+      parts.push(contextUsage.breakdown.systemTokens);
+    if (typeof contextUsage.breakdown.chatHistoryTokens === 'number')
+      parts.push(contextUsage.breakdown.chatHistoryTokens);
+    if (typeof contextUsage.breakdown.inputDraftTokens === 'number')
+      parts.push(contextUsage.breakdown.inputDraftTokens);
+    // transcriptTokens are not used for standalone
+    if (parts.length === 0) return null;
+    return parts.reduce((a, b) => a + b, 0);
+  })();
+
+  if (
+    contextUsagePercentage === null &&
+    fallbackPromptTokens !== null &&
+    typeof effectiveModelContextSize === 'number' &&
+    effectiveModelContextSize > 0
+  ) {
+    contextUsagePercentage = Math.min(
+      100,
+      Math.round((fallbackPromptTokens / effectiveModelContextSize) * 100)
+    );
+  }
+
+  const showContextWarning =
+    (contextUsagePercentage !== null && contextUsagePercentage > 75) ||
+    (() => {
+      if (!contextUsage) return false;
+      const prompt =
+        contextUsage.totals.promptTokens ?? fallbackPromptTokens ?? null;
+      if (prompt == null) return false;
+      if (
+        typeof effectiveModelContextSize !== 'number' ||
+        effectiveModelContextSize <= 0
+      )
+        return false;
+      const projected = prompt + contextUsage.reserved.outputTokens;
+      return projected > effectiveModelContextSize;
+    })();
+
+  // Clamp progress value to [0, 100] and allow null for indeterminate
+  const progressValue: number | null = (() => {
+    if (
+      typeof contextUsagePercentage !== 'number' ||
+      !Number.isFinite(contextUsagePercentage)
+    )
+      return null;
+    return Math.max(0, Math.min(100, contextUsagePercentage));
+  })();
 
   const renderStatusBadge = () => {
     if (isLoadingOllamaStatus) return <Spinner size="1" />;
@@ -234,9 +326,61 @@ export function StandaloneChatHeader({
                   {isLoadingOllamaStatus
                     ? '...'
                     : configuredContextSize
-                      ? prettyBytes(configuredContextSize).replace(' ', '')
+                      ? configuredContextSize.toLocaleString()
                       : 'Default'}
                 </Badge>
+              </Tooltip>
+            )}
+
+            {/* --- CONTEXT METER --- */}
+            {effectiveModelContextSize && (
+              <Tooltip
+                content={
+                  contextUsage
+                    ? (() => {
+                        const prompt =
+                          contextUsage.totals.promptTokens ??
+                          fallbackPromptTokens ??
+                          '?';
+                        const eff = effectiveModelContextSize ?? '?';
+                        const reserved = contextUsage.reserved.outputTokens;
+                        const projected =
+                          typeof prompt === 'number' && typeof eff === 'number'
+                            ? prompt + reserved
+                            : '?';
+                        const overflow =
+                          typeof projected === 'number' &&
+                          typeof eff === 'number' &&
+                          projected > eff;
+                        return (
+                          `Prompt: ${prompt} / ${eff} tokens` +
+                          `\nReserved Output: ${reserved}` +
+                          `\nProjected: ${projected} / ${eff}${overflow ? ' (will exceed)' : ''}` +
+                          `\nBreakdown — System: ${contextUsage.breakdown.systemTokens ?? '?'}, Chat: ${contextUsage.breakdown.chatHistoryTokens ?? '?'}, Input: ${contextUsage.breakdown.inputDraftTokens ?? 0}`
+                        );
+                      })()
+                    : 'Estimating context usage...'
+                }
+              >
+                <Box style={{ minWidth: 140 }}>
+                  <Progress
+                    size="1"
+                    value={progressValue}
+                    max={100}
+                    variant={
+                      progressValue !== null && contextUsage
+                        ? (() => {
+                            const warnAt = contextUsage.thresholds.warnAt * 100;
+                            const dangerAt =
+                              contextUsage.thresholds.dangerAt * 100;
+                            if (progressValue >= dangerAt) return 'surface';
+                            if (progressValue >= warnAt) return 'classic';
+                            return 'soft';
+                          })()
+                        : 'soft'
+                    }
+                  />
+                </Box>
               </Tooltip>
             )}
             {/* Display Last Interaction Tokens */}

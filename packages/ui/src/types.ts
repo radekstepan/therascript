@@ -293,3 +293,31 @@ export type AnalysisJobSortCriteria =
   | 'created_at'
   | 'completed_at'
   | 'model_name';
+
+// --- NEW CONTEXT USAGE TYPES ---
+export interface UIContextUsageModelInfo {
+  name: string;
+  configuredContextSize: number | null | undefined;
+  defaultContextSize: number | null | undefined;
+  effectiveContextSize: number | null | undefined;
+}
+export interface UIContextUsageBreakdown {
+  systemTokens: number | null;
+  transcriptTokens: number | null;
+  chatHistoryTokens: number | null;
+  inputDraftTokens: number | null;
+}
+export interface UIContextUsageTotals {
+  promptTokens: number | null;
+  percentUsed: number | null; // 0-1
+  remainingForPrompt: number | null;
+  remainingForOutput: number | null;
+}
+export interface UIContextUsageResponse {
+  model: UIContextUsageModelInfo;
+  breakdown: UIContextUsageBreakdown;
+  reserved: { outputTokens: number };
+  totals: UIContextUsageTotals;
+  thresholds: { warnAt: number; dangerAt: number };
+}
+// --- END NEW CONTEXT USAGE TYPES ---

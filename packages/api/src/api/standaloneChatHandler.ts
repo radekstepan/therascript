@@ -27,6 +27,11 @@ import config from '../config/index.js';
 // ============================= FIX START ==============================
 import { cleanLlmOutput } from '../utils/helpers.js';
 // ============================== FIX END ===============================
+import {
+  computeContextUsageForChat,
+  recommendContextSize,
+} from '../services/contextUsageService.js';
+import { getConfiguredContextSize } from '../services/activeModelService.js';
 
 const esClient = getElasticsearchClient(config.elasticsearch.url);
 
@@ -182,7 +187,20 @@ export const addStandaloneChatMessage = async ({
       );
     }
 
-    const ollamaStream = await streamChatResponse(null, currentMessages); // Pass null for transcript context
+    // Standalone: If no configured context size, apply a reasonable default recommendation (e.g., 4096)
+    const configured = getConfiguredContextSize();
+    const recommendedContext = recommendContextSize({
+      transcriptTokens: 0,
+      modelDefaultMax: null, // stream layer may still cap to model internally
+    });
+
+    const ollamaStream = await streamChatResponse(
+      null,
+      currentMessages,
+      configured == null && recommendedContext != null
+        ? { contextSize: recommendedContext }
+        : undefined
+    ); // Pass null for transcript context
 
     const headers = new Headers({
       'Content-Type': 'text/event-stream; charset=utf-8',
@@ -217,6 +235,19 @@ export const addStandaloneChatMessage = async ({
         console.log(
           `[API ProcessStream ${chatData.id}] Starting Ollama stream processing...`
         );
+        // Emit early usage estimate for UI meter (LM Studio–style)
+        try {
+          const usage = await computeContextUsageForChat({
+            isStandalone: true,
+            messages: currentMessages,
+          });
+          await writeSseEvent({ usage });
+        } catch (usageErr) {
+          console.warn(
+            `[API ProcessStream ${chatData.id}] Failed to compute early usage:`,
+            usageErr
+          );
+        }
         for await (const chunk of ollamaStream) {
           if (chunk.message?.content) {
             const textChunk = chunk.message.content;

@@ -6,6 +6,7 @@ import type {
   BackendChatSession,
   BackendChatMessage,
   StandaloneChatListItem,
+  UIContextUsageResponse,
 } from '../types';
 
 const API_BASE_URL = axios.defaults.baseURL || 'http://localhost:3001';
@@ -208,5 +209,40 @@ export const deleteStandaloneChat = async (
   chatId: number
 ): Promise<{ message: string }> => {
   const response = await axios.delete(`/api/chats/${chatId}`);
+  return response.data;
+};
+
+// ================================
+// --- Context Usage Endpoints  ---
+// ================================
+
+export const fetchSessionContextUsage = async (
+  sessionId: number,
+  chatId: number,
+  opts?: { inputDraft?: string; reservedOutputTokens?: number }
+): Promise<UIContextUsageResponse> => {
+  const params: Record<string, any> = {};
+  if (opts?.inputDraft) params.inputDraft = opts.inputDraft;
+  if (typeof opts?.reservedOutputTokens === 'number')
+    params.reservedOutputTokens = String(opts.reservedOutputTokens);
+  const response = await axios.get<UIContextUsageResponse>(
+    `/api/sessions/${sessionId}/chats/${chatId}/context-usage`,
+    { params }
+  );
+  return response.data;
+};
+
+export const fetchStandaloneContextUsage = async (
+  chatId: number,
+  opts?: { inputDraft?: string; reservedOutputTokens?: number }
+): Promise<UIContextUsageResponse> => {
+  const params: Record<string, any> = {};
+  if (opts?.inputDraft) params.inputDraft = opts.inputDraft;
+  if (typeof opts?.reservedOutputTokens === 'number')
+    params.reservedOutputTokens = String(opts.reservedOutputTokens);
+  const response = await axios.get<UIContextUsageResponse>(
+    `/api/chats/${chatId}/context-usage`,
+    { params }
+  );
   return response.data;
 };

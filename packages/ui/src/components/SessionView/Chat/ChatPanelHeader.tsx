@@ -8,6 +8,7 @@ import {
   Tooltip,
   Button,
   Box,
+  Progress,
 } from '@radix-ui/themes';
 import {
   CheckCircledIcon,
@@ -17,9 +18,15 @@ import {
   ArchiveIcon,
   ExclamationTriangleIcon,
 } from '@radix-ui/react-icons';
-import type { Session, OllamaStatus } from '../../../types';
+import type {
+  Session,
+  OllamaStatus,
+  UIContextUsageResponse,
+} from '../../../types';
 import { cn } from '../../../utils';
 import prettyBytes from 'pretty-bytes';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { fetchSessionContextUsage } from '../../../api/chat';
 
 interface ChatPanelHeaderProps {
   session: Session | null;
@@ -52,18 +59,98 @@ export function ChatPanelHeader({
 
   const totalTokens = (latestPromptTokens ?? 0) + (latestCompletionTokens ?? 0);
 
+  // --- FETCH CONTEXT USAGE (session chats) ---
+  const sessionId = session?.id ?? null;
+  const { data: contextUsage, isLoading: isLoadingUsage } = useQuery<
+    UIContextUsageResponse | undefined,
+    Error
+  >({
+    queryKey: ['contextUsage', 'session', sessionId, activeChatId],
+    queryFn: () => {
+      if (!sessionId || !activeChatId) return Promise.resolve(undefined);
+      return fetchSessionContextUsage(sessionId, activeChatId);
+    },
+    enabled: !!sessionId && !!activeChatId,
+    staleTime: 15 * 1000,
+    refetchOnWindowFocus: true,
+  });
+
   // --- CONTEXT USAGE WARNING LOGIC ---
   const effectiveModelContextSize =
-    configuredContextSize || activeModelDefaultContextSize;
+    contextUsage?.model.effectiveContextSize ||
+    configuredContextSize ||
+    activeModelDefaultContextSize;
 
   let contextUsagePercentage: number | null = null;
-  if (transcriptTokenCount && effectiveModelContextSize) {
-    contextUsagePercentage =
-      (transcriptTokenCount / effectiveModelContextSize) * 100;
+  if (
+    contextUsage?.totals.percentUsed !== null &&
+    contextUsage?.totals.percentUsed !== undefined
+  ) {
+    contextUsagePercentage = Math.round(
+      (contextUsage.totals.percentUsed || 0) * 100
+    );
+  } else if (transcriptTokenCount && effectiveModelContextSize) {
+    // fallback (rough)
+    contextUsagePercentage = Math.round(
+      (transcriptTokenCount / effectiveModelContextSize) * 100
+    );
   }
 
-  const showContextWarning =
-    contextUsagePercentage !== null && contextUsagePercentage > 75;
+  // Fallback: compute prompt tokens locally if percentUsed is null
+  const fallbackPromptTokens: number | null = (() => {
+    if (!contextUsage) return null;
+    const parts: Array<number> = [];
+    if (typeof contextUsage.breakdown.systemTokens === 'number')
+      parts.push(contextUsage.breakdown.systemTokens);
+    if (typeof contextUsage.breakdown.transcriptTokens === 'number')
+      parts.push(contextUsage.breakdown.transcriptTokens);
+    if (typeof contextUsage.breakdown.chatHistoryTokens === 'number')
+      parts.push(contextUsage.breakdown.chatHistoryTokens);
+    if (typeof contextUsage.breakdown.inputDraftTokens === 'number')
+      parts.push(contextUsage.breakdown.inputDraftTokens);
+    if (parts.length === 0) return null;
+    return parts.reduce((a, b) => a + b, 0);
+  })();
+
+  if (
+    contextUsagePercentage === null &&
+    fallbackPromptTokens !== null &&
+    typeof effectiveModelContextSize === 'number' &&
+    effectiveModelContextSize > 0
+  ) {
+    contextUsagePercentage = Math.min(
+      100,
+      Math.round((fallbackPromptTokens / effectiveModelContextSize) * 100)
+    );
+  }
+
+  // Warn when over thresholds or when projected (prompt + reserved) exceeds effective context
+  const showContextWarning = (() => {
+    const overPct =
+      contextUsagePercentage !== null && contextUsagePercentage > 75;
+    if (!contextUsage) return overPct;
+    const prompt =
+      contextUsage.totals.promptTokens ?? fallbackPromptTokens ?? null;
+    const reserved = contextUsage.reserved.outputTokens;
+    const eff =
+      typeof effectiveModelContextSize === 'number'
+        ? effectiveModelContextSize
+        : null;
+    const projected = prompt != null && eff != null ? prompt + reserved : null;
+    const willOverflow =
+      projected != null && eff != null ? projected > eff : false;
+    return overPct || willOverflow;
+  })();
+
+  // Clamp progress value to [0, 100] and allow null for indeterminate
+  const progressValue: number | null = (() => {
+    if (
+      typeof contextUsagePercentage !== 'number' ||
+      !Number.isFinite(contextUsagePercentage)
+    )
+      return null;
+    return Math.max(0, Math.min(100, contextUsagePercentage));
+  })();
   // --- END WARNING LOGIC ---
 
   let statusTooltipContent = 'Loading status...';
@@ -111,9 +198,11 @@ export function ChatPanelHeader({
             <Tooltip
               content={
                 `Configured Context: ${configuredContextSize ? configuredContextSize.toLocaleString() : 'Default'}` +
-                (activeModelDefaultContextSize
-                  ? ` (Model Max: ${activeModelDefaultContextSize.toLocaleString()})`
-                  : '')
+                (contextUsage?.model.defaultContextSize
+                  ? ` (Model Max: ${contextUsage.model.defaultContextSize.toLocaleString()})`
+                  : activeModelDefaultContextSize
+                    ? ` (Model Max: ${activeModelDefaultContextSize.toLocaleString()})`
+                    : '')
               }
             >
               <Badge
@@ -130,9 +219,58 @@ export function ChatPanelHeader({
                 {isLoadingOllamaStatus
                   ? '...'
                   : configuredContextSize
-                    ? prettyBytes(configuredContextSize).replace(' ', '')
+                    ? configuredContextSize.toLocaleString()
                     : 'Default'}
               </Badge>
+            </Tooltip>
+          )}
+
+          {/* --- CONTEXT METER --- */}
+          {effectiveModelContextSize && (
+            <Tooltip
+              content={
+                contextUsage
+                  ? (() => {
+                      const prompt =
+                        contextUsage.totals.promptTokens ??
+                        fallbackPromptTokens ??
+                        '?';
+                      const eff = effectiveModelContextSize ?? '?';
+                      const reserved = contextUsage.reserved.outputTokens;
+                      const projected =
+                        typeof prompt === 'number' && typeof eff === 'number'
+                          ? prompt + reserved
+                          : '?';
+                      const overflow =
+                        typeof projected === 'number' &&
+                        typeof eff === 'number' &&
+                        projected > eff;
+                      return (
+                        `Prompt: ${prompt} / ${eff} tokens` +
+                        `\nReserved Output: ${reserved}` +
+                        `\nProjected: ${projected} / ${eff}${overflow ? ' (will exceed)' : ''}` +
+                        `\nBreakdown — System: ${contextUsage.breakdown.systemTokens ?? '?'}, Transcript: ${contextUsage.breakdown.transcriptTokens ?? '?'}, Chat: ${contextUsage.breakdown.chatHistoryTokens ?? '?'}, Input: ${contextUsage.breakdown.inputDraftTokens ?? 0}`
+                      );
+                    })()
+                  : 'Estimating context usage...'
+              }
+            >
+              <Box style={{ minWidth: 140 }}>
+                <Progress
+                  size="1"
+                  value={progressValue}
+                  max={100}
+                  variant={
+                    progressValue !== null && contextUsage
+                      ? progressValue >= contextUsage.thresholds.dangerAt * 100
+                        ? 'surface'
+                        : progressValue >= contextUsage.thresholds.warnAt * 100
+                          ? 'classic'
+                          : 'soft'
+                      : 'soft'
+                  }
+                />
+              </Box>
             </Tooltip>
           )}
 
