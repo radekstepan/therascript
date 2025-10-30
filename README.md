@@ -71,6 +71,12 @@ Therascript is a monorepo organized into several packages:
 *   `packages/docker-utils`: Shared utilities for managing Docker containers.
 *   `scripts/`: Root-level scripts for running the application in different modes (e.g., `run-dev.js`).
 
+## Further documentation
+
+- TL;DR for Copilot: COPILOT.md
+- Architecture overview: docs/ARCHITECTURE.md
+- Navigation cheatsheet (where to change what): docs/NAVIGATION.md
+
 ## Prerequisites
 
 Before you begin, ensure you have the following installed:
