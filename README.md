@@ -166,3 +166,23 @@ This starts the UI and a mocked version of the API, providing placeholder data a
     ```bash
     docker compose down
     ```
+
+## Testing
+
+All unit tests are written with Vitest and focus on backend packages (no UI tests).
+
+1. Ensure you're using the Node version from `.nvmrc` in any new terminal:
+    ```bash
+    nvm use
+    ```
+2. Run the test suite from the repo root:
+    ```bash
+    yarn test
+    ```
+3. Watch mode and coverage:
+    ```bash
+    yarn test:watch
+    yarn coverage
+    ```
+
+Tests live alongside sources as `*.test.ts` under `packages/**/src/`.
