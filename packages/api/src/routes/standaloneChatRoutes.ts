@@ -16,6 +16,7 @@ import type {
   BackendChatMessage,
   ChatMetadata,
 } from '../types/index.js';
+import { computeContextUsageForChat } from '../api/../services/contextUsageService.js';
 
 // --- Schemas ---
 const ChatIdParamSchema = t.Object({
@@ -59,6 +60,31 @@ const FullStandaloneChatResponseSchema = t.Intersect([
 ]);
 const DeleteChatResponseSchema = t.Object({ message: t.String() });
 
+// --- NEW: Context Usage Schemas ---
+const NullableNumber = t.Union([t.Number(), t.Null()]);
+const ContextUsageResponseSchema = t.Object({
+  model: t.Object({
+    name: t.String(),
+    configuredContextSize: t.Optional(NullableNumber),
+    defaultContextSize: t.Optional(NullableNumber),
+    effectiveContextSize: t.Optional(NullableNumber),
+  }),
+  breakdown: t.Object({
+    systemTokens: NullableNumber,
+    transcriptTokens: NullableNumber,
+    chatHistoryTokens: NullableNumber,
+    inputDraftTokens: NullableNumber,
+  }),
+  reserved: t.Object({ outputTokens: t.Number() }),
+  totals: t.Object({
+    promptTokens: NullableNumber,
+    percentUsed: NullableNumber,
+    remainingForPrompt: NullableNumber,
+    remainingForOutput: NullableNumber,
+  }),
+  thresholds: t.Object({ warnAt: t.Number(), dangerAt: t.Number() }),
+});
+
 // --- Elysia Plugin ---
 export const standaloneChatRoutes = new Elysia({ prefix: '/api/chats' })
   .model({
@@ -70,6 +96,7 @@ export const standaloneChatRoutes = new Elysia({ prefix: '/api/chats' })
     fullStandaloneChatResponse: FullStandaloneChatResponseSchema,
     deleteChatResponse: DeleteChatResponseSchema,
     chatMessageResponse: ChatMessageResponseSchema,
+    contextUsageResponse: ContextUsageResponseSchema,
   })
   .group('', { detail: { tags: ['Standalone Chat'] } }, (app) =>
     app
@@ -105,6 +132,39 @@ export const standaloneChatRoutes = new Elysia({ prefix: '/api/chats' })
               {
                 response: { 200: 'fullStandaloneChatResponse' },
                 detail: { summary: 'Get full details for a standalone chat' },
+              }
+            )
+            .get(
+              '/:chatId/context-usage',
+              async (context) => {
+                const { chatData, query } = context as any;
+                const inputDraft = query?.inputDraft ?? null;
+                const reservedOutputTokens = query?.reservedOutputTokens
+                  ? parseInt(String(query.reservedOutputTokens), 10)
+                  : undefined;
+                const messages = chatData
+                  ? (chatData.messages as BackendChatMessage[])
+                  : [];
+                const usage = await computeContextUsageForChat({
+                  isStandalone: true,
+                  messages,
+                  inputDraft,
+                  reservedOutputTokens,
+                });
+                return usage;
+              },
+              {
+                query: t.Optional(
+                  t.Object({
+                    inputDraft: t.Optional(t.String()),
+                    reservedOutputTokens: t.Optional(t.String()),
+                  })
+                ),
+                response: { 200: 'contextUsageResponse' },
+                detail: {
+                  summary:
+                    'Estimate context usage for this standalone chat (LM Studio–style)',
+                },
               }
             )
             .post(

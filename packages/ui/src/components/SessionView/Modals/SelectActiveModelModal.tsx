@@ -49,6 +49,7 @@ export function SelectActiveModelModal({
     currentActiveModelName || ''
   );
   const [contextSizeInput, setContextSizeInput] = useState('');
+  const [userTouchedContext, setUserTouchedContext] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const { data: availableModelsData, isLoading: isLoadingModels } = useQuery({
@@ -76,9 +77,15 @@ export function SelectActiveModelModal({
   useEffect(() => {
     if (isOpen) {
       setSelectedModel(currentActiveModelName || '');
-      setContextSizeInput(
-        currentConfiguredContextSize ? String(currentConfiguredContextSize) : ''
-      );
+      if (currentConfiguredContextSize && currentConfiguredContextSize > 0) {
+        setContextSizeInput(String(currentConfiguredContextSize));
+        // Preserve existing custom size; avoid auto-overwriting with recommended
+        setUserTouchedContext(true);
+      } else {
+        // Start empty; will auto-fill with recommended when available
+        setContextSizeInput('');
+        setUserTouchedContext(false);
+      }
       setError(null);
     }
   }, [isOpen, currentActiveModelName, currentConfiguredContextSize]);
@@ -111,6 +118,24 @@ export function SelectActiveModelModal({
       ? activeTranscriptTokens < effectiveContextSize
       : true
     : true;
+
+  // --- Recommended Context Size (avoid max by default) ---
+  const recommendedContextSize = React.useMemo(() => {
+    if (!activeTranscriptTokens) return undefined;
+    const modelMax = selectedModelDetails?.defaultContextSize ?? null;
+    const base = Math.max(4096, activeTranscriptTokens + 2048);
+    const rounded = Math.ceil(base / 256) * 256;
+    return modelMax != null ? Math.min(rounded, modelMax) : rounded;
+  }, [activeTranscriptTokens, selectedModelDetails?.defaultContextSize]);
+
+  // Auto-fill the input with recommended when available and user hasn't typed
+  useEffect(() => {
+    if (!isOpen) return;
+    if (userTouchedContext) return;
+    if (recommendedContextSize && recommendedContextSize > 0) {
+      setContextSizeInput(String(recommendedContextSize));
+    }
+  }, [isOpen, userTouchedContext, recommendedContextSize]);
 
   return (
     <Dialog.Root open={isOpen} onOpenChange={onOpenChange}>
@@ -181,9 +206,13 @@ export function SelectActiveModelModal({
               step="1024"
               placeholder={`Default (${selectedModelDetails?.defaultContextSize?.toLocaleString() ?? 'auto'})`}
               value={contextSizeInput}
-              onChange={(e) => setContextSizeInput(e.target.value)}
+              onChange={(e) => {
+                setContextSizeInput(e.target.value);
+                setUserTouchedContext(true);
+              }}
               disabled={isSaving}
             />
+            {/* Removed explicit Recommended UI in favor of info message below */}
           </label>
 
           {activeTranscriptTokens && (
@@ -195,13 +224,15 @@ export function SelectActiveModelModal({
                 <InfoCircledIcon />
               </Callout.Icon>
               <Callout.Text>
-                This transcript requires ~
-                <Strong>{activeTranscriptTokens.toLocaleString()}</Strong>{' '}
-                tokens. The selected model context is{' '}
-                <Strong>
-                  {effectiveContextSize?.toLocaleString() ?? 'unknown'}
-                </Strong>
-                .
+                Transcript requires ~
+                <Strong> {activeTranscriptTokens.toLocaleString()}</Strong>{' '}
+                tokens.{' '}
+                {recommendedContextSize ? (
+                  <>
+                    Recommended context:{' '}
+                    <Strong>{recommendedContextSize.toLocaleString()}</Strong>.
+                  </>
+                ) : null}
               </Callout.Text>
             </Callout.Root>
           )}

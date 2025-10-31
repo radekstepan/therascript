@@ -27,6 +27,11 @@ import config from '../config/index.js';
 // ============================= FIX START ==============================
 import { cleanLlmOutput } from '../utils/helpers.js';
 // ============================== FIX END ===============================
+import {
+  computeContextUsageForChat,
+  recommendContextSize,
+} from '../services/contextUsageService.js';
+import { getConfiguredContextSize } from '../services/activeModelService.js';
 
 const esClient = getElasticsearchClient(config.elasticsearch.url);
 
@@ -143,9 +148,19 @@ export const addSessionChatMessage = async ({
       );
     }
 
+    // If no configured context size, recommend a sane value for this session chat
+    const configured = getConfiguredContextSize();
+    const recommendedContext = recommendContextSize({
+      transcriptTokens: sessionData.transcriptTokenCount ?? null,
+      modelDefaultMax: null, // resolved later via service if needed by stream layer
+    });
+
     const ollamaStream = await streamChatResponse(
       transcriptString,
-      currentMessages
+      currentMessages,
+      configured == null && recommendedContext != null
+        ? { contextSize: recommendedContext }
+        : undefined
     );
 
     const headers = new Headers({
@@ -181,6 +196,20 @@ export const addSessionChatMessage = async ({
         console.log(
           `[API ProcessStream ${chatData.id}] Starting Ollama stream processing...`
         );
+        // Emit early usage estimate for UI meter (LM Studio–style)
+        try {
+          const usage = await computeContextUsageForChat({
+            isStandalone: false,
+            sessionData,
+            messages: currentMessages,
+          });
+          await writeSseEvent({ usage });
+        } catch (usageErr) {
+          console.warn(
+            `[API ProcessStream ${chatData.id}] Failed to compute early usage:`,
+            usageErr
+          );
+        }
         for await (const chunk of ollamaStream) {
           if (chunk.message?.content) {
             const textChunk = chunk.message.content;

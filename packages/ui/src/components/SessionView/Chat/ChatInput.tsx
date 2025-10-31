@@ -29,11 +29,20 @@ import { StarredTemplatesList } from './StarredTemplatesList';
 import {
   currentQueryAtom,
   activeChatIdAtom,
+  activeSessionIdAtom,
   toastMessageAtom,
 } from '../../../store';
-import type { ChatMessage, OllamaStatus } from '../../../types';
+import type {
+  ChatMessage,
+  OllamaStatus,
+  UIContextUsageResponse,
+} from '../../../types';
 import { fetchOllamaStatus, setOllamaModel } from '../../../api/api';
 import { SelectActiveModelModal } from '../Modals/SelectActiveModelModal';
+import {
+  fetchSessionContextUsage,
+  fetchStandaloneContextUsage,
+} from '../../../api/chat';
 
 interface AddMessageStreamMutationResult {
   userMessageId: number;
@@ -60,6 +69,7 @@ export function ChatInput({
 }: ChatInputProps) {
   const [currentQuery, setCurrentQuery] = useAtom(currentQueryAtom);
   const activeChatId = useAtomValue(activeChatIdAtom);
+  const activeSessionId = useAtomValue(activeSessionIdAtom);
   const [inputError, setInputError] = useState('');
   const setToastMessageAtom = useSetAtom(toastMessageAtom);
   const queryClient = useQueryClient();
@@ -222,6 +232,71 @@ export function ChatInput({
     ? 'Ask anything...'
     : 'Ask about the session...';
 
+  // --- Live Context Usage Preview (debounced) ---
+  const [debouncedInput, setDebouncedInput] = useState<string>('');
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedInput(currentQuery), 350);
+    return () => clearTimeout(t);
+  }, [currentQuery]);
+
+  const hasInput = !!debouncedInput.trim();
+  const canPreview =
+    !!activeChatId &&
+    !isEffectivelyDisabled &&
+    hasInput &&
+    (isStandalone || !!activeSessionId);
+
+  const { data: previewUsage } = useQuery<
+    UIContextUsageResponse | undefined,
+    Error
+  >({
+    queryKey: [
+      'contextUsagePreview',
+      isStandalone ? 'standalone' : 'session',
+      activeSessionId ?? 'no-session',
+      activeChatId ?? 'no-chat',
+      debouncedInput,
+    ],
+    queryFn: () =>
+      isStandalone
+        ? fetchStandaloneContextUsage(activeChatId!, {
+            inputDraft: debouncedInput,
+          })
+        : fetchSessionContextUsage(activeSessionId!, activeChatId!, {
+            inputDraft: debouncedInput,
+          }),
+    enabled: canPreview,
+    staleTime: 5 * 1000,
+  });
+
+  const previewPercent =
+    previewUsage?.totals.percentUsed != null
+      ? Math.round(previewUsage.totals.percentUsed * 100)
+      : null;
+  const willOverflow = (() => {
+    if (!previewUsage) return false;
+    const eff = previewUsage.model.effectiveContextSize ?? null;
+    const prompt = previewUsage.totals.promptTokens ?? null;
+    if (eff == null || prompt == null) return false;
+    const predicted = prompt + previewUsage.reserved.outputTokens;
+    return predicted > eff;
+  })();
+  const warnAtPct = previewUsage?.thresholds
+    ? previewUsage.thresholds.warnAt * 100
+    : null;
+  const dangerAtPct = previewUsage?.thresholds
+    ? previewUsage.thresholds.dangerAt * 100
+    : null;
+  const isWarn =
+    previewPercent != null && warnAtPct != null
+      ? previewPercent >= warnAtPct && previewPercent < (dangerAtPct ?? 101)
+      : false;
+  const isDanger =
+    previewPercent != null && dangerAtPct != null
+      ? previewPercent >= dangerAtPct
+      : false;
+  const shouldShowPreviewHint = willOverflow || isWarn || isDanger;
+
   return (
     <>
       <Flex direction="column" gap="1">
@@ -302,6 +377,18 @@ export function ChatInput({
         {addMessageMutation.isError && (
           <Text size="1" color="red" align="center" mt="1">
             Error: {addMessageMutation.error.message}
+          </Text>
+        )}
+
+        {/* Live usage preview hint: show only when useful (warn/danger/overflow) */}
+        {previewUsage && shouldShowPreviewHint && (
+          <Text
+            size="1"
+            color={willOverflow ? 'red' : isDanger ? 'red' : 'amber'}
+          >
+            {willOverflow
+              ? 'Warning: this message may exceed the model context.'
+              : `Approaching limit — context used ~${previewPercent}%`}
           </Text>
         )}
       </Flex>
