@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 
-import { initializeIndices } from './searchUtils.ts';
-import { TRANSCRIPTS_INDEX, MESSAGES_INDEX } from './mappings.ts';
+import { initializeIndices } from './searchUtils.js';
+import { TRANSCRIPTS_INDEX, MESSAGES_INDEX } from './mappings.js';
 
 function makeClient() {
   return {

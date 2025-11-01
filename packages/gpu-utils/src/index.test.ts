@@ -13,7 +13,7 @@ describe('gpu-utils.getGpuStats', () => {
     }));
     // child_process won't be used but provide a stub to be safe
     vi.doMock('child_process', () => ({ exec: vi.fn() }));
-    const mod = await import('./index.ts');
+    const mod = await import('./index.js');
     const stats = await mod.getGpuStats();
     expect(stats.available).toBe(false);
     expect(stats.summary.gpuCount).toBe(0);
@@ -27,7 +27,7 @@ describe('gpu-utils.getGpuStats', () => {
     vi.doMock('child_process', () => ({
       exec: (cmd: string, cb: any) => cb(null, { stdout: xml }),
     }));
-    const mod = await import('./index.ts');
+    const mod = await import('./index.js');
     const stats = await mod.getGpuStats();
     expect(stats.available).toBe(true);
     expect(stats.gpus[0].name).toBe('RTX');

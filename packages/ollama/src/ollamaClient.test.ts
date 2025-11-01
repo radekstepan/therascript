@@ -8,15 +8,13 @@ vi.mock('axios', () => ({
   },
 }));
 
-import { listLocalModels } from './ollamaClient.ts';
+import { listLocalModels } from './ollamaClient.js';
 
 describe('ollamaClient.listLocalModels', () => {
   it('returns model names on success', async () => {
-    (axios as any).get = vi
-      .fn()
-      .mockResolvedValue({
-        data: { models: [{ name: 'm1' }, { name: 'm2' }] },
-      });
+    (axios as any).get = vi.fn().mockResolvedValue({
+      data: { models: [{ name: 'm1' }, { name: 'm2' }] },
+    });
     await expect(listLocalModels()).resolves.toEqual(['m1', 'm2']);
   });
   it('returns [] when ECONNREFUSED', async () => {

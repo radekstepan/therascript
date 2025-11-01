@@ -5,7 +5,7 @@ vi.mock('axios', () => ({
   default: { post: vi.fn(), isAxiosError: (e: any) => !!e || false },
 }));
 
-import { sendChatRequest } from './ollamaClient.ts';
+import { sendChatRequest } from './ollamaClient.js';
 
 const payload = {
   model: 'mymodel',
