@@ -17,7 +17,7 @@ describe('tokenizerService.calculateTokenCount', () => {
 
   it('returns 0 for empty/nullish input', async () => {
     vi.resetModules();
-    const { calculateTokenCount } = await import('./tokenizerService.ts');
+    const { calculateTokenCount } = await import('./tokenizerService.js');
     expect(calculateTokenCount('')).toBe(0);
     expect(calculateTokenCount(null as any)).toBe(0);
     expect(calculateTokenCount(undefined as any)).toBe(0);
@@ -25,7 +25,7 @@ describe('tokenizerService.calculateTokenCount', () => {
 
   it('counts tokens using mocked tokenizer', async () => {
     vi.resetModules();
-    const { calculateTokenCount } = await import('./tokenizerService.ts');
+    const { calculateTokenCount } = await import('./tokenizerService.js');
     expect(calculateTokenCount('one two  three')).toBe(3);
   });
 
@@ -39,7 +39,7 @@ describe('tokenizerService.calculateTokenCount', () => {
         throw new Error('init fail');
       });
       vi.resetModules();
-      const { calculateTokenCount } = await import('./tokenizerService.ts');
+      const { calculateTokenCount } = await import('./tokenizerService.js');
       expect(calculateTokenCount('hello')).toBeNull();
     } finally {
       spyErr.mockRestore();

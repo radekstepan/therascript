@@ -10,7 +10,7 @@ vi.mock('@elastic/elasticsearch', () => {
   return { errors: { ResponseError } };
 });
 
-import { ensureIndexExists } from './searchUtils.ts';
+import { ensureIndexExists } from './searchUtils.js';
 import { errors as esErrors } from '@elastic/elasticsearch';
 
 function makeClient(opts: { exists: boolean; throwCreate?: any }) {

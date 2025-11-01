@@ -3,7 +3,7 @@ import {
   cleanLlmOutput,
   isNodeError,
   createSessionListDTO,
-} from './helpers.ts';
+} from './helpers.js';
 import type { BackendSession } from '../types/index.js';
 
 describe('helpers.cleanLlmOutput', () => {

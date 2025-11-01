@@ -75,7 +75,7 @@ describe('templateRepository', () => {
       get: dbMock.api.get,
       all: dbMock.api.all,
     }));
-    const { templateRepository } = await import('./templateRepository.ts');
+    const { templateRepository } = await import('./templateRepository.js');
 
     const created = templateRepository.create('t1', 'text1');
     expect(created.id).toBe(1);
