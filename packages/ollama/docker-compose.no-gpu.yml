@@ -1,0 +1,11 @@
+## Package-local override to remove GPU device reservations on hosts without NVIDIA
+## Place this alongside packages/ollama/docker-compose.yml. This file is deliberately
+# minimal: it overrides the 'ollama' service deploy resources to remove GPU device
+# reservation entries so Docker on macOS (which lacks the 'nvidia' driver) can start
+# the container.
+
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations: []

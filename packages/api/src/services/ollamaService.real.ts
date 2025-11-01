@@ -38,6 +38,7 @@ import {
 import { exec as callbackExec } from 'node:child_process';
 import * as util from 'node:util';
 import * as path from 'node:path';
+import * as os from 'node:os';
 import * as fs from 'node:fs'; // For checking compose file
 import { fileURLToPath } from 'node:url';
 import { templateRepository } from '../repositories/templateRepository.js';
@@ -65,7 +66,46 @@ async function runOllamaComposeCommand(command: string): Promise<string> {
       `Ollama docker-compose.yml not found at ${OLLAMA_COMPOSE_FILE}`
     );
   }
-  const composeCommand = `docker compose -f "${OLLAMA_COMPOSE_FILE}" ${command}`;
+  // Allow supplying an extra compose override file via DOCKER_COMPOSE_EXTRA
+  const extraCompose = process.env.DOCKER_COMPOSE_EXTRA;
+
+  const composeDir = path.dirname(OLLAMA_COMPOSE_FILE);
+  // Optional per-package overrides
+  const packageNoGpuOverride = path.join(
+    composeDir,
+    'docker-compose.no-gpu.yml'
+  );
+  const packageGpuOverride = path.join(composeDir, 'docker-compose.gpu.yml');
+
+  let chosenExtra: string | null = null;
+  const isMac = process.platform === 'darwin';
+  const isWSL =
+    os.release().toLowerCase().includes('microsoft') ||
+    !!process.env.WSL_DISTRO_NAME;
+  const isLinux = process.platform === 'linux' || isWSL;
+
+  // Prefer an explicit extra compose file only when in the same directory
+  if (extraCompose && fs.existsSync(extraCompose)) {
+    // Only use the provided extra compose file if it's in the same directory
+    // as the Ollama compose file (to avoid merging unrelated services).
+    if (path.dirname(extraCompose) === composeDir) {
+      chosenExtra = extraCompose;
+    } else {
+      console.log(
+        `[Real Ollama Docker] Skipping DOCKER_COMPOSE_EXTRA '${extraCompose}' because it is not in the same directory as the Ollama compose file.`
+      );
+    }
+  } else if (
+    isLinux &&
+    !process.env.OLLAMA_DISABLE_GPU &&
+    fs.existsSync(packageGpuOverride)
+  ) {
+    // On Linux/WSL, prefer GPU override if available and not explicitly disabled
+    chosenExtra = packageGpuOverride;
+  }
+
+  const extraFlag = chosenExtra ? ` -f "${chosenExtra}"` : '';
+  const composeCommand = `docker compose -f "${OLLAMA_COMPOSE_FILE}"${extraFlag} ${command}`;
   console.log(`[Real Ollama Docker] Running: ${composeCommand}`);
   try {
     const { stdout, stderr } = await exec(composeCommand);

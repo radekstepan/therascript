@@ -18,9 +18,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy only the requirements file to leverage Docker cache
 COPY packages/whisper/requirements.txt ./
 
-# Upgrade pip and install PyTorch with CUDA support first
+# Upgrade pip
 RUN pip3 install --upgrade pip --break-system-packages
-RUN pip3 install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128 --break-system-packages
+
+# Allow selecting the correct PyTorch channel via build args.
+# Defaults preserve Linux/WSL behavior (CUDA nightly) but can be overridden on macOS to CPU.
+ARG TORCH_INDEX_URL="https://download.pytorch.org/whl/nightly/cu128"
+ARG TORCH_FLAGS="--pre"
+
+# Install PyTorch first (so subsequent deps can detect it) using the configured channel.
+RUN echo "Installing PyTorch from ${TORCH_INDEX_URL} (flags: '${TORCH_FLAGS}')" \
+    && pip3 install ${TORCH_FLAGS} torch torchvision torchaudio --index-url ${TORCH_INDEX_URL} --break-system-packages
 
 # Install the rest of the Python dependencies
 RUN pip3 install -r requirements.txt --break-system-packages

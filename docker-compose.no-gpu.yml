@@ -1,0 +1,4 @@
+services:
+  # Override to remove GPU device reservations on macOS or other non-NVIDIA hosts
+  whisper:
+    deploy: {}
