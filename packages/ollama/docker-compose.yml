@@ -20,16 +20,12 @@ services:
     volumes:
       - ollama_data:/root/.ollama
     # GPU Acceleration Configuration (Optional)
-    # Uncomment this section if you have an NVIDIA GPU and the NVIDIA Container Toolkit installed
-    # on the Docker host to significantly speed up model inference.
-    # 'count: 1' allocates one GPU. Use 'all' to allocate all available GPUs.
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1 # Or 'all'
-              capabilities: [gpu]
+    # NOTE: removed automatic GPU device reservation to improve cross-platform
+    # compatibility (macOS Docker Desktop does not provide the 'nvidia' device
+    # driver). If you have an NVIDIA GPU and want to enable GPU reservation,
+    # create a local override file `packages/ollama/docker-compose.gpu.yml`
+    # that re-introduces the deploy.resources.reservations.devices block and
+    # run docker compose with that file on a compatible host.
     # Healthcheck removed as it was problematic with GPU initialization times.
     # The backend service now handles readiness checks by polling the API.
     # Restart policy: Restart the container unless it was explicitly stopped.

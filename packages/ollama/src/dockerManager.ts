@@ -34,7 +34,11 @@ async function runDockerComposeExec(command: string): Promise<string> {
     throw new Error(errorMessage);
   }
   // Note: compose V2 uses 'exec -T' for non-interactive
-  const composeCommand = `docker compose -f "${COMPOSE_FILE}" exec -T ${OLLAMA_SERVICE_NAME} ${command}`;
+  // Allow an optional extra compose override file to be supplied via env var.
+  const extraCompose = process.env.DOCKER_COMPOSE_EXTRA;
+  const extraFlag =
+    extraCompose && fs.existsSync(extraCompose) ? ` -f "${extraCompose}"` : '';
+  const composeCommand = `docker compose -f "${COMPOSE_FILE}"${extraFlag} exec -T ${OLLAMA_SERVICE_NAME} ${command}`;
   console.log(`[Ollama Docker Exec] Running: ${composeCommand}`);
   try {
     const { stdout, stderr } = await exec(composeCommand);

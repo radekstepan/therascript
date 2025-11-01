@@ -43,7 +43,11 @@ async function runDockerComposeCommand(
     console.error(errorMessage);
     throw new Error(errorMessage);
   }
-  const composeCommand = `docker compose -p ${projectName} -f "${composeFilePath}" ${command}`;
+  // Allow an optional extra compose override file to be supplied via env var.
+  const extraCompose = process.env.DOCKER_COMPOSE_EXTRA;
+  const extraFlag =
+    extraCompose && fs.existsSync(extraCompose) ? ` -f "${extraCompose}"` : '';
+  const composeCommand = `docker compose -p ${projectName} -f "${composeFilePath}"${extraFlag} ${command}`;
   console.log(`[Docker Utils] Running: ${composeCommand}`);
   try {
     const { stdout, stderr } = await exec(composeCommand);

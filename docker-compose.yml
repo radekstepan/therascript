@@ -9,6 +9,10 @@ services:
       context: .
       # FIX: Specify the path to the Dockerfile relative to the new context
       dockerfile: packages/whisper/Dockerfile
+      args:
+        # By default, use CUDA nightly channel (Linux/WSL). On macOS we override these via env.
+        TORCH_INDEX_URL: ${WHISPER_TORCH_INDEX_URL:-https://download.pytorch.org/whl/nightly/cu128}
+        TORCH_FLAGS: ${WHISPER_TORCH_FLAGS:---pre}
     image: therascript/whisper
     container_name: therascript_whisper_service
     ports:
@@ -16,13 +20,6 @@ services:
     volumes:
       # MODIFIED: Use a named volume for persisting downloaded models
       - whisper_models:/root/.cache/whisper
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8000/health"]
