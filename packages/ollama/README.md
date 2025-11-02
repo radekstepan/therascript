@@ -19,6 +19,12 @@ This service is typically **not run independently**. It is managed by the root `
 
 The `packages/api` service expects the Ollama API to be available at the URL specified in its environment configuration (`OLLAMA_BASE_URL`, typically `http://localhost:11434` for local development).
 
+### Native Runtime on macOS
+
+- macOS developers can now run Ollama directly on the host for better performance by setting `OLLAMA_RUNTIME=native` (this is the default on macOS).
+- Ensure the Ollama CLI is installed locally (e.g., via Homebrew or the official app). The API automatically falls back to `brew services`, `launchctl`, or a detached `ollama serve` process when the Docker container is disabled.
+- To force the legacy Docker-based workflow, export `OLLAMA_RUNTIME=docker` before starting the stack.
+
 ## Model Management
 
 While the `api` package provides endpoints for managing models (pulling, deleting), you can also interact directly with the Ollama container using `docker compose exec` (run from this directory or use the `-f` flag with the compose file path from the root):

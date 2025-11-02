@@ -28,9 +28,26 @@ console.log(`[Config] Determined APP_MODE as: ${appMode}`);
 const port = parseInt(getEnvVar('PORT', '3001'), 10);
 const isProduction = nodeEnv === 'production';
 const corsOrigin = getEnvVar('CORS_ORIGIN', 'http://localhost:3002');
+const determineDefaultOllamaRuntime = (): 'docker' | 'native' => {
+  if (process.platform === 'darwin') {
+    return 'native';
+  }
+  return 'docker';
+};
+
 const ollamaBaseURL = getEnvVar('OLLAMA_BASE_URL', 'http://localhost:11434');
 const ollamaModel = getEnvVar('OLLAMA_MODEL', 'llama3');
 const ollamaKeepAlive = getEnvVar('OLLAMA_CHAT_KEEP_ALIVE', '5m');
+const ollamaRuntimeRaw = getEnvVar(
+  'OLLAMA_RUNTIME',
+  determineDefaultOllamaRuntime()
+).toLowerCase();
+if (!['docker', 'native'].includes(ollamaRuntimeRaw)) {
+  throw new Error(
+    `Invalid OLLAMA_RUNTIME value: ${ollamaRuntimeRaw}. Expected 'docker' or 'native'.`
+  );
+}
+const ollamaRuntime = ollamaRuntimeRaw as 'docker' | 'native';
 const whisperApiURL = getEnvVar('WHISPER_API_URL', 'http://localhost:8000');
 const whisperModel = getEnvVar('WHISPER_MODEL', 'tiny');
 const elasticsearchUrl = getEnvVar(
@@ -85,6 +102,7 @@ const config = {
     baseURL: ollamaBaseURL,
     model: ollamaModel,
     keepAlive: ollamaKeepAlive,
+    runtime: ollamaRuntime,
   },
   whisper: { apiUrl: whisperApiURL, model: whisperModel },
   elasticsearch: {
@@ -125,5 +143,6 @@ console.log(`  - Port: ${config.server.port}`);
 console.log(`  - Redis: ${config.redis.host}:${config.redis.port}`);
 console.log(`  - DB Path: ${config.db.sqlitePath}`);
 console.log(`  - Uploads Path: ${config.db.uploadsDir}`);
+console.log(`  - Ollama Runtime: ${config.ollama.runtime}`);
 
 export default config;

@@ -29,40 +29,37 @@ export function GpuStatusIndicator({
   });
 
   const handleOpenModal = () => {
-    if (gpuStats?.available) {
+    if (gpuStats) {
       setIsModalOpen(true);
     }
   };
 
-  if (!gpuStats?.available) {
-    // Render a disabled-like state if nvidia-smi is not available
-    return (
-      <Tooltip content="nvidia-smi not found on server">
-        <button
-          className={cn(
-            'flex items-center mt-2 w-full py-2 text-left text-sm rounded-md opacity-50 cursor-not-allowed',
-            isSidebarOpen ? 'px-3' : 'justify-center px-0'
-          )}
-          disabled
-        >
-          <Cpu
-            size={18}
-            className={cn(
-              'text-[var(--gray-a9)]',
-              isSidebarOpen ? 'mr-2' : 'mr-0'
-            )}
-          />
-          {isSidebarOpen && <Text color="gray">GPU N/A</Text>}
-        </button>
-      </Tooltip>
-    );
-  }
+  const runtimeKey = gpuStats?.executionProvider ?? null;
+  const runtimeDisplay = runtimeKey
+    ? runtimeKey === 'gpu'
+      ? 'GPU'
+      : runtimeKey === 'metal'
+        ? 'Metal'
+        : 'CPU'
+    : '—';
+  const runtimeTooltip = runtimeKey
+    ? runtimeKey === 'gpu'
+      ? 'Running with NVIDIA GPU acceleration.'
+      : runtimeKey === 'metal'
+        ? 'Running with native Apple Metal acceleration.'
+        : 'Running on CPU only.'
+    : 'Runtime information unavailable.';
 
-  const summary = gpuStats.summary;
-  const vramUsagePercent =
-    summary.totalMemoryMb > 0
+  const hasMetrics = Boolean(
+    gpuStats && gpuStats.available && gpuStats.summary.gpuCount > 0
+  );
+
+  const summary = hasMetrics ? gpuStats!.summary : undefined;
+  const vramUsagePercent = summary
+    ? summary.totalMemoryMb > 0
       ? (summary.totalMemoryUsedMb / summary.totalMemoryMb) * 100
-      : 0;
+      : 0
+    : 0;
 
   const getUtilColor = (
     value: number | null
@@ -84,40 +81,64 @@ export function GpuStatusIndicator({
   return (
     <>
       <button
-        title="GPU Status"
+        title={`Runtime: ${runtimeDisplay}`}
         onClick={handleOpenModal}
         className={cn(
           'flex items-center mt-2 w-full py-2 text-left text-sm hover:bg-[var(--accent-a3)] rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-8)]',
           isSidebarOpen ? 'px-3' : 'justify-center px-0'
         )}
+        disabled={!gpuStats && isLoading}
       >
         <Cpu size={18} className={cn(isSidebarOpen ? 'mr-2' : 'mr-0')} />
         {isSidebarOpen && (
           <Flex direction="column" gap="1" style={{ flexGrow: 1 }}>
-            <Flex justify="between">
-              <Text size="1" weight="medium">
-                GPU
-              </Text>
-              <Text size="1">{summary.avgTemperatureCelsius ?? '--'}°C</Text>
+            <Flex justify="between" align="center">
+              <Tooltip content={runtimeTooltip}>
+                <Text size="1" weight="medium">
+                  Runtime: {runtimeDisplay}
+                </Text>
+              </Tooltip>
+              {hasMetrics && summary ? (
+                <Text size="1">{summary.avgTemperatureCelsius ?? '--'}°C</Text>
+              ) : null}
             </Flex>
-            <Tooltip
-              content={`GPU Utilization: ${summary.avgGpuUtilizationPercent ?? 'N/A'}%`}
-            >
-              <Progress
-                size="1"
-                value={summary.avgGpuUtilizationPercent ?? 0}
-                color={getUtilColor(summary.avgGpuUtilizationPercent)}
-              />
-            </Tooltip>
-            <Tooltip
-              content={`VRAM: ${prettyBytes(summary.totalMemoryUsedMb * 1024 * 1024)} / ${prettyBytes(summary.totalMemoryMb * 1024 * 1024)}`}
-            >
-              <Progress
-                size="1"
-                value={vramUsagePercent}
-                color={getVramColor(vramUsagePercent)}
-              />
-            </Tooltip>
+            {hasMetrics && summary ? (
+              <>
+                <Tooltip
+                  content={`GPU Utilization: ${summary.avgGpuUtilizationPercent ?? 'N/A'}%`}
+                >
+                  <Progress
+                    size="1"
+                    value={summary.avgGpuUtilizationPercent ?? 0}
+                    color={getUtilColor(summary.avgGpuUtilizationPercent)}
+                  />
+                </Tooltip>
+                <Tooltip
+                  content={`VRAM: ${prettyBytes(summary.totalMemoryUsedMb * 1024 * 1024)} / ${prettyBytes(summary.totalMemoryMb * 1024 * 1024)}`}
+                >
+                  <Progress
+                    size="1"
+                    value={vramUsagePercent}
+                    color={getVramColor(vramUsagePercent)}
+                  />
+                </Tooltip>
+              </>
+            ) : (
+              <Text size="1" color="gray">
+                {runtimeKey === 'metal'
+                  ? 'Apple Metal runtime (no NVIDIA metrics).'
+                  : runtimeKey === 'gpu'
+                    ? 'GPU metrics unavailable.'
+                    : runtimeKey === 'cpu'
+                      ? 'CPU-only runtime.'
+                      : 'Runtime data unavailable.'}
+              </Text>
+            )}
+            {error && (
+              <Text size="1" color="red">
+                {error.message}
+              </Text>
+            )}
           </Flex>
         )}
       </button>
