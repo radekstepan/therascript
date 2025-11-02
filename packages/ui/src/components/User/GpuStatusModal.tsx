@@ -184,13 +184,36 @@ export function GpuStatusModal({
   isLoading,
   error,
 }: GpuStatusModalProps) {
+  const runtimeKey = gpuStats?.executionProvider ?? null;
+  const runtimeLabel = runtimeKey
+    ? runtimeKey === 'gpu'
+      ? 'GPU'
+      : runtimeKey === 'metal'
+        ? 'Metal'
+        : 'CPU'
+    : 'Unknown';
+  const runtimeBadgeColor: React.ComponentProps<typeof Badge>['color'] =
+    runtimeKey === 'gpu' ? 'green' : runtimeKey === 'metal' ? 'cyan' : 'gray';
+  const runtimeDescription = runtimeKey
+    ? runtimeKey === 'gpu'
+      ? 'NVIDIA GPU acceleration detected via nvidia-smi.'
+      : runtimeKey === 'metal'
+        ? 'Running with native Apple Metal acceleration. NVIDIA metrics may be limited.'
+        : 'Running on CPU only. NVIDIA GPU metrics are unavailable.'
+    : 'Runtime information is not available yet.';
+
   return (
     <Dialog.Root open={isOpen} onOpenChange={onOpenChange}>
       <Dialog.Content style={{ maxWidth: 650 }}>
         <Dialog.Title>GPU Status</Dialog.Title>
         <Dialog.Description size="2" mb="4" color="gray">
-          Real-time statistics for NVIDIA GPU devices from `nvidia-smi`.
+          {runtimeDescription}
         </Dialog.Description>
+        <Flex mb="3">
+          <Badge color={runtimeBadgeColor} variant="soft">
+            Runtime: {runtimeLabel}
+          </Badge>
+        </Flex>
         <ScrollArea
           type="auto"
           scrollbars="vertical"
@@ -219,13 +242,17 @@ export function GpuStatusModal({
                   <InfoCircledIcon />
                 </Callout.Icon>
                 <Callout.Text>
-                  `nvidia-smi` command not found on the server. GPU monitoring
-                  is unavailable.
+                  {runtimeKey === 'metal'
+                    ? 'Running with Apple Metal acceleration. NVIDIA GPU monitoring via nvidia-smi is not available on macOS.'
+                    : '`nvidia-smi` command not found on the server. GPU monitoring is unavailable and the system is running on CPU.'}
                 </Callout.Text>
               </Callout.Root>
             ) : (
               <Flex direction="column" gap="4">
-                <Flex justify="between" gap="4">
+                <Flex justify="between" gap="4" style={{ flexWrap: 'wrap' }}>
+                  <Badge color={runtimeBadgeColor} variant="soft">
+                    Runtime: {runtimeLabel}
+                  </Badge>
                   <Badge color="gray" variant="soft">
                     Driver: {gpuStats.driverVersion}
                   </Badge>

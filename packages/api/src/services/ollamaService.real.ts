@@ -13,7 +13,7 @@ import ollama, {
   PullRequest,
   ModelResponse,
 } from 'ollama'; // Added ModelResponse type explicit import
-import axios, { AxiosError } from 'axios';
+import axios from 'axios';
 import crypto from 'node:crypto'; // Import crypto for job ID
 import config from '../config/index.js';
 // --- Use imported types from central location ---
@@ -35,109 +35,13 @@ import {
   getActiveModel,
   getConfiguredContextSize,
 } from './activeModelService.js';
-import { exec as callbackExec } from 'node:child_process';
-import * as util from 'node:util';
-import * as path from 'node:path';
-import * as os from 'node:os';
-import * as fs from 'node:fs'; // For checking compose file
-import { fileURLToPath } from 'node:url';
 import { templateRepository } from '../repositories/templateRepository.js';
 import { SYSTEM_PROMPT_TEMPLATES } from '@therascript/db/dist/sqliteService.js';
-
-const exec = util.promisify(callbackExec);
+import { getOllamaRuntime } from './ollamaRuntime.js';
 
 console.log('[Real Service] Using Real Ollama Service'); // Identify real service
 
-// --- Keep original Docker Management Logic ---
-const OLLAMA_PACKAGE_DIR = path.resolve(
-  fileURLToPath(import.meta.url),
-  '../../../..',
-  'ollama'
-);
-const OLLAMA_COMPOSE_FILE = path.join(OLLAMA_PACKAGE_DIR, 'docker-compose.yml');
-const OLLAMA_SERVICE_NAME = 'ollama'; // Match service name in ollama's compose file
-
-async function runOllamaComposeCommand(command: string): Promise<string> {
-  if (!fs.existsSync(OLLAMA_COMPOSE_FILE)) {
-    console.error(
-      `[Real Ollama Docker] Compose file not found at: ${OLLAMA_COMPOSE_FILE}`
-    );
-    throw new InternalServerError(
-      `Ollama docker-compose.yml not found at ${OLLAMA_COMPOSE_FILE}`
-    );
-  }
-  // Allow supplying an extra compose override file via DOCKER_COMPOSE_EXTRA
-  const extraCompose = process.env.DOCKER_COMPOSE_EXTRA;
-
-  const composeDir = path.dirname(OLLAMA_COMPOSE_FILE);
-  // Optional per-package overrides
-  const packageNoGpuOverride = path.join(
-    composeDir,
-    'docker-compose.no-gpu.yml'
-  );
-  const packageGpuOverride = path.join(composeDir, 'docker-compose.gpu.yml');
-
-  let chosenExtra: string | null = null;
-  const isMac = process.platform === 'darwin';
-  const isWSL =
-    os.release().toLowerCase().includes('microsoft') ||
-    !!process.env.WSL_DISTRO_NAME;
-  const isLinux = process.platform === 'linux' || isWSL;
-
-  // Prefer an explicit extra compose file only when in the same directory
-  if (extraCompose && fs.existsSync(extraCompose)) {
-    // Only use the provided extra compose file if it's in the same directory
-    // as the Ollama compose file (to avoid merging unrelated services).
-    if (path.dirname(extraCompose) === composeDir) {
-      chosenExtra = extraCompose;
-    } else {
-      console.log(
-        `[Real Ollama Docker] Skipping DOCKER_COMPOSE_EXTRA '${extraCompose}' because it is not in the same directory as the Ollama compose file.`
-      );
-    }
-  } else if (
-    isLinux &&
-    !process.env.OLLAMA_DISABLE_GPU &&
-    fs.existsSync(packageGpuOverride)
-  ) {
-    // On Linux/WSL, prefer GPU override if available and not explicitly disabled
-    chosenExtra = packageGpuOverride;
-  }
-
-  const extraFlag = chosenExtra ? ` -f "${chosenExtra}"` : '';
-  const composeCommand = `docker compose -f "${OLLAMA_COMPOSE_FILE}"${extraFlag} ${command}`;
-  console.log(`[Real Ollama Docker] Running: ${composeCommand}`);
-  try {
-    const { stdout, stderr } = await exec(composeCommand);
-    if (stderr && !stderr.toLowerCase().includes('warn')) {
-      console.warn(`[Real Ollama Docker] Compose stderr: ${stderr}`);
-    }
-    return stdout.trim();
-  } catch (error: any) {
-    console.error(`[Real Ollama Docker] Error executing: ${composeCommand}`);
-    if (error.stderr)
-      console.error(`[Real Ollama Docker] Stderr: ${error.stderr}`);
-    if (error.stdout)
-      console.error(`[Real Ollama Docker] Stdout: ${error.stdout}`);
-    throw new InternalServerError(
-      `Failed to run Ollama Docker Compose command: ${command}. Error: ${error.message}`
-    );
-  }
-}
-
-async function isOllamaContainerRunning(): Promise<boolean> {
-  try {
-    const containerId = await runOllamaComposeCommand(
-      `ps -q ${OLLAMA_SERVICE_NAME}`
-    );
-    return !!containerId;
-  } catch (error: any) {
-    console.warn(
-      `[Real Ollama Docker] Error checking running status (likely not running): ${error.message}`
-    );
-    return false;
-  }
-}
+const runtime = getOllamaRuntime();
 
 async function isOllamaApiResponsive(): Promise<boolean> {
   try {
@@ -149,54 +53,15 @@ async function isOllamaApiResponsive(): Promise<boolean> {
 }
 
 export async function ensureOllamaReady(timeoutMs = 30000): Promise<void> {
-  console.log('[Real Ollama Docker] Ensuring Ollama service is ready...');
-  if ((await isOllamaContainerRunning()) && (await isOllamaApiResponsive())) {
-    console.log(
-      '[Real Ollama Docker] ? Ollama container running and API responsive.'
-    );
-    return;
-  }
-  if (!(await isOllamaContainerRunning())) {
-    console.log(
-      '[Real Ollama Docker] ??? Ollama container not running. Attempting to start...'
-    );
-    try {
-      await runOllamaComposeCommand(`up -d ${OLLAMA_SERVICE_NAME}`);
-      console.log(
-        "[Real Ollama Docker] 'docker compose up -d ollama' command issued."
-      );
-    } catch (startError: any) {
-      console.error(
-        '[Real Ollama Docker] ? Failed to issue start command for Ollama service:',
-        startError
-      );
-      throw new InternalServerError(
-        'Failed to start Ollama Docker service.',
-        startError
-      );
-    }
-  } else {
-    console.log(
-      '[Real Ollama Docker] Container process found, but API was not responsive. Waiting...'
-    );
-  }
-  const startTime = Date.now();
-  while (Date.now() - startTime < timeoutMs) {
-    console.log(
-      '[Real Ollama Docker] ? Waiting for Ollama API to become responsive...'
-    );
-    if (await isOllamaApiResponsive()) {
-      console.log('[Real Ollama Docker] ? Ollama API is now responsive.');
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 3000));
-  }
-  console.error(
-    `[Real Ollama Docker] ? Ollama API did not become responsive within ${timeoutMs / 1000} seconds.`
+  console.log(
+    `[Real OllamaService] Ensuring Ollama runtime (${runtime.type}) is ready...`
   );
-  throw new InternalServerError(
-    `Ollama service started but API did not respond within timeout.`
-  );
+  await runtime.ensureReady(timeoutMs);
+  if (!(await isOllamaApiResponsive())) {
+    throw new InternalServerError(
+      `Ollama runtime (${runtime.type}) failed health check after startup.`
+    );
+  }
 }
 
 // --- ADDED ---
@@ -670,19 +535,24 @@ export const deleteOllamaModel = async (modelName: string): Promise<string> => {
     console.log(
       `[Real OllamaService] Executing delete command for '${modelName}'...`
     );
-    const deleteOutput = await runOllamaComposeCommand(
-      `exec -T ${OLLAMA_SERVICE_NAME} ollama rm ${modelName}`
-    );
+    const deleteOutput = await runtime.deleteModel(modelName);
     console.log(
       `[Real OllamaService] Delete command output for '${modelName}':`,
       deleteOutput
     );
+    const normalizedOutput = deleteOutput.toLowerCase();
+    if (!normalizedOutput.length) {
+      console.log(
+        `[Real OllamaService] Delete command returned no output; assuming success for '${modelName}'.`
+      );
+      return `Model '${modelName}' deleted successfully.`;
+    }
     if (
-      deleteOutput.toLowerCase().includes('deleted') ||
-      deleteOutput.toLowerCase().includes('removed')
+      normalizedOutput.includes('deleted') ||
+      normalizedOutput.includes('removed')
     ) {
       return `Model '${modelName}' deleted successfully.`;
-    } else if (deleteOutput.toLowerCase().includes('not found')) {
+    } else if (normalizedOutput.includes('not found')) {
       console.warn(
         `[Real OllamaService] Model '${modelName}' not found during delete attempt.`
       );
@@ -700,7 +570,7 @@ export const deleteOllamaModel = async (modelName: string): Promise<string> => {
       `[Real OllamaService] Error executing delete command for '${modelName}':`,
       error
     );
-    if (error.message?.toLowerCase().includes('not found')) {
+    if (error instanceof NotFoundError) {
       throw new NotFoundError(`Model '${modelName}' not found locally.`);
     }
     if (error instanceof ApiError) throw error;

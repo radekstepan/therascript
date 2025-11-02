@@ -50,6 +50,11 @@ const GpuStatsResponseSchema = t.Object({
   cudaVersion: t.Nullable(t.String()),
   gpus: t.Array(GpuDeviceStatsSchema),
   summary: GpuStatsSummarySchema,
+  executionProvider: t.Union([
+    t.Literal('gpu'),
+    t.Literal('cpu'),
+    t.Literal('metal'),
+  ]),
 });
 // --- End GPU Stats Schemas ---
 

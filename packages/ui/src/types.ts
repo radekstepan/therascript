@@ -54,6 +54,7 @@ export interface GpuStats {
     totalPowerDrawWatts: number | null;
     totalPowerLimitWatts: number | null;
   };
+  executionProvider?: 'gpu' | 'cpu' | 'metal';
 }
 // --- END NEW GPU STATS TYPES ---
 

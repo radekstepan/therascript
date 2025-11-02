@@ -1,9 +1,13 @@
 // packages/api/src/api/gpuHandler.ts
-import { getGpuStatsService } from '../services/gpuService.js';
+import {
+  getGpuStatsService,
+  type RuntimeAwareGpuStats,
+} from '../services/gpuService.js';
 import { InternalServerError } from '../errors.js';
-import type { GpuStats } from '@therascript/gpu-utils';
 
-export const getGpuStatsHandler = async ({ set }: any): Promise<GpuStats> => {
+export const getGpuStatsHandler = async ({
+  set,
+}: any): Promise<RuntimeAwareGpuStats> => {
   try {
     const stats = await getGpuStatsService();
     set.status = 200;
