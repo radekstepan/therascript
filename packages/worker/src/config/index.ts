@@ -41,6 +41,11 @@ const config = {
   services: {
     whisperApiUrl: getEnvVar('WHISPER_API_URL', 'http://localhost:8000'),
     whisperModel: getEnvVar('WHISPER_MODEL', 'tiny'),
+    transcriptionBackend: getEnvVar('TRANSCRIPTION_BACKEND', 'voxtral') as
+      | 'whisper'
+      | 'voxtral',
+    voxtralApiUrl: getEnvVar('VOXTRAL_API_URL', 'http://localhost:8010/v1'),
+    voxtralModel: getEnvVar('VOXTRAL_MODEL', 'mistralai/Voxtral-Mini-3B-2507'),
     ollamaBaseUrl: getEnvVar('OLLAMA_BASE_URL', 'http://localhost:11434'),
     elasticsearchUrl: getEnvVar('ELASTICSEARCH_URL', 'http://localhost:9200'),
   },
@@ -51,7 +56,11 @@ console.log(`  - NODE_ENV: ${config.server.nodeEnv}`);
 console.log(`  - APP_MODE: ${config.server.appMode}`);
 console.log(`  - Redis: ${config.redis.host}:${config.redis.port}`);
 console.log(`  - DB Path: ${config.db.sqlitePath}`);
+console.log(
+  `  - Transcription Backend: ${config.services.transcriptionBackend}`
+);
 console.log(`  - Whisper URL: ${config.services.whisperApiUrl}`);
+console.log(`  - Voxtral URL: ${config.services.voxtralApiUrl}`);
 console.log(`  - Ollama URL: ${config.services.ollamaBaseUrl}`);
 console.log(`  - ES URL: ${config.services.elasticsearchUrl}`);
 

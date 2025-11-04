@@ -2,6 +2,7 @@
 import config from '../config/index.js';
 import type { WhisperJobStatus } from '../types/index.js';
 import type * as RealService from './transcriptionService.real.js';
+// Note: using any for voxtral module typing to avoid namespace type issues
 import type * as MockService from './transcriptionService.mock.js';
 
 interface TranscriptionServiceInterface {
@@ -17,8 +18,15 @@ if (config.server.appMode === 'mock') {
   const mockModule = await import('./transcriptionService.mock.js');
   service = mockModule;
 } else {
-  const realModule = await import('./transcriptionService.real.js');
-  service = realModule;
+  if (config.transcription.backend === 'voxtral') {
+    const voxtralModule: any = await import(
+      './transcriptionService.voxtral.js'
+    );
+    service = voxtralModule as TranscriptionServiceInterface;
+  } else {
+    const realModule = await import('./transcriptionService.real.js');
+    service = realModule;
+  }
 }
 
 // Export functions from the dynamically chosen service

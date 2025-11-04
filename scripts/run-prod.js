@@ -142,20 +142,27 @@ async function cleanupUiProcess(port) {
 }
 // --- End UI Process Cleanup Function ---
 
-// Arguments for concurrently
+// Arguments for concurrently (conditional service based on backend)
+const BACKEND = process.env.TRANSCRIPTION_BACKEND || 'voxtral';
+const serviceName = BACKEND === 'whisper' ? 'WHISPER' : 'VOXTRAL';
+const serviceCommand =
+  BACKEND === 'whisper' ? 'yarn start:whisper' : 'yarn start:voxtral';
 const concurrentlyArgs = [
   'concurrently',
   '--kill-others-on-fail',
   '--names',
-  'API,UI,WORKER,WHISPER,ES',
+  `API,UI,WORKER,${serviceName},ES`,
   '--prefix-colors',
   'bgGreen.bold,bgMagenta.bold,bgYellow.bold,bgCyan.bold,bgBlue.bold',
   '"yarn start:api:prod"',
   '"yarn dev:ui"', // Typically for prod you'd serve static UI assets, but dev:ui is fine for this setup
   '"yarn start:worker:prod"',
-  '"yarn start:whisper"',
+  `"${serviceCommand}"`,
   '"yarn start:elasticsearch-manager"',
 ];
+console.log(
+  `[RunProd] Transcription backend: ${BACKEND}. Starting service: ${serviceName}`
+);
 
 let appProcess;
 let isShuttingDown = false;

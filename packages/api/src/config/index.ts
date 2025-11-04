@@ -33,6 +33,12 @@ const ollamaModel = getEnvVar('OLLAMA_MODEL', 'llama3');
 const ollamaKeepAlive = getEnvVar('OLLAMA_CHAT_KEEP_ALIVE', '5m');
 const whisperApiURL = getEnvVar('WHISPER_API_URL', 'http://localhost:8000');
 const whisperModel = getEnvVar('WHISPER_MODEL', 'tiny');
+const transcriptionBackend = getEnvVar('TRANSCRIPTION_BACKEND', 'voxtral');
+const voxtralApiURL = getEnvVar('VOXTRAL_API_URL', 'http://localhost:8010/v1');
+const voxtralModel = getEnvVar(
+  'VOXTRAL_MODEL',
+  'mistralai/Voxtral-Mini-3B-2507'
+);
 const elasticsearchUrl = getEnvVar(
   'ELASTICSEARCH_URL',
   'http://localhost:9200'
@@ -87,6 +93,10 @@ const config = {
     keepAlive: ollamaKeepAlive,
   },
   whisper: { apiUrl: whisperApiURL, model: whisperModel },
+  transcription: {
+    backend: transcriptionBackend as 'whisper' | 'voxtral',
+    voxtral: { apiUrl: voxtralApiURL, model: voxtralModel },
+  },
   elasticsearch: {
     url: elasticsearchUrl,
   },
@@ -125,5 +135,6 @@ console.log(`  - Port: ${config.server.port}`);
 console.log(`  - Redis: ${config.redis.host}:${config.redis.port}`);
 console.log(`  - DB Path: ${config.db.sqlitePath}`);
 console.log(`  - Uploads Path: ${config.db.uploadsDir}`);
+console.log(`  - Transcription Backend: ${config.transcription.backend}`);
 
 export default config;

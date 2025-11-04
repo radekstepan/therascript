@@ -9,7 +9,7 @@ vi.mock('@elastic/elasticsearch', () => {
   return { errors: { ResponseError } };
 });
 
-import { deleteByQuery } from './searchUtils.ts';
+import { deleteByQuery } from './searchUtils.js';
 import { errors as esErrors } from '@elastic/elasticsearch';
 
 function makeClient(overrides: Partial<any> = {}) {

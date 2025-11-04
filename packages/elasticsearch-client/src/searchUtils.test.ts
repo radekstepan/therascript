@@ -17,7 +17,7 @@ vi.mock('@elastic/elasticsearch', () => {
   };
 });
 
-import { deleteDocument, bulkIndexDocuments } from './searchUtils.ts';
+import { deleteDocument, bulkIndexDocuments } from './searchUtils.js';
 import { errors as esErrors } from '@elastic/elasticsearch';
 
 function makeClient(overrides: Partial<any> = {}) {

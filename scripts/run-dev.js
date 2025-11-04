@@ -145,20 +145,27 @@ async function cleanupUiProcess(port) {
 }
 // --- End UI Process Cleanup Function ---
 
-// --- Concurrently Command Setup ---
+// --- Concurrently Command Setup (conditional Whisper/Voxtral) ---
+const BACKEND = process.env.TRANSCRIPTION_BACKEND || 'voxtral';
+const serviceName = BACKEND === 'whisper' ? 'WHISPER' : 'VOXTRAL';
+const serviceCommand =
+  BACKEND === 'whisper' ? 'yarn start:whisper' : 'yarn start:voxtral';
 const concurrentlyArgs = [
   'concurrently',
   '--kill-others-on-fail',
   '--names',
-  'API,UI,WORKER,WHISPER,ES', // Added WORKER
+  `API,UI,WORKER,${serviceName},ES`,
   '--prefix-colors',
-  'bgBlue.bold,bgMagenta.bold,bgYellow.bold,bgCyan.bold,bgGreen.bold', // Added color for WORKER
+  'bgBlue.bold,bgMagenta.bold,bgYellow.bold,bgCyan.bold,bgGreen.bold',
   '"yarn dev:api"',
   '"yarn dev:ui"',
-  '"yarn dev:worker"', // Added WORKER
-  '"yarn start:whisper"',
+  '"yarn dev:worker"',
+  `"${serviceCommand}"`,
   '"yarn start:elasticsearch-manager"',
 ];
+console.log(
+  `[RunDev] Transcription backend: ${BACKEND}. Starting service: ${serviceName}`
+);
 // --- End Concurrently Command Setup ---
 
 // --- Main Execution Block ---

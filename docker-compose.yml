@@ -11,11 +11,37 @@ services:
       dockerfile: packages/whisper/Dockerfile
     image: therascript/whisper
     container_name: therascript_whisper_service
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # Voxtral vLLM OpenAI Server
+  voxtral:
+    build:
+      context: .
+      dockerfile: packages/voxtral/Dockerfile
+    image: therascript/voxtral-proxy
+    container_name: therascript_voxtral_service
+    environment:
+      - VOXTRAL_MODEL=mistralai/Voxtral-Mini-3B-2507
+      - VOXTRAL_DTYPE=bfloat16
+      - VOXTRAL_TOKENIZER_MODE=mistral
+      - VOXTRAL_CONFIG_FORMAT=mistral
+      - VOXTRAL_LOAD_FORMAT=mistral
+      - VOXTRAL_MAX_MODEL_LEN=14384
+      - VOXTRAL_GPU_MEMORY_UTILIZATION=0.90
+      - VOXTRAL_CHUNK_SECONDS=300
+      - VOXTRAL_AUDIO_BITRATE=32k
+      - VOXTRAL_AUDIO_SAMPLE_RATE=16000
+      - VOXTRAL_AUDIO_CHANNELS=1
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:8010:8000"
     volumes:
-      # MODIFIED: Use a named volume for persisting downloaded models
-      - whisper_models:/root/.cache/whisper
+      - voxtral_cache:/root/.cache/huggingface
     deploy:
       resources:
         reservations:
@@ -25,11 +51,12 @@ services:
               capabilities: [gpu]
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8000/health"]
+      # Proxy exposes /v1/models and forwards to the internal vLLM server
+      test: ["CMD", "curl", "--fail", "http://localhost:8000/v1/models"]
       interval: 15s
       timeout: 5s
-      retries: 3
-      start_period: 30s
+      retries: 5
+      start_period: 120s
 
   # Elasticsearch Service
   elasticsearch:
@@ -91,6 +118,8 @@ volumes:
   es_data: # Volume for Elasticsearch data persistence
     driver: local
   whisper_models:
+    driver: local
+  voxtral_cache:
     driver: local
   redis_data: # Volume for Redis data persistence
     driver: local

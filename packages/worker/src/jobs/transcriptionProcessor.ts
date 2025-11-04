@@ -23,6 +23,7 @@ import {
 import axios from 'axios';
 import FormData from 'form-data';
 import fs from 'fs';
+import OpenAI from 'openai';
 import config from '../config/index.js';
 
 const esClient = getElasticsearchClient(config.services.elasticsearchUrl);
@@ -108,6 +109,37 @@ function groupSegmentsIntoParagraphs(
   return paragraphs.filter((p) => p.text);
 }
 
+async function transcribeWithVoxtral(filePath: string): Promise<string> {
+  const client = new OpenAI({
+    apiKey: 'EMPTY',
+    baseURL: config.services.voxtralApiUrl,
+  });
+  const response = await client.audio.transcriptions.create({
+    file: fs.createReadStream(filePath) as any,
+    model: config.services.voxtralModel,
+    language: 'en',
+    temperature: 0.0,
+  } as any);
+  const text = (response as any).text ?? String(response);
+  return text;
+}
+
+function splitTextIntoParagraphs(text: string): StructuredTranscript {
+  const sentences = text
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const paragraphs: StructuredTranscript = [];
+  let id = 0;
+  let ts = 0;
+  const incrementMs = 5000; // synthetic timestamps when using Voxtral
+  for (const s of sentences) {
+    paragraphs.push({ id: id++, timestamp: ts, text: s });
+    ts += incrementMs;
+  }
+  return paragraphs;
+}
+
 export default async function (job: Job<TranscriptionJobData, any, string>) {
   const { sessionId } = job.data;
   console.log(
@@ -127,21 +159,31 @@ export default async function (job: Job<TranscriptionJobData, any, string>) {
     await job.updateProgress(5);
     sessionRepository.updateMetadata(sessionId, { status: 'transcribing' });
 
-    const whisperJobId = await startWhisperJob(audioPath);
-    sessionRepository.updateMetadata(sessionId, { whisperJobId });
-    await job.updateProgress(10);
-
-    const finalStatus = await pollWhisperStatus(whisperJobId);
-    if (finalStatus.status !== 'completed' || !finalStatus.result?.segments) {
-      throw new Error(
-        `Whisper job ${whisperJobId} failed or returned no segments. Status: ${finalStatus.status}`
+    let structuredTranscript: StructuredTranscript = [];
+    if (config.services.transcriptionBackend === 'voxtral') {
+      const voxtralJobId = `voxtral:${sessionId}`;
+      sessionRepository.updateMetadata(sessionId, {
+        whisperJobId: voxtralJobId,
+      });
+      await job.updateProgress(15);
+      const text = await transcribeWithVoxtral(audioPath);
+      await job.updateProgress(70);
+      structuredTranscript = splitTextIntoParagraphs(text);
+    } else {
+      const whisperJobId = await startWhisperJob(audioPath);
+      sessionRepository.updateMetadata(sessionId, { whisperJobId });
+      await job.updateProgress(10);
+      const finalStatus = await pollWhisperStatus(whisperJobId);
+      if (finalStatus.status !== 'completed' || !finalStatus.result?.segments) {
+        throw new Error(
+          `Whisper job ${whisperJobId} failed or returned no segments. Status: ${finalStatus.status}`
+        );
+      }
+      await job.updateProgress(80);
+      structuredTranscript = groupSegmentsIntoParagraphs(
+        finalStatus.result.segments
       );
     }
-
-    await job.updateProgress(80);
-    const structuredTranscript = groupSegmentsIntoParagraphs(
-      finalStatus.result.segments
-    );
     const fullText = structuredTranscript
       .map((p: TranscriptParagraphData) => p.text)
       .join('\n\n');

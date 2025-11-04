@@ -4,7 +4,7 @@
  */
 import { atomWithStorage } from 'jotai/utils'; // Utility to persist atom state in localStorage
 // Import the SortDirection type (asc/desc) defined elsewhere
-import type { SortDirection } from './session/sessionSortDirectionAtom.ts';
+import type { SortDirection } from './session/sessionSortDirectionAtom.js';
 
 /**
  * Atom storing the current sort direction for the standalone chat list.

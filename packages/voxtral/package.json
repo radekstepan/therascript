@@ -1,0 +1,24 @@
+{
+  "name": "@therascript/voxtral",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Service manager for a vLLM Voxtral-Mini-3B-2507 server",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "axios": "^1.7.7",
+    "dockerode": "^4.0.6",
+    "openai": "^4.66.0"
+  },
+  "devDependencies": {
+    "@types/dockerode": "^3.3.34",
+    "@types/node": "^20.11.30",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.2"
+  }
+}

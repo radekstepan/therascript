@@ -1,17 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock dependencies used inside contextUsageService
-vi.mock('./tokenizerService.ts', () => ({
+vi.mock('./tokenizerService.js', () => ({
   calculateTokenCount: (s: string) => (s ? s.length : 0),
 }));
-vi.mock('./activeModelService.ts', () => ({
+vi.mock('./activeModelService.js', () => ({
   getActiveModel: () => 'test-model',
   getConfiguredContextSize: () => null,
 }));
-vi.mock('./ollamaService.ts', () => ({
+vi.mock('./ollamaService.js', () => ({
   listModels: async () => [{ name: 'test-model', defaultContextSize: 8192 }],
 }));
-vi.mock('../repositories/templateRepository.ts', () => ({
+vi.mock('../repositories/templateRepository.js', () => ({
   templateRepository: {
     findByTitle: (title: string) => ({
       id: 1,
@@ -31,7 +31,7 @@ vi.mock('@therascript/db/dist/sqliteService.js', () => ({
 import {
   recommendContextSize,
   computeContextUsageForChat,
-} from './contextUsageService.ts';
+} from './contextUsageService.js';
 
 describe('contextUsageService.recommendContextSize', () => {
   it('returns transcript + buffer rounded, min 4096', () => {

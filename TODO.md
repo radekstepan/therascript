@@ -1,1 +1,2 @@
-Show jobs go up when just chatting - needs a switch to websockets
+TODO: voxtral is still up when I shut down
+TODO: chunk overlap and stitch "smartly"

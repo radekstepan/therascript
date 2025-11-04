@@ -6,7 +6,7 @@
     "forceConsistentCasingInFileNames": true,
     "esModuleInterop": true,
     "resolveJsonModule": true,
-    "allowImportingTsExtensions": true,
+    
 
     // Module settings (adjust per-package if needed)
     "moduleResolution": "NodeNext", // Good default for modern Node/TS

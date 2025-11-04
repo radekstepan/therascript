@@ -3,10 +3,15 @@
   "compilerOptions": {
     "module": "NodeNext", // Keep NodeNext for Elysia/Node.js backend
     "outDir": "./dist",
-    "rootDir": "./src"
+    "rootDir": "./src",
     // Add specific types if needed, e.g., "node" (often implicit)
     // "types": ["node"]
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "dist", "scripts"] // Exclude scripts if not TS
+  "exclude": [
+    "node_modules",
+    "dist",
+    "scripts",
+    "src/**/*.test.ts"
+  ] // Exclude scripts and tests from build
 }

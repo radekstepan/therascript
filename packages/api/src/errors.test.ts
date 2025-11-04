@@ -4,7 +4,7 @@ import {
   BadRequestError,
   ConflictError,
   InternalServerError,
-} from './errors.ts';
+} from './errors.js';
 
 describe('errors', () => {
   const originalEnv = process.env.NODE_ENV;
