@@ -3,6 +3,8 @@ const { spawn } = require('child_process');
 const { exec } = require('node:child_process');
 const util = require('node:util');
 const http = require('node:http'); // For the shutdown service
+const path = require('node:path'); // Import path
+const fs = require('fs'); // Import fs
 
 const execPromise = util.promisify(exec);
 
@@ -35,6 +37,40 @@ let shutdownHttpServer = null; // To store the server instance
 // --- End Shutdown Service Configuration ---
 
 console.log('[RunProd] Starting production-like environment...');
+
+// --- OS Detection & Env Tweaks (Similar to run-dev.js) ---
+function isWSL() {
+  if (process.platform !== 'linux') return false;
+  try {
+    if (process.env.WSL_DISTRO_NAME) return true;
+    const contents = fs.readFileSync('/proc/version', 'utf8');
+    return /microsoft/i.test(contents);
+  } catch (_) {
+    return false;
+  }
+}
+
+const isLinux = process.platform === 'linux' && !isWSL();
+const isWsl = isWSL();
+
+if (isLinux || isWsl) {
+  console.log(
+    '[RunProd] OS detected: ' +
+      (isWsl ? 'WSL' : 'Linux') +
+      '. Attempting to enable GPU support via override.'
+  );
+
+  const repoRoot = path.resolve(__dirname, '..');
+  const gpuCompose = path.join(repoRoot, 'docker-compose.gpu.yml');
+
+  if (fs.existsSync(gpuCompose)) {
+    process.env.DOCKER_COMPOSE_EXTRA = gpuCompose;
+    console.log('[RunProd] Enabling GPU support via override:', gpuCompose);
+  } else {
+    console.warn('[RunProd] GPU override file not found at:', gpuCompose);
+  }
+}
+// --- End OS Detection ---
 
 async function stopAndRemoveContainer(containerName) {
   console.log(

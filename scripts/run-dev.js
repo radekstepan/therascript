@@ -6,6 +6,8 @@ const { spawn } = require('child_process'); // For running `concurrently`
 const { exec } = require('node:child_process'); // For running docker commands and port killing
 const util = require('node:util'); // For promisify
 const http = require('node:http'); // For the shutdown service
+const path = require('node:path'); // Import path
+const fs = require('fs'); // Import fs
 
 // Promisify exec for async/await usage with docker commands
 const execPromise = util.promisify(exec);
@@ -46,7 +48,6 @@ function isWSL() {
   if (process.platform !== 'linux') return false;
   try {
     if (process.env.WSL_DISTRO_NAME) return true;
-    const fs = require('node:fs');
     const contents = fs.readFileSync('/proc/version', 'utf8');
     return /microsoft/i.test(contents);
   } catch (_) {
@@ -63,26 +64,29 @@ if (isMacOS) {
   process.env.WHISPER_TORCH_INDEX_URL = 'https://download.pytorch.org/whl/cpu';
   // Prefer stable CPU wheels (no --pre). Empty string disables the flag.
   process.env.WHISPER_TORCH_FLAGS = '';
-  // Use a compose override file that removes NVIDIA GPU requirements on macOS
-  const path = require('node:path');
-  const repoRoot = path.resolve(__dirname, '..');
-  const noGpuCompose = path.join(repoRoot, 'docker-compose.no-gpu.yml');
-  if (require('fs').existsSync(noGpuCompose)) {
-    process.env.DOCKER_COMPOSE_EXTRA = noGpuCompose;
-    console.log(
-      '[RunDev] Using docker-compose override to disable GPU reservations:',
-      noGpuCompose
-    );
-  }
+
   console.log(
     '[RunDev] OS detected: macOS. Configuring Whisper build for CPU PyTorch wheels.'
   );
+  // Note: We no longer set DOCKER_COMPOSE_EXTRA for macOS because the base docker-compose.yml
+  // is now CPU-only by default.
 } else if (isLinux || isWsl) {
   console.log(
     '[RunDev] OS detected: ' +
       (isWsl ? 'WSL' : 'Linux') +
       '. Using CUDA nightly PyTorch wheels for Whisper (default).'
   );
+
+  // Apply GPU configuration override for Linux/WSL
+  const repoRoot = path.resolve(__dirname, '..');
+  const gpuCompose = path.join(repoRoot, 'docker-compose.gpu.yml');
+
+  if (fs.existsSync(gpuCompose)) {
+    process.env.DOCKER_COMPOSE_EXTRA = gpuCompose;
+    console.log('[RunDev] Enabling GPU support via override:', gpuCompose);
+  } else {
+    console.warn('[RunDev] GPU override file not found at:', gpuCompose);
+  }
 }
 // --- End OS Detection & Env Tweaks ---
 
