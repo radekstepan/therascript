@@ -91,7 +91,12 @@ Before you begin, ensure you have the following installed:
 2.  **Docker and Docker Compose:**
     *   Docker Desktop for Windows/macOS or Docker Engine + Docker Compose plugin for Linux.
     *   Ensure the Docker daemon is running.
-3.  **NVIDIA GPU with CUDA (Recommended for AI Services):**
+3.  **Configure Docker to use NVIDIA runtime**
+        ```bash
+        sudo nvidia-ctk runtime configure --runtime=docker
+        sudo systemctl restart docker
+        ```
+4.  **NVIDIA GPU with CUDA (Recommended for AI Services):**
     *   For optimal performance, an NVIDIA GPU with CUDA drivers and the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) is highly recommended. The GPU monitoring feature specifically requires `nvidia-smi` to be available on the host.
     *   Ollama and Whisper *can* run on CPU, but performance will be significantly slower.
 
