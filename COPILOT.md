@@ -30,9 +30,14 @@ Use this as a fast-loading, minimal context file. It links to deeper docs.
 - Whisper: PORT, TEMP_INPUT_DIR, TEMP_OUTPUT_DIR
 
 ## Docs
-- Architecture: docs/ARCHITECTURE.md
-- Navigation (task → files): docs/NAVIGATION.md
-- Root README: README.md
+- **Architecture**: docs/ARCHITECTURE.md (high-level system design, diagrams)
+- **Navigation**: docs/NAVIGATION.md (task → files cheatsheet)
+- **Component Map**: docs/COMPONENT_MAP.md (package details, libraries)
+- **API Reference**: docs/API_REFERENCE.md (all REST endpoints)
+- **Data Flows**: docs/DATA_FLOWS.md (operational workflows)
+- **Schema Reference**: docs/SCHEMA_REFERENCE.md (SQLite + Elasticsearch)
+- **Agents**: AGENTS.md (LLM-focused overview of agents and workflows)
+- **Root README**: README.md
 
 ## Gotchas
 - Ensure API and Worker point to the same SQLite file in dev

@@ -1,4 +1,3 @@
 - add system ram progress bar
 - add token in out per model usage + whisper usage (cost?)
-- add docs on whole architecture
 - do a system review of any inefficiencies

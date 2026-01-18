@@ -2,6 +2,15 @@
 
 This document outlines the autonomous and semi-autonomous agents operating within the Therascript ecosystem. The system utilizes a combination of background workers (BullMQ), specialized API handlers, and LLM-driven strategies to process therapy sessions.
 
+## 📖 System Documentation
+For detailed implementation references, please see:
+- **[Architecture](docs/ARCHITECTURE.md)**: High-level system architecture, package organization, and infrastructure.
+- **[Component Map](docs/COMPONENT_MAP.md)**: Breakdown of packages, libraries, and entry points.
+- **[Navigation Guide](docs/NAVIGATION.md)**: "Where to change what" – directory structure and common tasks.
+- **[API Reference](docs/API_REFERENCE.md)**: Complete REST API endpoint documentation.
+- **[Operational Flows](docs/DATA_FLOWS.md)**: Step-by-step data flow for Transcription, Chat, and Analysis.
+- **[Schema Reference](docs/SCHEMA_REFERENCE.md)**: SQLite tables and Elasticsearch indices.
+
 ## 1. Background Workers
 Located in `packages/worker`, these agents run asynchronously to handle heavy computational tasks.
 

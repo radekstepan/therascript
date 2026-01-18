@@ -1,148 +1,300 @@
-# Therascript Architecture Overview
+# System Architecture
 
-This document gives a high-level map of the system so you can quickly find the right place to implement features or fix bugs.
+This document provides a high-level overview of Therascript's architecture, including package organization, infrastructure components, and communication patterns.
 
-## Services and Packages
+## High-Level Overview
 
-- API (`packages/api`)
-  - Tech: Node.js (Elysia), TypeScript, SQLite (`better-sqlite3`), Elasticsearch client, BullMQ producer
-  - Entrypoint: `src/server.ts`
-  - Config: `src/config/index.ts`
-  - Routes: `src/routes/*` (REST endpoints)
-  - Services: `src/services/*` (business logic and integrations)
-  - Repositories: `src/repositories/*` (DB access via shared @therascript/db)
-  - Types: `src/types/*`
-  - Responsibilities:
-    - Session CRUD, file upload pathing, transcript paragraphs
-    - Chat (session-bound and standalone) and templates
-    - Kicks off transcription and analysis jobs (BullMQ) via Redis
-    - Search endpoints (Elasticsearch)
-    - Docker/Ollama management passthrough endpoints and system utilities
+Therascript is a **monorepo** containing 10 packages that work together to provide therapy session transcription and AI-powered analysis. The system runs as three main processes backed by four Dockerized services.
 
-- Worker (`packages/worker`)
-  - Tech: Node.js (BullMQ), TypeScript
-  - Entrypoint: `src/index.ts`
-  - Jobs: `src/jobs/transcriptionProcessor.ts`, `src/jobs/analysisProcessor.ts`
-  - Config: `src/config/index.ts`, Redis: `src/redisConnection.ts`
-  - Responsibilities:
-    - Consumes BullMQ queues from Redis
-    - Transcription job calls Whisper service and stores transcript paragraphs; indexes to Elasticsearch; seeds initial AI message for the session chat
-    - Analysis job performs MapReduce over per-session transcripts using the Ollama chat API
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              THERASCRIPT ARCHITECTURE                           │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│   ┌─────────────┐         REST + SSE          ┌──────────────────────────────┐  │
+│   │             │◄──────────────────────────► │                              │  │
+│   │   React     │                             │     ElysiaJS API Server      │  │
+│   │   SPA UI    │                             │                              │  │
+│   │  (port 3002)│                             │         (port 3001)          │  │
+│   └─────────────┘                             └──────────────────────────────┘  │
+│                                                        │          │             │
+│                                                        │          │             │
+│                    ┌───────────────────────────────────┘          │             │
+│                    │                                              │             │
+│                    ▼                                              ▼             │
+│   ┌────────────────────────────┐              ┌──────────────────────────────┐  │
+│   │                            │   BullMQ     │                              │  │
+│   │      Redis (Queues)        │◄────────────►│    Background Worker         │  │
+│   │       (port 6379)          │   Jobs       │                              │  │
+│   │                            │              │   • Transcription Jobs       │  │
+│   └────────────────────────────┘              │   • Analysis Jobs            │  │
+│              │                                └──────────────────────────────┘  │
+│              │ Pub/Sub                                 │          │             │
+│              │ (progress)                              │          │             │
+│              ▼                                         │          │             │
+│   ┌────────────────────────────┐                       │          │             │
+│   │     SSE Streaming to UI    │                       │          │             │
+│   └────────────────────────────┘                       │          │             │
+│                                                        │          │             │
+│   ┌────────────────────────────┐                       │          │             │
+│   │                            │◄──────────────────────┘          │             │
+│   │   Whisper (Transcription)  │  HTTP Polling                    │             │
+│   │       (port 8000)          │                                  │             │
+│   └────────────────────────────┘                                  │             │
+│                                                                   │             │
+│   ┌────────────────────────────┐                                  │             │
+│   │                            │◄─────────────────────────────────┘             │
+│   │      Ollama (LLM)          │  HTTP Streaming                                │
+│   │       (port 11434)         │                                                │
+│   └────────────────────────────┘                                                │
+│                                                                                 │
+│   ┌────────────────────────────┐    ┌─────────────────────────────────────────┐ │
+│   │                            │    │                                         │ │
+│   │    Elasticsearch           │    │               SQLite                    │ │
+│   │     (port 9200)            │    │         (Primary Storage)               │ │
+│   │   (Full-Text Search)       │    │                                         │ │
+│   └────────────────────────────┘    └─────────────────────────────────────────┘ │
+│                                                                                 │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
 
-- Whisper (`packages/whisper`)
-  - Tech: Express (TypeScript), Python `transcribe.py`
-  - Entrypoint: `src/server.ts` → `src/routes.ts` → `src/jobManager.ts`
-  - Endpoints:
-    - POST `/transcribe` (multipart form with file) → returns `job_id`
-    - GET `/status/:job_id` → job state and result
-    - POST `/cancel/:job_id`
-    - GET `/health`
-  - Responsibilities:
-    - Run Python transcription in a subprocess, track progress, and expose job status
+## Package Organization
 
-- Ollama (`packages/ollama`)
-  - Tech: Node.js TypeScript
-  - Key: `src/ollamaClient.ts`, `src/dockerManager.ts`, `src/chatManager.ts`
-  - Responsibilities:
-    - Ensure Ollama Docker service is running and healthy
-    - Stream model pulls, check model availability, simple chat helper
+The monorepo is organized into three layers: **Application**, **Shared Libraries**, and **External Services**.
 
-- Elasticsearch Client (`packages/elasticsearch-client`)
-  - Tech: `@elastic/elasticsearch`
-  - Files: `src/client.ts`, `src/mappings.ts`, `src/searchUtils.ts`
-  - Responsibilities:
-    - Client singleton, index mappings, index init, indexing helpers, querying helpers, and common types
-    - Index names: `therascript_transcripts`, `therascript_messages`
+```
+packages/
+├── Application Layer
+│   ├── api/                    # ElysiaJS HTTP server
+│   ├── worker/                 # BullMQ background processor
+│   └── ui/                     # React SPA frontend
+│
+├── Shared Libraries
+│   ├── db/                     # SQLite + migrations + types
+│   ├── elasticsearch-client/   # ES client config + search utils
+│   ├── docker-utils/           # Container management helpers
+│   └── gpu-utils/              # NVIDIA GPU monitoring
+│
+└── External Service Wrappers
+    ├── ollama/                 # Ollama Docker management
+    ├── whisper/                # Python FastAPI transcription service
+    └── elasticsearch-manager/  # ES container management
+```
 
-- Database (`packages/db`)
-  - Tech: `better-sqlite3`
-  - Files: `src/sqliteService.ts`, `src/config.ts`
-  - Responsibilities:
-    - Initialize SQLite, run migrations (LATEST_SCHEMA_VERSION = 7)
-    - Seed system prompt templates
-    - Provide thin helpers for running queries
+### Application Layer
 
-- Docker Utils (`packages/docker-utils`)
-  - Tech: Node.js, Dockerode, docker compose CLI
-  - File: `src/index.ts`
-  - Responsibilities:
-    - Start/stop/check services using compose + Dockerode
-    - Health check helpers (HTTP or running)
+| Package | Type | Port | Description |
+|---------|------|------|-------------|
+| `packages/api` | ElysiaJS Server | 3001 | REST API, orchestration, SSE streaming, service management |
+| `packages/worker` | BullMQ Worker | — | Consumes `transcription-jobs` and `analysis-jobs` queues |
+| `packages/ui` | React 19 SPA | 3002 | User interface with Radix UI, Tailwind, TanStack Query, Jotai |
 
-- GPU Utils (`packages/gpu-utils`)
-  - Tech: Node.js, nvidia-smi
-  - File: `src/index.ts`
-  - Responsibilities:
-    - Parse `nvidia-smi -q -x` for UI GPU status
+### Shared Libraries
 
-- UI (`packages/ui`)
-  - Tech: React 19, TS, Radix UI, Tailwind, Webpack
-  - Entrypoint: `src/index.tsx`, App: `src/App.tsx`
-  - API client modules: `src/api/*`
-  - Main feature areas: `src/components/*`
+| Package | Primary Library | Purpose |
+|---------|-----------------|---------|
+| `packages/db` | better-sqlite3 | Database connection, migrations, shared TypeScript types |
+| `packages/elasticsearch-client` | @elastic/elasticsearch | Index mappings, search utilities, bulk operations |
+| `packages/docker-utils` | dockerode | Container health checks, start/stop helpers |
+| `packages/gpu-utils` | nvidia-smi (CLI) | GPU stats parsing for monitoring UI |
 
-## Runtime Topology
+### External Service Wrappers
 
-- Root `docker-compose.yml` manages:
-  - whisper (127.0.0.1:8000), elasticsearch (127.0.0.1:9200), kibana (127.0.0.1:5601), redis (127.0.0.1:6379)
-  - Whisper has GPU access when available
-- Ollama is managed by `packages/ollama/docker-compose.yml`
-- Dev and prod-like orchestration:
-  - `yarn dev` → runs API, UI, Worker, Whisper manager, ES manager via `scripts/run-dev.js`
-  - `yarn start` → prod-like via `scripts/run-prod.js`
+| Package | Technology | Purpose |
+|---------|------------|---------|
+| `packages/ollama` | Docker Compose | Ollama container config and lifecycle management |
+| `packages/whisper` | Python/FastAPI | Audio transcription service (OpenAI Whisper model) |
+| `packages/elasticsearch-manager` | dockerode | ES container health and management |
 
-## Data Flow (Happy Path)
+## Infrastructure Layer
 
-1) Upload audio via API → session created (SQLite)
-2) API enqueues transcription job (BullMQ → Redis)
-3) Worker transcription job:
-   - Calls Whisper `/transcribe`, polls `/status/:job_id`
-   - Groups segments to paragraphs; inserts into SQLite
-   - Indexes transcript paragraphs to Elasticsearch
-   - Marks session status completed; creates initial AI message; indexes message to Elasticsearch
-4) User chats about a session (API) → uses Ollama chat via HTTP, stores messages in SQLite and indexes to Elasticsearch
-5) Multi-session analysis request (API) → enqueue analysis job
-6) Worker analysis job:
-   - Map: For each selected session, ask Ollama to produce a per-session intermediate answer
-   - Reduce: Ask Ollama to synthesize a final answer from intermediates
-   - Store final result in SQLite
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        DATA STORAGE                                 │
+├─────────────────────────────┬───────────────────────────────────────┤
+│         SQLite              │           Elasticsearch               │
+│   (Primary Data Store)      │        (Search Index)                 │
+├─────────────────────────────┼───────────────────────────────────────┤
+│ • sessions                  │ • therascript_transcripts             │
+│ • transcript_paragraphs     │   (full-text search on transcripts)   │
+│ • chats                     │                                       │
+│ • messages                  │ • therascript_messages                │
+│ • analysis_jobs             │   (full-text search on chat history)  │
+│ • intermediate_summaries    │                                       │
+│ • message_templates         │                                       │
+│ • settings                  │                                       │
+│ • system_prompts            │                                       │
+└─────────────────────────────┴───────────────────────────────────────┘
 
-## Key Queues
+┌─────────────────────────────────────────────────────────────────────┐
+│                     JOB QUEUE (Redis + BullMQ)                      │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│   transcription-jobs                 analysis-jobs                  │
+│   ┌──────────────────┐              ┌──────────────────┐            │
+│   │ sessionId        │              │ jobId            │            │
+│   │ audioPath        │              │ strategy (JSON)  │            │
+│   │ modelName        │              │ sessionIds[]     │            │
+│   └──────────────────┘              └──────────────────┘            │
+│                                                                     │
+│   Redis Pub/Sub Channels:                                           │
+│   • analysis-progress:{jobId}  →  Real-time token streaming to UI   │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
 
-- Transcription: `transcription-jobs`
-- Analysis: `analysis-jobs`
+┌─────────────────────────────────────────────────────────────────────┐
+│                      AI SERVICES (Docker)                           │
+├──────────────────────────────────┬──────────────────────────────────┤
+│          Ollama                  │           Whisper                │
+│        (port 11434)              │         (port 8000)              │
+├──────────────────────────────────┼──────────────────────────────────┤
+│ • LLM inference                  │ • Audio transcription            │
+│ • Model management               │ • OpenAI Whisper model           │
+│   (pull, load, unload, delete)   │ • GPU acceleration (CUDA)        │
+│ • Streaming responses            │ • Status polling                 │
+│ • Context window management      │                                  │
+└──────────────────────────────────┴──────────────────────────────────┘
+```
 
-## Important Environment Variables
+## Communication Patterns
 
-- API: `PORT` (default 3001), `CORS_ORIGIN`, `DB_PATH`, `DB_UPLOADS_DIR`, `ELASTICSEARCH_URL`, `REDIS_HOST/PORT`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `WHISPER_API_URL`, `WHISPER_MODEL`
-- Worker: similar to API (`DB_PATH`, service URLs)
-- Whisper: `PORT`, `TEMP_INPUT_DIR`, `TEMP_OUTPUT_DIR`
+### 1. API ↔ UI: REST + Server-Sent Events
 
-## Health and Startup
+```
+UI                                  API
+│                                    │
+│──── POST /api/sessions ──────────► │  (Upload audio)
+│◄─── { sessionId, status } ──────── │
+│                                    │
+│──── POST /api/chats/:id/messages ─►│  (Send chat message)
+│◄═══ SSE: token stream ═══════════  │  (Streaming response)
+│                                    │
+│──── GET /api/analysis-jobs/:id/stream ─►│
+│◄═══ SSE: progress updates ════════ │  (Real-time analysis progress)
+```
 
-- API boot: configures DB path, checks Elasticsearch health and initializes indices (`initializeIndices`) and logs model/context
-- Whisper: `/health` for compose healthcheck
-- Elasticsearch: healthcheck via `_cat/health`
-- Run wrappers (`scripts/run-dev.js`, `scripts/run-prod.js`) ensure Redis is up and handle shutdown + cleanup
+### 2. API ↔ Worker: BullMQ Job Queues
 
-## Indexing Schema (Elasticsearch)
+```
+API                         Redis (BullMQ)                    Worker
+│                                │                               │
+│── add(transcription-jobs) ───► │                               │
+│                                │ ◄── process(transcription) ── │
+│                                │                               │
+│── add(analysis-jobs) ────────► │                               │
+│                                │ ◄── process(analysis) ─────── │
+│                                │                               │
+│                                │ ◄── publish(progress) ─────── │
+│◄─ subscribe(progress) ──────── │                               │
+```
 
-- Transcripts index (`therascript_transcripts`): paragraph-level docs with stemmed sub-field
-- Messages index (`therascript_messages`): chat messages with stemmed sub-field and metadata
+### 3. Worker ↔ Whisper: HTTP Polling
 
-## Database Schema Highlights
+```
+Worker                              Whisper Service
+│                                        │
+│─── POST /transcribe (audio file) ────► │
+│◄── { job_id, status: "processing" } ── │
+│                                        │
+│─── GET /status/{job_id} ─────────────► │  (poll every N seconds)
+│◄── { status: "processing" } ────────── │
+│                                        │
+│─── GET /status/{job_id} ─────────────► │
+│◄── { status: "completed", result } ─── │
+```
 
-- sessions, transcript_paragraphs, chats, messages, templates
-- analysis_jobs, analysis_job_sessions, intermediate_summaries
-- Migrations in `packages/db/src/sqliteService.ts` up to version 7 (adds `system` sender, strategy fields, unique templates, etc.)
+### 4. API/Worker ↔ Ollama: HTTP Streaming
 
-## Where To Implement
+```
+API/Worker                          Ollama Service
+│                                        │
+│─── POST /api/chat (stream: true) ────► │
+│◄═══ chunked response (tokens) ═══════  │  (streaming)
+│◄═══ chunked response (tokens) ═══════  │
+│◄─── { done: true } ──────────────────  │
+```
 
-- New REST API endpoint → `packages/api/src/routes/*` + service + repository
-- New background job → `packages/worker/src/jobs/*` + add worker wiring in `src/index.ts`
-- Change transcription behavior → Worker `transcriptionProcessor.ts` and Whisper service
-- Change multi-session analysis → Worker `analysisProcessor.ts` and API service that creates jobs
-- Search-related behavior → `packages/elasticsearch-client` helpers and `api/src/routes/searchRoutes.ts`
-- Ollama model mgmt → `packages/ollama/src/*` and `api/src/routes/ollamaRoutes.ts`
-- DB schema change → `packages/db/src/sqliteService.ts` (new migration version) and repositories
-- UI features → `packages/ui/src/components/*` and API bindings in `src/api/*`
+### 5. Real-Time Progress: Redis Pub/Sub
+
+```
+Worker                    Redis                       API                      UI
+│                           │                          │                        │
+│── PUBLISH progress ─────► │                          │                        │
+│                           │ ─── message ───────────► │                        │
+│                           │                          │ ═══ SSE stream ══════► │
+```
+
+## Data Flow Summary
+
+### Transcription Pipeline
+
+```
+┌──────┐    ┌─────┐    ┌───────┐    ┌────────┐    ┌─────────┐    ┌────────┐
+│  UI  │───►│ API │───►│ Redis │───►│ Worker │───►│ Whisper │───►│ SQLite │
+└──────┘    └─────┘    └───────┘    └────────┘    └─────────┘    │   ES   │
+                                                                 └────────┘
+1. Upload audio          2. Queue job       3. Process       4. Transcribe    5. Store
+```
+
+### Chat Pipeline (RAG)
+
+```
+┌──────┐    ┌─────┐    ┌────────┐    ┌────────┐    ┌──────┐
+│  UI  │◄══►│ API │───►│ SQLite │    │ Ollama │◄───│ API  │
+└──────┘SSE └─────┘    └────────┘    └────────┘    └──────┘
+                            │                         │
+                   1. Fetch context          2. Stream inference
+```
+
+### Multi-Session Analysis (MapReduce)
+
+```
+┌──────┐    ┌─────┐    ┌───────┐    ┌────────┐    ┌────────┐    ┌────────┐
+│  UI  │───►│ API │───►│ Redis │───►│ Worker │───►│ Ollama │───►│ SQLite │
+└──────┘    └─────┘    └───────┘    └────────┘    └────────┘    └────────┘
+              │                          │              │
+         1. Generate              2. Map Phase    3. Reduce Phase
+            Strategy              (per session)   (aggregate)
+              │                          │              │
+              ▼                          ▼              ▼
+         ┌──────────────────────────────────────────────────┐
+         │           Redis Pub/Sub (progress updates)       │
+         └──────────────────────────────────────────────────┘
+                              │
+                              ▼
+                         ┌──────┐
+                         │  UI  │  (SSE streaming)
+                         └──────┘
+```
+
+## Port Reference
+
+| Service | Default Port | Purpose |
+|---------|--------------|---------|
+| UI | 3002 | React SPA (Webpack Dev Server) |
+| API | 3001 | ElysiaJS REST API |
+| Redis | 6379 | BullMQ job queues + Pub/Sub |
+| Elasticsearch | 9200 | Full-text search API |
+| Kibana | 5601 | ES data exploration (dev only) |
+| Ollama | 11434 | LLM inference API |
+| Whisper | 8000 | Transcription API |
+
+## Technology Stack Summary
+
+| Layer | Technology |
+|-------|------------|
+| **Frontend** | React 19, TypeScript, Radix UI, Tailwind CSS, TanStack Query, Jotai |
+| **Backend** | ElysiaJS, TypeScript, BullMQ |
+| **Database** | SQLite (better-sqlite3) |
+| **Search** | Elasticsearch 8.x |
+| **Job Queue** | Redis + BullMQ |
+| **LLM** | Ollama (Llama, Mistral, Gemma) |
+| **Transcription** | OpenAI Whisper (PyTorch/CUDA) |
+| **Containerization** | Docker, Docker Compose |
+| **Monorepo** | Lerna, Yarn Workspaces |
+
+## Related Documentation
+
+- [Component Map](COMPONENT_MAP.md) - Detailed package breakdown and library usage
+- [Data Flows](DATA_FLOWS.md) - Step-by-step operational workflows
+- [Schema Reference](SCHEMA_REFERENCE.md) - SQLite tables and ES indices

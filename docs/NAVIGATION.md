@@ -1,104 +1,237 @@
-# Therascript Navigation Cheatsheet
+# Therascript Navigation Guide
 
-Use this as a fast map from common tasks to the exact files and modules to touch.
+> **"Where to change what"** — A quick reference for developers and LLMs to locate code by feature area.
 
-## Quick Pointers
+---
 
-- Start all services (dev): root `scripts/run-dev.js` → `yarn dev`
-- Start core services (compose): root `docker-compose.yml` → whisper, elasticsearch, redis, kibana
-- API server: `packages/api/src/server.ts`
-- API config and envs: `packages/api/src/config/index.ts` (reads `.env.api.*`)
-- Worker entry: `packages/worker/src/index.ts` (reads `.env.worker.*`)
-- Whisper service: `packages/whisper/src/server.ts` + `src/routes.ts` + `transcribe.py`
-- Ollama management: `packages/ollama/src/dockerManager.ts`, `src/ollamaClient.ts`
-- DB migrations: `packages/db/src/sqliteService.ts`
-- Elasticsearch mappings: `packages/elasticsearch-client/src/mappings.ts`
-- UI app: `packages/ui/src/App.tsx`, feature components in `src/components/*`
+## API Layer (`packages/api/src/`)
 
-### Per-package developer notes
+### Entry Point
+- [`server.ts`](../packages/api/src/server.ts) — Express app setup, middleware, route registration
 
-- API: packages/api/DEV_NOTES.md
-- Worker: packages/worker/DEV_NOTES.md
-- Whisper: packages/whisper/DEV_NOTES.md
-- Ollama: packages/ollama/DEV_NOTES.md
-- Elasticsearch Client: packages/elasticsearch-client/DEV_NOTES.md
-- Elasticsearch Manager: packages/elasticsearch-manager/DEV_NOTES.md
-- DB (SQLite): packages/db/DEV_NOTES.md
-- Docker Utils: packages/docker-utils/DEV_NOTES.md
-- GPU Utils: packages/gpu-utils/DEV_NOTES.md
-- UI: packages/ui/DEV_NOTES.md
+### Routes (`/routes/*.ts`) — HTTP endpoint definitions
+| File | Purpose |
+|------|---------|
+| `sessionRoutes.ts` | Session CRUD, file upload |
+| `chatRoutes.ts` | Session-bound chat endpoints |
+| `standaloneChatRoutes.ts` | Standalone chat (no session context) |
+| `analysisRoutes.ts` | Multi-session analysis jobs |
+| `transcriptionRoutes.ts` | Transcription status, polling |
+| `searchRoutes.ts` | Elasticsearch search endpoints |
+| `ollamaRoutes.ts` | Model management (list, load, unload) |
+| `templateRoutes.ts` | Prompt template CRUD |
+| `systemRoutes.ts` | System prompts management |
+| `jobsRoutes.ts` | Background job status |
+| `dockerRoutes.ts` | Docker container management |
+| `adminRoutes.ts` | Admin/debug endpoints |
+| `metaRoutes.ts` | Health checks, readiness |
 
-## Common Scenarios
+### Handlers (`/api/*.ts`) — Business logic for complex operations
+| File | Purpose |
+|------|---------|
+| `sessionHandler.ts` | Session creation, deletion logic |
+| `sessionChatHandler.ts` | RAG chat with transcript context |
+| `standaloneChatHandler.ts` | General-purpose chat (no context) |
+| `analysisHandler.ts` | Strategy generation, MapReduce orchestration |
+| `templateHandler.ts` | Template management logic |
+| `jobsHandler.ts` | Job queue operations |
+| `gpuHandler.ts` | GPU availability checks |
+| `metaHandler.ts` | System metadata, readiness |
+| `adminHandler.ts` | Admin operations |
 
-1) Add a new API endpoint
-- Create a route in `packages/api/src/routes/YourThingRoutes.ts`
-- Add business logic in `packages/api/src/services/YourThingService.ts`
-- Persist/Query via `packages/api/src/repositories/*`
-- Wire the route into the app in `src/server.ts` with `.use(yourRoutes)`
-- Add UI calls in `packages/ui/src/api/yourThing.ts` and components under `src/components`
+### Services (`/services/*.ts`) — External integrations & utilities
+| File | Purpose |
+|------|---------|
+| `ollamaService.ts` | LLM inference (facade for mock/real) |
+| `ollamaService.real.ts` | Actual Ollama API client |
+| `ollamaService.mock.ts` | Mock for testing |
+| `ollamaRuntime.ts` | Model lifecycle management |
+| `activeModelService.ts` | Track currently loaded model |
+| `transcriptionService.ts` | Whisper integration (facade) |
+| `transcriptionService.real.ts` | Actual Whisper API client |
+| `fileService.ts` | Audio file handling, storage |
+| `jobQueueService.ts` | BullMQ job submission |
+| `analysisJobService.ts` | Analysis job orchestration |
+| `dockerManagementService.ts` | Container start/stop |
+| `gpuService.ts` | GPU detection |
+| `tokenizerService.ts` | Token counting |
+| `contextUsageService.ts` | Context window tracking |
+| `streamSubscriber.ts` | Redis pub/sub for streaming |
+| `redisConnection.ts` | Redis client singleton |
 
-2) Fix a bug in transcription flow
-- Worker job: `packages/worker/src/jobs/transcriptionProcessor.ts`
-- API routes kicking off jobs: `packages/api/src/routes/transcriptionRoutes.ts`
-- Whisper backend: `packages/whisper/src/routes.ts`, `src/jobManager.ts`, and `transcribe.py`
-- ES indexing helpers: `packages/elasticsearch-client/src/searchUtils.ts`
-- DB schema/columns: `packages/db/src/sqliteService.ts`
+### Repositories (`/repositories/*.ts`) — Database access patterns
+| File | Purpose |
+|------|---------|
+| `sessionRepository.ts` | Sessions table operations |
+| `chatRepository.ts` | Chats table operations |
+| `messageRepository.ts` | Messages table operations |
+| `transcriptRepository.ts` | Transcript paragraphs + ES queries |
+| `analysisRepository.ts` | Analysis jobs table operations |
+| `templateRepository.ts` | Templates table operations |
 
-3) Change multi-session analysis behavior
-- Worker job: `packages/worker/src/jobs/analysisProcessor.ts`
-- Strategy generation or job creation: `packages/api/src/services/analysisJobService.ts` and route `src/routes/analysisRoutes.ts`
-- Types and repository access: `packages/api/src/types/*`, `src/repositories/analysisRepository.ts`
+---
 
-4) Update search behavior
-- Query code and helpers: `packages/elasticsearch-client/src/searchUtils.ts`
-- Index mappings: `packages/elasticsearch-client/src/mappings.ts`
-- API search routes: `packages/api/src/routes/searchRoutes.ts`
-- UI search: `packages/ui/src/components/Search/*` and `src/api/search.ts`
+## Worker (`packages/worker/src/`)
 
-5) Add a new background job type
-- Define processor in `packages/worker/src/jobs/*`
-- Export queue name from the job module
-- Wire a Worker in `packages/worker/src/index.ts`
-- Expose API endpoints to enqueue or monitor in `packages/api/src/routes/jobsRoutes.ts`
+### Entry Point
+- [`index.ts`](../packages/worker/src/index.ts) — BullMQ worker initialization, queue setup
 
-6) Change how files are stored or located
-- File resolution and upload constraints: `packages/api/src/services/fileService.ts` and `src/config/index.ts`
-- DB `uploadsDir` and `DB_PATH` come from env via the config
+### Job Processors (`/jobs/*.ts`)
+| File | Purpose |
+|------|---------|
+| `transcriptionProcessor.ts` | "The Ears" — Whisper job processing, ES indexing |
+| `analysisProcessor.ts` | "The Analyst" — MapReduce analysis execution |
 
-7) Ollama model issues (not pulled, bad health)
-- Health/ensure/start: `packages/ollama/src/dockerManager.ts` and `@therascript/docker-utils`
-- Model chat and list: `packages/ollama/src/ollamaClient.ts`
-- API routes: `packages/api/src/routes/ollamaRoutes.ts`
+### Services (`/services/*.ts`)
+| File | Purpose |
+|------|---------|
+| `streamPublisher.ts` | Redis pub/sub for real-time streaming to UI |
 
-8) GPU stats not showing correctly
-- Stats collector: `packages/gpu-utils/src/index.ts`
-- UI consumption: search in `packages/ui` for GPU-related hooks/components
+### Other Files
+| File | Purpose |
+|------|---------|
+| `redisConnection.ts` | Redis client for BullMQ |
+| `types.ts` | Worker-specific type definitions |
 
-9) Database migrations or seeding
-- Add a migration step by increasing `LATEST_SCHEMA_VERSION` and appending steps in `packages/db/src/sqliteService.ts`
-- Seed system templates in the same file (see `SYSTEM_PROMPT_TEMPLATES`)
+---
 
-10) Dev and prod-like run issues
-- Wrappers: `scripts/run-dev.js` and `scripts/run-prod.js` (they ensure Redis, manage shutdown, and clean up containers)
-- Environment files: `.env.api.dev`, `.env.worker.dev`, `.env.api.prod`, `.env.worker.prod`
+## UI (`packages/ui/src/`)
 
-## Important Types and Contracts
+### Entry Points
+- [`index.tsx`](../packages/ui/src/index.tsx) — React DOM render
+- [`App.tsx`](../packages/ui/src/App.tsx) — Root component, routing, theme, layout
 
-- Analysis job types: `packages/api/src/types/*` and DB tables in `packages/db/src/sqliteService.ts`
-- Transcription types and ES documents: `packages/elasticsearch-client/src/searchUtils.ts`
-- Worker job data: `packages/worker/src/types.ts`
-- Chat message type: `packages/api/src/types/index.ts` (sender: 'user' | 'ai' | 'system') maps to DB and ES
+### Routes (defined in `App.tsx`)
+| Path | Component |
+|------|-----------|
+| `/` | `LandingPage` |
+| `/sessions/:sessionId` | `SessionView` |
+| `/sessions/:sessionId/chats/:chatId` | `SessionView` |
+| `/chats/:chatId` | `StandaloneChatView` |
+| `/sessions-list` | `SessionsPage` |
+| `/chats-list` | `StandaloneChatsPage` |
+| `/templates` | `TemplatesPage` |
+| `/analysis-jobs` | `AnalysisJobsPage` |
+| `/settings` | `SettingsPage` |
 
-## Fast Grep Targets
+### Pages (`/components/*.tsx`)
+| File | Purpose |
+|------|---------|
+| `SessionsPage.tsx` | Sessions list view |
+| `StandaloneChatsPage.tsx` | Standalone chats list |
+| `SettingsPage.tsx` | App settings |
+| `TemplatesPage.tsx` | Prompt templates management |
+| `SystemPromptsPage.tsx` | System prompts editor |
 
-- Enqueue transcription: `addJob('transcription-jobs'` in API services/routes
-- Enqueue analysis: `addJob('analysis-jobs'` in API services/routes
-- ES index names: `TRANSCRIPTS_INDEX`, `MESSAGES_INDEX`
-- Whisper endpoints: `/transcribe`, `/status/:job_id`
-- Ollama chat: POST `${OLLAMA_BASE_URL}/api/chat`
+### Feature Components (`/components/{Feature}/`)
+| Directory | Purpose |
+|-----------|---------|
+| `Analysis/` | Analysis jobs UI, `AnalysisJobsPage.tsx` |
+| `SessionView/` | Session detail, chat, transcript display |
+| `StandaloneChatView/` | Standalone chat interface |
+| `Search/` | Search UI components |
+| `Transcription/` | Transcription progress, display |
+| `UploadModal/` | File upload modal |
+| `Layout/` | Sidebar, toolbar, background |
+| `LandingPage/` | Home/landing page |
+| `Shared/` | Reusable UI components |
+| `Jobs/` | Job status components |
+| `User/` | User-related components |
 
-## Cross-Cutting Notes
+### API Clients (`/api/*.ts`) — Typed API wrappers
+| File | Purpose |
+|------|---------|
+| `api.ts` | Base axios configuration |
+| `session.ts` | Session API calls |
+| `chat.ts` | Chat API calls |
+| `analysis.ts` | Analysis job API calls |
+| `search.ts` | Search API calls |
+| `ollama.ts` | Model management API |
+| `transcription.ts` | Transcription API |
+| `templates.ts` | Templates API |
+| `system.ts` | System prompts API |
+| `jobs.ts` | Jobs API |
+| `docker.ts` | Docker management API |
+| `meta.ts` | Health/readiness API |
 
-- API and Worker both configure DB paths on boot based on their own `.env` files; ensure both point to the same SQLite file in dev
-- Elasticsearch indices are initialized on API startup; worker uses the same client helpers for indexing
-- Routes wire order in `api/src/server.ts` matters only for docs grouping; errors handled centrally with helpful logs
+### React Hooks (`/hooks/*.ts`)
+| File | Purpose |
+|------|---------|
+| `useMessageStream.ts` | SSE streaming for chat messages |
+| `useAnalysisStream.ts` | SSE streaming for analysis results |
+| `useAnimatedText.tsx` | Text animation effects |
+
+### State Management (`/store/*.ts`) — Jotai atoms
+| Directory/File | Purpose |
+|----------------|---------|
+| `action/` | Action-related atoms |
+| `chat/` | Chat state atoms |
+| `navigation/` | Navigation state (currentPageAtom) |
+| `session/` | Session state atoms |
+| `ui/` | UI state (sidebar, theme, modals) |
+| `analysisJobSortCriteriaAtom.ts` | Analysis sorting state |
+| `standaloneChatSortCriteriaAtom.ts` | Chat sorting state |
+
+---
+
+## Shared Packages
+
+### Database (`packages/db/src/`)
+| File | Purpose |
+|------|---------|
+| `sqliteService.ts` | Schema definition, migrations, system prompt templates |
+| `config.ts` | Database path configuration |
+| `types.ts` | Database type definitions |
+
+### Elasticsearch (`packages/elasticsearch-client/src/`)
+| File | Purpose |
+|------|---------|
+| `mappings.ts` | Index mappings (therascript_transcripts) |
+| `client.ts` | ES client singleton |
+| `searchUtils.ts` | Search query builders |
+
+---
+
+## Common Tasks Quick Reference
+
+| Task | Where to Change |
+|------|-----------------|
+| **Add new API endpoint** | 1. `packages/api/src/routes/*.ts` (define route)<br>2. `packages/api/src/api/*.ts` (add handler if complex) |
+| **Add new SQLite table** | `packages/db/src/sqliteService.ts` (schema + add migration in `runMigrations()`) |
+| **Add new ES index** | `packages/elasticsearch-client/src/mappings.ts` |
+| **Add new background job** | 1. `packages/worker/src/jobs/*.ts` (processor)<br>2. `packages/api/src/services/jobQueueService.ts` (queue submission) |
+| **Modify system prompts** | `packages/db/src/sqliteService.ts` (`SYSTEM_PROMPT_TEMPLATES`) |
+| **Add new UI page** | 1. `packages/ui/src/components/*.tsx` (page component)<br>2. `packages/ui/src/App.tsx` (add route) |
+| **Add new API client** | `packages/ui/src/api/*.ts` |
+| **Add new Jotai atom** | `packages/ui/src/store/*.ts` |
+| **Add new React hook** | `packages/ui/src/hooks/*.ts` |
+| **Add new repository** | `packages/api/src/repositories/*.ts` |
+| **Add new service** | `packages/api/src/services/*.ts` |
+
+---
+
+## Key Files Summary
+
+```
+packages/
+├── api/src/
+│   ├── server.ts              # API entry point
+│   ├── routes/*.ts            # HTTP endpoints
+│   ├── api/*.ts               # Business logic handlers
+│   ├── services/*.ts          # External integrations
+│   └── repositories/*.ts      # Database access
+├── worker/src/
+│   ├── index.ts               # Worker entry point
+│   └── jobs/*.ts              # Job processors
+├── ui/src/
+│   ├── App.tsx                # UI entry + routing
+│   ├── components/*.tsx       # Pages
+│   ├── components/{Feature}/  # Feature components
+│   ├── api/*.ts               # API clients
+│   ├── hooks/*.ts             # React hooks
+│   └── store/*.ts             # Jotai state
+├── db/src/
+│   └── sqliteService.ts       # Schema + prompts
+└── elasticsearch-client/src/
+    └── mappings.ts            # ES index definitions
+```

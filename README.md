@@ -73,9 +73,14 @@ Therascript is a monorepo organized into several packages:
 
 ## Further documentation
 
-- TL;DR for Copilot: COPILOT.md
-- Architecture overview: docs/ARCHITECTURE.md
-- Navigation cheatsheet (where to change what): docs/NAVIGATION.md
+- **[AGENTS.md](AGENTS.md)**: LLM-focused overview of agents, workflows, and links to all docs
+- **[COPILOT.md](COPILOT.md)**: TL;DR for Copilot
+- **[Architecture Overview](docs/ARCHITECTURE.md)**: High-level system architecture, package organization
+- **[Navigation Guide](docs/NAVIGATION.md)**: "Where to change what" cheatsheet
+- **[Component Map](docs/COMPONENT_MAP.md)**: Detailed package breakdown and libraries
+- **[API Reference](docs/API_REFERENCE.md)**: Complete REST API endpoint documentation
+- **[Data Flows](docs/DATA_FLOWS.md)**: Step-by-step operational workflows
+- **[Schema Reference](docs/SCHEMA_REFERENCE.md)**: SQLite tables and Elasticsearch indices
 
 ## Prerequisites
 
