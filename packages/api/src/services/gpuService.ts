@@ -1,4 +1,5 @@
 // packages/api/src/services/gpuService.ts
+import os from 'os';
 import { getGpuStats } from '@therascript/gpu-utils';
 import type { GpuStats } from '@therascript/gpu-utils';
 import config from '../config/index.js';
@@ -30,6 +31,9 @@ export async function getGpuStatsService(): Promise<RuntimeAwareGpuStats> {
   } catch (error) {
     // If fetching fails, return an 'unavailable' state but don't cache it
     console.error('[GpuService] Failed to get GPU stats:', error);
+    const totalBytes = os.totalmem();
+    const freeBytes = os.freemem();
+    const usedBytes = totalBytes - freeBytes;
     return {
       available: false,
       driverVersion: null,
@@ -46,6 +50,12 @@ export async function getGpuStatsService(): Promise<RuntimeAwareGpuStats> {
         totalPowerLimitWatts: null,
       },
       executionProvider: determineExecutionProvider(null),
+      systemMemory: {
+        totalMb: Math.round(totalBytes / (1024 * 1024)),
+        usedMb: Math.round(usedBytes / (1024 * 1024)),
+        freeMb: Math.round(freeBytes / (1024 * 1024)),
+        percentUsed: (usedBytes / totalBytes) * 100,
+      },
     };
   }
 }

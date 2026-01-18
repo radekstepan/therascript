@@ -1,3 +1,2 @@
-- add system ram progress bar
 - add token in out per model usage + whisper usage (cost?)
 - do a system review of any inefficiencies

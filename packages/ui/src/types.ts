@@ -9,6 +9,13 @@ export interface ActiveJobCount {
 // --- END NEW ---
 
 // --- NEW GPU STATS TYPES ---
+export interface SystemMemory {
+  totalMb: number;
+  usedMb: number;
+  freeMb: number;
+  percentUsed: number;
+}
+
 export interface GpuProcess {
   pid: number;
   name: string;
@@ -55,6 +62,7 @@ export interface GpuStats {
     totalPowerLimitWatts: number | null;
   };
   executionProvider?: 'gpu' | 'cpu' | 'metal';
+  systemMemory: SystemMemory;
 }
 // --- END NEW GPU STATS TYPES ---
 

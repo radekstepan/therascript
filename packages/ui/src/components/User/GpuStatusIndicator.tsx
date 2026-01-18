@@ -85,6 +85,14 @@ export function GpuStatusIndicator({
     return 'sky';
   };
 
+  const getRamColor = (
+    value: number
+  ): React.ComponentProps<typeof Progress>['color'] => {
+    if (value > 90) return 'red';
+    if (value > 75) return 'amber';
+    return 'purple';
+  };
+
   return (
     <>
       <button
@@ -140,6 +148,17 @@ export function GpuStatusIndicator({
                       ? 'CPU-only runtime.'
                       : 'Runtime data unavailable.'}
               </Text>
+            )}
+            {gpuStats?.systemMemory && (
+              <Tooltip
+                content={`System RAM: ${prettyBytes(gpuStats.systemMemory.usedMb * 1024 * 1024)} / ${prettyBytes(gpuStats.systemMemory.totalMb * 1024 * 1024)}`}
+              >
+                <Progress
+                  size="1"
+                  value={gpuStats.systemMemory.percentUsed}
+                  color={getRamColor(gpuStats.systemMemory.percentUsed)}
+                />
+              </Tooltip>
             )}
             {error && (
               <Text size="1" color="red">

@@ -73,6 +73,13 @@ export interface GpuDeviceStats {
   processes: GpuProcess[];
 }
 
+export interface SystemMemory {
+  totalMb: number;
+  usedMb: number;
+  freeMb: number;
+  percentUsed: number;
+}
+
 export interface GpuStats {
   available: boolean;
   driverVersion: string | null;
@@ -89,4 +96,5 @@ export interface GpuStats {
     totalPowerLimitWatts: number | null;
   };
   executionProvider?: 'gpu' | 'cpu' | 'metal';
+  systemMemory: SystemMemory;
 }

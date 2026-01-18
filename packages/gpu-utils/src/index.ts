@@ -3,6 +3,7 @@ import { promisify } from 'util';
 import { exec } from 'child_process';
 import { XMLParser } from 'fast-xml-parser';
 import which from 'which';
+import os from 'os';
 import type {
   GpuStats,
   GpuDeviceStats,
@@ -24,6 +25,19 @@ const xmlParser = new XMLParser({
 
 let _nvidiaSmiPath: string | null = null;
 let _nvidiaSmiChecked = false;
+
+function getSystemMemoryStats() {
+  const totalBytes = os.totalmem();
+  const freeBytes = os.freemem();
+  const usedBytes = totalBytes - freeBytes;
+
+  return {
+    totalMb: Math.round(totalBytes / (1024 * 1024)),
+    usedMb: Math.round(usedBytes / (1024 * 1024)),
+    freeMb: Math.round(freeBytes / (1024 * 1024)),
+    percentUsed: (usedBytes / totalBytes) * 100,
+  };
+}
 
 async function getNvidiaSmiPath(): Promise<string | null> {
   if (_nvidiaSmiChecked) {
@@ -159,6 +173,7 @@ function formatGpuDetails(rawJson: {
       totalPowerLimitWatts:
         summary.totalPowerLimitWatts > 0 ? summary.totalPowerLimitWatts : null,
     },
+    systemMemory: getSystemMemoryStats(),
   };
 }
 
@@ -180,6 +195,7 @@ export async function getGpuStats(): Promise<GpuStats> {
         totalPowerDrawWatts: null,
         totalPowerLimitWatts: null,
       },
+      systemMemory: getSystemMemoryStats(),
     };
   }
   try {

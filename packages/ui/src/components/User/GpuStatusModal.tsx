@@ -53,6 +53,15 @@ const getVramColor = (
   return 'sky';
 };
 
+const getRamColor = (
+  value: number | null
+): React.ComponentProps<typeof Progress>['color'] => {
+  if (value === null) return 'gray';
+  if (value > 90) return 'red';
+  if (value > 75) return 'amber';
+  return 'purple';
+};
+
 const StatRow: React.FC<{ label: string; value: React.ReactNode }> = ({
   label,
   value,
@@ -249,6 +258,39 @@ const ActiveModelCard: React.FC<{ status: OllamaStatus }> = ({ status }) => {
   );
 };
 
+const SystemMemoryCard: React.FC<{
+  memory: import('../../types').SystemMemory;
+}> = ({ memory }) => (
+  <Card size="2">
+    <Flex direction="column" gap="3">
+      <Heading as="h3" size="4">
+        System Memory
+      </Heading>
+      <Flex direction="column" gap="2">
+        <ProgressBar
+          value={memory.percentUsed}
+          label="RAM Usage"
+          colorFn={getRamColor}
+        />
+      </Flex>
+      <Flex direction="column" gap="1">
+        <StatRow
+          label="Total RAM"
+          value={prettyBytes(memory.totalMb * 1024 * 1024)}
+        />
+        <StatRow
+          label="Used"
+          value={prettyBytes(memory.usedMb * 1024 * 1024)}
+        />
+        <StatRow
+          label="Free"
+          value={prettyBytes(memory.freeMb * 1024 * 1024)}
+        />
+      </Flex>
+    </Flex>
+  </Card>
+);
+
 export function GpuStatusModal({
   isOpen,
   onOpenChange,
@@ -319,6 +361,13 @@ export function GpuStatusModal({
                       <Separator size="4" />
                     </>
                   )}
+
+                {gpuStats?.systemMemory && (
+                  <>
+                    <SystemMemoryCard memory={gpuStats.systemMemory} />
+                    <Separator size="4" />
+                  </>
+                )}
 
                 {!gpuStats?.available ? (
                   <Callout.Root color="amber">

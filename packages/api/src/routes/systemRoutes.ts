@@ -44,6 +44,13 @@ const GpuStatsSummarySchema = t.Object({
   totalPowerLimitWatts: t.Nullable(t.Number()),
 });
 
+const SystemMemorySchema = t.Object({
+  totalMb: t.Number(),
+  usedMb: t.Number(),
+  freeMb: t.Number(),
+  percentUsed: t.Number(),
+});
+
 const GpuStatsResponseSchema = t.Object({
   available: t.Boolean(),
   driverVersion: t.Nullable(t.String()),
@@ -55,6 +62,7 @@ const GpuStatsResponseSchema = t.Object({
     t.Literal('cpu'),
     t.Literal('metal'),
   ]),
+  systemMemory: SystemMemorySchema,
 });
 // --- End GPU Stats Schemas ---
 
