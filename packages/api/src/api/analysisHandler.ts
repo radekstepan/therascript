@@ -21,6 +21,7 @@ import type {
 } from '../types/index.js';
 import { cleanLlmOutput } from '../utils/helpers.js';
 import type { ChatResponse } from 'ollama';
+import { createJobSubscriber } from '../services/streamSubscriber.js';
 
 // This helper is also in analysisJobService.ts. Consider moving to a shared util.
 async function accumulateStreamResponse(
@@ -369,4 +370,63 @@ export const deleteAnalysisJobHandler = ({
       error instanceof Error ? error : undefined
     );
   }
+};
+
+export const streamAnalysisJobHandler = ({ params, set }: any) => {
+  const jobId = parseInt(params.jobId, 10);
+  const job = analysisRepository.getJobById(jobId);
+
+  if (!job) {
+    set.status = 404;
+    return new Response('Job not found', { status: 404 });
+  }
+
+  // Create stream with proper cleanup handling
+  let unsubscribe: (() => void) | null = null;
+
+  const stream = new ReadableStream({
+    start(controller) {
+      const encoder = new TextEncoder();
+
+      const send = (data: any) => {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+      };
+
+      // 1. Send initial snapshot
+      const snapshot = {
+        type: 'snapshot',
+        phase: 'status' as const,
+        job,
+        summaries: analysisRepository.getAllSummariesForJob(jobId),
+      };
+      send(snapshot);
+
+      // 2. Subscribe to Redis events
+      unsubscribe = createJobSubscriber(jobId, (event) => {
+        send(event);
+
+        // Close stream if job reaches terminal state
+        if (
+          event.type === 'status' &&
+          ['completed', 'failed', 'canceled'].includes(event.status!)
+        ) {
+          console.log(`[Stream API] Job ${jobId} finished. Closing stream.`);
+          controller.close();
+          unsubscribe?.();
+        }
+      });
+    },
+    cancel() {
+      console.log(`[Stream API] Client disconnected from job ${jobId} stream.`);
+      unsubscribe?.();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    },
+  });
 };

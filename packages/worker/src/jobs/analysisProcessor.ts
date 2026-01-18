@@ -10,30 +10,61 @@ import type {
   BackendSession,
   IntermediateSummary,
 } from '@therascript/api/dist/types/index.js';
-import axios from 'axios';
 import config from '../config/index.js';
+import { publishStreamEvent } from '../services/streamPublisher.js';
 
-// --- This section is a simplified adaptation from api/src/services/ollamaService ---
-async function streamChatResponse(
+// --- Streaming Helper ---
+async function* streamChatTokens(
   chatHistory: BackendChatMessage[],
   options?: { model?: string; contextSize?: number }
-): Promise<string> {
-  const payload = {
-    model: options?.model || 'llama3', // Provide a default
-    messages: chatHistory.map((m) => ({
-      role: m.sender === 'ai' ? 'assistant' : m.sender,
-      content: m.text,
-    })),
-    stream: false,
-    options: options?.contextSize ? { num_ctx: options.contextSize } : {},
-  };
-  const response = await axios.post(
-    `${config.services.ollamaBaseUrl}/api/chat`,
-    payload
-  );
-  return response.data.message.content;
+): AsyncGenerator<string> {
+  const response = await fetch(`${config.services.ollamaBaseUrl}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: options?.model || 'llama3',
+      messages: chatHistory.map((m) => ({
+        role: m.sender === 'ai' ? 'assistant' : m.sender,
+        content: m.text,
+      })),
+      stream: true,
+      options: options?.contextSize ? { num_ctx: options.contextSize } : {},
+    }),
+  });
+
+  if (!response.body) throw new Error('No response body from Ollama');
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const json = JSON.parse(line);
+          if (json.message?.content) {
+            yield json.message.content;
+          }
+          if (json.done) return;
+        } catch (e) {
+          console.warn('[AnalysisProcessor] Error parsing JSON chunk:', e);
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
 }
-// --- End ollamaService adaptation ---
+// --- End Streaming Helper ---
 
 export const analysisQueueName = 'analysis-jobs';
 
@@ -47,6 +78,11 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
     if (jobRecord.status === 'canceling' || jobRecord.status === 'canceled') {
       await job.updateProgress(100);
       await analysisRepository.updateJobStatus(jobId, 'canceled');
+      publishStreamEvent(jobId, {
+        phase: 'status',
+        type: 'status',
+        status: 'canceled',
+      });
       return;
     }
 
@@ -61,11 +97,24 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
 
     await job.updateProgress(5);
     analysisRepository.updateJobStatus(jobId, 'mapping');
+    publishStreamEvent(jobId, {
+      phase: 'map',
+      type: 'status',
+      status: 'mapping',
+    });
+
     const pendingSummaries =
       analysisRepository.getPendingSummariesForJob(jobId);
-    if (pendingSummaries.length === 0)
-      throw new Error('No pending summaries to process.');
+    if (pendingSummaries.length === 0) {
+      // It's possible the map phase was partially done or we are restarting.
+      // Check if we can proceed to reduce.
+      const allSummaries = analysisRepository.getAllSummariesForJob(jobId);
+      if (allSummaries.length === 0) {
+        throw new Error('No summaries tasks found.');
+      }
+    }
 
+    // --- MAP PHASE ---
     for (const summaryTask of pendingSummaries) {
       jobRecord = analysisRepository.getJobById(jobId);
       if (jobRecord?.status === 'canceling') break;
@@ -75,6 +124,13 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
           summaryTask.id,
           'processing'
         );
+        publishStreamEvent(jobId, {
+          phase: 'map',
+          type: 'start',
+          sessionId: summaryTask.session_id,
+          summaryId: summaryTask.id,
+        });
+
         const session = sessionRepository.findById(summaryTask.session_id);
         if (!session)
           throw new Error(`Session ${summaryTask.session_id} not found.`);
@@ -103,7 +159,6 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
             },
           ];
         } else {
-          // Simple strategy
           mapMessages = [
             {
               id: 0,
@@ -114,17 +169,57 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
             },
           ];
         }
-        const summaryText = await streamChatResponse(mapMessages, {
+
+        let summaryText = '';
+        let chunkBuffer = '';
+        let lastPublish = Date.now();
+
+        for await (const chunk of streamChatTokens(mapMessages, {
           model: jobRecord?.model_name || undefined,
           contextSize: jobRecord?.context_size || undefined,
-        });
+        })) {
+          summaryText += chunk;
+          chunkBuffer += chunk;
+
+          if (Date.now() - lastPublish > 100) {
+            publishStreamEvent(jobId, {
+              phase: 'map',
+              type: 'token',
+              summaryId: summaryTask.id,
+              delta: chunkBuffer,
+            });
+            chunkBuffer = '';
+            lastPublish = Date.now();
+          }
+
+          if (summaryText.length % 2000 < 50) {
+            const freshJob = analysisRepository.getJobById(jobId);
+            if (freshJob?.status === 'canceling') break;
+          }
+        }
+
+        if (chunkBuffer) {
+          publishStreamEvent(jobId, {
+            phase: 'map',
+            type: 'token',
+            summaryId: summaryTask.id,
+            delta: chunkBuffer,
+          });
+        }
 
         if (!summaryText) throw new Error('LLM returned an empty summary.');
+
         analysisRepository.updateIntermediateSummary(
           summaryTask.id,
           'completed',
           summaryText
         );
+        publishStreamEvent(jobId, {
+          phase: 'map',
+          type: 'end',
+          summaryId: summaryTask.id,
+        });
+
         console.log(
           `[Analysis Worker ${jobId}] Completed summary for session ${summaryTask.session_id}.`
         );
@@ -135,6 +230,12 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
           null,
           mapError.message
         );
+        publishStreamEvent(jobId, {
+          phase: 'map',
+          type: 'error',
+          summaryId: summaryTask.id,
+          message: mapError.message,
+        });
       }
     }
 
@@ -142,11 +243,23 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
     if (jobRecord?.status === 'canceling') {
       await job.updateProgress(100);
       analysisRepository.updateJobStatus(jobId, 'canceled');
+      publishStreamEvent(jobId, {
+        phase: 'status',
+        type: 'status',
+        status: 'canceled',
+      });
       return;
     }
 
+    // --- REDUCE PHASE ---
     await job.updateProgress(50);
     analysisRepository.updateJobStatus(jobId, 'reducing');
+    publishStreamEvent(jobId, {
+      phase: 'reduce',
+      type: 'status',
+      status: 'reducing',
+    });
+
     const allSummaries = analysisRepository.getAllSummariesForJob(jobId);
     const successfulSummaries = allSummaries.filter(
       (s: IntermediateSummary) => s.status === 'completed' && s.summary_text
@@ -210,15 +323,62 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
       ];
     }
 
-    const finalResult = await streamChatResponse(reduceMessages, {
+    publishStreamEvent(jobId, { phase: 'reduce', type: 'start' });
+
+    let finalResult = '';
+    let reduceBuffer = '';
+    let lastReducePublish = Date.now();
+
+    for await (const chunk of streamChatTokens(reduceMessages, {
       model: jobRecord?.model_name || undefined,
       contextSize: jobRecord?.context_size || undefined,
-    });
+    })) {
+      finalResult += chunk;
+      reduceBuffer += chunk;
+
+      if (Date.now() - lastReducePublish > 100) {
+        publishStreamEvent(jobId, {
+          phase: 'reduce',
+          type: 'token',
+          delta: reduceBuffer,
+        });
+        reduceBuffer = '';
+        lastReducePublish = Date.now();
+
+        // Check for cancellation during reduce
+        const freshJob = analysisRepository.getJobById(jobId);
+        if (freshJob?.status === 'canceling') {
+          publishStreamEvent(jobId, {
+            phase: 'status',
+            type: 'status',
+            status: 'canceled',
+          });
+          analysisRepository.updateJobStatus(jobId, 'canceled');
+          return;
+        }
+      }
+    }
+
+    if (reduceBuffer) {
+      publishStreamEvent(jobId, {
+        phase: 'reduce',
+        type: 'token',
+        delta: reduceBuffer,
+      });
+    }
 
     if (!finalResult) throw new Error('LLM returned an empty final result.');
 
+    publishStreamEvent(jobId, { phase: 'reduce', type: 'end' });
+
     await job.updateProgress(100);
     analysisRepository.updateJobStatus(jobId, 'completed', finalResult);
+    publishStreamEvent(jobId, {
+      phase: 'status',
+      type: 'status',
+      status: 'completed',
+    });
+
     console.log(`[Analysis Worker] Job ${jobId} completed successfully.`);
   } catch (error: any) {
     console.error(`[Analysis Worker] FAILED job ${jobId}:`, error);
@@ -229,6 +389,12 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
       jobRecord.status !== 'canceled'
     ) {
       analysisRepository.updateJobStatus(jobId, 'failed', null, error.message);
+      publishStreamEvent(jobId, {
+        phase: 'status',
+        type: 'error',
+        status: 'failed',
+        message: error.message,
+      });
     } else if (jobRecord) {
       analysisRepository.updateJobStatus(
         jobId,
@@ -237,6 +403,6 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
         'Canceled during error handling.'
       );
     }
-    throw error; // Re-throw to let BullMQ know the job failed
+    throw error;
   }
 }

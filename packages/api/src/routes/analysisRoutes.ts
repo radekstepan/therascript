@@ -6,6 +6,7 @@ import {
   getAnalysisJobHandler,
   cancelAnalysisJobHandler,
   deleteAnalysisJobHandler,
+  streamAnalysisJobHandler,
 } from '../api/analysisHandler.js';
 
 // Schemas
@@ -97,6 +98,12 @@ export const analysisRoutes = new Elysia({ prefix: '/api/analysis-jobs' })
         response: { 200: 'analysisJobWithDetails' },
         detail: {
           summary: 'Get the status and result of a single analysis job',
+        },
+      })
+      .get('/:jobId/stream', streamAnalysisJobHandler, {
+        params: 'jobIdParam',
+        detail: {
+          summary: 'Stream analysis logs and tokens via SSE',
         },
       })
       .post('/:jobId/cancel', cancelAnalysisJobHandler, {

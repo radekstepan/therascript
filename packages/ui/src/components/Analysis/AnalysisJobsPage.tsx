@@ -1,5 +1,11 @@
 // packages/ui/src/components/Analysis/AnalysisJobsPage.tsx
-import React, { useState, useMemo, useCallback } from 'react';
+import React, {
+  useState,
+  useMemo,
+  useCallback,
+  useEffect,
+  useRef,
+} from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -33,8 +39,8 @@ import {
   ChevronDownIcon,
   FileTextIcon,
   ChevronRightIcon,
-  InfoCircledIcon,
   CalendarIcon,
+  LightningBoltIcon,
 } from '@radix-ui/react-icons';
 import ReactMarkdown from 'react-markdown';
 import {
@@ -58,6 +64,7 @@ import {
 } from '../../store';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { cn } from '../../utils';
+import { useAnalysisStream } from '../../hooks/useAnalysisStream';
 
 // Helper function to get badge color based on status
 const getStatusBadgeColor = (
@@ -83,14 +90,50 @@ const getStatusBadgeColor = (
   }
 };
 
+const StreamingBox: React.FC<{ text: string }> = ({ text }) => {
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [text]);
+
+  return (
+    <Box
+      ref={scrollRef}
+      p="2"
+      mt="2"
+      style={{
+        backgroundColor: 'var(--gray-a3)',
+        borderRadius: 'var(--radius-3)',
+        maxHeight: '400px',
+        overflowY: 'auto',
+      }}
+    >
+      <div className="markdown-ai-message">
+        <ReactMarkdown>{text}</ReactMarkdown>
+      </div>
+    </Box>
+  );
+};
+
 const IntermediateSummaryItem: React.FC<{
   summary: IntermediateSummaryWithSessionName;
-}> = ({ summary }) => {
+  liveLog?: string; // Add liveLog prop
+}> = ({ summary, liveLog }) => {
   const [isOpen, setIsOpen] = useState(false);
 
   const isSuccess = summary.status === 'completed';
   const isFailed = summary.status === 'failed';
   const isProcessing = summary.status === 'processing';
+
+  // Automatically open if processing and log is streaming
+  useEffect(() => {
+    if (isProcessing && liveLog) {
+      setIsOpen(true);
+    }
+  }, [isProcessing, liveLog]);
 
   return (
     <Card size="2" style={{ width: '100%' }}>
@@ -121,7 +164,7 @@ const IntermediateSummaryItem: React.FC<{
         </Flex>
 
         <Box mt="auto">
-          {(isSuccess || isFailed) && (
+          {(isSuccess || isFailed || (isProcessing && liveLog)) && (
             <Button
               variant="soft"
               size="1"
@@ -129,7 +172,8 @@ const IntermediateSummaryItem: React.FC<{
               onClick={() => setIsOpen(!isOpen)}
               style={{ width: 'fit-content' }}
             >
-              {isOpen ? 'Hide' : 'Show'} {isSuccess ? 'Analysis' : 'Error'}
+              {isOpen ? 'Hide' : 'Show'}{' '}
+              {isProcessing ? 'Live Log' : isSuccess ? 'Analysis' : 'Error'}
               <ChevronRightIcon
                 className="transition-transform"
                 style={{
@@ -140,7 +184,9 @@ const IntermediateSummaryItem: React.FC<{
           )}
         </Box>
 
-        {isOpen && isSuccess && summary.summary_text && (
+        {isOpen && isProcessing && liveLog && <StreamingBox text={liveLog} />}
+
+        {isOpen && isSuccess && summary.summary_text && !isProcessing && (
           <Box
             p="2"
             mt="2"
@@ -177,6 +223,9 @@ const JobDetailView: React.FC<{
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
+  // Use the stream hook
+  const { mapLogs, reduceLog, isConnected } = useAnalysisStream(jobId);
+
   const {
     data: job,
     isLoading,
@@ -186,7 +235,6 @@ const JobDetailView: React.FC<{
     queryKey: ['analysisJob', jobId],
     queryFn: () => fetchAnalysisJob(jobId),
     refetchInterval: (query) => {
-      // FIX: Use the 'query' object passed by refetchInterval to access state.data
       const data = query.state.data;
       const isTerminal =
         data?.status === 'completed' ||
@@ -194,14 +242,11 @@ const JobDetailView: React.FC<{
         data?.status === 'canceled';
 
       if (isTerminal) {
-        // When the job reaches a terminal state, invalidate the main list query.
-        console.log(
-          `[JobDetailView] Job ${jobId} reached terminal state '${data.status}'. Invalidating jobs list.`
-        );
         queryClient.invalidateQueries({ queryKey: ['analysisJobs'] });
-        return false; // Stop polling
+        return false;
       }
-      return 5000; // Poll every 5 seconds
+      // If streaming is connected, we can poll less frequently
+      return isConnected ? 8000 : 3000;
     },
   });
 
@@ -272,6 +317,11 @@ const JobDetailView: React.FC<{
             Analysis #{job.id}
           </Heading>
           <Flex gap="3" align="center">
+            {isConnected && (
+              <Badge color="green" variant="soft">
+                <LightningBoltIcon /> Live
+              </Badge>
+            )}
             {isCancellable && (
               <Button
                 variant="soft"
@@ -308,8 +358,12 @@ const JobDetailView: React.FC<{
                 size="2"
                 variant="soft"
               >
-                {isFetching && !isDeletable ? <Spinner size="1" /> : null}
-                <Text ml={isFetching && !isDeletable ? '1' : '0'}>
+                {isFetching && !isDeletable && !isConnected ? (
+                  <Spinner size="1" />
+                ) : null}
+                <Text
+                  ml={isFetching && !isDeletable && !isConnected ? '1' : '0'}
+                >
                   {job.status}
                 </Text>
               </Badge>
@@ -394,30 +448,27 @@ const JobDetailView: React.FC<{
               {job.summaries
                 .sort((a, b) => a.sessionName.localeCompare(b.sessionName))
                 .map((summary) => (
-                  <IntermediateSummaryItem key={summary.id} summary={summary} />
+                  <IntermediateSummaryItem
+                    key={summary.id}
+                    summary={summary}
+                    liveLog={mapLogs[summary.id]} // Pass live log
+                  />
                 ))}
             </Grid>
           </Box>
         )}
 
-        {/* === ERROR DETAILS === */}
-        {job.status === 'failed' && (
+        {/* === FINAL ANSWER TERMINAL (When Reducing) === */}
+        {job.status === 'reducing' && reduceLog && (
           <Box>
-            <Heading as="h3" size="4" mb="2" color="red">
-              Error Details
+            <Heading as="h3" size="4" mb="2" color="blue">
+              Synthesizing Final Answer...
             </Heading>
-            <Callout.Root color="red" role="alert">
-              <Callout.Icon>
-                <ExclamationTriangleIcon />
-              </Callout.Icon>
-              <Callout.Text>
-                {job.error_message || 'An unknown error occurred.'}
-              </Callout.Text>
-            </Callout.Root>
+            <StreamingBox text={reduceLog} />
           </Box>
         )}
 
-        {/* === FINAL ANSWER === */}
+        {/* === FINAL ANSWER COMPLETED === */}
         {job.status === 'completed' && (
           <Box>
             <Heading as="h3" size="4" mb="2" color="green">
@@ -436,6 +487,23 @@ const JobDetailView: React.FC<{
                 </ReactMarkdown>
               </div>
             </Box>
+          </Box>
+        )}
+
+        {/* === ERROR DETAILS === */}
+        {job.status === 'failed' && (
+          <Box>
+            <Heading as="h3" size="4" mb="2" color="red">
+              Error Details
+            </Heading>
+            <Callout.Root color="red" role="alert">
+              <Callout.Icon>
+                <ExclamationTriangleIcon />
+              </Callout.Icon>
+              <Callout.Text>
+                {job.error_message || 'An unknown error occurred.'}
+              </Callout.Text>
+            </Callout.Root>
           </Box>
         )}
       </Flex>
