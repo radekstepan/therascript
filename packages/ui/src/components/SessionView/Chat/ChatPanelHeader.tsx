@@ -59,6 +59,23 @@ export function ChatPanelHeader({
 
   const totalTokens = (latestPromptTokens ?? 0) + (latestCompletionTokens ?? 0);
 
+  // --- CALCULATE VRAM USAGE STRING ---
+  let vramUsageString = '';
+  if (isActiveModelLoaded && ollamaStatus?.details) {
+    const sizeVram = ollamaStatus.details.size_vram || 0;
+    vramUsageString = ` | VRAM: ${prettyBytes(sizeVram)}`;
+    const totalSize = ollamaStatus.details.size;
+    if (totalSize > 0) {
+      const pct = Math.round((sizeVram / totalSize) * 100);
+      if (pct < 100) {
+        vramUsageString += ` (${pct}% GPU)`;
+      } else {
+        vramUsageString += ` (100% GPU)`;
+      }
+    }
+  }
+  // --- END VRAM USAGE STRING ---
+
   // --- FETCH CONTEXT USAGE (session chats) ---
   const sessionId = session?.id ?? null;
   const { data: contextUsage, isLoading: isLoadingUsage } = useQuery<
@@ -159,7 +176,7 @@ export function ChatPanelHeader({
       statusTooltipContent =
         'No AI model selected. Click "Configure Model" to choose one.';
     } else if (isActiveModelLoaded) {
-      statusTooltipContent = `Active Model: ${modelName} (Loaded)`;
+      statusTooltipContent = `Active Model: ${modelName} (Loaded)${vramUsageString}`;
     } else {
       statusTooltipContent = `Active Model: ${modelName} (Not loaded or unavailable)`;
     }

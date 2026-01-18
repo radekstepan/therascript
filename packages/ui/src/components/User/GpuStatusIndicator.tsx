@@ -3,8 +3,8 @@ import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Flex, Text, Tooltip, Progress, Box } from '@radix-ui/themes';
 import { Cpu } from 'lucide-react';
-import { fetchGpuStats } from '../../api/api';
-import type { GpuStats } from '../../types';
+import { fetchGpuStats, fetchOllamaStatus } from '../../api/api';
+import type { GpuStats, OllamaStatus } from '../../types';
 import { GpuStatusModal } from './GpuStatusModal';
 import { cn } from '../../utils';
 import prettyBytes from 'pretty-bytes';
@@ -18,7 +18,7 @@ export function GpuStatusIndicator({
 
   const {
     data: gpuStats,
-    isLoading,
+    isLoading: isLoadingGpu,
     error,
   } = useQuery<GpuStats, Error>({
     queryKey: ['gpuStats'],
@@ -28,8 +28,15 @@ export function GpuStatusIndicator({
     staleTime: 1000,
   });
 
+  const { data: ollamaStatus } = useQuery<OllamaStatus, Error>({
+    queryKey: ['ollamaStatus'],
+    queryFn: () => fetchOllamaStatus(),
+    refetchInterval: 5000,
+    staleTime: 4000,
+  });
+
   const handleOpenModal = () => {
-    if (gpuStats) {
+    if (gpuStats || ollamaStatus) {
       setIsModalOpen(true);
     }
   };
@@ -87,7 +94,7 @@ export function GpuStatusIndicator({
           'flex items-center mt-2 w-full py-2 text-left text-sm hover:bg-[var(--accent-a3)] rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-8)]',
           isSidebarOpen ? 'px-3' : 'justify-center px-0'
         )}
-        disabled={!gpuStats && isLoading}
+        disabled={!gpuStats && isLoadingGpu}
       >
         <Cpu size={18} className={cn(isSidebarOpen ? 'mr-2' : 'mr-0')} />
         {isSidebarOpen && (
@@ -126,7 +133,7 @@ export function GpuStatusIndicator({
             ) : (
               <Text size="1" color="gray">
                 {runtimeKey === 'metal'
-                  ? 'Apple Metal runtime (no NVIDIA metrics).'
+                  ? 'Apple Metal runtime.'
                   : runtimeKey === 'gpu'
                     ? 'GPU metrics unavailable.'
                     : runtimeKey === 'cpu'
@@ -147,7 +154,8 @@ export function GpuStatusIndicator({
         isOpen={isModalOpen}
         onOpenChange={setIsModalOpen}
         gpuStats={gpuStats}
-        isLoading={isLoading}
+        ollamaStatus={ollamaStatus}
+        isLoading={isLoadingGpu}
         error={error}
       />
     </>

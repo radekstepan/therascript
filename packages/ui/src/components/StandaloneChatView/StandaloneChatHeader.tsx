@@ -40,7 +40,7 @@ import { toastMessageAtom } from '../../store';
 import { fetchStandaloneContextUsage } from '../../api/chat';
 import { formatTimestamp } from '../../helpers';
 import { cn } from '../../utils';
-// import prettyBytes from 'pretty-bytes'; // not used for token counts
+import prettyBytes from 'pretty-bytes'; // Added for VRAM usage display
 
 interface StandaloneChatHeaderProps {
   activeChatId: number | null;
@@ -126,6 +126,23 @@ export function StandaloneChatHeader({
     ollamaStatus?.details?.name === ollamaStatus?.activeModel
       ? ollamaStatus?.details?.defaultContextSize
       : null;
+
+  // --- CALCULATE VRAM USAGE STRING ---
+  let vramUsageString = '';
+  if (isActiveModelLoaded && ollamaStatus?.details) {
+    const sizeVram = ollamaStatus.details.size_vram || 0;
+    vramUsageString = ` | VRAM: ${prettyBytes(sizeVram)}`;
+    const totalSize = ollamaStatus.details.size;
+    if (totalSize > 0) {
+      const pct = Math.round((sizeVram / totalSize) * 100);
+      if (pct < 100) {
+        vramUsageString += ` (${pct}% GPU)`;
+      } else {
+        vramUsageString += ` (100% GPU)`;
+      }
+    }
+  }
+  // --- END VRAM USAGE STRING ---
 
   // --- FETCH CONTEXT USAGE (standalone chats) ---
   const { data: contextUsage } = useQuery<
@@ -230,7 +247,7 @@ export function StandaloneChatHeader({
       statusTooltipContent =
         'No AI model selected. Click "Configure Model" to choose one.';
     } else if (isActiveModelLoaded) {
-      statusTooltipContent = `Active Model: ${modelName} (Loaded)`;
+      statusTooltipContent = `Active Model: ${modelName} (Loaded)${vramUsageString}`;
     } else {
       statusTooltipContent = `Active Model: ${modelName} (Not loaded or unavailable)`;
     }
@@ -322,7 +339,6 @@ export function StandaloneChatHeader({
                     height="14"
                     style={{ marginRight: '2px' }}
                   />
-                  {/* --- *** UPDATED LINE *** --- */}
                   {isLoadingOllamaStatus
                     ? '...'
                     : configuredContextSize

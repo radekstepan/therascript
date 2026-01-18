@@ -14,19 +14,23 @@ import {
   Heading,
   Progress,
   Card,
+  Separator,
 } from '@radix-ui/themes';
 import {
   Cross2Icon,
   InfoCircledIcon,
   ExclamationTriangleIcon,
+  LightningBoltIcon,
+  DesktopIcon,
 } from '@radix-ui/react-icons';
-import type { GpuStats, GpuDeviceStats } from '../../types';
+import type { GpuStats, GpuDeviceStats, OllamaStatus } from '../../types';
 import prettyBytes from 'pretty-bytes';
 
 interface GpuStatusModalProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   gpuStats: GpuStats | undefined;
+  ollamaStatus: OllamaStatus | undefined;
   isLoading: boolean;
   error: Error | null;
 }
@@ -177,10 +181,79 @@ const GpuDeviceCard: React.FC<{ device: GpuDeviceStats }> = ({ device }) => {
   );
 };
 
+const ActiveModelCard: React.FC<{ status: OllamaStatus }> = ({ status }) => {
+  if (!status.activeModel || !status.loaded || !status.details) return null;
+
+  const details = status.details;
+  const sizeVram = details.size_vram || 0;
+  const totalSize = details.size; // Model file size on disk (approx weight size)
+  // Approximate system RAM usage for weights: Total model size minus what's in VRAM.
+  // Note: This is an approximation. If size_vram > totalSize (due to context overhead), we clamp to 0.
+  const sizeSystem = Math.max(0, totalSize - sizeVram);
+
+  const percentVram =
+    totalSize > 0 ? Math.min(100, Math.round((sizeVram / totalSize) * 100)) : 0;
+  const isFullyOffloaded = sizeVram >= totalSize;
+
+  return (
+    <Card size="2">
+      <Flex direction="column" gap="3">
+        <Heading as="h3" size="4">
+          Active Model Resources
+        </Heading>
+        <Flex justify="between" align="center">
+          <Text size="2" weight="medium">
+            Model:
+          </Text>
+          <Text size="2">{status.activeModel}</Text>
+        </Flex>
+
+        <Box>
+          <Flex justify="between" mb="1">
+            <Text size="1" color="gray">
+              Offloaded to GPU
+            </Text>
+            <Text size="1" color="gray">
+              {percentVram}%
+            </Text>
+          </Flex>
+          <Progress value={percentVram} size="2" color="blue" />
+        </Box>
+
+        <Flex direction="column" gap="2">
+          <Flex align="center" gap="2">
+            <Badge color="blue" variant="soft">
+              <LightningBoltIcon />
+              VRAM Usage: {prettyBytes(sizeVram)}
+            </Badge>
+            {isFullyOffloaded && (
+              <Badge color="green" variant="outline">
+                100% Offloaded
+              </Badge>
+            )}
+          </Flex>
+          {sizeSystem > 0 && (
+            <Flex align="center" gap="2">
+              <Badge color="orange" variant="soft">
+                <DesktopIcon />
+                System RAM: {prettyBytes(sizeSystem)}
+              </Badge>
+              <Text size="1" color="gray">
+                (Estimated weights on CPU)
+              </Text>
+            </Flex>
+          )}
+        </Flex>
+      </Flex>
+    </Card>
+  );
+};
+
 export function GpuStatusModal({
   isOpen,
   onOpenChange,
   gpuStats,
+  ollamaStatus,
   isLoading,
   error,
 }: GpuStatusModalProps) {
@@ -205,7 +278,7 @@ export function GpuStatusModal({
   return (
     <Dialog.Root open={isOpen} onOpenChange={onOpenChange}>
       <Dialog.Content style={{ maxWidth: 650 }}>
-        <Dialog.Title>GPU Status</Dialog.Title>
+        <Dialog.Title>System Resources</Dialog.Title>
         <Dialog.Description size="2" mb="4" color="gray">
           {runtimeDescription}
         </Dialog.Description>
@@ -236,33 +309,47 @@ export function GpuStatusModal({
                   Error fetching GPU status: {error.message}
                 </Callout.Text>
               </Callout.Root>
-            ) : !gpuStats?.available ? (
-              <Callout.Root color="amber">
-                <Callout.Icon>
-                  <InfoCircledIcon />
-                </Callout.Icon>
-                <Callout.Text>
-                  {runtimeKey === 'metal'
-                    ? 'Running with Apple Metal acceleration. NVIDIA GPU monitoring via nvidia-smi is not available on macOS.'
-                    : '`nvidia-smi` command not found on the server. GPU monitoring is unavailable and the system is running on CPU.'}
-                </Callout.Text>
-              </Callout.Root>
             ) : (
               <Flex direction="column" gap="4">
-                <Flex justify="between" gap="4" style={{ flexWrap: 'wrap' }}>
-                  <Badge color={runtimeBadgeColor} variant="soft">
-                    Runtime: {runtimeLabel}
-                  </Badge>
-                  <Badge color="gray" variant="soft">
-                    Driver: {gpuStats.driverVersion}
-                  </Badge>
-                  <Badge color="gray" variant="soft">
-                    CUDA: {gpuStats.cudaVersion}
-                  </Badge>
-                </Flex>
-                {gpuStats.gpus.map((device) => (
-                  <GpuDeviceCard key={device.id} device={device} />
-                ))}
+                {ollamaStatus &&
+                  ollamaStatus.loaded &&
+                  ollamaStatus.details && (
+                    <>
+                      <ActiveModelCard status={ollamaStatus} />
+                      <Separator size="4" />
+                    </>
+                  )}
+
+                {!gpuStats?.available ? (
+                  <Callout.Root color="amber">
+                    <Callout.Icon>
+                      <InfoCircledIcon />
+                    </Callout.Icon>
+                    <Callout.Text>
+                      {runtimeKey === 'metal'
+                        ? 'Running with Apple Metal acceleration. NVIDIA GPU monitoring via nvidia-smi is not available on macOS.'
+                        : '`nvidia-smi` command not found on the server. GPU monitoring is unavailable and the system is running on CPU.'}
+                    </Callout.Text>
+                  </Callout.Root>
+                ) : (
+                  <>
+                    <Flex
+                      justify="between"
+                      gap="4"
+                      style={{ flexWrap: 'wrap' }}
+                    >
+                      <Badge color="gray" variant="soft">
+                        Driver: {gpuStats.driverVersion}
+                      </Badge>
+                      <Badge color="gray" variant="soft">
+                        CUDA: {gpuStats.cudaVersion}
+                      </Badge>
+                    </Flex>
+                    {gpuStats.gpus.map((device) => (
+                      <GpuDeviceCard key={device.id} device={device} />
+                    ))}
+                  </>
+                )}
               </Flex>
             )}
           </Box>
