@@ -2,6 +2,7 @@
 import { analysisRepository } from '../repositories/analysisRepository.js';
 import { sessionRepository } from '../repositories/sessionRepository.js';
 import { templateRepository } from '../repositories/templateRepository.js';
+import { usageRepository } from '../repositories/usageRepository.js';
 import { SYSTEM_PROMPT_TEMPLATES } from '@therascript/db/dist/sqliteService.js';
 import { processAnalysisJob } from '../services/analysisJobService.js';
 import { listModels, streamChatResponse } from '../services/ollamaService.js';
@@ -26,14 +27,20 @@ import { createJobSubscriber } from '../services/streamSubscriber.js';
 // This helper is also in analysisJobService.ts. Consider moving to a shared util.
 async function accumulateStreamResponse(
   stream: AsyncIterable<ChatResponse>
-): Promise<string> {
+): Promise<{ text: string; promptTokens?: number; completionTokens?: number }> {
   let fullText = '';
+  let promptTokens: number | undefined;
+  let completionTokens: number | undefined;
   for await (const chunk of stream) {
     if (chunk.message?.content) {
       fullText += chunk.message.content;
     }
+    if (chunk.done) {
+      promptTokens = chunk.prompt_eval_count;
+      completionTokens = chunk.eval_count;
+    }
   }
-  return cleanLlmOutput(fullText);
+  return { text: cleanLlmOutput(fullText), promptTokens, completionTokens };
 }
 
 const getSystemPrompt = (
@@ -79,7 +86,11 @@ const generateShortPromptInBackground = async (
       ],
       { model: modelName || undefined }
     );
-    const shortPrompt = await accumulateStreamResponse(stream);
+    const {
+      text: shortPrompt,
+      promptTokens,
+      completionTokens,
+    } = await accumulateStreamResponse(stream);
 
     if (shortPrompt) {
       analysisRepository.updateJobShortPrompt(jobId, shortPrompt);
@@ -93,6 +104,21 @@ const generateShortPromptInBackground = async (
       analysisRepository.updateJobShortPrompt(
         jobId,
         `Analysis - ${originalPrompt.substring(0, 30)}...`
+      );
+    }
+
+    try {
+      usageRepository.insertUsageLog({
+        type: 'llm',
+        source: 'analysis_short_prompt',
+        model: modelName || 'llama3',
+        promptTokens,
+        completionTokens,
+      });
+    } catch (err) {
+      console.warn(
+        `[Analysis BG ${jobId}] Failed to log short prompt usage:`,
+        err
       );
     }
   } catch (error) {
@@ -133,7 +159,11 @@ const generateStrategyAndUpdateJob = async (
       ],
       { model: modelName || undefined }
     );
-    const rawStrategyOutput = await accumulateStreamResponse(stream);
+    const {
+      text: rawStrategyOutput,
+      promptTokens,
+      completionTokens,
+    } = await accumulateStreamResponse(stream);
 
     let cleanedJson = rawStrategyOutput;
     const jsonRegex = /```json\s*([\s\S]*?)\s*```/;
@@ -155,6 +185,21 @@ const generateStrategyAndUpdateJob = async (
     console.log(
       `[Analysis BG ${jobId}] Successfully generated strategy and set status to 'pending'.`
     );
+
+    try {
+      usageRepository.insertUsageLog({
+        type: 'llm',
+        source: 'analysis_strategy',
+        model: modelName || 'llama3',
+        promptTokens,
+        completionTokens,
+      });
+    } catch (err) {
+      console.warn(
+        `[Analysis BG ${jobId}] Failed to log strategy generation usage:`,
+        err
+      );
+    }
 
     // Now trigger the worker since the job is ready
     void processAnalysisJob(jobId);

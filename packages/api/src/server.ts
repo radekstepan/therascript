@@ -31,6 +31,7 @@ import { searchRoutes } from './routes/searchRoutes.js';
 import { analysisRoutes } from './routes/analysisRoutes.js';
 import { transcriptionRoutes } from './routes/transcriptionRoutes.js';
 import { jobsRoutes } from './routes/jobsRoutes.js';
+import { usageRoutes } from './routes/usageRoutes.js';
 import {
   ApiError,
   InternalServerError,
@@ -146,6 +147,7 @@ const app = new Elysia()
             description: 'Administrative Actions (e.g., re-indexing)',
           },
           { name: 'Meta', description: 'API Metadata and Health' },
+          { name: 'Usage', description: 'Usage Tracking and Cost Estimation' },
         ],
       },
     })
@@ -288,7 +290,8 @@ const app = new Elysia()
   .use(sessionRoutes)
   .use(chatRoutes)
   .use(standaloneChatRoutes)
-  .use(templateRoutes);
+  .use(templateRoutes)
+  .use(usageRoutes);
 
 async function checkOllamaConnectionOnStartup() {
   /* ... */

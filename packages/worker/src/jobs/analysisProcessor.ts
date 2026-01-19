@@ -4,6 +4,7 @@ import { AnalysisJobData } from '../types.js';
 import { analysisRepository } from '@therascript/api/dist/repositories/analysisRepository.js';
 import { transcriptRepository } from '@therascript/api/dist/repositories/transcriptRepository.js';
 import { sessionRepository } from '@therascript/api/dist/repositories/sessionRepository.js';
+import { usageRepository } from '@therascript/api/dist/repositories/usageRepository.js';
 import type {
   AnalysisStrategy,
   BackendChatMessage,
@@ -13,10 +14,16 @@ import type {
 import config from '../config/index.js';
 import { publishStreamEvent } from '../services/streamPublisher.js';
 
+interface StreamResult {
+  promptTokens?: number;
+  completionTokens?: number;
+}
+
 // --- Streaming Helper ---
 async function* streamChatTokens(
   chatHistory: BackendChatMessage[],
-  options?: { model?: string; contextSize?: number }
+  options?: { model?: string; contextSize?: number },
+  resultRef?: { current: StreamResult }
 ): AsyncGenerator<string> {
   const response = await fetch(`${config.services.ollamaBaseUrl}/api/chat`, {
     method: 'POST',
@@ -54,7 +61,13 @@ async function* streamChatTokens(
           if (json.message?.content) {
             yield json.message.content;
           }
-          if (json.done) return;
+          if (json.done && resultRef) {
+            resultRef.current = {
+              promptTokens: json.prompt_eval_count,
+              completionTokens: json.eval_count,
+            };
+            return;
+          }
         } catch (e) {
           console.warn('[AnalysisProcessor] Error parsing JSON chunk:', e);
         }
@@ -173,11 +186,16 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
         let summaryText = '';
         let chunkBuffer = '';
         let lastPublish = Date.now();
+        const streamResult: { current: StreamResult } = { current: {} };
 
-        for await (const chunk of streamChatTokens(mapMessages, {
-          model: jobRecord?.model_name || undefined,
-          contextSize: jobRecord?.context_size || undefined,
-        })) {
+        for await (const chunk of streamChatTokens(
+          mapMessages,
+          {
+            model: jobRecord?.model_name || undefined,
+            contextSize: jobRecord?.context_size || undefined,
+          },
+          streamResult
+        )) {
           summaryText += chunk;
           chunkBuffer += chunk;
 
@@ -208,6 +226,21 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
         }
 
         if (!summaryText) throw new Error('LLM returned an empty summary.');
+
+        try {
+          usageRepository.insertUsageLog({
+            type: 'llm',
+            source: 'analysis_map',
+            model: jobRecord?.model_name || 'llama3',
+            promptTokens: streamResult.current.promptTokens,
+            completionTokens: streamResult.current.completionTokens,
+          });
+        } catch (err) {
+          console.warn(
+            `[Analysis Worker ${jobId}] Failed to log usage for session ${summaryTask.session_id}:`,
+            err
+          );
+        }
 
         analysisRepository.updateIntermediateSummary(
           summaryTask.id,
@@ -328,11 +361,16 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
     let finalResult = '';
     let reduceBuffer = '';
     let lastReducePublish = Date.now();
+    const reduceStreamResult: { current: StreamResult } = { current: {} };
 
-    for await (const chunk of streamChatTokens(reduceMessages, {
-      model: jobRecord?.model_name || undefined,
-      contextSize: jobRecord?.context_size || undefined,
-    })) {
+    for await (const chunk of streamChatTokens(
+      reduceMessages,
+      {
+        model: jobRecord?.model_name || undefined,
+        contextSize: jobRecord?.context_size || undefined,
+      },
+      reduceStreamResult
+    )) {
       finalResult += chunk;
       reduceBuffer += chunk;
 
@@ -368,6 +406,21 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
     }
 
     if (!finalResult) throw new Error('LLM returned an empty final result.');
+
+    try {
+      usageRepository.insertUsageLog({
+        type: 'llm',
+        source: 'analysis_reduce',
+        model: jobRecord?.model_name || 'llama3',
+        promptTokens: reduceStreamResult.current.promptTokens,
+        completionTokens: reduceStreamResult.current.completionTokens,
+      });
+    } catch (err) {
+      console.warn(
+        `[Analysis Worker ${jobId}] Failed to log usage for reduce phase:`,
+        err
+      );
+    }
 
     publishStreamEvent(jobId, { phase: 'reduce', type: 'end' });
 

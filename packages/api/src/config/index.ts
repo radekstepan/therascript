@@ -1,6 +1,7 @@
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { pricing } from './pricing.js';
 
 const nodeEnv = process.env.NODE_ENV || 'development';
 console.log(`[Config] NODE_ENV determined as: ${nodeEnv}`);
@@ -146,3 +147,4 @@ console.log(`  - Uploads Path: ${config.db.uploadsDir}`);
 console.log(`  - Ollama Runtime: ${config.ollama.runtime}`);
 
 export default config;
+export { pricing };

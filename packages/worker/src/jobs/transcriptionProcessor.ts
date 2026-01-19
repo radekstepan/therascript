@@ -7,6 +7,7 @@ import { messageRepository } from '@therascript/api/dist/repositories/messageRep
 import { chatRepository } from '@therascript/api/dist/repositories/chatRepository.js';
 import { calculateTokenCount } from '@therascript/api/dist/services/tokenizerService.js';
 import { getAudioAbsolutePath } from '@therascript/api/dist/services/fileService.js';
+import { usageRepository } from '@therascript/api/dist/repositories/usageRepository.js';
 import type {
   StructuredTranscript,
   WhisperJobStatus,
@@ -135,6 +136,25 @@ export default async function (job: Job<TranscriptionJobData, any, string>) {
     if (finalStatus.status !== 'completed' || !finalStatus.result?.segments) {
       throw new Error(
         `Whisper job ${whisperJobId} failed or returned no segments. Status: ${finalStatus.status}`
+      );
+    }
+
+    try {
+      // Duration is on WhisperJobStatus directly, not on result
+      const durationSec = finalStatus.duration ?? null;
+      const durationInt = durationSec != null ? Math.round(durationSec) : null;
+      if (durationInt !== null) {
+        usageRepository.insertUsageLog({
+          type: 'whisper',
+          source: 'whisper_transcription',
+          model: config.services.whisperModel,
+          duration: durationInt,
+        });
+      }
+    } catch (err) {
+      console.warn(
+        `[Transcription Worker] Failed to log usage for session ${sessionId}:`,
+        err
       );
     }
 

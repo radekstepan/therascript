@@ -16,3 +16,17 @@ import { twMerge } from 'tailwind-merge'; // Utility to merge Tailwind CSS class
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
+
+export const formatCurrency = (amount: number): string => {
+  // For very small amounts (less than $0.01), show in cents with ¢ symbol
+  if (amount > 0 && amount < 0.01) {
+    const cents = amount * 100;
+    return `${cents.toFixed(3)}¢`;
+  }
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  }).format(amount);
+};

@@ -22,6 +22,7 @@ import {
 } from '@radix-ui/themes';
 import { renderMarkdownAtom } from '../store/ui/renderMarkdownAtom';
 import { LlmManagementModal } from './SessionView/Modals/LlmManagementModal';
+import { UsageSection } from './UsageSection';
 import {
   MixerVerticalIcon,
   LayoutIcon as RadixLayoutIcon,
@@ -314,6 +315,15 @@ export function SettingsPage() {
                   overwrite all current data. This action cannot be undone.
                 </Callout.Text>
               </Callout.Root>
+            </Box>
+          </Card>
+
+          <Card mb="6">
+            <Box p="4">
+              <Heading as="h2" size="5" mb="4">
+                Usage & Cost
+              </Heading>
+              <UsageSection />
             </Box>
           </Card>
 

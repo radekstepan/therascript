@@ -1,6 +1,7 @@
 // packages/api/src/api/standaloneChatHandler.ts
 import { chatRepository } from '../repositories/chatRepository.js';
 import { messageRepository } from '../repositories/messageRepository.js';
+import { usageRepository } from '../repositories/usageRepository.js';
 import { streamChatResponse } from '../services/ollamaService.js';
 import {
   NotFoundError,
@@ -31,7 +32,10 @@ import {
   computeContextUsageForChat,
   recommendContextSize,
 } from '../services/contextUsageService.js';
-import { getConfiguredContextSize } from '../services/activeModelService.js';
+import {
+  getConfiguredContextSize,
+  getActiveModel,
+} from '../services/activeModelService.js';
 
 const esClient = getElasticsearchClient(config.elasticsearch.url);
 
@@ -328,6 +332,21 @@ export const addStandaloneChatMessage = async ({
             console.log(
               `[API ProcessStream Finally ${chatData.id}] Saved AI message (length: ${cleanedAiText.length}) to DB.`
             );
+
+            try {
+              usageRepository.insertUsageLog({
+                type: 'llm',
+                source: 'standalone_chat',
+                model: getActiveModel(),
+                promptTokens: aiMessage.promptTokens,
+                completionTokens: aiMessage.completionTokens,
+              });
+            } catch (err) {
+              console.warn(
+                `[API ProcessStream Finally ${chatData.id}] Failed to log usage:`,
+                err
+              );
+            }
           } catch (dbError) {
             console.error(
               `[API ProcessStream Finally ${chatData.id}] CRITICAL: Failed to save AI message to DB:`,

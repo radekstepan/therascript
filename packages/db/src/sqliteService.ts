@@ -77,7 +77,7 @@ export const schema = `
 `;
 
 // --- NEW MIGRATION LOGIC ---
-export const LATEST_SCHEMA_VERSION = 7;
+export const LATEST_SCHEMA_VERSION = 8;
 
 // --- NEW SYSTEM PROMPTS ---
 export const SYSTEM_PROMPT_TEMPLATES = {
@@ -359,6 +359,29 @@ function runMigrations(dbInstance: DB) {
         dbInstance.pragma(`user_version = 7`);
         currentVersion = 7;
         console.log('[db Migrator] Version 7 applied.');
+      }
+
+      // NEW MIGRATION: Version 8 to add usage_logs table for tracking LLM and Whisper usage
+      if (currentVersion < 8) {
+        console.log('[db Migrator] Applying version 8...');
+        dbInstance.exec(`
+            CREATE TABLE IF NOT EXISTS usage_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                type TEXT NOT NULL CHECK(type IN ('llm', 'whisper')),
+                source TEXT NOT NULL,
+                model TEXT NOT NULL,
+                promptTokens INTEGER NULL,
+                completionTokens INTEGER NULL,
+                duration INTEGER NULL,
+                timestamp INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_usage_logs_timestamp ON usage_logs (timestamp);
+            CREATE INDEX IF NOT EXISTS idx_usage_logs_type ON usage_logs (type);
+            CREATE INDEX IF NOT EXISTS idx_usage_logs_type_timestamp ON usage_logs (type, timestamp);
+        `);
+        dbInstance.pragma(`user_version = 8`);
+        currentVersion = 8;
+        console.log('[db Migrator] Version 8 applied.');
       }
     })();
     console.log(
