@@ -4,6 +4,7 @@ import { exec } from 'child_process';
 import { XMLParser } from 'fast-xml-parser';
 import which from 'which';
 import os from 'os';
+import si from 'systeminformation';
 import type {
   GpuStats,
   GpuDeviceStats,
@@ -173,13 +174,158 @@ function formatGpuDetails(rawJson: {
       totalPowerLimitWatts:
         summary.totalPowerLimitWatts > 0 ? summary.totalPowerLimitWatts : null,
     },
+    executionProvider: 'gpu',
     systemMemory: getSystemMemoryStats(),
   };
 }
 
+async function getGpuStatsFromSystemInfo(): Promise<Partial<GpuStats>> {
+  const graphics = await si.graphics();
+  const systemMemory = getSystemMemoryStats();
+
+  const gpus: GpuDeviceStats[] = graphics.controllers.map((gpu, index) => {
+    const isApple =
+      process.platform === 'darwin' &&
+      gpu.model?.toLowerCase().includes('apple');
+
+    let totalMb = 0;
+    let usedMb = 0;
+
+    if (typeof gpu.vram === 'number' && gpu.vram > 0) {
+      totalMb = gpu.vram;
+    } else if (isApple && gpu.vramDynamic) {
+      totalMb = systemMemory.totalMb;
+      usedMb = systemMemory.usedMb;
+    }
+
+    const freeMb = Math.max(0, totalMb - usedMb);
+
+    return {
+      id: index,
+      name: gpu.model,
+      fanSpeedPercent: null,
+      performanceState: 'unknown',
+      memory: {
+        totalMb,
+        usedMb,
+        freeMb,
+      },
+      utilization: {
+        gpuPercent: gpu.utilizationGpu || null,
+        memoryPercent: gpu.utilizationMemory || null,
+      },
+      temperature: {
+        currentCelsius: gpu.temperatureGpu || null,
+      },
+      power: {
+        drawWatts: null,
+        limitWatts: null,
+      },
+      processes: [],
+    };
+  });
+
+  const summary = gpus.reduce(
+    (acc, gpu) => {
+      acc.totalMemoryMb += gpu.memory.totalMb;
+      acc.totalMemoryUsedMb += gpu.memory.usedMb;
+      if (gpu.utilization.gpuPercent !== null)
+        acc.gpuUtilSum += gpu.utilization.gpuPercent;
+      if (gpu.utilization.memoryPercent !== null)
+        acc.memUtilSum += gpu.utilization.memoryPercent;
+      if (gpu.temperature.currentCelsius !== null) {
+        acc.tempSum += gpu.temperature.currentCelsius;
+        acc.tempCount++;
+      }
+      if (gpu.utilization.gpuPercent !== null) acc.gpuUtilCount++;
+      if (gpu.utilization.memoryPercent !== null) acc.memUtilCount++;
+      return acc;
+    },
+    {
+      gpuCount: gpus.length,
+      totalMemoryMb: 0,
+      totalMemoryUsedMb: 0,
+      avgGpuUtilizationPercent: null as number | null,
+      avgMemoryUtilizationPercent: null as number | null,
+      avgTemperatureCelsius: null as number | null,
+      totalPowerDrawWatts: 0,
+      totalPowerLimitWatts: 0,
+      gpuUtilSum: 0,
+      gpuUtilCount: 0,
+      memUtilSum: 0,
+      memUtilCount: 0,
+      tempSum: 0,
+      tempCount: 0,
+    }
+  );
+
+  return {
+    available: gpus.length > 0,
+    driverVersion: null,
+    cudaVersion: null,
+    gpus,
+    summary: {
+      gpuCount: summary.gpuCount,
+      totalMemoryMb: summary.totalMemoryMb,
+      totalMemoryUsedMb: summary.totalMemoryUsedMb,
+      avgGpuUtilizationPercent:
+        summary.gpuUtilCount > 0
+          ? Math.round(summary.gpuUtilSum / summary.gpuUtilCount)
+          : null,
+      avgMemoryUtilizationPercent:
+        summary.memUtilCount > 0
+          ? Math.round(summary.memUtilSum / summary.memUtilCount)
+          : null,
+      avgTemperatureCelsius:
+        summary.tempCount > 0
+          ? Math.round(summary.tempSum / summary.tempCount)
+          : null,
+      totalPowerDrawWatts: null,
+      totalPowerLimitWatts: null,
+    },
+    systemMemory: getSystemMemoryStats(),
+  };
+}
+
+function determineExecutionProvider(
+  stats: Partial<GpuStats>
+): 'gpu' | 'cpu' | 'metal' {
+  if (stats.gpus && stats.gpus.length > 0) {
+    const hasAppleGpu =
+      process.platform === 'darwin' &&
+      stats.gpus.some((g) => g.name?.toLowerCase().includes('apple'));
+    if (hasAppleGpu) {
+      return 'metal';
+    }
+    return 'gpu';
+  }
+  return 'cpu';
+}
+
 export async function getGpuStats(): Promise<GpuStats> {
   const smiPath = await getNvidiaSmiPath();
-  if (!smiPath) {
+
+  if (smiPath) {
+    try {
+      const { stdout } = await execAsync(`${smiPath} -q -x`);
+      const rawJson = xmlParser.parse(stdout);
+      const stats = formatGpuDetails(rawJson);
+      stats.executionProvider = 'gpu';
+      return stats;
+    } catch (error) {
+      console.warn(
+        '[gpu-utils] nvidia-smi found but failed, falling back to systeminformation'
+      );
+    }
+  }
+
+  try {
+    const stats = await getGpuStatsFromSystemInfo();
+    stats.executionProvider = determineExecutionProvider(stats);
+    return stats as GpuStats;
+  } catch (error) {
+    console.error('[gpu-utils] systeminformation failed:', error);
+
     return {
       available: false,
       driverVersion: null,
@@ -195,15 +341,8 @@ export async function getGpuStats(): Promise<GpuStats> {
         totalPowerDrawWatts: null,
         totalPowerLimitWatts: null,
       },
+      executionProvider: 'cpu',
       systemMemory: getSystemMemoryStats(),
     };
-  }
-  try {
-    const { stdout } = await execAsync(`${smiPath} -q -x`);
-    const rawJson = xmlParser.parse(stdout);
-    return formatGpuDetails(rawJson);
-  } catch (error) {
-    console.error('[gpu-utils] Error executing or parsing nvidia-smi:', error);
-    throw new Error('Failed to get GPU statistics from nvidia-smi.');
   }
 }

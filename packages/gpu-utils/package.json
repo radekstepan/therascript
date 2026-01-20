@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "fast-xml-parser": "^4.4.0",
+    "systeminformation": "^5.30.5",
     "which": "^4.0.0"
   },
   "devDependencies": {

@@ -1,2 +1,1 @@
-- the system resource usage looks off for system vram. Any lib to get that for us?
 - do a system review of any inefficiencies
