@@ -87,7 +87,7 @@ export const addAnalysisJob = async (data: AnalysisJobData) => {
 };
 
 // --- Graceful Shutdown ---
-async function shutdown() {
+export async function closeQueues() {
   console.log('[JobQueueService] Closing BullMQ queues...');
   try {
     await Promise.all([transcriptionQueue.close(), analysisQueue.close()]);
@@ -96,6 +96,3 @@ async function shutdown() {
     console.error('[JobQueueService] Error closing BullMQ queues:', err);
   }
 }
-
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);

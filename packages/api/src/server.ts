@@ -50,6 +50,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import axios from 'axios';
 import { closeDb } from '@therascript/db';
+import { closeQueues } from './services/jobQueueService.js';
 import {
   getElasticsearchClient,
   initializeIndices,
@@ -447,7 +448,8 @@ async function shutdown(signal: string) {
         resolve(null);
       });
     });
-    closeDb(); // Close SQLite connection
+    await closeQueues();
+    closeDb();
   } catch (err) {
     console.error('[Server] Error during graceful shutdown:', err);
   } finally {

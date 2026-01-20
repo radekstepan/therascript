@@ -526,17 +526,3 @@ export function transaction<F extends (...args: any[]) => any>(
 export const checkDatabaseHealth = (): void => {
   getDb().pragma('quick_check');
 };
-process.on('exit', closeDb);
-process.on('SIGHUP', () => process.exit(128 + 1));
-process.on('SIGINT', () => process.exit(128 + 2));
-process.on('SIGTERM', () => process.exit(128 + 15));
-process.on('uncaughtException', (err) => {
-  console.error('[db]: Uncaught Exception:', err);
-  closeDb();
-  process.exit(1);
-});
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('[db]: Unhandled Rejection at:', promise, 'reason:', reason);
-  closeDb();
-  process.exit(1);
-});
