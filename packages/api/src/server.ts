@@ -55,6 +55,7 @@ import {
   getElasticsearchClient,
   initializeIndices,
   checkEsHealth,
+  closeElasticsearchClient,
 } from '@therascript/elasticsearch-client';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -450,6 +451,7 @@ async function shutdown(signal: string) {
     });
     await closeQueues();
     closeDb();
+    await closeElasticsearchClient();
   } catch (err) {
     console.error('[Server] Error during graceful shutdown:', err);
   } finally {

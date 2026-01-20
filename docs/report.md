@@ -28,43 +28,6 @@ Therascript is a well-structured monorepo with clear separation between packages
 
 ---
 
-## 2. High Priority Issues
-
-### 2.4 🟠 Elasticsearch Client Never Closes
-
-**Location:** [`packages/elasticsearch-client/src/client.ts`](file:///Users/radek/dev/therascript/packages/elasticsearch-client/src/client.ts)
-
-**Problem:** The ES client singleton is created but never closed:
-
-```typescript
-let esClientInstance: Client | null = null;
-
-export const getElasticsearchClient = (nodeUrl: string): Client => {
-  if (!esClientInstance) {
-    esClientInstance = new Client({ node: nodeUrl, ... });
-  }
-  return esClientInstance;
-};
-// No closeElasticsearchClient() function exists
-```
-
-**Impact:**
-- On shutdown, ES client may have pending operations
-- Node.js process may hang waiting for connections to close
-- No way to flush pending bulk operations
-
-**Fix:** Add close function and call from entrypoint shutdown:
-```typescript
-export const closeElasticsearchClient = async (): Promise<void> => {
-  if (esClientInstance) {
-    await esClientInstance.close();
-    esClientInstance = null;
-  }
-};
-```
-
----
-
 ## 3. Medium Priority Issues
 
 ### 3.1 🟡 Configuration Duplication

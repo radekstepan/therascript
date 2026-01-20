@@ -40,3 +40,19 @@ export const checkEsHealth = async (client: Client): Promise<boolean> => {
     return false;
   }
 };
+
+export const closeElasticsearchClient = async (): Promise<void> => {
+  if (esClientInstance) {
+    try {
+      await esClientInstance.close();
+      console.log('[ES Client] Elasticsearch client closed successfully.');
+    } catch (error: any) {
+      console.error(
+        '[ES Client] Error closing Elasticsearch client:',
+        error.message || error
+      );
+    } finally {
+      esClientInstance = null;
+    }
+  }
+};

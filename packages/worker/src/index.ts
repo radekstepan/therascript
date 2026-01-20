@@ -2,6 +2,7 @@
 import { Worker, Job } from 'bullmq';
 import { configureDb, closeDb } from '@therascript/db';
 import { configureFileService } from '@therascript/services';
+import { closeElasticsearchClient } from '@therascript/elasticsearch-client';
 import config from './config/index.js';
 import { redisConnection } from './redisConnection.js';
 import transcriptionProcessor, {
@@ -85,6 +86,7 @@ async function shutdown(signal: string) {
     console.log('[Worker] All BullMQ components closed.');
     closeDb();
     console.log('[Worker] Database connection closed.');
+    await closeElasticsearchClient();
   } catch (err) {
     console.error('[Worker] Error during graceful shutdown:', err);
   } finally {

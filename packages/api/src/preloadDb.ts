@@ -17,6 +17,7 @@ import {
   initializeIndices as initializeEsIndices,
   deleteIndex as deleteEsIndex,
   bulkIndexDocuments as bulkIndexEsDocuments,
+  closeElasticsearchClient,
   TRANSCRIPTS_INDEX,
   MESSAGES_INDEX,
 } from '@therascript/elasticsearch-client';
@@ -538,6 +539,7 @@ async function preloadDatabase() {
     }
 
     closeDb();
+    await closeElasticsearchClient();
 
     if (success) {
       console.log('[Preload] Success!');
