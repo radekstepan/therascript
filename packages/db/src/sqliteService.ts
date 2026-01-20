@@ -444,6 +444,7 @@ export function closeDb(): void {
       dbInstance.close();
       console.log('[db]: Database connection closed.');
       dbInstance = null; // Important to reset
+      statementCache.clear();
     } catch (error) {
       console.error('[db]: Error closing the database connection:', error);
     }
