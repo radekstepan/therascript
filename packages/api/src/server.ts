@@ -1,10 +1,12 @@
 // Configure the database connection before any other modules are loaded
 import { configureDb } from '@therascript/db';
+import { configureFileService } from '@therascript/services';
 import config from './config/index.js';
 configureDb({
   dbPath: config.db.sqlitePath,
   isDev: !config.server.isProduction,
 });
+configureFileService(config.db.uploadsDir);
 
 import http from 'node:http';
 import { WritableStream, ReadableStream } from 'node:stream/web';

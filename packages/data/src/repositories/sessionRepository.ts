@@ -1,8 +1,10 @@
 import { db, type DbStatement, type DbRunResult } from '@therascript/db';
-import type { BackendSession, BackendSessionMetadata } from '../types/index.js';
-import path from 'node:path'; // Import path for checking
+import type {
+  BackendSession,
+  BackendSessionMetadata,
+} from '@therascript/domain';
+import path from 'node:path';
 
-// --- Lazy Statement Getters ---
 let _insertSessionStmt: DbStatement | null = null;
 const insertSessionStmt = (): DbStatement => {
   if (!_insertSessionStmt) {
@@ -60,7 +62,6 @@ const findSessionByAudioPathStmt = (): DbStatement => {
   }
   return _findSessionByAudioPathStmt;
 };
-// --- End Lazy Statement Getters ---
 
 export const sessionRepository = {
   create: (

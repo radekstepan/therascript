@@ -12,7 +12,9 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@therascript/api": "*",
+    "@therascript/data": "*",
+    "@therascript/domain": "*",
+    "@therascript/services": "*",
     "@therascript/db": "*",
     "@therascript/elasticsearch-client": "*",
     "axios": "^1.8.4",

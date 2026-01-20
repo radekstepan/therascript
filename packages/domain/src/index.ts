@@ -1,10 +1,8 @@
-// packages/api/src/types/index.ts
-
 export interface Template {
   id: number;
   title: string;
   text: string;
-  createdAt: number; // UNIX Milliseconds
+  createdAt: number;
 }
 
 export interface BackendChatMessage {
@@ -12,39 +10,38 @@ export interface BackendChatMessage {
   chatId: number;
   sender: 'user' | 'ai' | 'system';
   text: string;
-  timestamp: number; // UNIX Milliseconds
+  timestamp: number;
   promptTokens?: number | null;
   completionTokens?: number | null;
 }
 
 export interface BackendChatSession {
   id: number;
-  sessionId: number | null; // Null for standalone chats
-  timestamp: number; // UNIX Milliseconds
+  sessionId: number | null;
+  timestamp: number;
   name?: string | null;
   messages?: BackendChatMessage[];
-  tags?: string[] | null; // For standalone chats primarily
+  tags?: string[] | null;
 }
 
-// Metadata for a chat, excluding its messages list
 export type ChatMetadata = Omit<BackendChatSession, 'messages'> & {
-  tags?: string[] | null; // Ensure tags are part of this if they can be associated with a chat's metadata
+  tags?: string[] | null;
 };
 
 export interface BackendTranscriptParagraph {
-  id: number; // Primary key of the transcript_paragraphs table
+  id: number;
   sessionId: number;
-  paragraphIndex: number; // Logical order of the paragraph within the session transcript
-  timestampMs: number; // Original timestamp in milliseconds from Whisper
+  paragraphIndex: number;
+  timestampMs: number;
   text: string;
 }
 
-// Structure used for API responses for transcript content
 export interface TranscriptParagraphData {
-  id: number; // Corresponds to paragraphIndex for UI display purposes
-  timestamp: number; // start time in milliseconds (maps from timestampMs)
+  id: number;
+  timestamp: number;
   text: string;
 }
+
 export type StructuredTranscript = TranscriptParagraphData[];
 
 export interface WhisperSegment {
@@ -79,43 +76,41 @@ export interface WhisperJobStatus {
     | 'transcribing'
     | 'started'
     | 'canceling';
-  progress?: number | null; // Percentage 0-100
+  progress?: number | null;
   result?: WhisperTranscriptionResult | null;
   error?: string | null;
-  start_time?: number | null; // UNIX Milliseconds
-  end_time?: number | null; // UNIX Milliseconds
-  duration?: number | null; // Audio duration in seconds
-  message?: string | null; // Optional descriptive message from Whisper service
+  start_time?: number | null;
+  end_time?: number | null;
+  duration?: number | null;
+  message?: string | null;
 }
 
 export interface BackendSession {
   id: number;
-  fileName: string; // Original uploaded filename
+  fileName: string;
   clientName: string;
   sessionName: string;
-  date: string; // ISO 8601 string (e.g., "2023-10-27T12:00:00.000Z")
+  date: string;
   sessionType: string;
   therapy: string;
-  audioPath: string | null; // Relative path/identifier for the audio file
+  audioPath: string | null;
   status: 'pending' | 'queued' | 'transcribing' | 'completed' | 'failed';
   whisperJobId: string | null;
   transcriptTokenCount?: number | null;
-  chats?: (Omit<ChatMetadata, 'tags'> & { sessionId: number })[]; // For session details endpoint, session chats don't have tags from this relation
+  chats?: (Omit<ChatMetadata, 'tags'> & { sessionId: number })[];
 }
 
-// Metadata for creating/updating a session
 export type BackendSessionMetadata = Omit<
   BackendSession,
   | 'id'
   | 'transcriptTokenCount'
   | 'chats'
-  | 'fileName' // fileName is usually derived from upload, not direct metadata input
+  | 'fileName'
   | 'status'
   | 'whisperJobId'
   | 'audioPath'
 >;
 
-// For API documentation via Swagger (if used)
 export interface ActionSchema {
   endpoint: string;
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -128,16 +123,15 @@ export interface ActionSchema {
 
 export interface ApiErrorResponse {
   error: string;
-  message: string; // Added for consistency with Elysia error responses
+  message: string;
   details?: string | Record<string, any>;
   validationErrors?: any;
 }
 
-// Ollama related types (internal API representation, dates are Date objects)
 export interface OllamaModelInfo {
   name: string;
-  modified_at: Date; // Date object
-  size: number; // in bytes
+  modified_at: Date;
+  size: number;
   digest: string;
   details: {
     format: string;
@@ -147,8 +141,8 @@ export interface OllamaModelInfo {
     quantization_level: string;
   };
   defaultContextSize?: number | null;
-  size_vram?: number; // Optional field from newer Ollama versions
-  expires_at?: Date; // Optional Date object
+  size_vram?: number;
+  expires_at?: Date;
 }
 
 export type OllamaPullJobStatusState =
@@ -166,22 +160,21 @@ export interface OllamaPullJobStatus {
   modelName: string;
   status: OllamaPullJobStatusState;
   message: string;
-  progress?: number; // 0-100
+  progress?: number;
   completedBytes?: number;
   totalBytes?: number;
-  currentLayer?: string; // For detailed progress
-  startTime: number; // UNIX Milliseconds
-  endTime?: number; // UNIX Milliseconds
+  currentLayer?: string;
+  startTime: number;
+  endTime?: number;
   error?: string;
 }
 
-// Docker related types (as provided by Dockerode, simplified for API)
 export interface DockerContainerStatus {
   id: string;
   name: string;
   image: string;
-  state: string; // e.g., 'running', 'exited'
-  status: string; // Human-readable status, e.g., 'Up 5 minutes'
+  state: string;
+  status: string;
   ports: {
     PrivatePort: number;
     PublicPort?: number;
@@ -190,7 +183,6 @@ export interface DockerContainerStatus {
   }[];
 }
 
-// Elasticsearch Search Result Item (API internal representation before sending to UI)
 export interface ApiSearchResultItem {
   id: string | number;
   type: 'chat' | 'transcript';
@@ -205,14 +197,11 @@ export interface ApiSearchResultItem {
   tags?: string[] | null;
 }
 
-// API response structure for search
 export interface ApiSearchResponse {
   query: string;
   results: ApiSearchResultItem[];
   total: number;
 }
-
-// --- NEW ANALYSIS JOB TYPES ---
 
 export interface AnalysisStrategy {
   intermediate_question: string;
@@ -234,11 +223,11 @@ export interface AnalysisJob {
     | 'canceled';
   final_result: string | null;
   error_message: string | null;
-  created_at: number; // UNIX Milliseconds
-  completed_at: number | null; // UNIX Milliseconds
+  created_at: number;
+  completed_at: number | null;
   model_name: string | null;
   context_size: number | null;
-  strategy_json: string | null; // Stored as a JSON string
+  strategy_json: string | null;
 }
 
 export interface IntermediateSummary {
@@ -258,7 +247,5 @@ export interface IntermediateSummaryWithSessionName
 
 export interface AnalysisJobWithDetails extends AnalysisJob {
   summaries: IntermediateSummaryWithSessionName[];
-  strategy: AnalysisStrategy | null; // Parsed for the UI
+  strategy: AnalysisStrategy | null;
 }
-
-// --- END NEW ANALYSIS JOB TYPES ---

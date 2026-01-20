@@ -2,7 +2,7 @@ import { Elysia, t, type Static } from 'elysia';
 import path from 'node:path';
 import fsSync from 'node:fs';
 import { Readable } from 'node:stream';
-import { sessionRepository } from '../repositories/sessionRepository.js';
+import { sessionRepository } from '@therascript/data';
 import {
   listSessions,
   getSessionDetails,
@@ -16,9 +16,9 @@ import {
   deleteUploadedAudioFile,
   saveUploadedAudio,
   getAudioAbsolutePath,
-} from '../services/fileService.js';
+} from '@therascript/services';
 import { startTranscriptionJob } from '../services/transcriptionService.js';
-import type { BackendSession } from '../types/index.js';
+import type { BackendSession } from '@therascript/domain';
 import {
   NotFoundError,
   InternalServerError,

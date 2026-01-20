@@ -3,8 +3,7 @@ import type {
   BackendChatSession,
   BackendChatMessage,
   ChatMetadata,
-} from '../types/index.js';
-// Statement and FtsSearchResult are no longer needed here for search
+} from '@therascript/domain';
 
 const parseTags = (tagsJson: string | null): string[] | null => {
   if (!tagsJson) return null;
@@ -39,12 +38,10 @@ const selectChatsBySessionIdSql =
 const selectStandaloneChatsSql =
   'SELECT id, sessionId, timestamp, name, tags FROM chats WHERE sessionId IS NULL ORDER BY timestamp DESC';
 const selectMessagesByChatIdSql =
-  'SELECT * FROM messages WHERE chatId = ? ORDER BY id ASC'; // Keep for findChatWithMessages
+  'SELECT * FROM messages WHERE chatId = ? ORDER BY id ASC';
 const selectChatByIdSql = 'SELECT * FROM chats WHERE id = ?';
 const updateChatDetailsSql = 'UPDATE chats SET name = ?, tags = ? WHERE id = ?';
 const deleteChatSql = 'DELETE FROM chats WHERE id = ?';
-
-// searchSql and searchStmt are removed
 
 const findChatWithMessages = (chatId: number): BackendChatSession | null => {
   try {
@@ -100,7 +97,7 @@ export const chatRepository = {
       const chatRows = all<RawChatRow>(selectChatsBySessionIdSql, sessionId);
       return chatRows.map((chat) => ({
         id: chat.id,
-        sessionId: chat.sessionId as number, // Session chats always have a session ID
+        sessionId: chat.sessionId as number,
         timestamp: chat.timestamp,
         name: chat.name ?? null,
         tags: parseTags(chat.tags),
@@ -116,7 +113,7 @@ export const chatRepository = {
       const chatRows = all<RawChatRow>(selectStandaloneChatsSql);
       return chatRows.map((chat) => ({
         id: chat.id,
-        sessionId: null, // Standalone chats have null session ID
+        sessionId: null,
         timestamp: chat.timestamp,
         name: chat.name ?? null,
         tags: parseTags(chat.tags),
@@ -158,5 +155,4 @@ export const chatRepository = {
       throw new Error(`Database error deleting chat.`);
     }
   },
-  // searchMessages method is removed
 };

@@ -3,7 +3,7 @@ import type {
   BackendChatMessage,
   OllamaModelInfo,
   OllamaPullJobStatus,
-} from '../types/index.js'; // Added OllamaPullJobStatus
+} from '@therascript/domain'; // Added OllamaPullJobStatus
 import type { ChatResponse, ListResponse, ProgressResponse } from 'ollama';
 import type * as RealService from './ollamaService.real.js'; // Use .real suffix
 import type * as MockService from './ollamaService.mock.js';

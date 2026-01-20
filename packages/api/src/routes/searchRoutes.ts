@@ -18,7 +18,7 @@ import { InternalServerError, BadRequestError } from '../errors.js';
 import type {
   ApiSearchResultItem as UIApiSearchResultItem,
   ApiSearchResponse as UIApiSearchResponse,
-} from '../types/index.js';
+} from '@therascript/domain';
 
 const SearchQuerySchema = t.Object({
   q: t.String({

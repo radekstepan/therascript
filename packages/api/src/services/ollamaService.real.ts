@@ -22,7 +22,7 @@ import {
   OllamaModelInfo,
   OllamaPullJobStatus,
   OllamaPullJobStatusState,
-} from '../types/index.js';
+} from '@therascript/domain';
 // --- End Import ---
 import {
   InternalServerError,
@@ -35,7 +35,7 @@ import {
   getActiveModel,
   getConfiguredContextSize,
 } from './activeModelService.js';
-import { templateRepository } from '../repositories/templateRepository.js';
+import { templateRepository } from '@therascript/data';
 import { SYSTEM_PROMPT_TEMPLATES } from '@therascript/db/dist/sqliteService.js';
 import { getOllamaRuntime } from './ollamaRuntime.js';
 

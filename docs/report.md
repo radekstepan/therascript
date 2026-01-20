@@ -63,34 +63,6 @@ export function closeDb(): void {
 }
 ```
 
----
-
-### 1.2 🔴 Worker Imports from API Compiled Output
-
-**Location:** [`packages/worker/src/jobs/transcriptionProcessor.ts:4-16`](file:///Users/radek/dev/therascript/packages/worker/src/jobs/transcriptionProcessor.ts#L4-L16), [`packages/worker/src/jobs/analysisProcessor.ts:4-13`](file:///Users/radek/dev/therascript/packages/worker/src/jobs/analysisProcessor.ts#L4-L13)
-
-**Problem:** Worker package directly imports from `@therascript/api/dist/*`:
-
-```typescript
-import { sessionRepository } from '@therascript/api/dist/repositories/sessionRepository.js';
-import { transcriptRepository } from '@therascript/api/dist/repositories/transcriptRepository.js';
-import { calculateTokenCount } from '@therascript/api/dist/services/tokenizerService.js';
-```
-
-**Impact:**
-- Worker depends on API's build artifacts existing
-- Breaks if API build output layout changes
-- Imports internal implementation details, not stable APIs
-- Makes local dev workflows fragile (watch mode, ts-node)
-- Hides potential circular dependencies
-
-**Recommended Fix:** Create shared packages:
-- `@therascript/data` - repositories (session, transcript, message, chat, analysis, usage)
-- `@therascript/domain` - shared types
-- `@therascript/services` - shared services (tokenizer, file service, Ollama client)
-
----
-
 ### 1.3 🔴 Missing HTTP Status Check in Analysis Processor Streaming
 
 **Location:** [`packages/worker/src/jobs/analysisProcessor.ts:28-42`](file:///Users/radek/dev/therascript/packages/worker/src/jobs/analysisProcessor.ts#L28-L42)

@@ -1,22 +1,23 @@
 // packages/api/src/api/sessionHandler.ts
-import { sessionRepository } from '../repositories/sessionRepository.js';
-import { chatRepository } from '../repositories/chatRepository.js';
-import { transcriptRepository } from '../repositories/transcriptRepository.js';
-import { messageRepository } from '../repositories/messageRepository.js';
+import {
+  sessionRepository,
+  chatRepository,
+  transcriptRepository,
+  messageRepository,
+} from '@therascript/data';
 import {
   deleteUploadedAudioFile,
   saveUploadedAudio,
-} from '../services/fileService.js';
-import { reloadActiveModelContext } from '../services/ollamaService.js';
-// Import getStructuredTranscriptionResult from transcriptionService where it's actually exported
+} from '@therascript/services';
 import { getStructuredTranscriptionResult } from '../services/transcriptionService.js';
+import { reloadActiveModelContext } from '../services/ollamaService.js';
 import type {
   BackendSession,
   StructuredTranscript,
   BackendSessionMetadata,
   ApiSearchResultItem,
   TranscriptParagraphData,
-} from '../types/index.js';
+} from '@therascript/domain';
 import {
   NotFoundError,
   BadRequestError,
@@ -24,7 +25,7 @@ import {
   ApiError,
   ConflictError,
 } from '../errors.js';
-import { calculateTokenCount } from '../services/tokenizerService.js';
+import { calculateTokenCount } from '@therascript/services';
 import {
   getElasticsearchClient,
   TRANSCRIPTS_INDEX,

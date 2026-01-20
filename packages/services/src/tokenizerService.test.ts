@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 
-// Mock tiktoken to control tokenizer availability and behavior
 vi.mock('@dqbd/tiktoken', () => ({
   get_encoding: vi.fn(() => ({
     encode: (s: string) => (s.trim() === '' ? [] : s.trim().split(/\s+/g)),
@@ -30,11 +29,9 @@ describe('tokenizerService.calculateTokenCount', () => {
   });
 
   it('returns null if tokenizer failed to initialize', async () => {
-    // Silence expected error/warn noise from init failure and null tokenizer path
     const spyErr = vi.spyOn(console, 'error').mockImplementation(() => {});
     const spyWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      // Remock get_encoding to throw to simulate init failure
       (mockedGetEncoding as any).mockImplementationOnce(() => {
         throw new Error('init fail');
       });

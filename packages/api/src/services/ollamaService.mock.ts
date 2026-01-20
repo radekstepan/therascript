@@ -6,7 +6,7 @@ import type {
   OllamaModelInfo,
   OllamaPullJobStatus,
   OllamaPullJobStatusState,
-} from '../types/index.js';
+} from '@therascript/domain';
 // --- End Import ---
 import {
   NotFoundError,

@@ -1,13 +1,22 @@
-// =========================================
-// File: packages/api/src/services/fileService.ts
-// =========================================
 import fs from 'fs/promises';
 import path from 'path';
-import crypto from 'node:crypto'; // Import crypto for unique name generation
-import config from '../config/index.js';
-import { isNodeError } from '../utils/helpers.js';
+import crypto from 'node:crypto';
+import { isNodeError } from './helpers.js';
 
-const uploadsDir = config.db.uploadsDir;
+let uploadsDir: string | null = null;
+
+export function configureFileService(dir: string) {
+  uploadsDir = dir;
+}
+
+const getUploadsDir = (): string => {
+  if (!uploadsDir) {
+    throw new Error(
+      'File service not configured. Call configureFileService() first.'
+    );
+  }
+  return uploadsDir;
+};
 
 const generateUniqueAudioFilename = (
   sessionId: number,
@@ -25,18 +34,19 @@ export const saveUploadedAudio = async (
   originalFilename: string,
   audioBuffer: Buffer
 ): Promise<string> => {
+  const dir = getUploadsDir();
   const uniqueFilename = generateUniqueAudioFilename(
     sessionId,
     originalFilename
   );
-  const absoluteFilePath = path.join(uploadsDir, uniqueFilename);
+  const absoluteFilePath = path.join(dir, uniqueFilename);
   const relativeFilePath = uniqueFilename;
 
   console.log(
     `[FileService] Saving audio for session ${sessionId}: ${originalFilename} -> ${absoluteFilePath}`
   );
   try {
-    await fs.mkdir(uploadsDir, { recursive: true });
+    await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(absoluteFilePath, audioBuffer);
     console.log(
       `[FileService] Audio saved successfully to: ${absoluteFilePath}`
@@ -56,6 +66,7 @@ export const saveUploadedAudio = async (
 const getAudioAbsolutePath = (
   relativeFilename: string | null
 ): string | null => {
+  const dir = getUploadsDir();
   if (!relativeFilename) return null;
   if (path.isAbsolute(relativeFilename)) {
     console.error(
@@ -63,11 +74,11 @@ const getAudioAbsolutePath = (
     );
     return null;
   }
-  const absolutePath = path.resolve(uploadsDir, relativeFilename);
-  const resolvedUploadsDir = path.resolve(uploadsDir);
+  const absolutePath = path.resolve(dir, relativeFilename);
+  const resolvedUploadsDir = path.resolve(dir);
   if (!absolutePath.startsWith(resolvedUploadsDir)) {
     console.error(
-      `[FileService:getAudioAbsolutePath] Resolved path '${absolutePath}' is outside the expected uploads directory '${resolvedUploadsDir}'. Aborting.`
+      `[FileService:getAudioAbsolutePath] Resolved path '${absolutePath}' is outside of expected uploads directory '${resolvedUploadsDir}'. Aborting.`
     );
     return null;
   }
@@ -112,10 +123,11 @@ export const deleteUploadedAudioFile = async (
 };
 
 export const deleteAllUploads = async (): Promise<void> => {
-  console.warn(`[FileService] DELETING ALL UPLOADS in ${uploadsDir}`);
+  const dir = getUploadsDir();
+  console.warn(`[FileService] DELETING ALL UPLOADS in ${dir}`);
   try {
-    await fs.rm(uploadsDir, { recursive: true, force: true });
-    await fs.mkdir(uploadsDir, { recursive: true });
+    await fs.rm(dir, { recursive: true, force: true });
+    await fs.mkdir(dir, { recursive: true });
     console.log(`[FileService] Uploads directory has been cleared.`);
   } catch (error) {
     console.error(`[FileService] Error clearing uploads directory:`, error);
@@ -123,22 +135,19 @@ export const deleteAllUploads = async (): Promise<void> => {
   }
 };
 
-export const getUploadsDir = (): string => {
-  return uploadsDir;
-};
-
 export const copyAllUploadsTo = async (
   destinationDir: string
 ): Promise<void> => {
+  const dir = getUploadsDir();
   try {
-    const files = await fs.readdir(uploadsDir);
+    const files = await fs.readdir(dir);
     for (const file of files) {
-      const sourcePath = path.join(uploadsDir, file);
+      const sourcePath = path.join(dir, file);
       const destPath = path.join(destinationDir, file);
       await fs.copyFile(sourcePath, destPath);
     }
     console.log(
-      `[FileService] Copied ${files.length} files from ${uploadsDir} to ${destinationDir}`
+      `[FileService] Copied ${files.length} files from ${dir} to ${destinationDir}`
     );
   } catch (error) {
     console.error(`[FileService] Error copying uploaded files:`, error);
@@ -146,4 +155,4 @@ export const copyAllUploadsTo = async (
   }
 };
 
-export { getAudioAbsolutePath };
+export { getAudioAbsolutePath, getUploadsDir };

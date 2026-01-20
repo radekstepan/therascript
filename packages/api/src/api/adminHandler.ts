@@ -10,19 +10,21 @@ import {
 } from '@therascript/elasticsearch-client';
 import config from '../config/index.js';
 import { db, schema } from '@therascript/db';
-import { sessionRepository } from '../repositories/sessionRepository.js';
-import { transcriptRepository } from '../repositories/transcriptRepository.js';
-import { chatRepository } from '../repositories/chatRepository.js';
-import { messageRepository } from '../repositories/messageRepository.js';
-import { templateRepository } from '../repositories/templateRepository.js';
-import { analysisRepository } from '../repositories/analysisRepository.js';
+import {
+  sessionRepository,
+  transcriptRepository,
+  chatRepository,
+  messageRepository,
+  templateRepository,
+  analysisRepository,
+} from '@therascript/data';
 import { InternalServerError } from '../errors.js';
 import type {
   BackendSession,
   TranscriptParagraphData,
   BackendChatMessage,
-} from '../types/index.js';
-import { deleteAllUploads, getUploadsDir } from '../services/fileService.js';
+} from '@therascript/domain';
+import { deleteAllUploads, getUploadsDir } from '@therascript/services';
 import tar from 'tar-stream';
 import { z } from 'zod';
 import { Readable } from 'stream';

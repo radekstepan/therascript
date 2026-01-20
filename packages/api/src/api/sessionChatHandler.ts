@@ -1,8 +1,10 @@
 // packages/api/src/api/sessionChatHandler.ts
-import { chatRepository } from '../repositories/chatRepository.js';
-import { transcriptRepository } from '../repositories/transcriptRepository.js';
-import { messageRepository } from '../repositories/messageRepository.js';
-import { usageRepository } from '../repositories/usageRepository.js';
+import {
+  chatRepository,
+  transcriptRepository,
+  messageRepository,
+  usageRepository,
+} from '@therascript/data';
 import { streamChatResponse } from '../services/ollamaService.js';
 import {
   NotFoundError,
@@ -15,7 +17,7 @@ import type {
   ChatMetadata,
   BackendChatSession,
   BackendSession,
-} from '../types/index.js'; // Added BackendSession
+} from '@therascript/domain'; // Added BackendSession
 import { TransformStream } from 'node:stream/web';
 import { TextEncoder } from 'node:util';
 import {
@@ -26,7 +28,7 @@ import {
 } from '@therascript/elasticsearch-client';
 import config from '../config/index.js';
 // ============================= FIX START ==============================
-import { cleanLlmOutput } from '../utils/helpers.js';
+import { cleanLlmOutput } from '@therascript/services';
 // ============================== FIX END ===============================
 import {
   computeContextUsageForChat,

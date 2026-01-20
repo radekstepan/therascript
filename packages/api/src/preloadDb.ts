@@ -1,5 +1,6 @@
 // Add configuration at the top
 import { configureDb, db, closeDb } from '@therascript/db';
+import { calculateTokenCount } from '@therascript/services';
 import config from './config/index.js';
 configureDb({
   dbPath: config.db.sqlitePath,
@@ -10,8 +11,7 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@elastic/elasticsearch';
-import { calculateTokenCount } from './services/tokenizerService.js';
-import type { TranscriptParagraphData } from './types/index.js';
+import type { TranscriptParagraphData } from '@therascript/domain';
 import {
   getElasticsearchClient,
   initializeIndices as initializeEsIndices,

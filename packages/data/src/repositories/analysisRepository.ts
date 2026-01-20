@@ -1,10 +1,6 @@
-// packages/api/src/repositories/analysisRepository.ts
 import { db, run, all, get } from '@therascript/db';
-import type { AnalysisJob, IntermediateSummary } from '../types/index.js';
+import type { AnalysisJob, IntermediateSummary } from '@therascript/domain';
 
-// --- SQL Statements ---
-
-// Analysis Jobs
 const insertJobSql = `
     INSERT INTO analysis_jobs (original_prompt, short_prompt, status, created_at, model_name, context_size, strategy_json) 
     VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -22,14 +18,12 @@ const updateJobStrategyAndStatusSql =
   "UPDATE analysis_jobs SET strategy_json = ?, status = 'pending' WHERE id = ?";
 const deleteJobSql = 'DELETE FROM analysis_jobs WHERE id = ?';
 
-// Analysis Job Sessions (Join Table)
 const insertJobSessionSql = `
     INSERT INTO analysis_job_sessions (analysis_job_id, session_id) 
     VALUES (?, ?)
 `;
 const selectAllJobSessionsSql = 'SELECT * FROM analysis_job_sessions';
 
-// Intermediate Summaries
 const insertIntermediateSummarySql = `
     INSERT INTO intermediate_summaries (analysis_job_id, session_id, status) 
     VALUES (?, ?, ?)
@@ -49,12 +43,7 @@ const updateIntermediateSummarySql = `
     WHERE id = ?
 `;
 
-// --- Repository Implementation ---
-
 export const analysisRepository = {
-  /**
-   * Creates a new analysis job and its associated session links and intermediate tasks.
-   */
   createJob: (
     prompt: string,
     shortPrompt: string,
@@ -67,7 +56,6 @@ export const analysisRepository = {
     try {
       const createdAt = Date.now();
       const newJobId = db.transaction(() => {
-        // 1. Create the main job
         const jobInfo = run(
           insertJobSql,
           prompt,
@@ -80,13 +68,11 @@ export const analysisRepository = {
         );
         const jobId = jobInfo.lastInsertRowid as number;
 
-        // 2. Link sessions to the job
         const sessionStmt = db.prepare(insertJobSessionSql);
         for (const sessionId of sessionIds) {
           sessionStmt.run(jobId, sessionId);
         }
 
-        // 3. Create pending intermediate summary tasks
         const summaryStmt = db.prepare(insertIntermediateSummarySql);
         for (const sessionId of sessionIds) {
           summaryStmt.run(jobId, sessionId, 'pending');
@@ -187,7 +173,6 @@ export const analysisRepository = {
 
   deleteJob: (jobId: number): boolean => {
     try {
-      // ON DELETE CASCADE will handle analysis_job_sessions and intermediate_summaries
       const info = run(deleteJobSql, jobId);
       return info.changes > 0;
     } catch (error) {

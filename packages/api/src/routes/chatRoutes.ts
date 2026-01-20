@@ -1,8 +1,10 @@
 // packages/api/src/routes/chatRoutes.ts
 import { Elysia, t, type Static, type Cookie } from 'elysia';
-import { chatRepository } from '../repositories/chatRepository.js';
-import { messageRepository } from '../repositories/messageRepository.js';
-import { sessionRepository } from '../repositories/sessionRepository.js';
+import {
+  chatRepository,
+  messageRepository,
+  sessionRepository,
+} from '@therascript/data';
 import {
   createSessionChat,
   addSessionChatMessage,
@@ -16,7 +18,7 @@ import type {
   BackendChatMessage,
   ChatMetadata,
   BackendSession,
-} from '../types/index.js'; // Added BackendChatSession
+} from '@therascript/domain'; // Added BackendChatSession
 import { computeContextUsageForChat } from '../services/contextUsageService.js';
 
 // --- Schemas ---

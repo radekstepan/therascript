@@ -3,7 +3,7 @@ import {
   type WeeklyAggregate,
   type WeeklyAggregateByModel,
   type UsageTotalsByModel,
-} from '../repositories/usageRepository.js';
+} from '@therascript/data';
 import {
   pricing,
   type LlmModelPricing,

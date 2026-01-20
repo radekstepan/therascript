@@ -1,7 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// We'll mock @therascript/db with an in-memory store
-
 type Template = { id: number; title: string; text: string; createdAt: number };
 
 const makeDbMock = () => {

@@ -29,7 +29,7 @@ import type {
   OllamaModelInfo,
   OllamaPullJobStatus,
   OllamaPullJobStatusState,
-} from '../types/index.js';
+} from '@therascript/domain';
 
 // --- Ollama Response/Request Schemas ---
 const OllamaModelDetailSchema = t.Object({

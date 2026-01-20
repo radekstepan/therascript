@@ -32,10 +32,14 @@ const config = {
     port: parseInt(getEnvVar('REDIS_PORT', '6379'), 10),
   },
   db: {
-    // Resolve path relative to the worker package directory
+    // Resolve path relative to worker package directory
     sqlitePath: path.resolve(
       packageWorkerDir,
       getEnvVar('DB_PATH', '../api/data/therapy-analyzer-dev.sqlite')
+    ),
+    uploadsDir: path.resolve(
+      packageWorkerDir,
+      getEnvVar('DB_UPLOADS_DIR', '../api/data/uploads')
     ),
   },
   services: {

@@ -1,11 +1,11 @@
 // packages/api/src/api/templateHandler.ts
-import { templateRepository } from '../repositories/templateRepository.js';
+import { templateRepository } from '@therascript/data';
 import {
   NotFoundError,
   InternalServerError,
   BadRequestError,
 } from '../errors.js';
-import type { Template } from '../types/index.js';
+import type { Template } from '@therascript/domain';
 
 export const getTemplates = ({ set }: any): Template[] => {
   try {

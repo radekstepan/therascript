@@ -1,19 +1,23 @@
 // packages/worker/src/jobs/transcriptionProcessor.ts
 import { Job } from 'bullmq';
 import { TranscriptionJobData } from '../types.js';
-import { sessionRepository } from '@therascript/api/dist/repositories/sessionRepository.js';
-import { transcriptRepository } from '@therascript/api/dist/repositories/transcriptRepository.js';
-import { messageRepository } from '@therascript/api/dist/repositories/messageRepository.js';
-import { chatRepository } from '@therascript/api/dist/repositories/chatRepository.js';
-import { calculateTokenCount } from '@therascript/api/dist/services/tokenizerService.js';
-import { getAudioAbsolutePath } from '@therascript/api/dist/services/fileService.js';
-import { usageRepository } from '@therascript/api/dist/repositories/usageRepository.js';
+import {
+  sessionRepository,
+  transcriptRepository,
+  messageRepository,
+  chatRepository,
+  usageRepository,
+} from '@therascript/data';
+import {
+  calculateTokenCount,
+  getAudioAbsolutePath,
+} from '@therascript/services';
 import type {
   StructuredTranscript,
   WhisperJobStatus,
   WhisperSegment,
   TranscriptParagraphData,
-} from '@therascript/api/dist/types/index.js';
+} from '@therascript/domain';
 import {
   getElasticsearchClient,
   indexDocument,

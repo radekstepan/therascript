@@ -3,7 +3,7 @@
 import Dockerode from 'dockerode'; // Library to interact with the Docker Engine API
 import { PassThrough, Readable, Writable } from 'node:stream';
 import { InternalServerError, NotFoundError } from '../errors.js'; // Custom error class
-import type { DockerContainerStatus } from '../types/index.js'; // Type definition for container status
+import type { DockerContainerStatus } from '@therascript/domain'; // Type definition for container status
 
 // --- Project Specific Containers ---
 // These names MUST match the `container_name` specified in the relevant docker-compose files.

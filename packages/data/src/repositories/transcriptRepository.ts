@@ -10,9 +10,8 @@ import type {
   StructuredTranscript,
   BackendTranscriptParagraph,
   TranscriptParagraphData,
-} from '../types/index.js';
+} from '@therascript/domain';
 
-// --- Lazy Statement Getters ---
 let _selectParagraphsStmt: DbStatement | null = null;
 const selectParagraphsStmt = (): DbStatement => {
   if (!_selectParagraphsStmt) {
@@ -27,7 +26,6 @@ const selectParagraphsStmt = (): DbStatement => {
 };
 
 const selectAllParagraphsStmt = (): DbStatement => {
-  // Simple, no need to cache
   return db.prepare(
     'SELECT * FROM transcript_paragraphs ORDER BY sessionId, paragraphIndex ASC'
   );
@@ -74,7 +72,6 @@ const deleteParagraphsStmt = (): DbStatement => {
   }
   return _deleteParagraphsStmt;
 };
-// --- End Lazy Statement Getters ---
 
 export const transcriptRepository = {
   findParagraphsBySessionId: (sessionId: number): StructuredTranscript => {
@@ -118,7 +115,6 @@ export const transcriptRepository = {
       return;
     }
     try {
-      // Define and execute the transaction within the method call
       const insertTx = db.transaction(
         (items: { sessionId: number; paragraphs: StructuredTranscript }) => {
           const stmt = insertParagraphStmt();

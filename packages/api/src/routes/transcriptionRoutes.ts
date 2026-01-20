@@ -1,7 +1,7 @@
 // packages/api/src/routes/transcriptionRoutes.ts
 import { Elysia, t } from 'elysia';
 import { getTranscriptionStatus } from '../services/transcriptionService.js';
-import type { WhisperJobStatus } from '../types/index.js';
+import type { WhisperJobStatus } from '@therascript/domain';
 import { NotFoundError, ApiError } from '../errors.js';
 
 const JobIdParamSchema = t.Object({

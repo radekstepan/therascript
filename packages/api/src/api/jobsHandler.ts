@@ -1,7 +1,7 @@
 // packages/api/src/api/jobsHandler.ts
 import { getActiveJobCounts } from '../services/jobQueueService.js';
 import { InternalServerError } from '../errors.js';
-import { analysisRepository } from '../repositories/analysisRepository.js';
+import { analysisRepository } from '@therascript/data';
 
 export const getActiveJobCountHandler = async ({ set }: any) => {
   try {

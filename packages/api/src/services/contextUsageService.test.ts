@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock dependencies used inside contextUsageService
-vi.mock('./tokenizerService.js', () => ({
+vi.mock('@therascript/services', () => ({
   calculateTokenCount: (s: string) => (s ? s.length : 0),
 }));
 vi.mock('./activeModelService.js', () => ({
@@ -11,7 +11,7 @@ vi.mock('./activeModelService.js', () => ({
 vi.mock('./ollamaService.js', () => ({
   listModels: async () => [{ name: 'test-model', defaultContextSize: 8192 }],
 }));
-vi.mock('../repositories/templateRepository.js', () => ({
+vi.mock('@therascript/data', () => ({
   templateRepository: {
     findByTitle: (title: string) => ({
       id: 1,

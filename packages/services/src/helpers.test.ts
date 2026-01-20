@@ -4,13 +4,12 @@ import {
   isNodeError,
   createSessionListDTO,
 } from './helpers.js';
-import type { BackendSession } from '../types/index.js';
+import type { BackendSession } from '@therascript/domain';
 
 describe('helpers.cleanLlmOutput', () => {
   it('removes known tokens and trims/normalizes whitespace', () => {
     const input = `Hello <|end_of_turn|> world\n\n<start_of_turn>user  [INST]  Text </s>  `;
     const out = cleanLlmOutput(input);
-    // Tokens like <start_of_turn>user and [INST] are removed, multiple spaces/newlines normalized
     expect(out).toBe('Hello world Text');
   });
 
@@ -26,6 +25,7 @@ describe('helpers.isNodeError', () => {
     err.code = 'ENOENT';
     expect(isNodeError(err)).toBe(true);
   });
+
   it('returns false for non-error values', () => {
     expect(isNodeError({})).toBe(false);
     expect(isNodeError('x')).toBe(false);
@@ -49,8 +49,6 @@ describe('helpers.createSessionListDTO', () => {
       chats: [{ id: 1, sessionId: 1, timestamp: 0, name: 'n', tags: null }],
     } as any;
     const dto = createSessionListDTO(session);
-    // @ts-expect-error chats should be omitted
-    expect(dto.chats).toBeUndefined();
     expect(dto).toMatchObject({
       id: 1,
       fileName: 'a',

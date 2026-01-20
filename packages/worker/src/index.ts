@@ -1,6 +1,7 @@
 // packages/worker/src/index.ts
 import { Worker, Job } from 'bullmq';
 import { configureDb, closeDb } from '@therascript/db';
+import { configureFileService } from '@therascript/services';
 import config from './config/index.js';
 import { redisConnection } from './redisConnection.js';
 import transcriptionProcessor, {
@@ -12,11 +13,13 @@ import analysisProcessor, {
 
 console.log('[Worker] Initializing worker process...');
 
-// Configure the database connection for the worker
+// Configure database connection for worker
 configureDb({
   dbPath: config.db.sqlitePath,
   isDev: config.server.nodeEnv === 'development',
 });
+
+configureFileService(config.db.uploadsDir);
 
 // Note: QueueScheduler has been removed in BullMQ 5.x
 // If you need scheduler functionality, consider using the worker with job scheduling features

@@ -1,16 +1,18 @@
 // packages/worker/src/jobs/analysisProcessor.ts
 import { Job } from 'bullmq';
 import { AnalysisJobData } from '../types.js';
-import { analysisRepository } from '@therascript/api/dist/repositories/analysisRepository.js';
-import { transcriptRepository } from '@therascript/api/dist/repositories/transcriptRepository.js';
-import { sessionRepository } from '@therascript/api/dist/repositories/sessionRepository.js';
-import { usageRepository } from '@therascript/api/dist/repositories/usageRepository.js';
+import {
+  analysisRepository,
+  transcriptRepository,
+  sessionRepository,
+  usageRepository,
+} from '@therascript/data';
 import type {
   AnalysisStrategy,
   BackendChatMessage,
   BackendSession,
   IntermediateSummary,
-} from '@therascript/api/dist/types/index.js';
+} from '@therascript/domain';
 import config from '../config/index.js';
 import { publishStreamEvent } from '../services/streamPublisher.js';
 

@@ -1,15 +1,14 @@
 // packages/api/src/services/contextUsageService.ts
-// Centralized helpers to estimate context usage for chats (LM Studio–style meter)
 
-import { calculateTokenCount } from './tokenizerService.js';
+import { calculateTokenCount } from '@therascript/services';
 import {
   getActiveModel,
   getConfiguredContextSize,
 } from './activeModelService.js';
 import { listModels } from './ollamaService.js';
-import { templateRepository } from '../repositories/templateRepository.js';
+import { templateRepository } from '@therascript/data';
 import { SYSTEM_PROMPT_TEMPLATES } from '@therascript/db/dist/sqliteService.js';
-import type { BackendChatMessage, BackendSession } from '../types/index.js';
+import type { BackendChatMessage, BackendSession } from '@therascript/domain';
 
 export interface ContextUsageBreakdown {
   systemTokens: number | null;
