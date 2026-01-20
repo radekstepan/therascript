@@ -13,78 +13,9 @@ import type {
   BackendSession,
   IntermediateSummary,
 } from '@therascript/domain';
+import { streamLlmChat, type StreamResult } from '@therascript/services';
 import config from '../config/index.js';
 import { publishStreamEvent } from '../services/streamPublisher.js';
-
-interface StreamResult {
-  promptTokens?: number;
-  completionTokens?: number;
-}
-
-// --- Streaming Helper ---
-async function* streamChatTokens(
-  chatHistory: BackendChatMessage[],
-  options?: { model?: string; contextSize?: number },
-  resultRef?: { current: StreamResult }
-): AsyncGenerator<string> {
-  const response = await fetch(`${config.services.ollamaBaseUrl}/api/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: options?.model || 'llama3',
-      messages: chatHistory.map((m) => ({
-        role: m.sender === 'ai' ? 'assistant' : m.sender,
-        content: m.text,
-      })),
-      stream: true,
-      options: options?.contextSize ? { num_ctx: options.contextSize } : {},
-    }),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Ollama request failed (${response.status}): ${errorText}`);
-  }
-
-  if (!response.body) throw new Error('No response body from Ollama');
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          const json = JSON.parse(line);
-          if (json.message?.content) {
-            yield json.message.content;
-          }
-          if (json.done && resultRef) {
-            resultRef.current = {
-              promptTokens: json.prompt_eval_count,
-              completionTokens: json.eval_count,
-            };
-            return;
-          }
-        } catch (e) {
-          console.warn('[AnalysisProcessor] Error parsing JSON chunk:', e);
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
-}
-// --- End Streaming Helper ---
 
 export const analysisQueueName = 'analysis-jobs';
 
@@ -193,16 +124,15 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
         let summaryText = '';
         let chunkBuffer = '';
         let lastPublish = Date.now();
-        const streamResult: { current: StreamResult } = { current: {} };
+        const abortController = new AbortController();
+        let mapStreamResult: StreamResult = {};
 
-        for await (const chunk of streamChatTokens(
-          mapMessages,
-          {
-            model: jobRecord?.model_name || undefined,
-            contextSize: jobRecord?.context_size || undefined,
-          },
-          streamResult
-        )) {
+        for await (const chunk of streamLlmChat(mapMessages, {
+          model: jobRecord?.model_name || undefined,
+          contextSize: jobRecord?.context_size || undefined,
+          abortSignal: abortController.signal,
+          ollamaBaseUrl: config.services.ollamaBaseUrl,
+        })) {
           summaryText += chunk;
           chunkBuffer += chunk;
 
@@ -219,7 +149,10 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
 
           if (summaryText.length % 2000 < 50) {
             const freshJob = analysisRepository.getJobById(jobId);
-            if (freshJob?.status === 'canceling') break;
+            if (freshJob?.status === 'canceling') {
+              abortController.abort();
+              break;
+            }
           }
         }
 
@@ -239,8 +172,8 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
             type: 'llm',
             source: 'analysis_map',
             model: jobRecord?.model_name || 'llama3',
-            promptTokens: streamResult.current.promptTokens,
-            completionTokens: streamResult.current.completionTokens,
+            promptTokens: mapStreamResult.promptTokens,
+            completionTokens: mapStreamResult.completionTokens,
           });
         } catch (err) {
           console.warn(
@@ -368,16 +301,15 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
     let finalResult = '';
     let reduceBuffer = '';
     let lastReducePublish = Date.now();
-    const reduceStreamResult: { current: StreamResult } = { current: {} };
+    const reduceAbortController = new AbortController();
+    let reduceStreamResult: StreamResult = {};
 
-    for await (const chunk of streamChatTokens(
-      reduceMessages,
-      {
-        model: jobRecord?.model_name || undefined,
-        contextSize: jobRecord?.context_size || undefined,
-      },
-      reduceStreamResult
-    )) {
+    for await (const chunk of streamLlmChat(reduceMessages, {
+      model: jobRecord?.model_name || undefined,
+      contextSize: jobRecord?.context_size || undefined,
+      abortSignal: reduceAbortController.signal,
+      ollamaBaseUrl: config.services.ollamaBaseUrl,
+    })) {
       finalResult += chunk;
       reduceBuffer += chunk;
 
@@ -393,6 +325,7 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
         // Check for cancellation during reduce
         const freshJob = analysisRepository.getJobById(jobId);
         if (freshJob?.status === 'canceling') {
+          reduceAbortController.abort();
           publishStreamEvent(jobId, {
             phase: 'status',
             type: 'status',
@@ -419,8 +352,8 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
         type: 'llm',
         source: 'analysis_reduce',
         model: jobRecord?.model_name || 'llama3',
-        promptTokens: reduceStreamResult.current.promptTokens,
-        completionTokens: reduceStreamResult.current.completionTokens,
+        promptTokens: reduceStreamResult.promptTokens,
+        completionTokens: reduceStreamResult.completionTokens,
       });
     } catch (err) {
       console.warn(

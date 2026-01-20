@@ -13,3 +13,12 @@ export {
   configureFileService,
   copyAllUploadsTo,
 } from './fileService.js';
+export {
+  streamLlmChat,
+  DEFAULT_STOP_TOKENS,
+  StreamLlmChatOptions,
+  StreamResult,
+  OllamaConnectionError,
+  OllamaModelNotFoundError,
+  OllamaTimeoutError,
+} from './ollamaClient.js';

@@ -30,38 +30,6 @@ Therascript is a well-structured monorepo with clear separation between packages
 
 ## 2. High Priority Issues
 
-### 2.2 🟠 Duplicate Ollama Streaming Implementations
-
-**Locations:**
-- [`packages/worker/src/jobs/analysisProcessor.ts:23-79`](file:///Users/radek/dev/therascript/packages/worker/src/jobs/analysisProcessor.ts#L23-L79) - Custom `fetch`-based implementation
-- [`packages/api/src/services/ollamaService.real.ts:928-1077`](file:///Users/radek/dev/therascript/packages/api/src/services/ollamaService.real.ts#L928-L1077) - Uses `ollama` library
-
-**Problem:** Two completely different streaming implementations:
-
-| Aspect | API (ollamaService.real.ts) | Worker (analysisProcessor.ts) |
-|--------|---------------------------|------------------------------|
-| Client | `ollama` npm package | Raw `fetch` |
-| Status check | Via library | ❌ Missing |
-| Timeout | Via library defaults | ❌ None |
-| Abort support | ❌ No | ❌ No |
-| Stop tokens | ✅ Configured | ❌ None |
-| Error handling | Structured ApiErrors | Basic Error throws |
-
-**Impact:**
-- Semantic drift between API and worker behavior
-- Different error handling and token accounting
-- Bug fixes need to be applied twice
-- Worker streaming lacks critical safeguards
-
-**Recommended Fix:** Extract a shared Ollama streaming adapter with:
-- `AbortSignal` support
-- Status code checking
-- Configurable timeout
-- Unified token accounting
-- Stop token configuration
-
----
-
 ### 2.3 🟠 Missing Abort/Cancellation Plumbing
 
 **Problem:** Long-running LLM operations cannot be cancelled when:

@@ -38,6 +38,12 @@ import {
 import { templateRepository } from '@therascript/data';
 import { SYSTEM_PROMPT_TEMPLATES } from '@therascript/db/dist/sqliteService.js';
 import { getOllamaRuntime } from './ollamaRuntime.js';
+import {
+  streamLlmChat,
+  OllamaConnectionError,
+  OllamaModelNotFoundError,
+  OllamaTimeoutError,
+} from '@therascript/services';
 
 console.log('[Real Service] Using Real Ollama Service'); // Identify real service
 
@@ -954,7 +960,7 @@ export const streamChatResponse = async (
 
   // --- MODIFICATION START ---
   const hasSystemPrompt = chatHistory.some((msg) => msg.sender === 'system');
-  const messages: OllamaApiMessage[] = [];
+  const messages: BackendChatMessage[] = [];
 
   const mapSenderToRole = (
     sender: 'user' | 'ai' | 'system'
@@ -967,8 +973,11 @@ export const streamChatResponse = async (
     // New behavior for analysis jobs: Trust the provided message array completely
     chatHistory.forEach((msg) => {
       messages.push({
-        role: mapSenderToRole(msg.sender),
-        content: msg.text,
+        id: msg.id,
+        chatId: msg.chatId,
+        sender: msg.sender,
+        text: msg.text,
+        timestamp: msg.timestamp,
       });
     });
   } else {
@@ -986,28 +995,27 @@ export const streamChatResponse = async (
       : getSystemPrompt('system_prompt');
 
     messages.push({
-      role: 'system',
-      content: systemPromptContent,
+      id: 0,
+      chatId: 0,
+      sender: 'system',
+      text: systemPromptContent,
+      timestamp: Date.now(),
     });
 
-    messages.push(
-      ...previousHistory.map(
-        (msg): OllamaApiMessage => ({
-          role: mapSenderToRole(msg.sender),
-          content: msg.text,
-        })
-      )
-    );
+    messages.push(...previousHistory);
 
     if (!isStandalone) {
-      const transcriptContextMessage: OllamaApiMessage = {
-        role: 'user',
-        content: `CONTEXT TRANSCRIPT:\n"""\n${contextTranscript || 'No transcript available.'}\n"""`,
+      const transcriptContextMessage: BackendChatMessage = {
+        id: 0,
+        chatId: 0,
+        sender: 'user',
+        text: `CONTEXT TRANSCRIPT:\n"""\n${contextTranscript || 'No transcript available.'}\n"""`,
+        timestamp: Date.now(),
       };
       messages.push(transcriptContextMessage);
     }
 
-    messages.push({ role: 'user', content: latestUserMessage.text });
+    messages.push(latestUserMessage);
   }
   // --- MODIFICATION END ---
 
@@ -1015,63 +1023,74 @@ export const streamChatResponse = async (
     `[Real OllamaService] Streaming response (model: ${modelToUse})...`
   );
 
-  try {
-    // ============================= FIX START ==============================
-    // Expand the list of stop tokens to prevent the model from generating them.
-    const ollamaOptions: any = {
-      stop: [
-        '<end_of_turn>',
-        '<start_of_turn>',
-        '<|eot_id|>',
-        '<|start_header_id|>',
-        '<|end_header_id|>',
-        '<|eom_id|>',
-      ],
-    };
-    // ============================== FIX END ===============================
-    if (contextSize !== null && contextSize !== undefined) {
-      ollamaOptions.num_ctx = contextSize;
-    }
+  // Convert AsyncGenerator<string, StreamResult> to AsyncIterable<ChatResponse>
+  async function* convertToChatResponse(): AsyncIterable<ChatResponse> {
+    try {
+      const streamGenerator = streamLlmChat(messages, {
+        model: modelToUse,
+        contextSize: contextSize ?? undefined,
+        ollamaBaseUrl: config.ollama.baseURL,
+      });
 
-    const stream = await ollama.chat({
-      model: modelToUse,
-      messages: messages,
-      stream: true,
-      keep_alive: config.ollama.keepAlive,
-      options: ollamaOptions,
-    });
-    console.log(
-      `[Real OllamaService] Stream initiated for model ${modelToUse}.`
-    );
-    return stream;
-  } catch (error: any) {
-    console.error('[Real OllamaService] Error initiating chat stream:', error);
-    const isModelNotFoundError =
-      error.status === 404 ||
-      (error.message?.includes('model') &&
-        (error.message?.includes('not found') ||
-          error.message?.includes('missing')));
-    if (isModelNotFoundError) {
-      console.error(
-        `[Real OllamaService] Model '${modelToUse}' not found during stream init.`
-      );
-      throw new BadRequestError(
-        `Model '${modelToUse}' not found. Please pull or select an available model.`
-      );
-    }
-    if (error instanceof Error) {
+      let result = await streamGenerator.next();
+
+      while (!result.done) {
+        yield {
+          message: {
+            role: 'assistant',
+            content: result.value,
+          },
+          done: false,
+          model: modelToUse,
+          created_at: new Date(),
+        } as ChatResponse;
+        result = await streamGenerator.next();
+      }
+
+      yield {
+        message: {
+          role: 'assistant',
+          content: '',
+        },
+        done: true,
+        model: modelToUse,
+        created_at: new Date(),
+        prompt_eval_count: result.value.promptTokens || 0,
+        eval_count: result.value.completionTokens || 0,
+      } as ChatResponse;
+    } catch (error: any) {
+      console.error('[Real OllamaService] Error during stream:', error);
+
+      if (error instanceof OllamaModelNotFoundError) {
+        throw new BadRequestError(error.message);
+      }
+
+      if (error instanceof OllamaConnectionError) {
+        throw new InternalServerError(
+          `Connection refused: Could not connect to Ollama at ${config.ollama.baseURL}.`
+        );
+      }
+
+      if (error instanceof OllamaTimeoutError) {
+        throw new InternalServerError(error.message);
+      }
+
       const connectionError =
         (error as NodeJS.ErrnoException)?.code === 'ECONNREFUSED' ||
         (axios.isAxiosError(error) && error.code === 'ECONNREFUSED');
+
       if (connectionError) {
         throw new InternalServerError(
           `Connection refused: Could not connect to Ollama at ${config.ollama.baseURL}.`
         );
       }
+
+      throw new InternalServerError(
+        'Failed to initiate stream from AI service.',
+        error instanceof Error ? error : undefined
+      );
     }
-    throw new InternalServerError(
-      'Failed to initiate stream from AI service.',
-      error instanceof Error ? error : undefined
-    );
   }
+
+  return convertToChatResponse();
 };

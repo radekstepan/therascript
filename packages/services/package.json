@@ -12,7 +12,8 @@
   },
   "dependencies": {
     "@dqbd/tiktoken": "^1.0.15",
-    "@therascript/domain": "*"
+    "@therascript/domain": "*",
+    "ollama": "^0.6.0"
   },
   "devDependencies": {
     "@types/node": "^20.16.2",
