@@ -152,36 +152,57 @@ export async function* streamLlmChat(
   }));
 
   try {
-    const stream = await ollama.chat({
+    const stream = (await ollama.chat({
       model,
       messages: ollamaMessages,
       stream: true,
       options: ollamaOptions,
-    });
+    })) as any;
 
     let accumulatedContent = '';
 
-    for await (const chunk of stream) {
-      if (combinedSignal.aborted) {
+    const onAbort = () => {
+      if (stream.abort) {
+        stream.abort();
+      }
+    };
+
+    combinedSignal.addEventListener('abort', onAbort);
+
+    try {
+      for await (const chunk of stream) {
+        if (combinedSignal.aborted) {
+          clearTimeout(timeoutId);
+          if (abortSignal?.aborted) {
+            return { promptTokens: 0, completionTokens: 0 };
+          }
+          throw new OllamaTimeoutError(timeoutMs);
+        }
+
+        if (chunk.message?.content) {
+          accumulatedContent += chunk.message.content;
+          yield chunk.message.content;
+        }
+
+        if (chunk.done) {
+          clearTimeout(timeoutId);
+          return {
+            promptTokens: chunk.prompt_eval_count,
+            completionTokens: chunk.eval_count,
+          };
+        }
+      }
+    } catch (error: any) {
+      if (combinedSignal.aborted || error.name === 'AbortError') {
         clearTimeout(timeoutId);
         if (abortSignal?.aborted) {
           return { promptTokens: 0, completionTokens: 0 };
         }
         throw new OllamaTimeoutError(timeoutMs);
       }
-
-      if (chunk.message?.content) {
-        accumulatedContent += chunk.message.content;
-        yield chunk.message.content;
-      }
-
-      if (chunk.done) {
-        clearTimeout(timeoutId);
-        return {
-          promptTokens: chunk.prompt_eval_count,
-          completionTokens: chunk.eval_count,
-        };
-      }
+      throw error;
+    } finally {
+      combinedSignal.removeEventListener('abort', onAbort);
     }
 
     clearTimeout(timeoutId);

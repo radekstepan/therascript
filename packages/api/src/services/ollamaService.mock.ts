@@ -146,7 +146,7 @@ export const reloadActiveModelContext = async (): Promise<void> => {
 export const streamChatResponse = async (
   contextTranscript: string | null,
   chatHistory: BackendChatMessage[],
-  options?: { model?: string; contextSize?: number }
+  options?: { model?: string; contextSize?: number; signal?: AbortSignal }
 ): Promise<AsyncIterable<ChatResponse>> => {
   const modelToUse = options?.model || getActiveModel();
   const contextSize =
@@ -169,6 +169,10 @@ export const streamChatResponse = async (
     await new Promise((resolve) => setTimeout(resolve, MOCK_DELAY_MS / 4)); // Initial delay
     let fullContent = '';
     for (let i = 0; i < words.length; i++) {
+      if (options?.signal?.aborted) {
+        console.log('[Mock Ollama Stream] Aborted');
+        return;
+      }
       const word = words[i];
       const isLast = i === words.length - 1;
       const chunkContent = word + (isLast ? '' : ' ');

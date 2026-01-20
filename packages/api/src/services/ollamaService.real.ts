@@ -934,7 +934,7 @@ export const reloadActiveModelContext = async (): Promise<void> => {
 export const streamChatResponse = async (
   contextTranscript: string | null,
   chatHistory: BackendChatMessage[],
-  options?: { model?: string; contextSize?: number }
+  options?: { model?: string; contextSize?: number; signal?: AbortSignal }
 ): Promise<AsyncIterable<ChatResponse>> => {
   const modelToUse = options?.model || getActiveModel();
   const contextSize =
@@ -1029,6 +1029,7 @@ export const streamChatResponse = async (
       const streamGenerator = streamLlmChat(messages, {
         model: modelToUse,
         contextSize: contextSize ?? undefined,
+        abortSignal: options?.signal,
         ollamaBaseUrl: config.ollama.baseURL,
       });
 

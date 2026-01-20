@@ -124,6 +124,7 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
         let summaryText = '';
         let chunkBuffer = '';
         let lastPublish = Date.now();
+        let lastCancelCheck = Date.now();
         const abortController = new AbortController();
         let mapStreamResult: StreamResult = {};
 
@@ -147,7 +148,8 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
             lastPublish = Date.now();
           }
 
-          if (summaryText.length % 2000 < 50) {
+          if (Date.now() - lastCancelCheck > 500) {
+            lastCancelCheck = Date.now();
             const freshJob = analysisRepository.getJobById(jobId);
             if (freshJob?.status === 'canceling') {
               abortController.abort();
@@ -301,6 +303,7 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
     let finalResult = '';
     let reduceBuffer = '';
     let lastReducePublish = Date.now();
+    let lastReduceCancelCheck = Date.now();
     const reduceAbortController = new AbortController();
     let reduceStreamResult: StreamResult = {};
 
@@ -321,8 +324,10 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
         });
         reduceBuffer = '';
         lastReducePublish = Date.now();
+      }
 
-        // Check for cancellation during reduce
+      if (Date.now() - lastReduceCancelCheck > 500) {
+        lastReduceCancelCheck = Date.now();
         const freshJob = analysisRepository.getJobById(jobId);
         if (freshJob?.status === 'canceling') {
           reduceAbortController.abort();

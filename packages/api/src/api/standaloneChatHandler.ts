@@ -57,6 +57,7 @@ interface ElysiaHandlerContext {
   params: Record<string, string | undefined>;
   query: Record<string, string | undefined>;
   set: { status?: number | string; headers?: Record<string, string> };
+  signal?: AbortSignal;
   // These are added by 'derive' hooks if used for these routes
   chatData?: BackendChatSession;
   messageData?: BackendChatMessage;
@@ -148,6 +149,7 @@ export const addStandaloneChatMessage = async ({
   chatData,
   body,
   set,
+  signal,
 }: ElysiaHandlerContext): Promise<Response> => {
   const { text } = body as { text: string }; // Type assertion for body
   const trimmedText = text.trim();
@@ -204,8 +206,8 @@ export const addStandaloneChatMessage = async ({
       null,
       currentMessages,
       configured == null && recommendedContext != null
-        ? { contextSize: recommendedContext }
-        : undefined
+        ? { contextSize: recommendedContext, signal }
+        : { signal }
     ); // Pass null for transcript context
 
     const headers = new Headers({

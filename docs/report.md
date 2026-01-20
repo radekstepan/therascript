@@ -30,37 +30,6 @@ Therascript is a well-structured monorepo with clear separation between packages
 
 ## 2. High Priority Issues
 
-### 2.3 🟠 Missing Abort/Cancellation Plumbing
-
-**Problem:** Long-running LLM operations cannot be cancelled when:
-- SSE client disconnects
-- Analysis job is cancelled
-- Request times out
-
-**UI has abort support:**
-```typescript
-// packages/ui/src/hooks/useMessageStream.ts:50-51
-const streamControllerRef = useRef<AbortController | null>(null);
-streamControllerRef.current = new AbortController();
-```
-
-**But backend doesn't propagate it:**
-- [`sessionChatHandler.ts`](file:///Users/radek/dev/therascript/packages/api/src/api/sessionChatHandler.ts) - No abort signal to Ollama
-- [`analysisProcessor.ts`](file:///Users/radek/dev/therascript/packages/worker/src/jobs/analysisProcessor.ts) - No timeout or abort on fetch
-
-**Impact:**
-- Wasted GPU/LLM resources on abandoned requests
-- Analysis jobs continue even after cancellation flag is set
-- SSE stream errors don't stop Ollama consumption
-
-**Recommended Fix:**
-1. Add `AbortController` to API chat handlers
-2. Pass `AbortSignal` through to `streamChatResponse`
-3. Worker streaming should accept abort signal and timeout
-4. Check cancellation flag more frequently in analysis loop
-
----
-
 ### 2.4 🟠 Elasticsearch Client Never Closes
 
 **Location:** [`packages/elasticsearch-client/src/client.ts`](file:///Users/radek/dev/therascript/packages/elasticsearch-client/src/client.ts)
