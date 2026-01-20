@@ -1994,6 +1994,13 @@
     "@types/qs" "*"
     "@types/serve-static" "*"
 
+"@types/form-data@^2.5.2":
+  version "2.5.2"
+  resolved "https://registry.yarnpkg.com/@types/form-data/-/form-data-2.5.2.tgz#a4dbfd4d5d4a8d0dec9932f1932e2ae7267fc9ae"
+  integrity sha512-tfmcyHn1Pp9YHAO5r40+UuZUPAZbUEgqTel3EuEKpmF9hPkXgR4l41853raliXnb4gwyPNoQOfvgGGlHN5WSog==
+  dependencies:
+    form-data "*"
+
 "@types/hast@^3.0.0":
   version "3.0.4"
   resolved "https://registry.yarnpkg.com/@types/hast/-/hast-3.0.4.tgz#1d6b39993b82cea6ad783945b0508c25903e15aa"
@@ -4371,6 +4378,17 @@ foreground-child@^3.1.0:
   dependencies:
     cross-spawn "^7.0.6"
     signal-exit "^4.0.1"
+
+form-data@*:
+  version "4.0.5"
+  resolved "https://registry.yarnpkg.com/form-data/-/form-data-4.0.5.tgz#b49e48858045ff4cbf6b03e1805cebcad3679053"
+  integrity sha512-8RipRLol37bNs2bhoV67fiTEvdTrbMUYcFTiy3+wuuOnUog2QBHCZWXDRijWQfAkhBj2Uf5UnVaiWwA5vdd82w==
+  dependencies:
+    asynckit "^0.4.0"
+    combined-stream "^1.0.8"
+    es-set-tostringtag "^2.1.0"
+    hasown "^2.0.2"
+    mime-types "^2.1.12"
 
 form-data@^4.0.0:
   version "4.0.2"

@@ -43,6 +43,28 @@ console.log('[Real Service] Using Real Ollama Service'); // Identify real servic
 
 const runtime = getOllamaRuntime();
 
+const WHISPER_API_URL = process.env.WHISPER_API_URL || 'http://localhost:8000';
+
+async function ensureWhisperUnloaded(): Promise<void> {
+  try {
+    console.log(
+      '[OllamaService] Requesting Whisper model unload before Ollama load...'
+    );
+    const response = await axios.post(
+      `${WHISPER_API_URL}/model/unload`,
+      {},
+      { timeout: 10000 }
+    );
+    console.log(
+      `[OllamaService] Whisper unload result: ${response.data.message}`
+    );
+  } catch (error: any) {
+    console.warn(
+      `[OllamaService] Could not unload Whisper model: ${error.message}`
+    );
+  }
+}
+
 async function isOllamaApiResponsive(): Promise<boolean> {
   try {
     await axios.get(config.ollama.baseURL, { timeout: 3000 });
@@ -663,6 +685,9 @@ export const loadOllamaModel = async (modelName: string): Promise<void> => {
     throw new BadRequestError('Model name must be provided to load.');
   }
   console.log(`[Real OllamaService] Request to load model '${modelName}'...`);
+
+  await ensureWhisperUnloaded();
+
   try {
     await ensureOllamaReady();
     console.log(

@@ -11,14 +11,17 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
+    "axios": "^1.8.4",
     "dockerode": "^4.0.6",
     "express": "^4.21.2",
+    "form-data": "^4.0.0",
     "multer": "^1.4.5-lts.1",
     "uuid": "^9.0.1"
   },
   "devDependencies": {
     "@types/dockerode": "^3.3.34",
     "@types/express": "^4.17.23",
+    "@types/form-data": "^2.5.2",
     "@types/multer": "^1.4.11",
     "@types/node": "^20.11.30",
     "@types/uuid": "^9.0.8",

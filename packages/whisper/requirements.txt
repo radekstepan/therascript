@@ -22,6 +22,9 @@ pydantic
 # Required by FastAPI for handling file uploads (multipart/form-data).
 python-multipart
 
+# Async HTTP client for communicating with Ollama API for VRAM coordination.
+httpx
+
 # PyTorch is installed separately via Dockerfile using --index-url
 # to ensure compatibility with the CUDA version or for specific builds (like nightly).
 # torch

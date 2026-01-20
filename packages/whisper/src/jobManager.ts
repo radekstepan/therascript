@@ -1,29 +1,12 @@
-// packages/whisper/src/jobManager.ts
-import { ChildProcess, spawn } from 'child_process';
-import { existsSync } from 'fs';
-import fs from 'fs/promises';
+import axios from 'axios';
+import FormData from 'form-data';
+import fs from 'fs';
 import { JobStatus } from './types.js';
 
+const PYTHON_API_URL =
+  process.env.WHISPER_PYTHON_URL || 'http://localhost:8001';
+
 const jobs = new Map<string, JobStatus>();
-const processes = new Map<string, ChildProcess>();
-
-function parseDurationString(durationStr: string): number {
-  const match = durationStr.match(/(\d+(\.\d+)?)/);
-  return match ? parseFloat(match[1]) : 0.0;
-}
-
-function parseWhisperTime(timeStr: string): number {
-  const parts = timeStr.split(':');
-  if (parts.length === 3) {
-    return (
-      parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseFloat(parts[2])
-    );
-  } else if (parts.length === 2) {
-    return parseInt(parts[0]) * 60 + parseFloat(parts[1]);
-  }
-  console.warn(`[JobManager] Could not parse timestamp format: ${timeStr}`);
-  return 0.0;
-}
 
 export function getJob(jobId: string): JobStatus | undefined {
   return jobs.get(jobId);
@@ -45,230 +28,139 @@ export function createJob(jobId: string): JobStatus {
   return newJob;
 }
 
-export function cancelJob(jobId: string): {
-  success: boolean;
-  message: string;
-} {
-  const job = jobs.get(jobId);
-  const process = processes.get(jobId);
-  if (!job) {
-    return { success: false, message: 'Job ID not found' };
-  }
-  const currentStatus = job.status;
-  if (
-    ['completed', 'failed', 'canceled', 'canceling'].includes(currentStatus)
-  ) {
-    return {
-      success: false,
-      message: `Job already in state: ${currentStatus}`,
-    };
-  }
-  job.status = 'canceling';
-  job.message = 'Cancellation requested by user. Attempting to stop process.';
-  jobs.set(jobId, job);
-  if (process && process.pid) {
-    process.kill('SIGTERM');
-    console.log(`[Cancel] Sent SIGTERM to process for job ${jobId}`);
-    return {
-      success: true,
-      message: 'Cancellation request sent. Job will attempt to terminate.',
-    };
-  } else {
-    job.status = 'canceled';
-    job.message = 'Process not found, marking as canceled.';
-    jobs.set(jobId, job);
-    return {
-      success: true,
-      message: 'Process was not running, job marked as canceled.',
-    };
+export async function cancelJob(
+  jobId: string
+): Promise<{ success: boolean; message: string }> {
+  try {
+    const response = await axios.post(`${PYTHON_API_URL}/cancel/${jobId}`);
+    const job = jobs.get(jobId);
+
+    if (job && response.data.message === 'Cancellation request sent') {
+      job.status = 'canceling';
+      job.message = response.data.message;
+    }
+
+    return { success: true, message: response.data.message };
+  } catch (error: any) {
+    if (error.response?.status === 404) {
+      return { success: false, message: 'Job ID not found' };
+    }
+    return { success: false, message: error.message };
   }
 }
 
-export async function runTranscriptionProcess(
-  job_id: string,
-  input_path: string,
-  output_path: string,
-  model_name: string
-): Promise<void> {
-  const job = jobs.get(job_id);
-  if (!job) {
-    console.error(`[ProcessRunner] Job ${job_id} not found in map at start.`);
-    return;
-  }
+export async function submitTranscriptionJob(
+  inputPath: string,
+  modelName: string,
+  maxRetries: number = 3
+): Promise<string> {
+  let lastError: Error | null = null;
 
-  job.status = 'model_loading';
-  job.message = `Initializing model '${model_name}'...`;
-  job.start_time = Date.now();
-  jobs.set(job_id, job);
-
-  const cmd = 'python3';
-  const args = ['-u', 'transcribe.py', input_path, output_path, model_name];
-  const process = spawn(cmd, args);
-  processes.set(job_id, process);
-  console.log(
-    `[ProcessRunner] Job ${job_id}: Subprocess started (PID: ${process.pid}).`
-  );
-
-  const progressRegex =
-    /^\[(\d{1,2}:\d{2}\.\d{3})\s*-->\s*(\d{1,2}:\d{2}\.\d{3})\]/;
-
-  const streamClosedPromises = [];
-
-  if (process.stdout) {
-    const stdoutPromise = new Promise<void>((resolve) => {
-      process.stdout.on('data', (data: Buffer) => {
-        const lines = data
-          .toString()
-          .split('\n')
-          .filter((line) => line.trim());
-        for (const line of lines) {
-          console.log(`[Job ${job_id} STDOUT]: ${line}`);
-          try {
-            const statusUpdate = JSON.parse(line);
-            const currentJob = jobs.get(job_id);
-            if (!currentJob) continue;
-
-            if (statusUpdate.status && statusUpdate.status !== 'completed') {
-              currentJob.status = statusUpdate.status;
-            }
-
-            if (statusUpdate.message) currentJob.message = statusUpdate.message;
-            if (statusUpdate.progress)
-              currentJob.progress = statusUpdate.progress;
-            if (
-              statusUpdate.status === 'info' &&
-              statusUpdate.code === 'audio_duration'
-            ) {
-              currentJob.duration = parseDurationString(
-                statusUpdate.message || ''
-              );
-            } else if (statusUpdate.status === 'error') {
-              currentJob.status = 'failed';
-              currentJob.error = statusUpdate.message || 'Error from script.';
-              if (process.pid) process.kill();
-            }
-          } catch (e) {
-            const match = line.match(progressRegex);
-            const currentJob = jobs.get(job_id);
-            if (match && currentJob && currentJob.duration) {
-              const endTimeStr = match[2];
-              const currentTimestamp = parseWhisperTime(endTimeStr);
-              const progressVal = Math.min(
-                (currentTimestamp / currentJob.duration) * 100,
-                100
-              );
-              if (progressVal > (currentJob.progress || 0)) {
-                currentJob.status = 'transcribing';
-                currentJob.progress = parseFloat(progressVal.toFixed(2));
-                currentJob.message = `Transcribing: ${line.split(']')[0].trim()}]`;
-              }
-            }
-          }
-        }
-      });
-      process.stdout.on('end', resolve);
-    });
-    streamClosedPromises.push(stdoutPromise);
-  }
-
-  if (process.stderr) {
-    const stderrPromise = new Promise<void>((resolve) => {
-      process.stderr.on('data', (data: Buffer) => {
-        const line = data.toString().trim();
-        console.log(`[Job ${job_id} STDERR]: ${line}`);
-        const currentJob = jobs.get(job_id);
-        if (
-          currentJob &&
-          (currentJob.status === 'model_loading' ||
-            currentJob.status === 'model_downloading')
-        ) {
-          if (line.includes('downloading') || line.includes('%')) {
-            currentJob.status = 'model_downloading';
-            currentJob.message = `Model download: ${line.substring(0, 150)}`;
-          }
-        }
-      });
-      process.stderr.on('end', resolve);
-    });
-    streamClosedPromises.push(stderrPromise);
-  }
-
-  const exitPromise = new Promise<{
-    code: number | null;
-    signal: NodeJS.Signals | null;
-  }>((resolve) => {
-    process.on('exit', (code, signal) => resolve({ code, signal }));
-    process.on('error', (err) => {
-      console.error(
-        `[ProcessRunner] Failed to start subprocess for job ${job_id}:`,
-        err
-      );
-      const currentJob = jobs.get(job_id);
-      if (currentJob) {
-        currentJob.status = 'failed';
-        currentJob.error = `Failed to start process: ${err.message}`;
-      }
-      resolve({ code: null, signal: null }); // Resolve with nulls on spawn error
-    });
-  });
-
-  // Wait for streams to close *and* for the process to exit.
-  const [{ code: exitCode, signal: exitSignal }] = await Promise.all([
-    exitPromise,
-    ...streamClosedPromises,
-  ]);
-
-  console.log(
-    `[ProcessRunner] Job ${job_id}: All streams closed. Process exited with code ${exitCode} and signal ${exitSignal}.`
-  );
-  const finalJobState = jobs.get(job_id);
-  if (!finalJobState) return;
-
-  if (exitCode === 0) {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
-      if (existsSync(output_path)) {
-        const resultData = await fs.readFile(output_path, 'utf-8');
-        finalJobState.result = JSON.parse(resultData);
-        finalJobState.progress = 100;
-        finalJobState.status = 'completed'; // Set status to 'completed' ONLY after result is attached
-        finalJobState.message = 'Transcription and result processing complete.';
-      } else {
-        throw new Error('Output file not found after successful exit.');
+      const form = new FormData();
+      form.append('file', fs.createReadStream(inputPath));
+      form.append('model_name', modelName);
+
+      const response = await axios.post(`${PYTHON_API_URL}/transcribe`, form, {
+        headers: form.getHeaders(),
+        timeout: 5 * 60 * 1000,
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+      });
+
+      if (response.status !== 200 || !response.data.job_id) {
+        throw new Error('Failed to submit job to Python Whisper service');
       }
-    } catch (err: any) {
-      finalJobState.status = 'failed';
-      finalJobState.error = `Failed to read or parse result file: ${err.message}`;
+
+      const jobId = response.data.job_id;
+      createJob(jobId);
+
+      pollJobStatus(jobId);
+
+      return jobId;
+    } catch (error: any) {
+      lastError = error;
+      if (error.code === 'ECONNREFUSED' && attempt < maxRetries - 1) {
+        console.log(`[JobManager] Python API not ready, retrying in 2s...`);
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        continue;
+      }
+      throw error;
     }
-  } else if (exitSignal) {
-    finalJobState.status = 'failed';
-    finalJobState.error = `Process was terminated by signal: ${exitSignal}. This is often caused by an Out-Of-Memory (OOM) error. Please try increasing the RAM available to Docker.`;
-    console.error(
-      `[ProcessRunner] Job ${job_id} failed due to signal ${exitSignal}.`
-    );
-  } else if (
-    finalJobState.status !== 'canceled' &&
-    finalJobState.status !== 'failed'
-  ) {
-    finalJobState.status = 'failed';
-    finalJobState.error = `Process exited unexpectedly with code: ${exitCode ?? 'unknown'}. The final status was '${finalJobState.status}'. Check container logs for details.`;
   }
 
-  finalJobState.end_time = Date.now();
-  processes.delete(job_id);
+  throw lastError;
+}
 
+async function pollJobStatus(jobId: string): Promise<void> {
+  const pollInterval = 2000;
+  const maxConsecutiveErrors = 5;
+  let consecutiveErrors = 0;
+
+  while (true) {
+    try {
+      const response = await axios.get(`${PYTHON_API_URL}/status/${jobId}`);
+      consecutiveErrors = 0;
+      const status = response.data;
+
+      const job = jobs.get(jobId);
+      if (job) {
+        job.status = status.status;
+        job.progress = status.progress;
+        job.message = status.message;
+        job.duration = status.duration;
+        job.result = status.result;
+        job.error = status.error;
+        job.start_time = status.start_time;
+        job.end_time = status.end_time;
+      }
+
+      if (['completed', 'failed', 'canceled'].includes(status.status)) {
+        break;
+      }
+    } catch (error: any) {
+      consecutiveErrors++;
+      console.error(`[JobManager] Error polling job ${jobId}:`, error.message);
+
+      if (error.response?.status === 404) {
+        const job = jobs.get(jobId);
+        if (job) {
+          job.status = 'failed';
+          job.error = 'Job lost - transcription service restarted';
+          job.end_time = Date.now();
+        }
+        break;
+      }
+
+      if (consecutiveErrors >= maxConsecutiveErrors) {
+        const job = jobs.get(jobId);
+        if (job) {
+          job.status = 'failed';
+          job.error = 'Lost connection to transcription service';
+          job.end_time = Date.now();
+        }
+        break;
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, pollInterval));
+  }
+}
+
+export async function unloadModel(): Promise<{
+  success: boolean;
+  message: string;
+}> {
   try {
-    if (existsSync(input_path)) await fs.unlink(input_path);
-    if (
-      (finalJobState.status === 'completed' ||
-        finalJobState.status === 'canceled') &&
-      existsSync(output_path)
-    ) {
-      await fs.unlink(output_path);
-    }
-  } catch (cleanupError) {
-    console.error(
-      `[ProcessRunner] Job ${job_id}: Error during file cleanup:`,
-      cleanupError
-    );
+    const response = await axios.post(`${PYTHON_API_URL}/model/unload`);
+    return { success: true, message: response.data.message };
+  } catch (error: any) {
+    return { success: false, message: error.message };
   }
+}
+
+export async function getModelStatus(): Promise<any> {
+  const response = await axios.get(`${PYTHON_API_URL}/model/status`);
+  return response.data;
 }
