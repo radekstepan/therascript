@@ -41,6 +41,11 @@ async function* streamChatTokens(
     }),
   });
 
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Ollama request failed (${response.status}): ${errorText}`);
+  }
+
   if (!response.body) throw new Error('No response body from Ollama');
 
   const reader = response.body.getReader();

@@ -63,36 +63,6 @@ export function closeDb(): void {
 }
 ```
 
-### 1.3 🔴 Missing HTTP Status Check in Analysis Processor Streaming
-
-**Location:** [`packages/worker/src/jobs/analysisProcessor.ts:28-42`](file:///Users/radek/dev/therascript/packages/worker/src/jobs/analysisProcessor.ts#L28-L42)
-
-**Problem:** The `streamChatTokens` function doesn't check if the HTTP response was successful:
-
-```typescript
-async function* streamChatTokens(...): AsyncGenerator<string> {
-  const response = await fetch(`${config.services.ollamaBaseUrl}/api/chat`, {...});
-  // MISSING: if (!response.ok) throw new Error(...)
-  if (!response.body) throw new Error('No response body from Ollama');
-  // Proceeds to read body even if status is 4xx/5xx
-}
-```
-
-**Impact:**
-- Silent failures when Ollama returns errors (model not found, overloaded, etc.)
-- Corrupted job state from processing error response as tokens
-- Difficult to debug LLM issues
-
-**Fix:**
-```typescript
-if (!response.ok) {
-  const errorText = await response.text();
-  throw new Error(`Ollama request failed (${response.status}): ${errorText}`);
-}
-```
-
----
-
 ## 2. High Priority Issues
 
 ### 2.1 🟠 Multiple Conflicting Signal Handlers
