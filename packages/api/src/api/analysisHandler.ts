@@ -75,6 +75,7 @@ const generateShortPromptInBackground = async (
       originalPrompt
     );
 
+    const startTime = Date.now();
     const stream = await streamChatResponse(
       null,
       [
@@ -93,6 +94,7 @@ const generateShortPromptInBackground = async (
       promptTokens,
       completionTokens,
     } = await accumulateStreamResponse(stream);
+    const duration = Date.now() - startTime;
 
     if (shortPrompt) {
       analysisRepository.updateJobShortPrompt(jobId, shortPrompt);
@@ -116,6 +118,7 @@ const generateShortPromptInBackground = async (
         model: modelName || 'llama3',
         promptTokens,
         completionTokens,
+        duration,
       });
     } catch (err) {
       console.warn(
@@ -148,6 +151,7 @@ const generateStrategyAndUpdateJob = async (
       originalPrompt
     );
 
+    const startTime = Date.now();
     const stream = await streamChatResponse(
       null,
       [
@@ -166,6 +170,7 @@ const generateStrategyAndUpdateJob = async (
       promptTokens,
       completionTokens,
     } = await accumulateStreamResponse(stream);
+    const duration = Date.now() - startTime;
 
     let cleanedJson = rawStrategyOutput;
     const jsonRegex = /```json\s*([\s\S]*?)\s*```/;
@@ -195,6 +200,7 @@ const generateStrategyAndUpdateJob = async (
         model: modelName || 'llama3',
         promptTokens,
         completionTokens,
+        duration,
       });
     } catch (err) {
       console.warn(

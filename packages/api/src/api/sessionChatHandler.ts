@@ -199,6 +199,8 @@ export const addSessionChatMessage = async ({
       let finalPromptTokens: number | undefined;
       let finalCompletionTokens: number | undefined;
       let ollamaStreamError: Error | null = null;
+      let llmStartTime = 0;
+      let llmDuration = 0;
 
       try {
         console.log(
@@ -218,6 +220,7 @@ export const addSessionChatMessage = async ({
             usageErr
           );
         }
+        llmStartTime = Date.now();
         for await (const chunk of ollamaStream) {
           if (chunk.message?.content) {
             const textChunk = chunk.message.content;
@@ -241,6 +244,7 @@ export const addSessionChatMessage = async ({
         console.log(
           `[API ProcessStream ${chatData.id}] Finished iterating Ollama stream successfully.`
         );
+        const llmDuration = Date.now() - llmStartTime;
       } catch (streamError: any) {
         ollamaStreamError =
           streamError instanceof Error
@@ -307,6 +311,7 @@ export const addSessionChatMessage = async ({
                 model: getActiveModel(),
                 promptTokens: aiMessage.promptTokens,
                 completionTokens: aiMessage.completionTokens,
+                duration: llmDuration,
               });
             } catch (err) {
               console.warn(

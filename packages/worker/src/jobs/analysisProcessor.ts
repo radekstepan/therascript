@@ -128,12 +128,16 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
         const abortController = new AbortController();
         let mapStreamResult: StreamResult = {};
 
-        for await (const chunk of streamLlmChat(mapMessages, {
+        const mapStartTime = Date.now();
+        const mapGenerator = streamLlmChat(mapMessages, {
           model: jobRecord?.model_name || undefined,
           contextSize: jobRecord?.context_size || undefined,
           abortSignal: abortController.signal,
           ollamaBaseUrl: config.services.ollamaBaseUrl,
-        })) {
+        });
+        let iterResult = await mapGenerator.next();
+        while (!iterResult.done) {
+          const chunk = iterResult.value;
           summaryText += chunk;
           chunkBuffer += chunk;
 
@@ -156,7 +160,11 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
               break;
             }
           }
+
+          iterResult = await mapGenerator.next();
         }
+        mapStreamResult = iterResult.value as StreamResult;
+        const mapDuration = Date.now() - mapStartTime;
 
         if (chunkBuffer) {
           publishStreamEvent(jobId, {
@@ -176,6 +184,7 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
             model: jobRecord?.model_name || 'llama3',
             promptTokens: mapStreamResult.promptTokens,
             completionTokens: mapStreamResult.completionTokens,
+            duration: mapDuration,
           });
         } catch (err) {
           console.warn(
@@ -307,12 +316,16 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
     const reduceAbortController = new AbortController();
     let reduceStreamResult: StreamResult = {};
 
-    for await (const chunk of streamLlmChat(reduceMessages, {
+    const reduceStartTime = Date.now();
+    const reduceGenerator = streamLlmChat(reduceMessages, {
       model: jobRecord?.model_name || undefined,
       contextSize: jobRecord?.context_size || undefined,
       abortSignal: reduceAbortController.signal,
       ollamaBaseUrl: config.services.ollamaBaseUrl,
-    })) {
+    });
+    let reduceIterResult = await reduceGenerator.next();
+    while (!reduceIterResult.done) {
+      const chunk = reduceIterResult.value;
       finalResult += chunk;
       reduceBuffer += chunk;
 
@@ -340,7 +353,11 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
           return;
         }
       }
+
+      reduceIterResult = await reduceGenerator.next();
     }
+    reduceStreamResult = reduceIterResult.value as StreamResult;
+    const reduceDuration = Date.now() - reduceStartTime;
 
     if (reduceBuffer) {
       publishStreamEvent(jobId, {
@@ -359,6 +376,7 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
         model: jobRecord?.model_name || 'llama3',
         promptTokens: reduceStreamResult.promptTokens,
         completionTokens: reduceStreamResult.completionTokens,
+        duration: reduceDuration,
       });
     } catch (err) {
       console.warn(
