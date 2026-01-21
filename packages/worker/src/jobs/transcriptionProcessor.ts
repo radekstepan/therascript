@@ -57,10 +57,21 @@ async function startWhisperJob(filePath: string): Promise<string> {
 async function pollWhisperStatus(
   whisperJobId: string
 ): Promise<WhisperJobStatus> {
+  const startTime = Date.now();
+  const maxWaitMs = config.whisper.pollingTimeoutMs;
+
   while (true) {
+    if (Date.now() - startTime > maxWaitMs) {
+      throw new Error(
+        `Whisper job ${whisperJobId} timed out after ${maxWaitMs}ms`
+      );
+    }
+
     const { data: status } = await axios.get<WhisperJobStatus>(
-      `${config.whisper.apiUrl}/status/${whisperJobId}`
+      `${config.whisper.apiUrl}/status/${whisperJobId}`,
+      { timeout: 10000 }
     );
+
     if (
       status.status === 'completed' ||
       status.status === 'failed' ||
@@ -68,6 +79,7 @@ async function pollWhisperStatus(
     ) {
       return status;
     }
+
     await new Promise((resolve) => setTimeout(resolve, 5000));
   }
 }

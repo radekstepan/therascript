@@ -30,44 +30,6 @@ Therascript is a well-structured monorepo with clear separation between packages
 
 ## 3. Medium Priority Issues
 
-### 3.3 🟡 Missing Timeout on Whisper Polling
-
-**Location:** [`packages/worker/src/jobs/transcriptionProcessor.ts:53-69`](file:///Users/radek/dev/therascript/packages/worker/src/jobs/transcriptionProcessor.ts#L53-L69)
-
-```typescript
-async function pollWhisperStatus(whisperJobId: string): Promise<WhisperJobStatus> {
-  while (true) {  // Infinite loop!
-    const { data: status } = await axios.get<WhisperJobStatus>(...);
-    if (status.status === 'completed' || status.status === 'failed' || status.status === 'canceled') {
-      return status;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 5000));
-  }
-}
-```
-
-**Problem:** No maximum polling duration - loop runs forever if Whisper never completes.
-
-**Impact:**
-- Job can hang indefinitely
-- Worker slot blocked forever
-- No user feedback on stuck jobs
-
-**Fix:**
-```typescript
-async function pollWhisperStatus(whisperJobId: string, maxWaitMs = 30 * 60 * 1000): Promise<WhisperJobStatus> {
-  const startTime = Date.now();
-  while (true) {
-    if (Date.now() - startTime > maxWaitMs) {
-      throw new Error(`Whisper job ${whisperJobId} timed out after ${maxWaitMs}ms`);
-    }
-    // ... existing logic
-  }
-}
-```
-
----
-
 ### 3.4 🟡 Elasticsearch Client Ignores URL Changes
 
 **Location:** [`packages/elasticsearch-client/src/client.ts:5-25`](file:///Users/radek/dev/therascript/packages/elasticsearch-client/src/client.ts#L5-L25)

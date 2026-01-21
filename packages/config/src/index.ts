@@ -117,6 +117,10 @@ const config = {
   whisper: {
     apiUrl: getEnvVar('WHISPER_API_URL', 'http://localhost:8000'),
     model: getEnvVar('WHISPER_MODEL', 'tiny'),
+    pollingTimeoutMs: parseIntEnvVar(
+      'WHISPER_POLLING_TIMEOUT_MS',
+      30 * 60 * 1000
+    ),
   },
   elasticsearch: {
     url: getEnvVar('ELASTICSEARCH_URL', 'http://localhost:9200'),
