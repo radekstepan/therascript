@@ -1,7 +1,7 @@
 // Add configuration at the top
 import { configureDb, db, closeDb } from '@therascript/db';
 import { calculateTokenCount } from '@therascript/services';
-import config from './config/index.js';
+import config from '@therascript/config';
 configureDb({
   dbPath: config.db.sqlitePath,
   isDev: !config.server.isProduction,

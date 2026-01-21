@@ -1,6 +1,6 @@
 // packages/api/src/services/redisConnection.ts
 import { ConnectionOptions } from 'bullmq';
-import config from '../config/index.js';
+import config from '@therascript/config';
 
 console.log(
   `[Redis Connection] Setting up Redis connection for BullMQ: ${config.redis.host}:${config.redis.port}`

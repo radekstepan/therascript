@@ -1,12 +1,30 @@
 // Configure the database connection before any other modules are loaded
 import { configureDb } from '@therascript/db';
 import { configureFileService } from '@therascript/services';
-import config from './config/index.js';
+import config from '@therascript/config';
 configureDb({
   dbPath: config.db.sqlitePath,
   isDev: !config.server.isProduction,
 });
 configureFileService(config.db.uploadsDir);
+
+const ensureDirectoryExists = (dirPath: string, dirNameForLog: string) => {
+  if (!fs.existsSync(dirPath)) {
+    console.log(`[Config] Creating ${dirNameForLog} directory: ${dirPath}`);
+    try {
+      fs.mkdirSync(dirPath, { recursive: true });
+      console.log(`[Config] Successfully created ${dirNameForLog} directory.`);
+    } catch (err) {
+      console.error(
+        `[Config] FATAL: Error creating ${dirNameForLog} directory at ${dirPath}:`,
+        err
+      );
+      process.exit(1);
+    }
+  }
+};
+ensureDirectoryExists(path.dirname(config.db.sqlitePath), 'database');
+ensureDirectoryExists(config.db.uploadsDir, 'uploads');
 
 import http from 'node:http';
 import { WritableStream, ReadableStream } from 'node:stream/web';

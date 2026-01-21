@@ -26,7 +26,7 @@ import {
   indexDocument,
   deleteByQuery,
 } from '@therascript/elasticsearch-client';
-import config from '../config/index.js';
+import config from '@therascript/config';
 // ============================= FIX START ==============================
 import { cleanLlmOutput } from '@therascript/services';
 // ============================== FIX END ===============================

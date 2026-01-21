@@ -2,7 +2,7 @@
 import os from 'os';
 import { getGpuStats } from '@therascript/gpu-utils';
 import type { GpuStats } from '@therascript/gpu-utils';
-import config from '../config/index.js';
+import config from '@therascript/config';
 
 type RuntimeAwareGpuStats = GpuStats & {
   executionProvider: 'gpu' | 'cpu' | 'metal';

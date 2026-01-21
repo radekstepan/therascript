@@ -27,6 +27,7 @@
     "@elysiajs/cors": "^1.1.0",
     "@elysiajs/swagger": "^1.1.0",
     "@sinclair/typebox": "^0.34.0",
+    "@therascript/config": "*",
     "@therascript/data": "*",
     "@therascript/domain": "*",
     "@therascript/services": "*",

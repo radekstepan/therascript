@@ -28,19 +28,19 @@ import {
 import axios from 'axios';
 import FormData from 'form-data';
 import fs from 'fs';
-import config from '../config/index.js';
+import config from '@therascript/config';
 
-const esClient = getElasticsearchClient(config.services.elasticsearchUrl);
+const esClient = getElasticsearchClient(config.elasticsearch.url);
 
 export const transcriptionQueueName = 'transcription-jobs';
 
 async function startWhisperJob(filePath: string): Promise<string> {
   const form = new FormData();
   form.append('file', fs.createReadStream(filePath));
-  form.append('model_name', config.services.whisperModel);
+  form.append('model_name', config.whisper.model);
 
   const response = await axios.post(
-    `${config.services.whisperApiUrl}/transcribe`,
+    `${config.whisper.apiUrl}/transcribe`,
     form,
     {
       headers: form.getHeaders(),
@@ -59,7 +59,7 @@ async function pollWhisperStatus(
 ): Promise<WhisperJobStatus> {
   while (true) {
     const { data: status } = await axios.get<WhisperJobStatus>(
-      `${config.services.whisperApiUrl}/status/${whisperJobId}`
+      `${config.whisper.apiUrl}/status/${whisperJobId}`
     );
     if (
       status.status === 'completed' ||
@@ -151,7 +151,7 @@ export default async function (job: Job<TranscriptionJobData, any, string>) {
         usageRepository.insertUsageLog({
           type: 'whisper',
           source: 'whisper_transcription',
-          model: config.services.whisperModel,
+          model: config.whisper.model,
           duration: durationInt,
         });
       }

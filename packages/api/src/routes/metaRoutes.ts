@@ -5,7 +5,7 @@ import {
   getElasticsearchClient,
   checkEsHealth,
 } from '@therascript/elasticsearch-client'; // Import ES client utils
-import config from '../config/index.js';
+import config from '@therascript/config';
 import { getReadinessStatus } from '../api/metaHandler.js';
 
 const HealthResponseSchema = t.Object({

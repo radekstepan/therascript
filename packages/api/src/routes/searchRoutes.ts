@@ -13,7 +13,7 @@ import {
   type TranscriptSource,
   type MessageSource,
 } from '@therascript/elasticsearch-client';
-import config from '../config/index.js';
+import config from '@therascript/config';
 import { InternalServerError, BadRequestError } from '../errors.js';
 import type {
   ApiSearchResultItem as UIApiSearchResultItem,

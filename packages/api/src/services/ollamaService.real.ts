@@ -15,7 +15,7 @@ import ollama, {
 } from 'ollama'; // Added ModelResponse type explicit import
 import axios from 'axios';
 import crypto from 'node:crypto'; // Import crypto for job ID
-import config from '../config/index.js';
+import config from '@therascript/config';
 // --- Use imported types from central location ---
 import {
   BackendChatMessage,

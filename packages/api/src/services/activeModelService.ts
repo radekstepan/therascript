@@ -1,5 +1,5 @@
 /* packages/api/src/services/activeModelService.ts */
-import config from '../config/index.js';
+import config from '@therascript/config';
 
 // Initialize with the value from the config file (.env)
 let activeModelName: string = config.ollama.model;

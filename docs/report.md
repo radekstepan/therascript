@@ -30,28 +30,6 @@ Therascript is a well-structured monorepo with clear separation between packages
 
 ## 3. Medium Priority Issues
 
-### 3.1 🟡 Configuration Duplication
-
-**Locations:**
-- [`packages/api/src/config/index.ts`](file:///Users/radek/dev/therascript/packages/api/src/config/index.ts)
-- [`packages/worker/src/config/index.ts`](file:///Users/radek/dev/therascript/packages/worker/src/config/index.ts)
-
-**Problem:** Both packages have separate config modules with overlapping keys and different defaults:
-
-| Config Key | API Default | Worker Default |
-|-----------|-------------|----------------|
-| `DB_PATH` | `./data/therapy-analyzer.sqlite` | `../api/data/therapy-analyzer-dev.sqlite` |
-| Path resolution | Relative to API package | Relative to worker package |
-
-**Impact:**
-- Risk of API and worker using different databases in development
-- Duplicated env var parsing logic
-- Easy to add new config to one but forget the other
-
-**Recommended Fix:** Create `@therascript/config` shared package with unified configuration.
-
----
-
 ### 3.2 🟡 BullMQ Rate Limiter May Be Unnecessary
 
 **Location:** [`packages/worker/src/index.ts:34-37`](file:///Users/radek/dev/therascript/packages/worker/src/index.ts#L34-L37)

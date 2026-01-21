@@ -8,7 +8,7 @@ import {
   pricing,
   type LlmModelPricing,
   type WhisperModelPricing,
-} from '../config/pricing.js';
+} from '@therascript/config';
 import { BadRequestError } from '../errors.js';
 
 interface UsageHistoryWeek {

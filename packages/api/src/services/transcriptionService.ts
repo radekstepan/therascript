@@ -1,5 +1,5 @@
 /* packages/api/src/services/transcriptionService.ts */
-import config from '../config/index.js';
+import config from '@therascript/config';
 import type { WhisperJobStatus } from '@therascript/domain';
 import axios from 'axios';
 import { ApiError, InternalServerError, NotFoundError } from '../errors.js';

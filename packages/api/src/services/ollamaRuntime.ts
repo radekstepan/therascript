@@ -11,7 +11,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
-import config from '../config/index.js';
+import config from '@therascript/config';
 import { InternalServerError, NotFoundError } from '../errors.js';
 
 const execAsync = util.promisify(callbackExec);

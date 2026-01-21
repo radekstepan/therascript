@@ -14,7 +14,7 @@ import type {
   IntermediateSummary,
 } from '@therascript/domain';
 import { streamLlmChat, type StreamResult } from '@therascript/services';
-import config from '../config/index.js';
+import config from '@therascript/config';
 import { publishStreamEvent } from '../services/streamPublisher.js';
 
 export const analysisQueueName = 'analysis-jobs';
@@ -133,7 +133,7 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
           model: jobRecord?.model_name || undefined,
           contextSize: jobRecord?.context_size || undefined,
           abortSignal: abortController.signal,
-          ollamaBaseUrl: config.services.ollamaBaseUrl,
+          ollamaBaseUrl: config.ollama.baseURL,
         });
         let iterResult = await mapGenerator.next();
         while (!iterResult.done) {
@@ -321,7 +321,7 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
       model: jobRecord?.model_name || undefined,
       contextSize: jobRecord?.context_size || undefined,
       abortSignal: reduceAbortController.signal,
-      ollamaBaseUrl: config.services.ollamaBaseUrl,
+      ollamaBaseUrl: config.ollama.baseURL,
     });
     let reduceIterResult = await reduceGenerator.next();
     while (!reduceIterResult.done) {

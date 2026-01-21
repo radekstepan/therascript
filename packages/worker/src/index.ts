@@ -3,7 +3,7 @@ import { Worker, Job } from 'bullmq';
 import { configureDb, closeDb } from '@therascript/db';
 import { configureFileService } from '@therascript/services';
 import { closeElasticsearchClient } from '@therascript/elasticsearch-client';
-import config from './config/index.js';
+import config from '@therascript/config';
 import { redisConnection } from './redisConnection.js';
 import transcriptionProcessor, {
   transcriptionQueueName,

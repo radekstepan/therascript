@@ -26,7 +26,7 @@ import {
   deleteByQuery,
   bulkIndexDocuments, // For updating multiple messages on chat detail change
 } from '@therascript/elasticsearch-client';
-import config from '../config/index.js';
+import config from '@therascript/config';
 // ============================= FIX START ==============================
 import { cleanLlmOutput } from '@therascript/services';
 // ============================== FIX END ===============================

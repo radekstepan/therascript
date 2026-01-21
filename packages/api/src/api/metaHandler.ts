@@ -8,7 +8,7 @@ import {
 } from '@therascript/elasticsearch-client';
 import { checkOllamaApiHealth } from '../services/ollamaService.js';
 import { checkWhisperApiHealth } from '../services/transcriptionService.js';
-import config from '../config/index.js';
+import config from '@therascript/config';
 
 interface ServiceStatus {
   database: 'connected' | 'disconnected';

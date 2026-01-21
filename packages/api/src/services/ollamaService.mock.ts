@@ -13,7 +13,7 @@ import {
   BadRequestError,
   InternalServerError,
 } from '../errors.js';
-import config from '../config/index.js';
+import config from '@therascript/config';
 import {
   getActiveModel,
   getConfiguredContextSize,

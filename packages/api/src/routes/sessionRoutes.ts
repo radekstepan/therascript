@@ -25,7 +25,7 @@ import {
   ApiError,
   BadRequestError,
 } from '../errors.js';
-import config from '../config/index.js';
+import config from '@therascript/config';
 import {
   getElasticsearchClient,
   TRANSCRIPTS_INDEX,

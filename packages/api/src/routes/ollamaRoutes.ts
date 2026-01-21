@@ -2,7 +2,7 @@ import { Elysia, t } from 'elysia';
 // --- REMOVED ollama import, use service layer instead ---
 // import ollama from 'ollama';
 // --- END REMOVAL ---
-import config from '../config/index.js';
+import config from '@therascript/config';
 import {
   ApiError,
   InternalServerError,

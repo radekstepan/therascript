@@ -1,6 +1,6 @@
 // packages/worker/src/redisConnection.ts
 import { ConnectionOptions } from 'bullmq';
-import config from './config/index.js';
+import config from '@therascript/config';
 
 export const redisConnection: ConnectionOptions = {
   host: config.redis.host,

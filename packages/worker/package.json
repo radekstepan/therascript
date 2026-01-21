@@ -12,6 +12,7 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
+    "@therascript/config": "*",
     "@therascript/data": "*",
     "@therascript/domain": "*",
     "@therascript/services": "*",

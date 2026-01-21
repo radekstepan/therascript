@@ -1,5 +1,5 @@
 import { Redis } from 'ioredis';
-import config from '../config/index.js';
+import config from '@therascript/config';
 
 // Define the event shape again for type safety on the API side
 export interface StreamEvent {
