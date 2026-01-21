@@ -30,34 +30,6 @@ Therascript is a well-structured monorepo with clear separation between packages
 
 ## 3. Medium Priority Issues
 
-### 3.2 🟡 BullMQ Rate Limiter May Be Unnecessary
-
-**Location:** [`packages/worker/src/index.ts:34-37`](file:///Users/radek/dev/therascript/packages/worker/src/index.ts#L34-L37)
-
-```typescript
-const transcriptionWorker = new Worker(transcriptionQueueName, transcriptionProcessor, {
-  connection: redisConnection,
-  concurrency: 1,  // Good - one at a time for GPU
-  limiter: {
-    max: 1,
-    duration: 5000,  // Adds 5-second delay between jobs
-  },
-});
-```
-
-**Problem:** The limiter adds artificial 5-second delays between transcription jobs even when GPU is idle.
-
-**Impact:**
-- Unnecessary queue latency for back-to-back uploads
-- Doesn't address actual bottleneck (Whisper processing time)
-
-**Recommendation:** 
-- Start with only `concurrency: 1` (sufficient for GPU safety)
-- Remove limiter unless there's a specific proven need (Whisper rate-limiting, GPU thrashing)
-- If needed, make duration configurable via environment variable
-
----
-
 ### 3.3 🟡 Missing Timeout on Whisper Polling
 
 **Location:** [`packages/worker/src/jobs/transcriptionProcessor.ts:53-69`](file:///Users/radek/dev/therascript/packages/worker/src/jobs/transcriptionProcessor.ts#L53-L69)

@@ -34,11 +34,7 @@ const transcriptionWorker = new Worker(
   transcriptionProcessor,
   {
     connection: redisConnection,
-    concurrency: 1, // Process one transcription job at a time to not overload GPU
-    limiter: {
-      max: 1,
-      duration: 5000, // 1 job every 5 seconds
-    },
+    concurrency: 1, // Critical: Prevents GPU memory exhaustion by allowing only one Whisper job at a time
   }
 );
 
@@ -69,6 +65,16 @@ const setupWorkerEventListeners = (worker: Worker, name: string) => {
     console.error(`[${name} Worker] A worker error occurred:`, err);
   });
 };
+
+let lastTranscriptionJobStartTime: number | null = null;
+transcriptionWorker.on('active', (job: Job) => {
+  const now = Date.now();
+  if (lastTranscriptionJobStartTime) {
+    const interval = now - lastTranscriptionJobStartTime;
+    console.log(`[Transcription Worker] Job interval: ${interval}ms`);
+  }
+  lastTranscriptionJobStartTime = now;
+});
 
 setupWorkerEventListeners(transcriptionWorker, 'Transcription');
 setupWorkerEventListeners(analysisWorker, 'Analysis');
