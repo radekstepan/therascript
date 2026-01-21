@@ -30,40 +30,6 @@ Therascript is a well-structured monorepo with clear separation between packages
 
 ## 3. Medium Priority Issues
 
-### 3.4 🟡 Elasticsearch Client Ignores URL Changes
-
-**Location:** [`packages/elasticsearch-client/src/client.ts:5-25`](file:///Users/radek/dev/therascript/packages/elasticsearch-client/src/client.ts#L5-L25)
-
-```typescript
-export const getElasticsearchClient = (nodeUrl: string): Client => {
-  if (!esClientInstance) {
-    esClientInstance = new Client({ node: nodeUrl, ... });
-  }
-  return esClientInstance;  // Returns cached client even if nodeUrl is different
-};
-```
-
-**Problem:** Subsequent calls with a different URL silently return the first client.
-
-**Impact (single-tenant):** Minimal in production, but can cause confusing behavior in tests or if multiple configurations are attempted.
-
-**Fix:**
-```typescript
-let initializedNodeUrl: string | null = null;
-
-export const getElasticsearchClient = (nodeUrl: string): Client => {
-  if (!esClientInstance) {
-    esClientInstance = new Client({ node: nodeUrl, ... });
-    initializedNodeUrl = nodeUrl;
-  } else if (initializedNodeUrl !== nodeUrl) {
-    throw new Error(`ES client already initialized with ${initializedNodeUrl}, cannot reinitialize with ${nodeUrl}`);
-  }
-  return esClientInstance;
-};
-```
-
----
-
 ### 3.5 🟡 Type Safety Gaps
 
 **Locations:** Various

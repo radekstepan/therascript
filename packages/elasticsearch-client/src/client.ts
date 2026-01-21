@@ -1,6 +1,7 @@
 import { Client } from '@elastic/elasticsearch';
 
 let esClientInstance: Client | null = null;
+let initializedNodeUrl: string | null = null;
 
 export const getElasticsearchClient = (nodeUrl: string): Client => {
   if (!esClientInstance) {
@@ -10,6 +11,7 @@ export const getElasticsearchClient = (nodeUrl: string): Client => {
         requestTimeout: 10000, // Increased timeout for potentially long operations
         // Consider adding sniffOnStart: true, sniffInterval: 30000 for multi-node clusters
       });
+      initializedNodeUrl = nodeUrl;
       console.log(
         `[ES Client] Elasticsearch client initialized for node: ${nodeUrl}`
       );
@@ -20,6 +22,10 @@ export const getElasticsearchClient = (nodeUrl: string): Client => {
       );
       throw new Error('Could not initialize Elasticsearch client.');
     }
+  } else if (initializedNodeUrl !== nodeUrl) {
+    throw new Error(
+      `ES client already initialized with ${initializedNodeUrl}, cannot reinitialize with ${nodeUrl}`
+    );
   }
   return esClientInstance;
 };
@@ -53,6 +59,7 @@ export const closeElasticsearchClient = async (): Promise<void> => {
       );
     } finally {
       esClientInstance = null;
+      initializedNodeUrl = null;
     }
   }
 };
