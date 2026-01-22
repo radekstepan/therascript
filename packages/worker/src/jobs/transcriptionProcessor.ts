@@ -33,8 +33,6 @@ import { safeValidateTranscriptionJob } from '@therascript/domain';
 
 const esClient = getElasticsearchClient(config.elasticsearch.url);
 
-export const transcriptionQueueName = 'transcription-jobs';
-
 async function startWhisperJob(filePath: string): Promise<string> {
   const form = new FormData();
   form.append('file', fs.createReadStream(filePath));

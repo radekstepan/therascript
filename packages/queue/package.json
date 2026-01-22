@@ -1,0 +1,16 @@
+{
+  "name": "@therascript/queue",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@therascript/config": "*",
+    "bullmq": "^5.10.3",
+    "ioredis": "^5.4.1"
+  }
+}

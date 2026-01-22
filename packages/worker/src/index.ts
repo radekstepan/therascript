@@ -4,13 +4,14 @@ import { configureDb, closeDb } from '@therascript/db';
 import { configureFileService } from '@therascript/services';
 import { closeElasticsearchClient } from '@therascript/elasticsearch-client';
 import config from '@therascript/config';
-import { redisConnection } from './redisConnection.js';
-import transcriptionProcessor, {
-  transcriptionQueueName,
-} from './jobs/transcriptionProcessor.js';
-import analysisProcessor, {
-  analysisQueueName,
-} from './jobs/analysisProcessor.js';
+import {
+  redisConnection,
+  TRANSCRIPTION_QUEUE_NAME,
+  ANALYSIS_QUEUE_NAME,
+} from '@therascript/queue';
+import transcriptionProcessor from './jobs/transcriptionProcessor.js';
+import analysisProcessor from './jobs/analysisProcessor.js';
+import { closePublisher } from './services/streamPublisher.js';
 
 console.log('[Worker] Initializing worker process...');
 
@@ -27,10 +28,10 @@ configureFileService(config.db.uploadsDir);
 // or external scheduling solutions like node-cron
 
 console.log(
-  `[Worker] Initializing worker for queue: "${transcriptionQueueName}"`
+  `[Worker] Initializing worker for queue: "${TRANSCRIPTION_QUEUE_NAME}"`
 );
 const transcriptionWorker = new Worker(
-  transcriptionQueueName,
+  TRANSCRIPTION_QUEUE_NAME,
   transcriptionProcessor,
   {
     connection: redisConnection,
@@ -38,8 +39,8 @@ const transcriptionWorker = new Worker(
   }
 );
 
-console.log(`[Worker] Initializing worker for queue: "${analysisQueueName}"`);
-const analysisWorker = new Worker(analysisQueueName, analysisProcessor, {
+console.log(`[Worker] Initializing worker for queue: "${ANALYSIS_QUEUE_NAME}"`);
+const analysisWorker = new Worker(ANALYSIS_QUEUE_NAME, analysisProcessor, {
   connection: redisConnection,
   concurrency: 2, // Can run a couple of analysis jobs in parallel
 });
@@ -93,6 +94,8 @@ async function shutdown(signal: string) {
     closeDb();
     console.log('[Worker] Database connection closed.');
     await closeElasticsearchClient();
+    await closePublisher();
+    console.log('[Worker] Redis publisher closed.');
   } catch (err) {
     console.error('[Worker] Error during graceful shutdown:', err);
   } finally {

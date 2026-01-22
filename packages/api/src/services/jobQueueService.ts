@@ -4,7 +4,7 @@ import {
   redisConnection,
   TRANSCRIPTION_QUEUE_NAME,
   ANALYSIS_QUEUE_NAME,
-} from './redisConnection.js';
+} from '@therascript/queue';
 import type {
   TranscriptionJobData,
   AnalysisJobData,

@@ -18,8 +18,6 @@ import { streamLlmChat, type StreamResult } from '@therascript/services';
 import config from '@therascript/config';
 import { publishStreamEvent } from '../services/streamPublisher.js';
 
-export const analysisQueueName = 'analysis-jobs';
-
 export default async function (job: Job<AnalysisJobData, any, string>) {
   const validationResult = safeValidateAnalysisJob(job.data);
   if (!validationResult.success) {

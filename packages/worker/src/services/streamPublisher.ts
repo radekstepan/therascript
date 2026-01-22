@@ -1,22 +1,24 @@
 import { Redis } from 'ioredis';
-import config from '@therascript/config';
+import {
+  createRedisClient,
+  getAnalysisChannel,
+  type StreamEvent,
+} from '@therascript/queue';
 
-// Use named import Redis for correct class construction
-const publisher = new Redis({
-  host: config.redis.host,
-  port: config.redis.port,
-});
+let publisher: Redis | null = null;
 
-export interface StreamEvent {
-  jobId: number;
-  timestamp: number;
-  phase: 'map' | 'reduce' | 'strategy' | 'status';
-  type: 'start' | 'token' | 'end' | 'error' | 'status';
-  sessionId?: number;
-  summaryId?: number;
-  delta?: string;
-  status?: string;
-  message?: string;
+function getPublisher(): Redis {
+  if (!publisher) {
+    publisher = createRedisClient();
+  }
+  return publisher;
+}
+
+export async function closePublisher(): Promise<void> {
+  if (publisher) {
+    await publisher.quit();
+    publisher = null;
+  }
 }
 
 export function publishStreamEvent(
@@ -28,8 +30,8 @@ export function publishStreamEvent(
     timestamp: Date.now(),
     ...event,
   };
-  publisher
-    .publish(`analysis:job:${jobId}:events`, JSON.stringify(payload))
+  getPublisher()
+    .publish(getAnalysisChannel(jobId), JSON.stringify(payload))
     .catch((err: unknown) => {
       console.error(
         `[StreamPublisher] Failed to publish event for job ${jobId}:`,

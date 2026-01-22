@@ -18,6 +18,7 @@
     "@therascript/services": "*",
     "@therascript/db": "*",
     "@therascript/elasticsearch-client": "*",
+    "@therascript/queue": "*",
     "axios": "^1.8.4",
     "bullmq": "^5.10.3",
     "form-data": "^4.0.0",

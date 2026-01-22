@@ -1,5 +1,5 @@
-// packages/worker/src/redisConnection.ts
 import { ConnectionOptions } from 'bullmq';
+import { Redis } from 'ioredis';
 import config from '@therascript/config';
 
 export const redisConnection: ConnectionOptions = {
@@ -7,3 +7,10 @@ export const redisConnection: ConnectionOptions = {
   port: config.redis.port,
   maxRetriesPerRequest: null,
 };
+
+export function createRedisClient(): Redis {
+  return new Redis({
+    host: config.redis.host,
+    port: config.redis.port,
+  });
+}
