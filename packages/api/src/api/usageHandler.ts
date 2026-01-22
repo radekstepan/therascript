@@ -67,6 +67,22 @@ interface UsageLogsParams {
   offset?: number;
 }
 
+interface UsageQueryParams {
+  weeks?: string | number;
+  start?: string | number;
+  end?: string | number;
+  type?: string;
+  model?: string;
+  source?: string;
+  limit?: string | number;
+  offset?: string | number;
+}
+
+interface UsageHandlerContext {
+  query: UsageQueryParams;
+  set: { status?: number | string };
+}
+
 interface UsageLogWithCost {
   id: number;
   type: 'llm' | 'whisper';
@@ -134,10 +150,7 @@ function calculateWhisperCost(model: string, duration: number | null): number {
 export const getUsageHistory = async ({
   query,
   set,
-}: {
-  query: any;
-  set: { status?: number | string };
-}): Promise<UsageHistoryResponse> => {
+}: UsageHandlerContext): Promise<UsageHistoryResponse> => {
   let weeks = parseInt(String(query.weeks || '12'), 10);
   if (isNaN(weeks)) weeks = 12;
   if (weeks < 1) weeks = 1;
@@ -292,9 +305,7 @@ export const getUsageHistory = async ({
 
 export const getUsageStats = async ({
   set,
-}: {
-  set: { status?: number | string };
-}): Promise<UsageStatsResponse> => {
+}: Omit<UsageHandlerContext, 'query'>): Promise<UsageStatsResponse> => {
   const totals = usageRepository.getTotals({
     groupByModel: true,
   }) as UsageTotalsByModel[];
@@ -343,10 +354,7 @@ export const getUsageStats = async ({
 export const getUsageLogs = async ({
   query,
   set,
-}: {
-  query: any;
-  set: { status?: number | string };
-}): Promise<UsageLogsResponse> => {
+}: UsageHandlerContext): Promise<UsageLogsResponse> => {
   let limit = parseInt(String(query.limit || '50'), 10);
   let offset = parseInt(String(query.offset || '0'), 10);
 
@@ -371,7 +379,7 @@ export const getUsageLogs = async ({
     end,
     limit,
     offset,
-    type: query.type,
+    type: query.type as 'llm' | 'whisper' | undefined,
     model: query.model,
     source: query.source,
   });

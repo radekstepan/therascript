@@ -3,7 +3,11 @@ import { getActiveJobCounts } from '../services/jobQueueService.js';
 import { InternalServerError } from '../errors.js';
 import { analysisRepository } from '@therascript/data';
 
-export const getActiveJobCountHandler = async ({ set }: any) => {
+interface JobsHandlerContext {
+  set: { status?: number | string };
+}
+
+export const getActiveJobCountHandler = async ({ set }: JobsHandlerContext) => {
   try {
     // 1. Get counts from the Redis queue (BullMQ)
     const queueCounts = await getActiveJobCounts();

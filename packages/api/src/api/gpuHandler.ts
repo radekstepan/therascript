@@ -5,9 +5,13 @@ import {
 } from '../services/gpuService.js';
 import { InternalServerError } from '../errors.js';
 
+interface GpuHandlerContext {
+  set: { status?: number | string };
+}
+
 export const getGpuStatsHandler = async ({
   set,
-}: any): Promise<RuntimeAwareGpuStats> => {
+}: GpuHandlerContext): Promise<RuntimeAwareGpuStats> => {
   try {
     const stats = await getGpuStatsService();
     set.status = 200;

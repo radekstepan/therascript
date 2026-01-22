@@ -17,7 +17,11 @@ interface ServiceStatus {
   whisper: 'connected' | 'disconnected';
 }
 
-export const getReadinessStatus = async ({ set }: any) => {
+interface MetaHandlerContext {
+  set: { status?: number | string };
+}
+
+export const getReadinessStatus = async ({ set }: MetaHandlerContext) => {
   const statuses: ServiceStatus = {
     database: 'disconnected',
     elasticsearch: 'disconnected',

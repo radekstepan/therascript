@@ -6,8 +6,18 @@ import {
   BadRequestError,
 } from '../errors.js';
 import type { Template } from '@therascript/domain';
+import {
+  createTemplateSchema,
+  updateTemplateSchema,
+} from '@therascript/domain';
 
-export const getTemplates = ({ set }: any): Template[] => {
+interface TemplateHandlerContext {
+  body: unknown;
+  params: Record<string, string | undefined>;
+  set: { status?: number | string };
+}
+
+export const getTemplates = ({ set }: TemplateHandlerContext): Template[] => {
   try {
     const templates = templateRepository.findAll();
     set.status = 200;
@@ -20,11 +30,12 @@ export const getTemplates = ({ set }: any): Template[] => {
   }
 };
 
-export const createTemplate = ({ body, set }: any): Template => {
-  const { title, text } = body as { title: string; text: string };
-  if (!title?.trim() || !text?.trim()) {
-    throw new BadRequestError('Title and text are required for a template.');
-  }
+export const createTemplate = ({
+  body,
+  set,
+}: TemplateHandlerContext): Template => {
+  const validatedBody = createTemplateSchema.parse(body);
+  const { title, text } = validatedBody;
 
   try {
     const newTemplate = templateRepository.create(title.trim(), text.trim());
@@ -38,47 +49,69 @@ export const createTemplate = ({ body, set }: any): Template => {
   }
 };
 
-export const updateTemplate = ({ params, body, set }: any): Template => {
+export const updateTemplate = ({
+  params,
+  body,
+  set,
+}: TemplateHandlerContext): Template => {
   const { id } = params;
-  const { title, text } = body as { title: string; text: string };
-
-  if (!title?.trim() || !text?.trim()) {
-    throw new BadRequestError('Title and text are required for an update.');
+  if (!id) {
+    throw new BadRequestError('Template ID is required');
   }
+  const parsedId = parseInt(id, 10);
+
+  if (isNaN(parsedId)) {
+    throw new BadRequestError(`Invalid template ID: ${id}`);
+  }
+
+  const validatedBody = updateTemplateSchema.parse(body);
+  const { title, text } = validatedBody;
 
   try {
     const updatedTemplate = templateRepository.update(
-      id,
+      parsedId,
       title.trim(),
       text.trim()
     );
     if (!updatedTemplate) {
-      throw new NotFoundError(`Template with ID ${id}`);
+      throw new NotFoundError(`Template with ID ${parsedId}`);
     }
     set.status = 200;
     return updatedTemplate;
   } catch (error) {
     if (error instanceof NotFoundError) throw error;
     throw new InternalServerError(
-      `Failed to update template ${id}`,
+      `Failed to update template ${parsedId}`,
       error instanceof Error ? error : undefined
     );
   }
 };
 
-export const deleteTemplate = ({ params, set }: any): { message: string } => {
+export const deleteTemplate = ({
+  params,
+  set,
+}: TemplateHandlerContext): { message: string } => {
   const { id } = params;
+  if (!id) {
+    throw new BadRequestError('Template ID is required');
+  }
+  const parsedId = parseInt(id, 10);
+
+  if (isNaN(parsedId)) {
+    throw new BadRequestError(`Invalid template ID: ${id}`);
+  }
+
   try {
-    const deleted = templateRepository.deleteById(id);
+    const deleted = templateRepository.deleteById(parsedId);
     if (!deleted) {
-      throw new NotFoundError(`Template with ID ${id}`);
+      throw new NotFoundError(`Template with ID ${parsedId}`);
     }
     set.status = 200;
-    return { message: `Template with ID ${id} deleted successfully.` };
+    return { message: `Template with ID ${parsedId} deleted successfully.` };
   } catch (error) {
     if (error instanceof NotFoundError) throw error;
     throw new InternalServerError(
-      `Failed to delete template ${id}`,
+      `Failed to delete template ${parsedId}`,
       error instanceof Error ? error : undefined
     );
   }

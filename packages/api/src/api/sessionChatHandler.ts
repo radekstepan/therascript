@@ -17,7 +17,7 @@ import type {
   ChatMetadata,
   BackendChatSession,
   BackendSession,
-} from '@therascript/domain'; // Added BackendSession
+} from '@therascript/domain';
 import { TransformStream } from 'node:stream/web';
 import { TextEncoder } from 'node:util';
 import {
@@ -38,6 +38,7 @@ import {
   getConfiguredContextSize,
   getActiveModel,
 } from '../services/activeModelService.js';
+import { type ChatRequest, chatRequestSchema } from '@therascript/domain';
 
 const esClient = getElasticsearchClient(config.elasticsearch.url);
 
@@ -49,15 +50,13 @@ type FullSessionChatApiResponse = SessionChatMetadataResponse & {
   messages: ApiChatMessageResponse[];
 };
 
-// Define a type for Elysia context if not already available globally
-// This needs to match what Elysia actually provides to your handlers
+// Define a type for Elysia context with proper typing
 interface ElysiaHandlerContext {
-  body: any; // This will be typed by Elysia based on schema
-  params: Record<string, string | undefined>; // Params are strings initially
+  body: unknown;
+  params: Record<string, string | undefined>;
   query: Record<string, string | undefined>;
   set: { status?: number | string; headers?: Record<string, string> };
   signal?: AbortSignal;
-  // These are added by 'derive' hooks
   sessionData: BackendSession;
   chatData?: BackendChatSession;
   messageData?: BackendChatMessage;
@@ -101,8 +100,8 @@ export const addSessionChatMessage = async ({
   set,
   signal,
 }: ElysiaHandlerContext): Promise<Response> => {
-  const { text } = body as { text: string }; // Type assertion for body
-  const trimmedText = text.trim();
+  const validatedBody = chatRequestSchema.parse(body);
+  const trimmedText = validatedBody.text.trim();
   let userMessage: BackendChatMessage;
 
   if (!chatData) {
@@ -245,7 +244,7 @@ export const addSessionChatMessage = async ({
           `[API ProcessStream ${chatData.id}] Finished iterating Ollama stream successfully.`
         );
         const llmDuration = Date.now() - llmStartTime;
-      } catch (streamError: any) {
+      } catch (streamError) {
         ollamaStreamError =
           streamError instanceof Error
             ? streamError
@@ -381,7 +380,10 @@ export const addSessionChatMessage = async ({
       }
     });
 
-    return new Response(passthrough.readable as any, { status: 200, headers });
+    return new Response(passthrough.readable as ReadableStream<Uint8Array>, {
+      status: 200,
+      headers,
+    });
   } catch (error) {
     console.error(
       `[API Error] addSessionChatMessage setup failed (Chat ID: ${chatData?.id}, Session ID: ${sessionData?.id}):`,
@@ -416,13 +418,17 @@ export const getSessionChatDetails = ({
   };
 };
 
+interface RenameBody {
+  name?: string | null;
+}
+
 export const renameSessionChat = ({
   chatData,
   sessionData,
   body,
   set,
 }: ElysiaHandlerContext): SessionChatMetadataResponse => {
-  const { name } = body as { name?: string | null };
+  const { name } = body as RenameBody;
   const nameToSave =
     typeof name === 'string' && name.trim() !== '' ? name.trim() : null;
   if (!chatData)

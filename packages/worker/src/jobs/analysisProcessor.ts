@@ -1,6 +1,7 @@
 // packages/worker/src/jobs/analysisProcessor.ts
 import { Job } from 'bullmq';
 import { AnalysisJobData } from '../types.js';
+import { safeValidateAnalysisJob } from '@therascript/domain';
 import {
   analysisRepository,
   transcriptRepository,
@@ -20,7 +21,16 @@ import { publishStreamEvent } from '../services/streamPublisher.js';
 export const analysisQueueName = 'analysis-jobs';
 
 export default async function (job: Job<AnalysisJobData, any, string>) {
-  const { jobId } = job.data;
+  const validationResult = safeValidateAnalysisJob(job.data);
+  if (!validationResult.success) {
+    const error = new Error(
+      `Invalid analysis job payload: ${validationResult.error.errors.map((e) => e.message).join(', ')}`
+    );
+    console.error('[Analysis Worker] Validation error:', error);
+    throw error;
+  }
+
+  const { jobId } = validationResult.data;
   console.log(`[Analysis Worker] Starting processing for job ID: ${jobId}`);
 
   try {

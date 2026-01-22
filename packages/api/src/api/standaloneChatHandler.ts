@@ -16,7 +16,7 @@ import type {
   ChatMetadata,
   BackendChatSession,
   BackendSession,
-} from '@therascript/domain'; // Added BackendSession
+} from '@therascript/domain';
 import { TransformStream } from 'node:stream/web';
 import { TextEncoder } from 'node:util';
 import {
@@ -24,7 +24,7 @@ import {
   MESSAGES_INDEX,
   indexDocument,
   deleteByQuery,
-  bulkIndexDocuments, // For updating multiple messages on chat detail change
+  bulkIndexDocuments,
 } from '@therascript/elasticsearch-client';
 import config from '@therascript/config';
 // ============================= FIX START ==============================
@@ -38,6 +38,12 @@ import {
   getConfiguredContextSize,
   getActiveModel,
 } from '../services/activeModelService.js';
+import {
+  type ChatRequest,
+  type RenameChatRequest,
+  chatRequestSchema,
+  renameChatRequestSchema,
+} from '@therascript/domain';
 
 const esClient = getElasticsearchClient(config.elasticsearch.url);
 
@@ -51,17 +57,15 @@ type FullStandaloneChatApiResponse = StandaloneChatMetadataResponse & {
   messages: ApiChatMessageResponse[];
 };
 
-// Define a type for Elysia context if not already available globally in your project
+// Define a type for Elysia context with proper typing
 interface ElysiaHandlerContext {
-  body: any;
+  body: unknown;
   params: Record<string, string | undefined>;
   query: Record<string, string | undefined>;
   set: { status?: number | string; headers?: Record<string, string> };
   signal?: AbortSignal;
-  // These are added by 'derive' hooks if used for these routes
   chatData?: BackendChatSession;
   messageData?: BackendChatMessage;
-  // sessionData is not typically used in standalone chat handlers
 }
 
 export const createStandaloneChat = ({
@@ -151,8 +155,8 @@ export const addStandaloneChatMessage = async ({
   set,
   signal,
 }: ElysiaHandlerContext): Promise<Response> => {
-  const { text } = body as { text: string }; // Type assertion for body
-  const trimmedText = text.trim();
+  const validatedBody = chatRequestSchema.parse(body);
+  const trimmedText = validatedBody.text.trim();
   let userMessage: BackendChatMessage;
 
   if (!chatData) {
@@ -282,7 +286,7 @@ export const addStandaloneChatMessage = async ({
           `[API ProcessStream ${chatData.id}] Finished iterating Ollama stream successfully.`
         );
         llmDuration = Date.now() - llmStartTime;
-      } catch (streamError: any) {
+      } catch (streamError) {
         ollamaStreamError =
           streamError instanceof Error
             ? streamError
@@ -418,7 +422,10 @@ export const addStandaloneChatMessage = async ({
       }
     });
 
-    return new Response(passthrough.readable as any, { status: 200, headers });
+    return new Response(passthrough.readable as ReadableStream<Uint8Array>, {
+      status: 200,
+      headers,
+    });
   } catch (error) {
     console.error(
       `[API Error] addStandaloneChatMessage setup failed (Chat ID: ${chatData?.id}):`,
@@ -437,10 +444,8 @@ export const editStandaloneChatDetails = async ({
   body,
   set,
 }: ElysiaHandlerContext): Promise<StandaloneChatMetadataResponse> => {
-  const { name, tags } = body as {
-    name?: string | null;
-    tags?: string[] | null;
-  };
+  const validatedBody = renameChatRequestSchema.parse(body);
+  const { name, tags } = validatedBody;
   const nameToSave =
     typeof name === 'string' && name.trim() !== '' ? name.trim() : null;
   const validatedTags =
@@ -521,9 +526,11 @@ export const editStandaloneChatDetails = async ({
     return response;
   } catch (error) {
     console.error(`[API Err] editStandaloneDetails ${chatData?.id}:`, error);
+    const esError = error as {
+      meta?: { body?: { error?: { type?: string } } };
+    };
     if (
-      (error as any).meta?.body?.error?.type ===
-      'version_conflict_engine_exception'
+      esError.meta?.body?.error?.type === 'version_conflict_engine_exception'
     ) {
       console.warn(`[API ES Update] Version conflict for chat ${chatData?.id}`);
     }

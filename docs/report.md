@@ -28,28 +28,6 @@ Therascript is a well-structured monorepo with clear separation between packages
 
 ---
 
-## 3. Medium Priority Issues
-
-### 3.5 🟡 Type Safety Gaps
-
-**Locations:** Various
-
-**Problems:**
-1. `ElysiaHandlerContext` uses `body: any` ([sessionChatHandler.ts:52](file:///Users/radek/dev/therascript/packages/api/src/api/sessionChatHandler.ts#L52))
-2. SQLite rows returned as `any` and cast without validation
-3. Worker imports API types from compiled output (version mismatch risk)
-
-**Impact:**
-- Runtime type mismatches not caught at compile time
-- Potential undefined field access crashes
-
-**Recommendation:**
-- Define shared types in `@therascript/domain`
-- Add lightweight runtime validation for critical boundaries (job payloads, API request bodies)
-- Use Zod or similar for request body validation in Elysia
-
----
-
 ## 4. Low Priority Issues
 
 ### 4.1 🟢 Redis Connection Duplication

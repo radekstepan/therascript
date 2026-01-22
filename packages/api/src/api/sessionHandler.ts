@@ -36,8 +36,25 @@ import {
   deleteDocument,
 } from '@therascript/elasticsearch-client';
 import config from '@therascript/config';
+import {
+  updateSessionRequestSchema,
+  updateTranscriptParagraphRequestSchema,
+} from '@therascript/domain';
 
 const esClient = getElasticsearchClient(config.elasticsearch.url);
+
+interface SessionHandlerContextNoSessionData {
+  body: unknown;
+  params: Record<string, string | undefined>;
+  set: { status?: number | string };
+}
+
+interface SessionHandlerContext {
+  body: unknown;
+  params: Record<string, string | undefined>;
+  set: { status?: number | string };
+  sessionData: BackendSession;
+}
 
 const dateToIsoString = (dateString: string): string | null => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
@@ -61,7 +78,7 @@ const dateToIsoString = (dateString: string): string | null => {
   }
 };
 
-export const listSessions = ({ set }: any) => {
+export const listSessions = ({ set }: SessionHandlerContextNoSessionData) => {
   try {
     const sessions = sessionRepository.findAll();
     const sessionDTOs = sessions.map((s) => ({
@@ -88,7 +105,10 @@ export const listSessions = ({ set }: any) => {
   }
 };
 
-export const getSessionDetails = ({ sessionData, set }: any) => {
+export const getSessionDetails = ({
+  sessionData,
+  set,
+}: SessionHandlerContext) => {
   try {
     const chats = chatRepository.findChatsBySessionId(sessionData.id);
     const chatMetadata = chats.map((chat) => ({
@@ -129,12 +149,13 @@ export const updateSessionMetadata = async ({
   sessionData,
   body,
   set,
-}: any) => {
+}: SessionHandlerContext) => {
   const sessionId = sessionData.id;
-  const { date: dateInput, ...restOfBody } = body;
+  const validatedBody = updateSessionRequestSchema.parse(body);
+  const { date: dateInput, ...restOfBody } = validatedBody;
   const metadataUpdate: Partial<BackendSession> = { ...restOfBody };
 
-  if (Object.keys(body).length === 0) {
+  if (Object.keys(validatedBody).length === 0) {
     throw new BadRequestError('No metadata provided for update.');
   }
   if (dateInput) {
@@ -270,7 +291,7 @@ export const updateSessionMetadata = async ({
 export const getTranscript = async ({
   sessionData,
   set,
-}: any): Promise<StructuredTranscript> => {
+}: SessionHandlerContext): Promise<StructuredTranscript> => {
   const sessionId = sessionData.id;
   if (sessionData.status !== 'completed') {
     console.warn(
@@ -298,9 +319,10 @@ export const updateTranscriptParagraph = async ({
   sessionData,
   body,
   set,
-}: any): Promise<StructuredTranscript> => {
+}: SessionHandlerContext): Promise<StructuredTranscript> => {
   const sessionId = sessionData.id;
-  const { paragraphIndex, newText } = body;
+  const validatedBody = updateTranscriptParagraphRequestSchema.parse(body);
+  const { paragraphIndex, newText } = validatedBody;
 
   if (sessionData.status !== 'completed') {
     throw new BadRequestError(
@@ -415,13 +437,14 @@ export const deleteTranscriptParagraph = async ({
   sessionData,
   params,
   set,
-}: any): Promise<StructuredTranscript> => {
+}: SessionHandlerContext): Promise<StructuredTranscript> => {
   const sessionId = sessionData.id;
-  const paragraphIndex = parseInt(params.paragraphIndex, 10);
+  const { paragraphIndex: paragraphIndexParam } = params;
+  const paragraphIndex = parseInt(paragraphIndexParam || '0', 10);
 
   if (isNaN(paragraphIndex) || paragraphIndex < 0) {
     throw new BadRequestError(
-      `Invalid paragraph index: ${params.paragraphIndex}.`
+      `Invalid paragraph index: ${paragraphIndexParam}.`
     );
   }
 
@@ -492,11 +515,8 @@ export const finalizeSessionHandler = async ({
   params,
   set,
   sessionData: initialSessionDataFromDerive,
-}: any) => {
-  // params from route, sessionData from derive
-  const sessionId = parseInt(initialSessionDataFromDerive.id, 10);
-  if (isNaN(sessionId))
-    throw new BadRequestError('Invalid session ID for finalize.');
+}: SessionHandlerContext) => {
+  const sessionId = initialSessionDataFromDerive.id;
 
   console.log(`[API Finalize] Request received for session ${sessionId}`);
   const currentSessionData = sessionRepository.findById(sessionId);
@@ -630,7 +650,10 @@ export const finalizeSessionHandler = async ({
   }
 };
 
-export const deleteSessionAudioHandler = async ({ sessionData, set }: any) => {
+export const deleteSessionAudioHandler = async ({
+  sessionData,
+  set,
+}: SessionHandlerContext) => {
   const sessionId = sessionData.id;
   const audioIdentifier = sessionData.audioPath;
   if (!audioIdentifier) {

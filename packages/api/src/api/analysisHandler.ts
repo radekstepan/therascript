@@ -25,6 +25,18 @@ import type {
 import { cleanLlmOutput } from '@therascript/services';
 import type { ChatResponse } from 'ollama';
 import { createJobSubscriber } from '../services/streamSubscriber.js';
+import {
+  type AnalysisRequest,
+  analysisRequestSchema,
+} from '@therascript/domain';
+
+interface AnalysisHandlerContext {
+  params: { jobId?: string | number } & Record<
+    string,
+    string | number | undefined
+  >;
+  set: { status?: number | string };
+}
 
 // This helper is also in analysisJobService.ts. Consider moving to a shared util.
 async function accumulateStreamResponse(
@@ -225,13 +237,12 @@ const generateStrategyAndUpdateJob = async (
 export const createAnalysisJobHandler = async ({
   body,
   set,
-}: any): Promise<{ jobId: number }> => {
-  const { sessionIds, prompt, modelName, useAdvancedStrategy } = body as {
-    sessionIds: number[];
-    prompt: string;
-    modelName?: string;
-    useAdvancedStrategy?: boolean;
-  };
+}: {
+  body: unknown;
+  set: { status?: number | string };
+}): Promise<{ jobId: number }> => {
+  const validatedBody = analysisRequestSchema.parse(body);
+  const { sessionIds, prompt, modelName, useAdvancedStrategy } = validatedBody;
 
   try {
     // --- AUTOMATIC CONTEXT SIZE CALCULATION ---
@@ -303,7 +314,9 @@ export const createAnalysisJobHandler = async ({
   }
 };
 
-export const listAnalysisJobsHandler = ({ set }: any): AnalysisJob[] => {
+export const listAnalysisJobsHandler = ({
+  set,
+}: AnalysisHandlerContext): AnalysisJob[] => {
   try {
     const jobs = analysisRepository.listJobs();
     set.status = 200;
@@ -320,8 +333,11 @@ export const listAnalysisJobsHandler = ({ set }: any): AnalysisJob[] => {
 export const getAnalysisJobHandler = ({
   params,
   set,
-}: any): AnalysisJobWithDetails => {
-  const jobId = parseInt(params.jobId, 10);
+}: AnalysisHandlerContext): AnalysisJobWithDetails => {
+  const jobId =
+    typeof params.jobId === 'number'
+      ? params.jobId
+      : parseInt(params.jobId ?? '0', 10);
   try {
     const job = analysisRepository.getJobById(jobId);
     if (!job) {
@@ -372,8 +388,11 @@ export const getAnalysisJobHandler = ({
 export const cancelAnalysisJobHandler = ({
   params,
   set,
-}: any): { message: string } => {
-  const jobId = parseInt(params.jobId, 10);
+}: AnalysisHandlerContext): { message: string } => {
+  const jobId =
+    typeof params.jobId === 'number'
+      ? params.jobId
+      : parseInt(params.jobId ?? '0', 10);
   try {
     const job = analysisRepository.getJobById(jobId);
     if (!job) {
@@ -404,8 +423,11 @@ export const cancelAnalysisJobHandler = ({
 export const deleteAnalysisJobHandler = ({
   params,
   set,
-}: any): { message: string } => {
-  const jobId = parseInt(params.jobId, 10);
+}: AnalysisHandlerContext): { message: string } => {
+  const jobId =
+    typeof params.jobId === 'number'
+      ? params.jobId
+      : parseInt(params.jobId ?? '0', 10);
   try {
     const deleted = analysisRepository.deleteJob(jobId);
     if (!deleted) {
@@ -425,8 +447,14 @@ export const deleteAnalysisJobHandler = ({
   }
 };
 
-export const streamAnalysisJobHandler = ({ params, set }: any) => {
-  const jobId = parseInt(params.jobId, 10);
+export const streamAnalysisJobHandler = ({
+  params,
+  set,
+}: AnalysisHandlerContext): Response => {
+  const jobId =
+    typeof params.jobId === 'number'
+      ? params.jobId
+      : parseInt(params.jobId ?? '0', 10);
   const job = analysisRepository.getJobById(jobId);
 
   if (!job) {
@@ -441,7 +469,7 @@ export const streamAnalysisJobHandler = ({ params, set }: any) => {
     start(controller) {
       const encoder = new TextEncoder();
 
-      const send = (data: any) => {
+      const send = (data: object) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
       };
 

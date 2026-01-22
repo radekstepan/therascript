@@ -7,6 +7,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { getConfig } from './config.js';
 import type { DbRunResult, DbStatement } from './types.js';
+import { validateDatabaseSchema } from './schemaValidation.js';
 
 // MODIFIED: We will no longer hash this entire block.
 // It now represents the initial state of the database schema (Version 1).
@@ -465,6 +466,22 @@ export function initializeDatabase(dbInstance: DB) {
 
     // Seed system templates after migrations are complete
     seedSystemTemplates(dbInstance);
+
+    // Validate schema against expected Zod definitions (non-blocking)
+    try {
+      const validationResult = validateDatabaseSchema(dbInstance);
+      if (!validationResult.valid) {
+        console.warn('[db Init Func]: Schema validation warnings:');
+        for (const warning of validationResult.warnings) {
+          console.warn(`  - ${warning}`);
+        }
+      }
+    } catch (validationError) {
+      console.warn(
+        '[db Init Func]: Schema validation failed:',
+        (validationError as Error).message
+      );
+    }
 
     // This part is now handled inside the migration, but we can keep the warning.
     const sessionColumns = dbInstance.pragma('table_info(sessions)') as {

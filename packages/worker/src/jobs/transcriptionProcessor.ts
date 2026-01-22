@@ -29,6 +29,7 @@ import axios from 'axios';
 import FormData from 'form-data';
 import fs from 'fs';
 import config from '@therascript/config';
+import { safeValidateTranscriptionJob } from '@therascript/domain';
 
 const esClient = getElasticsearchClient(config.elasticsearch.url);
 
@@ -126,7 +127,16 @@ function groupSegmentsIntoParagraphs(
 }
 
 export default async function (job: Job<TranscriptionJobData, any, string>) {
-  const { sessionId } = job.data;
+  const validationResult = safeValidateTranscriptionJob(job.data);
+  if (!validationResult.success) {
+    const error = new Error(
+      `Invalid transcription job payload: ${validationResult.error.errors.map((e) => e.message).join(', ')}`
+    );
+    console.error('[Transcription Worker] Validation error:', error);
+    throw error;
+  }
+
+  const { sessionId } = validationResult.data;
   console.log(
     `[Transcription Worker] Starting job for session ID: ${sessionId}`
   );
