@@ -468,6 +468,7 @@ export function StandaloneChatHeader({
                 variant="soft"
                 color="gray"
                 disabled={deleteChatMutation.isPending}
+                className="transition-all duration-150"
               >
                 Cancel
               </Button>
@@ -479,6 +480,7 @@ export function StandaloneChatHeader({
                   chatToDelete && deleteChatMutation.mutate(chatToDelete.id)
                 }
                 disabled={deleteChatMutation.isPending}
+                className="transition-all duration-150"
               >
                 {deleteChatMutation.isPending ? (
                   <Spinner size="1" />

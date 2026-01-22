@@ -10,7 +10,6 @@ import {
   IconButton,
   Button as RadixButton,
   Spinner,
-  // Container, // Container removed for full-width behavior
   Text,
 } from '@radix-ui/themes';
 import {
@@ -137,19 +136,19 @@ export function TopToolbar() {
     <Box
       className={cn(
         'sticky top-0 z-30 flex items-center',
-        'bg-gray-100 dark:bg-gray-800',
-        'border-b border-gray-200 dark:border-gray-700',
+        // Modern glass effect
+        'bg-white/70 dark:bg-gray-900/70 backdrop-blur-md',
+        'border-b border-gray-200 dark:border-gray-800',
         'px-4 md:px-6 lg:px-8',
-        'py-4'
+        'py-3'
       )}
-      style={{ width: '100%' }} // Ensure the Box takes full width
+      style={{ width: '100%' }}
     >
-      {/* Removed Radix Container, Flex now handles full width layout */}
       <Flex justify="between" align="center" gap="4" width="100%">
         {/* Search Form - takes up available space */}
         <form
           onSubmit={handleSearchSubmit}
-          style={{ flexGrow: 1, maxWidth: '600px' }} // Allow search to grow but not excessively
+          style={{ flexGrow: 1, maxWidth: '600px' }}
         >
           <TextField.Root
             ref={searchInputRef}
@@ -162,9 +161,16 @@ export function TopToolbar() {
               isFetchingSearch || createStandaloneChatMutation.isPending
             }
             name="q"
+            variant="surface"
+            radius="full" // More modern pill shape
+            className="bg-gray-100 dark:bg-gray-800 border-transparent focus-within:border-[var(--accent-8)] focus-within:ring-1 focus-within:ring-[var(--accent-8)] shadow-sm"
           >
             <TextField.Slot>
-              <MagnifyingGlassIcon height="16" width="16" />
+              <MagnifyingGlassIcon
+                height="16"
+                width="16"
+                className="text-gray-500"
+              />
             </TextField.Slot>
             {isFetchingSearch && (
               <TextField.Slot>
@@ -181,6 +187,7 @@ export function TopToolbar() {
                   aria-label="Clear search"
                   title="Clear search (Esc)"
                   type="button"
+                  className="rounded-full hover:bg-gray-200 dark:hover:bg-gray-700"
                 >
                   <Cross1Icon />
                 </IconButton>
@@ -192,19 +199,37 @@ export function TopToolbar() {
         {/* Action Buttons - aligned to the right */}
         <Flex gap="3" align="center" flexShrink="0">
           <RadixButton
-            variant="outline"
+            variant="surface"
             size="2"
+            color="gray"
+            className="hidden sm:flex shadow-sm border border-gray-200 dark:border-gray-700 transition-colors"
+            style={{
+              backgroundColor: 'var(--gray-a4)',
+            }}
             onClick={handleNewStandaloneChat}
             disabled={createStandaloneChatMutation.isPending || !isSystemReady}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'var(--gray-a5)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'var(--gray-a4)';
+            }}
           >
             <ChatBubbleIcon width="16" height="16" />
             <Text ml="2">New Chat</Text>
           </RadixButton>
           <RadixButton
-            variant="soft"
+            variant="solid"
             size="2"
             onClick={handleOpenUploadModal}
             disabled={!isSystemReady}
+            className="shadow-md transition-all"
+            onMouseEnter={(e) => {
+              e.currentTarget.style.filter = 'brightness(1.1)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.filter = 'brightness(1)';
+            }}
           >
             <PlusCircledIcon width="16" height="16" />
             <Text ml="2">New Session</Text>

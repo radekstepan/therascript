@@ -1,5 +1,5 @@
 // packages/ui/src/components/SessionView/Chat/ChatMessageBubble.tsx
-import React, { useRef } from 'react'; // Added useRef
+import React, { useRef } from 'react';
 import {
   Box,
   Flex,
@@ -11,7 +11,7 @@ import {
 import { StarIcon, StarFilledIcon, CopyIcon } from '@radix-ui/react-icons';
 import ReactMarkdown from 'react-markdown';
 import { cn } from '../../../utils';
-import { useAnimatedText } from '../../../hooks/useAnimatedText'; // Import the hook
+import { useAnimatedText } from '../../../hooks/useAnimatedText';
 import type { ChatMessage } from '../../../types';
 
 interface ChatMessageBubbleProps {
@@ -20,7 +20,6 @@ interface ChatMessageBubbleProps {
   isAiResponding: boolean; // Pass this down
   renderMd: boolean;
   onStarClick: (message: ChatMessage) => void; // Callback for starring
-  // Updated onCopyClick prop signature
   onCopyClick: (payload: { text: string; html?: string }) => void;
 }
 
@@ -34,24 +33,23 @@ export function ChatMessageBubble({
 }: ChatMessageBubbleProps) {
   const animatedText = useAnimatedText(
     message.text,
-    message.sender === 'ai' && isCurrentlyStreaming // Enable only for streaming AI message
+    message.sender === 'ai' && isCurrentlyStreaming
   );
 
   const displayText = isCurrentlyStreaming ? animatedText : message.text;
   const showWaitingIndicator =
     isAiResponding && isCurrentlyStreaming && displayText === '';
 
-  // Ref for the Markdown content container
   const markdownContainerRef = useRef<HTMLDivElement>(null);
 
-  // Copy button logic
   const showCopyButton = message.sender === 'ai' && !isCurrentlyStreaming;
+  const isUser = message.sender === 'user';
 
   const handleCopy = () => {
     if (message.sender === 'ai' && renderMd && markdownContainerRef.current) {
       onCopyClick({
         html: markdownContainerRef.current.innerHTML,
-        text: message.text, // Original Markdown source as fallback
+        text: message.text,
       });
     } else {
       onCopyClick({ text: message.text });
@@ -62,33 +60,42 @@ export function ChatMessageBubble({
     <Flex
       key={message.id}
       direction="column"
-      align={message.sender === 'user' ? 'end' : 'start'}
+      align={isUser ? 'end' : 'start'}
+      className="mb-2"
     >
       <Box
-        p="3"
+        p="4"
         className={cn(
-          'rounded-md shadow-sm max-w-[85%] relative group',
-          message.sender === 'user'
-            ? 'bg-[--accent-a3] text-[--accent-a11]'
-            : 'bg-[--gray-a3] text-[--gray-a12]',
-          showWaitingIndicator && 'min-h-[3rem]'
+          'relative group shadow-sm transition-all duration-200',
+          'max-w-[90%] md:max-w-[85%] lg:max-w-[75%]',
+          // Modern bubble shapes: fully rounded with subtle differences
+          isUser
+            ? 'bg-[var(--accent-9)] text-white rounded-2xl'
+            : 'bg-[var(--gray-2)] text-[var(--gray-12)] rounded-2xl border border-[var(--gray-4)]',
+          showWaitingIndicator && 'min-h-[3rem] flex items-center'
         )}
+        style={{
+          // Subtle pop
+          boxShadow: isUser
+            ? '0 2px 8px -2px var(--accent-a5)'
+            : '0 2px 4px -2px rgba(0,0,0,0.05)',
+        }}
       >
-        {/* Star Button (Action to create template) */}
-        {message.sender === 'user' && (
+        {/* Star Button */}
+        {isUser && (
           <Tooltip content={'Save as template'}>
             <IconButton
               variant="ghost"
-              color={'gray'}
+              color="gray"
               size="1"
               className={cn(
-                'absolute top-1 right-1 p-0.5 transition-opacity z-10',
+                'absolute -top-2 -left-2 p-0.5 transition-all z-10 bg-[var(--color-panel-solid)] rounded-full shadow-sm border border-[var(--gray-5)]',
                 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
               )}
               onClick={() => onStarClick(message)}
               aria-label={'Save message as template'}
             >
-              <StarIcon width={14} height={14} />
+              <StarIcon width={12} height={12} />
             </IconButton>
           </Tooltip>
         )}
@@ -100,8 +107,12 @@ export function ChatMessageBubble({
               variant="ghost"
               color="gray"
               size="1"
-              className="absolute top-1 right-1 p-0.5 transition-opacity opacity-0 group-hover:opacity-100 focus-visible:opacity-100 z-10"
-              onClick={handleCopy} // Use the new handleCopy function
+              className={cn(
+                'absolute top-2 right-2 p-0.5 transition-all z-10',
+                'opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
+                'hover:bg-[var(--gray-a4)] rounded-md'
+              )}
+              onClick={handleCopy}
               aria-label="Copy message text"
             >
               <CopyIcon width={14} height={14} />
@@ -111,23 +122,16 @@ export function ChatMessageBubble({
 
         {/* Message Content */}
         {showWaitingIndicator ? (
-          <Flex
-            align="center"
-            justify="center"
-            gap="2"
-            className="h-full py-1 text-[--gray-a10]"
-          >
+          <Flex align="center" gap="2" className="text-[var(--gray-11)] px-1">
             <Spinner size="1" />
-            <Text size="1" style={{ fontStyle: 'italic' }}>
-              Waiting for response...
+            <Text size="2" style={{ fontStyle: 'italic' }}>
+              Thinking...
             </Text>
           </Flex>
         ) : (
-          <>
-            {message.sender === 'ai' && renderMd ? (
-              <Box className="markdown-ai-message" ref={markdownContainerRef}>
-                {' '}
-                {/* Assign ref here */}
+          <Box className={cn(isUser ? 'text-white' : 'markdown-ai-message')}>
+            {!isUser && renderMd ? (
+              <Box ref={markdownContainerRef}>
                 <ReactMarkdown>{displayText}</ReactMarkdown>
               </Box>
             ) : (
@@ -136,12 +140,13 @@ export function ChatMessageBubble({
                 style={{
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-word',
+                  lineHeight: 1.6,
                 }}
               >
                 {displayText}
               </Text>
             )}
-          </>
+          </Box>
         )}
       </Box>
     </Flex>

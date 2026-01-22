@@ -135,11 +135,17 @@ export function EditEntityModal<T extends BaseEntity | null, FormState>({
               variant="soft"
               color="gray"
               disabled={isSaving}
+              className="hover:bg-[var(--gray-a5)] transition-all duration-150"
             >
               <Cross2Icon /> Cancel
             </Button>
           </Dialog.Close>
-          <Button type="button" onClick={handleSaveClick} disabled={isSaving}>
+          <Button
+            type="button"
+            onClick={handleSaveClick}
+            disabled={isSaving}
+            className="hover:brightness-110 transition-all duration-150"
+          >
             {isSaving ? (
               <>
                 <Spinner size="2" />

@@ -341,6 +341,7 @@ export function CreateAnalysisJobModal({
                 }}
                 disabled={isMutationPending}
                 aria-label="Use Template"
+                className="hover:bg-[var(--gray-a5)] transition-colors"
               >
                 <StarIcon width="12" height="12" />
                 Use Template
@@ -435,6 +436,7 @@ export function CreateAnalysisJobModal({
                     setUseAdvancedStrategy(checked as boolean)
                   }
                   disabled={isMutationPending}
+                  className="cursor-pointer"
                 />
                 Use Advanced Analysis Strategy
                 <Tooltip content="When checked, the AI will create a dynamic two-step plan to better answer complex questions about trends or patterns. When unchecked, it uses a simpler, faster summarization approach.">
@@ -458,13 +460,19 @@ export function CreateAnalysisJobModal({
 
         <Flex gap="3" mt="4" justify="end">
           <Dialog.Close>
-            <Button variant="soft" color="gray" disabled={isMutationPending}>
+            <Button
+              variant="soft"
+              color="gray"
+              disabled={isMutationPending}
+              className="hover:bg-[var(--gray-a5)] transition-colors"
+            >
               <Cross2Icon /> Cancel
             </Button>
           </Dialog.Close>
           <Button
             onClick={handleSubmit}
             disabled={isMutationPending || isLoadingSessions || isLoadingModels}
+            className="hover:brightness-110 transition-all"
           >
             {isMutationPending ? (
               <>

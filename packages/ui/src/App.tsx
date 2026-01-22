@@ -80,10 +80,11 @@ function ReadinessOverlay({
         position: 'fixed',
         inset: 0,
         backgroundColor: 'var(--color-overlay)',
+        backdropFilter: 'blur(5px)',
         zIndex: 1000,
       }}
     >
-      <Card size="3">
+      <Card size="3" style={{ boxShadow: 'var(--shadow-5)' }}>
         <Flex align="center" gap="4">
           <Spinner size="3" />
           <Flex direction="column" gap="1">
@@ -236,8 +237,9 @@ function App() {
         appearance={effectiveTheme}
         accentColor={currentAccentColor}
         panelBackground="solid"
-        radius="none"
+        radius="medium" // Modernized radius
         scaling="100%"
+        className={effectiveTheme === 'dark' ? 'custom-dark-theme' : ''}
       >
         <GeneratedBackground />
         {/* Root container ensures RadixTheme styles apply globally and takes full viewport height */}
@@ -260,7 +262,7 @@ function App() {
               <TopToolbar /> {/* App Header, fixed height */}
               {/* Main content rendering area */}
               <main
-                className="flex-grow flex flex-col overflow-y-auto" // Ensures <main> fills space and manages overflow
+                className="flex-grow flex flex-col overflow-y-auto relative z-10" // Ensures <main> fills space and manages overflow
                 id="main-content"
                 style={{ backgroundColor: 'transparent' }}
               >
@@ -277,9 +279,9 @@ function App() {
             open={isToastVisible}
             onOpenChange={handleToastOpenChange}
             duration={5000}
-            className="rt-Toast-root-bordered bg-[var(--color-panel-solid)] rounded-md shadow-[hsl(206_22%_7%_/_35%)_0px_10px_38px_-10px,_hsl(206_22%_7%_/_20%)_0px_10px_20px_-15px] p-[15px] grid [grid-template-areas:_'title_action'_'description_action'] grid-cols-[auto_max-content] gap-x-[15px] items-center data-[state=open]:animate-slideIn data-[state=closed]:animate-hide data-[swipe=move]:translate-x-[var(--radix-toast-swipe-move-x)] data-[swipe=cancel]:translate-x-0 data-[swipe=cancel]:transition-[transform_200ms_ease-out] data-[swipe=end]:animate-swipeOut"
+            className="rt-Toast-root-bordered bg-[var(--color-panel-solid)] rounded-lg shadow-lg p-[15px] grid [grid-template-areas:_'title_action'_'description_action'] grid-cols-[auto_max-content] gap-x-[15px] items-center data-[state=open]:animate-slideIn data-[state=closed]:animate-hide data-[swipe=move]:translate-x-[var(--radix-toast-swipe-move-x)] data-[swipe=cancel]:translate-x-0 data-[swipe=cancel]:transition-[transform_200ms_ease-out] data-[swipe=end]:animate-swipeOut"
           >
-            <Toast.Description className="[grid-area:_description] m-0 text-[var(--gray-11)] text-[13px] leading-[1.3]">
+            <Toast.Description className="[grid-area:_description] m-0 text-[var(--gray-11)] text-[13px] leading-[1.3] font-medium">
               {toastMessageContent}
             </Toast.Description>
             <Toast.Close className="[grid-area:_action]" asChild>

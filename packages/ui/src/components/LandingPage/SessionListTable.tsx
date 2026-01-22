@@ -31,7 +31,6 @@ interface SessionListTableProps {
   onSort: (criteria: SessionSortCriteria) => void;
   onEditSession: (session: Session) => void;
   onDeleteSessionRequest: (session: Session) => void;
-  // --- NEW PROPS for selection ---
   selectedIds: Set<number>;
   onSelectionChange: (ids: Set<number>) => void;
 }
@@ -55,6 +54,8 @@ const getStatusBadgeColor = (
     case 'transcribing':
     case 'queued':
       return 'blue';
+    case 'completed':
+      return 'green';
     case 'pending':
     default:
       return 'gray';
@@ -68,7 +69,6 @@ export function SessionListTable({
   onSort,
   onEditSession,
   onDeleteSessionRequest,
-  // --- DESTRUCTURE NEW PROPS ---
   selectedIds,
   onSelectionChange,
 }: SessionListTableProps) {
@@ -79,7 +79,6 @@ export function SessionListTable({
     sessionId: number
   ) => {
     const target = e.target as HTMLElement;
-    // Prevent navigation when clicking on interactive elements
     if (target.closest('button, [role="menu"], [role="checkbox"]')) {
       return;
     }
@@ -100,7 +99,6 @@ export function SessionListTable({
     }
   };
 
-  // --- NEW SELECTION HANDLERS ---
   const handleRowCheckboxChange = (sessionId: number, checked: boolean) => {
     const newSelectedIds = new Set(selectedIds);
     if (checked) {
@@ -124,19 +122,18 @@ export function SessionListTable({
     sessions.length > 0 && selectedIds.size === sessions.length;
   const someSelected =
     selectedIds.size > 0 && selectedIds.size < sessions.length;
-  // --- END NEW SELECTION HANDLERS ---
 
   const renderSortIcon = useCallback(
     (criteria: SessionSortCriteria) => {
       if (sortCriteria !== criteria) {
         return (
-          <ChevronDownIcon className="h-3 w-3 ml-1 text-[--gray-a9] opacity-0 group-hover:opacity-100 transition-opacity" />
+          <ChevronDownIcon className="h-3 w-3 ml-1 text-[--gray-a8] opacity-0 group-hover:opacity-100 transition-opacity" />
         );
       }
       if (sortDirection === 'asc') {
-        return <ChevronUpIcon className="h-4 w-4 ml-1 text-[--gray-a11]" />;
+        return <ChevronUpIcon className="h-4 w-4 ml-1 text-[--accent-9]" />;
       }
-      return <ChevronDownIcon className="h-4 w-4 ml-1 text-[--gray-a11]" />;
+      return <ChevronDownIcon className="h-4 w-4 ml-1 text-[--accent-9]" />;
     },
     [sortCriteria, sortDirection]
   );
@@ -161,11 +158,14 @@ export function SessionListTable({
     [sortCriteria, sortDirection, onSort]
   );
 
+  // Common cell style for vertical centering
+  const cellStyle: React.CSSProperties = { verticalAlign: 'middle' };
+
   return (
     <ScrollArea
       type="auto"
       scrollbars="vertical"
-      style={{ flexGrow: 1, minHeight: 0 }}
+      style={{ flexGrow: 1, minHeight: 0, borderRadius: 'var(--radius-3)' }}
     >
       <Table.Root variant="surface" size="2">
         <Table.Header
@@ -173,56 +173,82 @@ export function SessionListTable({
             backgroundColor: 'var(--gray-a2)',
             position: 'sticky',
             top: 0,
-            zIndex: 1,
+            zIndex: 10,
+            // Removed manual box-shadow to fix double border issue.
+            // Radix table variants handle borders.
           }}
         >
           <Table.Row>
-            {/* --- NEW CHECKBOX HEADER --- */}
-            <Table.ColumnHeaderCell style={{ width: '1%' }}>
-              <Checkbox
-                checked={
-                  allSelected || someSelected
-                    ? someSelected
-                      ? 'indeterminate'
-                      : true
-                    : false
-                }
-                onCheckedChange={(checked) =>
-                  handleSelectAllChange(checked === true)
-                }
-                aria-label="Select all sessions"
-              />
+            <Table.ColumnHeaderCell style={{ width: '1%', ...cellStyle }}>
+              <Flex align="center" justify="center">
+                <Checkbox
+                  checked={
+                    allSelected || someSelected
+                      ? someSelected
+                        ? 'indeterminate'
+                        : true
+                      : false
+                  }
+                  onCheckedChange={(checked) =>
+                    handleSelectAllChange(checked === true)
+                  }
+                  aria-label="Select all sessions"
+                  className="cursor-pointer"
+                />
+              </Flex>
             </Table.ColumnHeaderCell>
             <Table.ColumnHeaderCell
               {...getHeaderCellProps('sessionName')}
               justify="start"
+              style={{
+                ...getHeaderCellProps('sessionName').style,
+                ...cellStyle,
+              }}
             >
               <Flex align="center" className="group">
                 Session / File {renderSortIcon('sessionName')}
               </Flex>
             </Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell {...getHeaderCellProps('clientName')}>
+            <Table.ColumnHeaderCell
+              {...getHeaderCellProps('clientName')}
+              style={{
+                ...getHeaderCellProps('clientName').style,
+                ...cellStyle,
+              }}
+            >
               <Flex align="center" className="group">
                 Client {renderSortIcon('clientName')}
               </Flex>
             </Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell {...getHeaderCellProps('sessionType')}>
+            <Table.ColumnHeaderCell
+              {...getHeaderCellProps('sessionType')}
+              style={{
+                ...getHeaderCellProps('sessionType').style,
+                ...cellStyle,
+              }}
+            >
               <Flex align="center" className="group">
                 Type {renderSortIcon('sessionType')}
               </Flex>
             </Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell {...getHeaderCellProps('therapy')}>
+            <Table.ColumnHeaderCell
+              {...getHeaderCellProps('therapy')}
+              style={{ ...getHeaderCellProps('therapy').style, ...cellStyle }}
+            >
               <Flex align="center" className="group">
                 Therapy {renderSortIcon('therapy')}
               </Flex>
             </Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell {...getHeaderCellProps('date')}>
+            <Table.ColumnHeaderCell
+              {...getHeaderCellProps('date')}
+              style={{ ...getHeaderCellProps('date').style, ...cellStyle }}
+            >
               <Flex align="center" className="group">
                 Date {renderSortIcon('date')}
               </Flex>
             </Table.ColumnHeaderCell>
             <Table.ColumnHeaderCell
-              style={{ width: '1%', whiteSpace: 'nowrap' }}
+              style={{ width: '1%', whiteSpace: 'nowrap', ...cellStyle }}
               align="right"
             >
               Actions
@@ -230,131 +256,160 @@ export function SessionListTable({
           </Table.Row>
         </Table.Header>
         <Table.Body>
-          {sessions.map((session: Session) => (
-            <Table.Row
-              key={session.id}
-              onClick={(e) => handleSessionClick(e, session.id)}
-              className={cn(
-                'cursor-pointer hover:bg-[--gray-a3] transition-colors duration-150 group',
-                session.status === 'failed' &&
-                  'bg-[--red-a2] hover:bg-[--red-a4]',
-                (session.status === 'pending' ||
-                  session.status === 'queued' ||
-                  session.status === 'transcribing') &&
-                  'bg-[--blue-a2] hover:bg-[--blue-a4]'
-              )}
-              aria-label={`Load session: ${session.sessionName || session.fileName}`}
-              tabIndex={0}
-              onKeyDown={(e) => handleKeyDown(e, session.id)}
-            >
-              {/* --- NEW CHECKBOX CELL --- */}
-              <Table.Cell onClick={(e) => e.stopPropagation()}>
-                <Checkbox
-                  checked={selectedIds.has(session.id)}
-                  onCheckedChange={(checked) =>
-                    handleRowCheckboxChange(session.id, checked === true)
-                  }
-                  aria-label={`Select session ${session.id}`}
-                />
-              </Table.Cell>
-              <Table.RowHeaderCell justify="start">
-                <Flex align="center" gap="2">
-                  <FileTextIcon className="text-[--gray-a10]" />
-                  <Text weight="medium" truncate>
-                    {session.sessionName || session.fileName}
-                  </Text>
-                  {session.status !== 'completed' && (
+          {sessions.map((session: Session) => {
+            const isSelected = selectedIds.has(session.id);
+            return (
+              <Table.Row
+                key={session.id}
+                onClick={(e) => handleSessionClick(e, session.id)}
+                className={cn(
+                  'cursor-pointer transition-colors duration-150 group',
+                  isSelected
+                    ? 'bg-[var(--accent-a2)] hover:bg-[var(--accent-a3)]'
+                    : 'hover:bg-[var(--gray-a3)]',
+                  session.status === 'failed' && 'bg-red-50 dark:bg-red-950/20'
+                )}
+                aria-label={`Load session: ${session.sessionName || session.fileName}`}
+                tabIndex={0}
+                onKeyDown={(e) => handleKeyDown(e, session.id)}
+                style={{ verticalAlign: 'middle' }} // Enforce vertical alignment on row
+              >
+                <Table.Cell
+                  onClick={(e) => e.stopPropagation()}
+                  style={cellStyle}
+                >
+                  <Flex align="center" justify="center">
+                    <Checkbox
+                      checked={isSelected}
+                      onCheckedChange={(checked) =>
+                        handleRowCheckboxChange(session.id, checked === true)
+                      }
+                      aria-label={`Select session ${session.id}`}
+                      className="cursor-pointer"
+                    />
+                  </Flex>
+                </Table.Cell>
+                <Table.RowHeaderCell justify="start" style={cellStyle}>
+                  <Flex align="center" gap="3">
+                    <div
+                      className={cn(
+                        'p-1.5 rounded-md flex-shrink-0',
+                        isSelected
+                          ? 'bg-[var(--accent-a4)] text-[var(--accent-11)]'
+                          : 'bg-[var(--gray-a3)] text-[var(--gray-11)]'
+                      )}
+                    >
+                      <FileTextIcon width={16} height={16} />
+                    </div>
+                    <Flex direction="column" gap="0">
+                      <Text weight="medium" size="2" truncate>
+                        {session.sessionName || session.fileName}
+                      </Text>
+                      {session.status !== 'completed' && (
+                        <div className="mt-0.5">
+                          <Badge
+                            color={getStatusBadgeColor(session.status)}
+                            variant="soft"
+                            radius="full"
+                            size="1"
+                          >
+                            {session.status}
+                          </Badge>
+                        </div>
+                      )}
+                    </Flex>
+                  </Flex>
+                </Table.RowHeaderCell>
+                <Table.Cell style={cellStyle}>
+                  {session.clientName ? (
+                    <Text size="2">{session.clientName}</Text>
+                  ) : (
+                    <Text size="2" color="gray" style={{ fontStyle: 'italic' }}>
+                      No Client
+                    </Text>
+                  )}
+                </Table.Cell>
+                <Table.Cell style={cellStyle}>
+                  {session.sessionType ? (
                     <Badge
-                      color={getStatusBadgeColor(session.status)}
-                      variant="soft"
+                      color={getBadgeColor(session.sessionType, 'session')}
+                      variant="surface"
                       radius="full"
                     >
-                      {session.status}
+                      {session.sessionType}
                     </Badge>
+                  ) : (
+                    <Text color="gray" size="2">
+                      -
+                    </Text>
                   )}
-                </Flex>
-              </Table.RowHeaderCell>
-              <Table.Cell>
-                <Text color="gray">
-                  {session.clientName || (
-                    <span style={{ fontStyle: 'italic' }}>No Client</span>
+                </Table.Cell>
+                <Table.Cell style={cellStyle}>
+                  {session.therapy ? (
+                    <Badge
+                      color={getBadgeColor(session.therapy, 'therapy')}
+                      variant="outline"
+                      radius="full"
+                    >
+                      {session.therapy}
+                    </Badge>
+                  ) : (
+                    <Text color="gray" size="2">
+                      -
+                    </Text>
                   )}
-                </Text>
-              </Table.Cell>
-              <Table.Cell>
-                {session.sessionType ? (
-                  <Badge
-                    color={getBadgeColor(session.sessionType, 'session')}
-                    variant="soft"
-                    radius="full"
-                  >
-                    {session.sessionType}
-                  </Badge>
-                ) : (
-                  <Text color="gray">N/A</Text>
-                )}
-              </Table.Cell>
-              <Table.Cell>
-                {session.therapy ? (
-                  <Badge
-                    color={getBadgeColor(session.therapy, 'therapy')}
-                    variant="soft"
-                    radius="full"
-                  >
-                    {session.therapy}
-                  </Badge>
-                ) : (
-                  <Text color="gray">N/A</Text>
-                )}
-              </Table.Cell>
-              <Table.Cell>
-                <Text color="gray">
-                  {formatIsoDateToYMD(session.date) || (
-                    <span style={{ fontStyle: 'italic' }}>No Date</span>
-                  )}
-                </Text>
-              </Table.Cell>
-              <Table.Cell
-                align="right"
-                onClick={(e) => e.stopPropagation()}
-                onKeyDown={(e) => e.stopPropagation()}
-              >
-                <DropdownMenu.Root>
-                  <DropdownMenu.Trigger>
-                    <IconButton
-                      variant="ghost"
-                      color="gray"
+                </Table.Cell>
+                <Table.Cell style={cellStyle}>
+                  <Text size="2" color="gray">
+                    {formatIsoDateToYMD(session.date) || '-'}
+                  </Text>
+                </Table.Cell>
+                <Table.Cell
+                  align="right"
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => e.stopPropagation()}
+                  style={cellStyle}
+                >
+                  <DropdownMenu.Root>
+                    <DropdownMenu.Trigger>
+                      <IconButton
+                        variant="ghost"
+                        color="gray"
+                        size="1"
+                        // Removed opacity-0 classes to keep actions always visible
+                        className="transition-opacity data-[state=open]:opacity-100"
+                        aria-label="Session options"
+                        title="Session options"
+                      >
+                        <DotsHorizontalIcon />
+                      </IconButton>
+                    </DropdownMenu.Trigger>
+                    <DropdownMenu.Content
+                      align="end"
                       size="1"
-                      className="p-1"
-                      aria-label="Session options"
-                      title="Session options"
+                      onClick={(e) => e.stopPropagation()}
+                      onMouseDown={(e) => e.stopPropagation()}
                     >
-                      <DotsHorizontalIcon />
-                    </IconButton>
-                  </DropdownMenu.Trigger>
-                  <DropdownMenu.Content
-                    align="end"
-                    size="1"
-                    onClick={(e) => e.stopPropagation()}
-                    onMouseDown={(e) => e.stopPropagation()}
-                  >
-                    <DropdownMenu.Item onSelect={() => onEditSession(session)}>
-                      <Pencil1Icon width="14" height="14" className="mr-2" />{' '}
-                      Edit Details
-                    </DropdownMenu.Item>
-                    <DropdownMenu.Separator />
-                    <DropdownMenu.Item
-                      color="red"
-                      onSelect={() => onDeleteSessionRequest(session)}
-                    >
-                      <TrashIcon width="14" height="14" className="mr-2" />{' '}
-                      Delete Session
-                    </DropdownMenu.Item>
-                  </DropdownMenu.Content>
-                </DropdownMenu.Root>
-              </Table.Cell>
-            </Table.Row>
-          ))}
+                      <DropdownMenu.Item
+                        onSelect={() => onEditSession(session)}
+                      >
+                        <Pencil1Icon width="14" height="14" className="mr-2" />{' '}
+                        Edit Details
+                      </DropdownMenu.Item>
+                      <DropdownMenu.Separator />
+                      <DropdownMenu.Item
+                        color="red"
+                        onSelect={() => onDeleteSessionRequest(session)}
+                      >
+                        <TrashIcon width="14" height="14" className="mr-2" />{' '}
+                        Delete Session
+                      </DropdownMenu.Item>
+                    </DropdownMenu.Content>
+                  </DropdownMenu.Root>
+                </Table.Cell>
+              </Table.Row>
+            );
+          })}
         </Table.Body>
       </Table.Root>
     </ScrollArea>

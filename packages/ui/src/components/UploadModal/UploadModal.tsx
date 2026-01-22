@@ -677,6 +677,7 @@ export function UploadModal({ isOpen }: UploadModalProps) {
             color="gray"
             onClick={() => handleOpenChange(false)}
             disabled={overallIsLoading && !hasFailed}
+            className="hover:bg-[var(--gray-a5)] transition-all duration-150"
           >
             <Cross2Icon />{' '}
             {overallIsLoading && !hasFailed ? 'Processing...' : 'Cancel'}
@@ -686,6 +687,7 @@ export function UploadModal({ isOpen }: UploadModalProps) {
               type="button"
               onClick={handleStartClick}
               disabled={!modalFile || isUploading}
+              className="hover:brightness-110 transition-all duration-150"
             >
               {isUploading ? (
                 <>
@@ -700,7 +702,12 @@ export function UploadModal({ isOpen }: UploadModalProps) {
             </Button>
           )}
           {hasFailed && (
-            <Button type="button" color="orange" onClick={resetModal}>
+            <Button
+              type="button"
+              color="orange"
+              onClick={resetModal}
+              className="hover:brightness-110 transition-all duration-150"
+            >
               Retry Upload
             </Button>
           )}

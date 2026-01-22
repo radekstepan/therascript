@@ -28,15 +28,11 @@ module.exports = {
       // Custom color palettes (can be used alongside Radix theme colors if needed for non-component styling)
       colors: {
         // === MODIFICATION START ===
-        // Override Tailwind's default 'gray' with 'neutral' for a true neutral gray
-        // This will affect all 'text-gray-xxx', 'bg-gray-xxx', 'border-gray-xxx' utilities.
-        gray: colors.neutral,
-        // You could also try colors.zinc or colors.stone if 'neutral' isn't quite right:
-        // gray: colors.zinc,
-        // gray: colors.stone,
+        // Switch to Zinc for a modern, premium gray scale (similar to Vercel/Shadcn)
+        gray: colors.zinc,
         // === MODIFICATION END ===
 
-        brand: colors.blue, // Example custom brand color (currently 'blue', consider changing if you want no blue at all)
+        brand: colors.blue, // Example custom brand color
         success: colors.emerald, // Example custom success color
         danger: colors.rose, // Example custom danger color
       },

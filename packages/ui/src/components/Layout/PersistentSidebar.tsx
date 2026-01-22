@@ -127,29 +127,36 @@ export function PersistentSidebar() {
     <>
       <div
         className={cn(
-          'fixed top-0 left-0 h-full flex flex-col shadow-lg z-40 transition-all duration-300 ease-in-out',
-          'bg-[var(--accent-2)] text-[var(--accent-11)]',
-          'border-r border-[var(--accent-6)]',
+          'fixed top-0 left-0 h-full flex flex-col shadow-xl z-40 transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1.0)]',
+          'bg-[var(--gray-1)] text-[var(--gray-11)]',
+          'border-r border-[var(--gray-a4)]',
           isSidebarOpen ? 'w-64' : 'w-20'
         )}
+        style={{
+          backgroundColor: 'var(--color-panel-solid)',
+        }}
         aria-label="Main sidebar"
       >
         {/* Top Section */}
         <div
           className={cn(
             'flex items-center h-16 p-4',
-            'border-b border-[var(--accent-6)]',
             isSidebarOpen ? 'justify-between' : 'justify-center'
           )}
         >
           {isSidebarOpen && (
-            <h1 className="text-xl font-semibold text-[var(--accent-12)]">
-              Therascript
-            </h1>
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 bg-[var(--accent-9)] rounded-md flex items-center justify-center text-white">
+                <BrainCircuit size={18} />
+              </div>
+              <h1 className="text-lg font-bold text-[var(--gray-12)] tracking-tight">
+                Therascript
+              </h1>
+            </div>
           )}
           <button
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className="p-2 rounded-md hover:bg-[var(--accent-a4)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-8)]"
+            className="p-2 rounded-lg text-[var(--gray-11)] hover:bg-[var(--gray-a3)] hover:text-[var(--gray-12)] focus:outline-none transition-colors"
             aria-label={isSidebarOpen ? 'Close sidebar' : 'Open sidebar'}
             aria-expanded={isSidebarOpen}
           >
@@ -162,28 +169,31 @@ export function PersistentSidebar() {
         </div>
 
         {/* Navigation Section */}
-        <nav className="mt-4 flex-grow" aria-label="Main navigation">
-          <ul>
+        <nav className="mt-6 flex-grow px-3" aria-label="Main navigation">
+          <ul className="space-y-1">
             {navItems.map((item) => (
               <li key={item.id}>
                 <button
                   onClick={() => navigateTo(item.page)}
-                  title={item.label}
+                  title={!isSidebarOpen ? item.label : undefined}
                   className={cn(
-                    'flex items-center w-full py-3 text-left transition-colors duration-150 ease-in-out',
-                    !isActive(item.page) &&
-                      'hover:bg-[var(--accent-a3)] hover:text-[var(--accent-12)]',
-                    'focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent-8)]',
-                    isSidebarOpen ? 'px-6' : 'px-0 justify-center',
+                    'flex items-center w-full py-2.5 rounded-lg text-sm font-medium transition-all duration-200',
+                    'focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-8)]',
+                    isSidebarOpen ? 'px-3' : 'px-0 justify-center',
                     isActive(item.page)
-                      ? 'bg-[var(--accent-4)] text-[var(--accent-12)] border-r-4 border-[var(--accent-9)] font-medium'
-                      : 'text-[var(--accent-11)]'
+                      ? 'bg-[var(--accent-a3)] text-[var(--accent-11)]'
+                      : 'text-[var(--gray-11)] hover:bg-[var(--gray-a3)] hover:text-[var(--gray-12)]'
                   )}
                   aria-current={isActive(item.page) ? 'page' : undefined}
                 >
                   <item.icon
                     size={20}
-                    className={cn(isSidebarOpen ? 'mr-3' : 'mr-0')}
+                    className={cn(
+                      isSidebarOpen ? 'mr-3' : 'mr-0',
+                      isActive(item.page)
+                        ? 'text-[var(--accent-11)]'
+                        : 'text-[var(--gray-10)]'
+                    )}
                     aria-hidden="true"
                   />
                   {isSidebarOpen && <span>{item.label}</span>}
@@ -197,24 +207,33 @@ export function PersistentSidebar() {
         <div
           className={cn(
             'absolute bottom-0 w-full p-4',
-            'border-t border-[var(--accent-6)]',
+            'border-t border-[var(--gray-a4)] bg-[var(--gray-2)]/50',
             !isSidebarOpen && 'flex flex-col items-center space-y-2'
           )}
         >
           {isSidebarOpen ? (
-            <select
-              value={theme}
-              onChange={(e) => setTheme(e.target.value as Theme)}
-              className="w-full p-2 text-sm bg-[var(--accent-3)] border border-[var(--accent-7)] text-[var(--accent-12)] rounded-md focus:outline-none focus:ring-2 focus:ring-[var(--accent-8)] focus:border-[var(--accent-8)]"
-              aria-label="Select theme"
-            >
-              <option value="light">Light Mode</option>
-              <option value="dark">Dark Mode</option>
-              <option value="system">System</option>
-            </select>
+            <div className="mb-2">
+              <Text
+                size="1"
+                color="gray"
+                className="mb-1 ml-1 block font-medium uppercase tracking-wider"
+              >
+                Theme
+              </Text>
+              <select
+                value={theme}
+                onChange={(e) => setTheme(e.target.value as Theme)}
+                className="w-full p-2 text-sm bg-[var(--gray-3)] border border-[var(--gray-6)] text-[var(--gray-12)] rounded-md focus:outline-none focus:ring-2 focus:ring-[var(--accent-8)] transition-colors cursor-pointer hover:bg-[var(--gray-4)]"
+                aria-label="Select theme"
+              >
+                <option value="light">Light Mode</option>
+                <option value="dark">Dark Mode</option>
+                <option value="system">System</option>
+              </select>
+            </div>
           ) : (
             <div
-              className="flex flex-col space-y-1"
+              className="flex flex-col space-y-2 mb-2"
               role="group"
               aria-label="Theme selection"
             >
@@ -222,45 +241,42 @@ export function PersistentSidebar() {
                 <button
                   onClick={() => setTheme('light')}
                   className={cn(
-                    'p-2 rounded-md hover:bg-[var(--accent-a4)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-8)]',
-                    effectiveTheme === 'light' &&
-                      theme !== 'system' &&
-                      'text-[var(--accent-9)]'
+                    'p-2 rounded-lg hover:bg-[var(--gray-a4)] transition-colors',
+                    effectiveTheme === 'light' && theme !== 'system'
+                      ? 'text-[var(--accent-9)] bg-[var(--accent-a3)]'
+                      : 'text-[var(--gray-11)]'
                   )}
                   aria-label="Set light theme"
-                  aria-pressed={
-                    effectiveTheme === 'light' && theme !== 'system'
-                  }
                 >
-                  <Sun size={20} aria-hidden="true" />
+                  <Sun size={18} aria-hidden="true" />
                 </button>
               </TooltipWrapper>
               <TooltipWrapper content="Dark Theme">
                 <button
                   onClick={() => setTheme('dark')}
                   className={cn(
-                    'p-2 rounded-md hover:bg-[var(--accent-a4)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-8)]',
-                    effectiveTheme === 'dark' &&
-                      theme !== 'system' &&
-                      'text-[var(--accent-9)]'
+                    'p-2 rounded-lg hover:bg-[var(--gray-a4)] transition-colors',
+                    effectiveTheme === 'dark' && theme !== 'system'
+                      ? 'text-[var(--accent-9)] bg-[var(--accent-a3)]'
+                      : 'text-[var(--gray-11)]'
                   )}
                   aria-label="Set dark theme"
-                  aria-pressed={effectiveTheme === 'dark' && theme !== 'system'}
                 >
-                  <Moon size={20} aria-hidden="true" />
+                  <Moon size={18} aria-hidden="true" />
                 </button>
               </TooltipWrapper>
               <TooltipWrapper content="System Theme">
                 <button
                   onClick={() => setTheme('system')}
                   className={cn(
-                    'p-2 rounded-md hover:bg-[var(--accent-a4)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-8)]',
-                    theme === 'system' && 'text-[var(--accent-9)]'
+                    'p-2 rounded-lg hover:bg-[var(--gray-a4)] transition-colors',
+                    theme === 'system'
+                      ? 'text-[var(--accent-9)] bg-[var(--accent-a3)]'
+                      : 'text-[var(--gray-11)]'
                   )}
                   aria-label="Set system theme"
-                  aria-pressed={theme === 'system'}
                 >
-                  <Laptop size={20} aria-hidden="true" />
+                  <Laptop size={18} aria-hidden="true" />
                 </button>
               </TooltipWrapper>
             </div>
@@ -270,20 +286,23 @@ export function PersistentSidebar() {
             title="Active Jobs"
             onClick={handleJobsQueueClick}
             className={cn(
-              'flex items-center mt-2 w-full py-2 text-left text-sm hover:bg-[var(--accent-a3)] rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-8)]',
+              'flex items-center w-full py-2 text-left text-sm hover:bg-[var(--gray-a3)] rounded-md transition-colors',
               isSidebarOpen ? 'px-3' : 'justify-center px-0'
             )}
           >
             <Timer
               size={18}
-              className={cn(isSidebarOpen ? 'mr-2' : 'mr-0')}
+              className={cn(
+                'text-[var(--gray-11)]',
+                isSidebarOpen ? 'mr-2' : 'mr-0'
+              )}
               aria-hidden="true"
             />
             {isSidebarOpen && (
               <Flex align="center" justify="between" width="100%">
-                <span>Active Jobs</span>
+                <span className="text-[var(--gray-12)]">Active Jobs</span>
                 {activeJobCount > 0 && (
-                  <Badge color="blue" variant="soft" radius="full">
+                  <Badge color="blue" variant="solid" radius="full" size="1">
                     {activeJobCount}
                   </Badge>
                 )}
@@ -297,7 +316,7 @@ export function PersistentSidebar() {
             title="Shutdown App"
             onClick={handleShutdownAppClick}
             className={cn(
-              'flex items-center mt-2 w-full py-2 text-left text-sm text-red-500 hover:bg-red-100 dark:hover:bg-red-700 dark:text-red-400 rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500',
+              'flex items-center w-full py-2 text-left text-sm text-[var(--gray-11)] hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-md transition-colors',
               isSidebarOpen ? 'px-3' : 'justify-center px-0'
             )}
             disabled={shutdownMutation.isPending}
@@ -376,7 +395,7 @@ const TooltipWrapper: React.FC<{
     <div className="relative group">
       {children}
       <div
-        className="absolute left-full ml-3 top-1/2 -translate-y-1/2 px-2 py-1 text-xs text-white bg-gray-900 dark:bg-gray-700 rounded-md opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50"
+        className="absolute left-full ml-3 top-1/2 -translate-y-1/2 px-2 py-1 text-xs text-white bg-gray-900 dark:bg-gray-700 rounded-md opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50 shadow-md"
         role="tooltip"
       >
         {content}

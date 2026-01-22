@@ -194,6 +194,7 @@ export function SettingsPage() {
                 <Switch
                   checked={renderMarkdown}
                   onCheckedChange={handleMarkdownToggle}
+                  className="cursor-pointer"
                 />
               </Flex>
               <Separator my="5" size="4" />

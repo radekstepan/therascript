@@ -255,10 +255,15 @@ export function SelectActiveModelModal({
             color="gray"
             onClick={() => onOpenChange(false)}
             disabled={isSaving}
+            className="transition-all duration-150"
           >
             <Cross2Icon /> Cancel
           </Button>
-          <Button onClick={handleSave} disabled={isSaving || !selectedModel}>
+          <Button
+            onClick={handleSave}
+            disabled={isSaving || !selectedModel}
+            className="transition-all duration-150"
+          >
             {isSaving ? (
               <>
                 <Spinner /> <Text ml="1">Saving...</Text>

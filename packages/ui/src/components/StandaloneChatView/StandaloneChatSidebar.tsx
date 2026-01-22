@@ -165,6 +165,10 @@ export function StandaloneChatSidebar({
             highContrast
             title="Start New Standalone Chat"
             disabled={createStandaloneChatMutation.isPending}
+            className="transition-all duration-150"
+            style={{
+              backgroundColor: 'var(--gray-a6)',
+            }}
           >
             {createStandaloneChatMutation.isPending ? (
               <Spinner size="1" />
@@ -240,6 +244,7 @@ export function StandaloneChatSidebar({
                 color="gray"
                 onClick={handleCancelDelete}
                 disabled={deleteChatMutation.isPending}
+                className="transition-all duration-150"
               >
                 Cancel
               </Button>
@@ -250,6 +255,7 @@ export function StandaloneChatSidebar({
                 color="red"
                 onClick={handleConfirmDelete}
                 disabled={deleteChatMutation.isPending}
+                className="transition-all duration-150"
               >
                 <>
                   {deleteChatMutation.isPending ? (
