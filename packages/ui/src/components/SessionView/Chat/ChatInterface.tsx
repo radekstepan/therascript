@@ -6,7 +6,7 @@ import React, {
   useState,
   useMemo,
 } from 'react';
-import { Box, Flex, ScrollArea, Spinner, Text } from '@radix-ui/themes';
+import { Box, Flex, Spinner, Text } from '@radix-ui/themes';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChatInput } from './ChatInput';
 import { ChatMessages } from './ChatMessages';
@@ -56,8 +56,6 @@ export function ChatInterface({
 }: ChatInterfaceProps) {
   const activeSessionId = session?.id ?? null;
 
-  const chatContentRef = useRef<HTMLDivElement | null>(null);
-  const viewportRef = useRef<HTMLDivElement | null>(null);
   const queryClient = useQueryClient();
   const [currentQuery, setCurrentQuery] = useAtom(currentQueryAtom);
 
@@ -328,30 +326,6 @@ export function ChatInterface({
   const combinedIsLoading =
     (!isStandalone && isLoadingSessionMeta) || (isLoadingMessages && !chatData);
 
-  // Auto-scroll logic
-  useEffect(() => {
-    // Check if the tab is active or if tab-based behavior is not applicable
-    if (isTabActive === undefined || isTabActive) {
-      if (!combinedIsLoading && chatContentRef.current) {
-        const shouldScroll =
-          chatMessages.length > 0 || streamingAiMessageId !== null;
-        if (shouldScroll) {
-          const lastElement = chatContentRef.current.lastElementChild;
-          if (lastElement) {
-            requestAnimationFrame(() => {
-              lastElement.scrollIntoView({ behavior: 'smooth', block: 'end' });
-            });
-          }
-        }
-      }
-    }
-  }, [
-    chatMessages.length,
-    combinedIsLoading,
-    isTabActive,
-    streamingAiMessageId,
-  ]);
-
   const isAiResponding =
     addMessageMutation.isPending || streamingAiMessageId !== null;
 
@@ -381,12 +355,7 @@ export function ChatInterface({
         />
       )}
 
-      <ScrollArea // This is the scrollable part for messages
-        type="auto"
-        scrollbars="vertical"
-        ref={viewportRef} // Keep if needed for other scroll logic
-        style={{ flexGrow: 1, minHeight: 0, position: 'relative' }} // Crucial: flexGrow and minHeight: 0
-      >
+      <Box style={{ flexGrow: 1, minHeight: 0, position: 'relative' }}>
         {combinedIsLoading && (
           <Flex
             align="center"
@@ -406,29 +375,33 @@ export function ChatInterface({
           </Flex>
         )}
         {chatError && !combinedIsLoading && (
-          <Flex justify="center" p="4">
+          <Flex
+            justify="center"
+            p="4"
+            style={{ position: 'absolute', inset: 0, zIndex: 5 }}
+          >
             <Text color="red">Error loading chat: {chatError.message}</Text>
           </Flex>
         )}
-
-        <Box // Padding container for messages
-          p="4"
-          ref={chatContentRef}
-          style={{
-            opacity: combinedIsLoading ? 0.5 : 1,
-            transition: 'opacity 0.2s ease-in-out',
-          }}
-        >
-          <ChatMessages
-            messages={chatMessages}
-            activeChatId={activeChatId}
-            activeSessionId={activeSessionId}
-            isStandalone={isStandalone}
-            streamingMessageId={streamingAiMessageId}
-            isAiResponding={addMessageMutation.isPending}
-          />
-        </Box>
-      </ScrollArea>
+        {!combinedIsLoading && !chatError && (
+          <Box
+            style={{
+              height: '100%',
+              opacity: combinedIsLoading ? 0.5 : 1,
+              transition: 'opacity 0.2s ease-in-out',
+            }}
+          >
+            <ChatMessages
+              messages={chatMessages}
+              activeChatId={activeChatId}
+              activeSessionId={activeSessionId}
+              isStandalone={isStandalone}
+              streamingMessageId={streamingAiMessageId}
+              isAiResponding={isAiResponding}
+            />
+          </Box>
+        )}
+      </Box>
 
       <Box // Chat input area, fixed height
         px="4"

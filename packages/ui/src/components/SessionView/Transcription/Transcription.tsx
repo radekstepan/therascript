@@ -1,7 +1,8 @@
 // packages/ui/src/components/SessionView/Transcription/Transcription.tsx
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useLocation } from 'react-router-dom'; // Import useLocation
+import { useLocation } from 'react-router-dom';
+import { Virtuoso } from 'react-virtuoso';
 import type {
   Session,
   StructuredTranscript,
@@ -10,7 +11,6 @@ import type {
 import { TranscriptParagraph } from '../../Transcription/TranscriptParagraph';
 import {
   Box,
-  ScrollArea,
   Text,
   Flex,
   Button,
@@ -134,12 +134,15 @@ export function Transcription({
   transcriptError,
 }: TranscriptionProps) {
   const [activeEditIndex, setActiveEditIndex] = useState<number | null>(null);
-  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const virtuosoRef = useRef<any>(null);
   const restoreScrollRef = useRef(false);
+  const [highlightedParagraphIndex, setHighlightedParagraphIndex] = useState<
+    number | null
+  >(null);
   const queryClient = useQueryClient();
   const audioRef = useRef<HTMLAudioElement>(null);
   const setToast = useSetAtom(toastMessageAtom);
-  const location = useLocation(); // Get location for hash changes
+  const location = useLocation();
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [playingParagraphIndex, setPlayingParagraphIndex] = useState<
@@ -157,39 +160,6 @@ export function Transcription({
 
   const transcriptTokenCount = session?.transcriptTokenCount;
   const isAudioAvailable = !!session?.audioPath;
-
-  // Scroll to paragraph based on hash
-  useEffect(() => {
-    if (transcriptContent && transcriptContent.length > 0 && location.hash) {
-      const hash = location.hash.substring(1); // Remove #
-      if (hash.startsWith('paragraph-')) {
-        const paragraphIndexStr = hash.substring('paragraph-'.length);
-        const paragraphIndex = parseInt(paragraphIndexStr, 10);
-        if (!isNaN(paragraphIndex)) {
-          // Small delay to ensure elements are rendered, especially after tab switch
-          setTimeout(() => {
-            const element = document.getElementById(
-              `paragraph-${paragraphIndex}`
-            );
-            if (element) {
-              console.log(`[Transcription] Scrolling to ${hash}`);
-              element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              // Optional: Add a visual highlight
-              element.classList.add('highlight-paragraph');
-              setTimeout(
-                () => element.classList.remove('highlight-paragraph'),
-                2000
-              );
-            } else {
-              console.warn(
-                `[Transcription] Element ${hash} not found for scrolling.`
-              );
-            }
-          }, 100);
-        }
-      }
-    }
-  }, [location.hash, transcriptContent, isTabActive]); // Rerun on hash change or if transcript loads
 
   const handleAudioCanPlay = useCallback(() => {
     setAudioReady(true);
@@ -420,23 +390,29 @@ export function Transcription({
     }, 150),
     [onScrollUpdate]
   );
-  const handleScroll = (event: React.UIEvent<HTMLDivElement>) => {
-    if (!restoreScrollRef.current && event.currentTarget)
-      debouncedScrollSave(event.currentTarget.scrollTop);
-    if (restoreScrollRef.current) restoreScrollRef.current = false;
-  };
+  const handleScroll = useCallback(
+    (e: any) => {
+      if (!restoreScrollRef.current && e.scrollTop !== undefined) {
+        debouncedScrollSave(e.scrollTop);
+      }
+      if (restoreScrollRef.current) restoreScrollRef.current = false;
+    },
+    [debouncedScrollSave]
+  );
 
   useEffect(() => {
     if (isTabActive) restoreScrollRef.current = true;
     else restoreScrollRef.current = false;
   }, [isTabActive]);
   useEffect(() => {
-    if (restoreScrollRef.current && viewportRef.current) {
+    if (restoreScrollRef.current && virtuosoRef.current) {
       requestAnimationFrame(() => {
-        if (restoreScrollRef.current && viewportRef.current) {
-          if (viewportRef.current.scrollTop !== initialScrollTop)
-            viewportRef.current.scrollTop = initialScrollTop;
-          else restoreScrollRef.current = false;
+        if (restoreScrollRef.current && virtuosoRef.current) {
+          virtuosoRef.current.scrollTo({
+            top: initialScrollTop,
+            behavior: 'auto',
+          });
+          restoreScrollRef.current = false;
         }
       });
     }
@@ -469,6 +445,37 @@ export function Transcription({
     );
 
   const paragraphs = transcriptContent || [];
+
+  // Scroll to paragraph based on hash
+  useEffect(() => {
+    if (!isTabActive) return;
+    if (paragraphs.length > 0 && location.hash) {
+      const hash = location.hash.substring(1);
+      if (hash.startsWith('paragraph-')) {
+        const paragraphIdStr = hash.substring('paragraph-'.length);
+        const paragraphId = parseInt(paragraphIdStr, 10);
+        if (!isNaN(paragraphId)) {
+          const idx = paragraphs.findIndex((p) => p.id === paragraphId);
+          if (idx >= 0) {
+            setTimeout(() => {
+              if (virtuosoRef.current) {
+                console.log(
+                  `[Transcription] Scrolling to paragraph id=${paragraphId} at index=${idx}`
+                );
+                virtuosoRef.current.scrollToIndex({
+                  index: idx,
+                  align: 'center',
+                  behavior: 'smooth',
+                });
+                setHighlightedParagraphIndex(idx);
+                setTimeout(() => setHighlightedParagraphIndex(null), 2000);
+              }
+            }, 100);
+          }
+        }
+      }
+    }
+  }, [location.hash, paragraphs, isTabActive]);
 
   const handleSaveParagraphInternal = async (
     paragraphId: number,
@@ -634,46 +641,46 @@ export function Transcription({
           </Flex>
         </Box>
 
-        <ScrollArea
-          type="auto"
-          scrollbars="vertical"
-          ref={viewportRef}
-          onScroll={handleScroll}
-          style={{ flexGrow: 1, minHeight: 0 }}
-        >
-          {isLoadingTranscript && (
-            <Flex
-              align="center"
-              justify="center"
-              style={{ minHeight: '100px' }}
-            >
-              <Spinner size="2" />{' '}
-              <Text ml="2" color="gray">
-                Loading transcript...
-              </Text>
-            </Flex>
-          )}
-          {transcriptError && !isLoadingTranscript && (
-            <Flex
-              align="center"
-              justify="center"
-              style={{ minHeight: '100px' }}
-            >
-              <Text color="red">
-                Error loading transcript: {transcriptError.message}
-              </Text>
-            </Flex>
-          )}
-
-          <Box p="3" className="space-y-3">
-            {!isLoadingTranscript &&
-              !transcriptError &&
-              paragraphs.length > 0 &&
-              paragraphs.map((paragraph, index) => (
+        {isLoadingTranscript && (
+          <Flex
+            align="center"
+            justify="center"
+            style={{ minHeight: '100px', flexGrow: 1 }}
+          >
+            <Spinner size="2" />{' '}
+            <Text ml="2" color="gray">
+              Loading transcript...
+            </Text>
+          </Flex>
+        )}
+        {transcriptError && !isLoadingTranscript && (
+          <Flex
+            align="center"
+            justify="center"
+            style={{ minHeight: '100px', flexGrow: 1 }}
+          >
+            <Text color="red">
+              Error loading transcript: {transcriptError.message}
+            </Text>
+          </Flex>
+        )}
+        {!isLoadingTranscript && !transcriptError && (
+          <Virtuoso
+            ref={virtuosoRef}
+            style={{ height: '100%' }}
+            data={paragraphs}
+            computeItemKey={(index, p) => p.id}
+            onScroll={handleScroll}
+            itemContent={(index, paragraph) => (
+              <Box
+                p="3"
+                pt={index === 0 ? '3' : '0'}
+                pb={index === paragraphs.length - 1 ? '3' : '0'}
+              >
                 <TranscriptParagraph
-                  key={paragraph.id} // Use stable ID for key
+                  key={paragraph.id}
                   paragraph={paragraph}
-                  index={index} // Pass array index for playback logic
+                  index={index}
                   onSave={handleSaveParagraphInternal}
                   onDelete={handleDeleteParagraphRequest}
                   activeEditIndex={activeEditIndex}
@@ -686,12 +693,12 @@ export function Transcription({
                   onPlayToggle={togglePlayback}
                   isPlaying={isPlaying && playingParagraphIndex === index}
                   isAudioAvailable={isAudioAvailable}
+                  isHighlighted={highlightedParagraphIndex === index}
                 />
-              ))}
-            {!isLoadingTranscript &&
-              !transcriptError &&
-              transcriptContent &&
-              paragraphs.length === 0 && (
+              </Box>
+            )}
+            components={{
+              EmptyPlaceholder: () => (
                 <Flex
                   align="center"
                   justify="center"
@@ -703,22 +710,10 @@ export function Transcription({
                       : 'Transcription not available yet.'}
                   </Text>
                 </Flex>
-              )}
-            {!isLoadingTranscript &&
-              !transcriptError &&
-              transcriptContent === undefined && (
-                <Flex
-                  align="center"
-                  justify="center"
-                  style={{ minHeight: '100px' }}
-                >
-                  <Text color="gray" style={{ fontStyle: 'italic' }}>
-                    No transcription content available.
-                  </Text>
-                </Flex>
-              )}
-          </Box>
-        </ScrollArea>
+              ),
+            }}
+          />
+        )}
       </Flex>
       <AlertDialog.Root
         open={isDeleteAudioConfirmOpen}

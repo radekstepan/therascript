@@ -1,7 +1,14 @@
 /* packages/ui/src/components/SessionView/Chat/ChatMessages.tsx */
-import React, { useState, useRef, useCallback, RefObject } from 'react';
+import React, {
+  useState,
+  useRef,
+  useCallback,
+  RefObject,
+  useMemo,
+} from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { Virtuoso } from 'react-virtuoso';
 import {
   Box,
   Flex,
@@ -50,6 +57,18 @@ export function ChatMessages({
   const queryClient = useQueryClient();
   const setToast = useSetAtom(toastMessageAtom);
   const renderMd = useAtomValue(renderMarkdownAtom);
+
+  const virtuosoRef = useRef<any>(null);
+
+  // Auto-scroll when new messages arrive or during streaming
+  const followOutput = useMemo(() => {
+    return isAiResponding ? 'smooth' : false;
+  }, [isAiResponding]);
+
+  // Scroll to bottom when messages change
+  const handleScrolledToBottom = useCallback(() => {
+    // Virtuoso's followOutput handles this automatically
+  }, []);
 
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
   const [templateToCreate, setTemplateToCreate] =
@@ -178,22 +197,32 @@ export function ChatMessages({
 
   return (
     <>
-      <Flex direction="column" gap="3">
-        {messages.map((message) => {
+      <Virtuoso
+        ref={virtuosoRef}
+        style={{ height: '100%' }}
+        data={messages}
+        computeItemKey={(index, m) => m.id}
+        followOutput={followOutput}
+        initialTopMostItemIndex={messages.length > 0 ? messages.length - 1 : 0}
+        increaseViewportBy={{ top: 0, bottom: 200 }}
+        onScroll={handleScrolledToBottom}
+        itemContent={(index, message) => {
           const isCurrentlyStreaming = message.id === streamingMessageId;
           return (
-            <ChatMessageBubble
-              key={message.id}
-              message={message}
-              isCurrentlyStreaming={isCurrentlyStreaming}
-              isAiResponding={isAiResponding}
-              renderMd={renderMd}
-              onStarClick={handleStarClick}
-              onCopyClick={handleCopyClick}
-            />
+            <Box py="2" px="4">
+              <ChatMessageBubble
+                key={message.id}
+                message={message}
+                isCurrentlyStreaming={isCurrentlyStreaming}
+                isAiResponding={isAiResponding}
+                renderMd={renderMd}
+                onStarClick={handleStarClick}
+                onCopyClick={handleCopyClick}
+              />
+            </Box>
           );
-        })}
-      </Flex>
+        }}
+      />
 
       <EditEntityModal
         isOpen={isTemplateModalOpen}

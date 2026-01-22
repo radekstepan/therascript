@@ -48,7 +48,7 @@ const formatParagraphTimestamp = (ms: number | undefined): string => {
 interface TranscriptParagraphProps {
   paragraph: TranscriptParagraphData;
   index: number;
-  onSave: (paragraphId: number, newText: string) => Promise<void> | void; // Changed from index to paragraphId
+  onSave: (paragraphId: number, newText: string) => Promise<void> | void;
   onDelete: (paragraph: TranscriptParagraphData) => void;
   activeEditIndex: number | null;
   setActiveEditIndex: Dispatch<SetStateAction<number | null>>;
@@ -56,6 +56,7 @@ interface TranscriptParagraphProps {
   onPlayToggle: (timestampMs: number, index: number) => void;
   isPlaying: boolean;
   isAudioAvailable: boolean;
+  isHighlighted?: boolean;
 }
 
 export function TranscriptParagraph({
@@ -69,6 +70,7 @@ export function TranscriptParagraph({
   onPlayToggle,
   isPlaying,
   isAudioAvailable,
+  isHighlighted = false,
 }: TranscriptParagraphProps) {
   const [editValue, setEditValue] = useState(paragraph.text);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -267,7 +269,8 @@ export function TranscriptParagraph({
       className={cn(
         'rounded transition-colors duration-150',
         !isEditing && 'hover:bg-[--gray-a3]',
-        isPlaying && isAudioAvailable && 'bg-[--blue-a3]'
+        isPlaying && isAudioAvailable && 'bg-[--blue-a3]',
+        isHighlighted && 'highlight-paragraph'
       )}
       style={{ position: 'relative' }}
     >

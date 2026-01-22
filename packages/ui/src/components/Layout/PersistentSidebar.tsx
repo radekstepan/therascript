@@ -146,8 +146,8 @@ export function PersistentSidebar() {
         >
           {isSidebarOpen && (
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-[var(--accent-9)] rounded-md flex items-center justify-center text-white">
-                <BrainCircuit size={18} />
+              <div className="w-8 h-8 bg-[var(--accent-9)] rounded-md flex items-center justify-center">
+                <BrainCircuit size={18} className="text-white" />
               </div>
               <h1 className="text-lg font-bold text-[var(--gray-12)] tracking-tight">
                 Therascript

@@ -1,14 +1,7 @@
 // packages/ui/src/components/SessionView/Chat/ChatMessageBubble.tsx
 import React, { useRef } from 'react';
-import {
-  Box,
-  Flex,
-  Text,
-  IconButton,
-  Tooltip,
-  Spinner,
-} from '@radix-ui/themes';
-import { StarIcon, StarFilledIcon, CopyIcon } from '@radix-ui/react-icons';
+import { Box, Flex, Text, Spinner } from '@radix-ui/themes';
+import { StarIcon, CopyIcon } from '@radix-ui/react-icons';
 import ReactMarkdown from 'react-markdown';
 import { cn } from '../../../utils';
 import { useAnimatedText } from '../../../hooks/useAnimatedText';
@@ -60,18 +53,19 @@ export function ChatMessageBubble({
     <Flex
       key={message.id}
       direction="column"
-      align={isUser ? 'end' : 'start'}
-      className="mb-2"
+      align="start"
+      className="mb-4 group"
     >
       <Box
-        p="4"
+        px="3"
+        py="2"
         className={cn(
-          'relative group shadow-sm transition-all duration-200',
+          'relative shadow-sm transition-all duration-200 w-fit',
           'max-w-[90%] md:max-w-[85%] lg:max-w-[75%]',
           // Modern bubble shapes: fully rounded with subtle differences
           isUser
-            ? 'bg-[var(--accent-9)] text-white rounded-2xl'
-            : 'bg-[var(--gray-2)] text-[var(--gray-12)] rounded-2xl border border-[var(--gray-4)]',
+            ? 'bg-[var(--accent-9)] text-white rounded-lg ml-auto'
+            : 'bg-[var(--gray-2)] text-[var(--gray-12)] rounded-lg border border-[var(--gray-4)]',
           showWaitingIndicator && 'min-h-[3rem] flex items-center'
         )}
         style={{
@@ -81,45 +75,6 @@ export function ChatMessageBubble({
             : '0 2px 4px -2px rgba(0,0,0,0.05)',
         }}
       >
-        {/* Star Button */}
-        {isUser && (
-          <Tooltip content={'Save as template'}>
-            <IconButton
-              variant="ghost"
-              color="gray"
-              size="1"
-              className={cn(
-                'absolute -top-2 -left-2 p-0.5 transition-all z-10 bg-[var(--color-panel-solid)] rounded-full shadow-sm border border-[var(--gray-5)]',
-                'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
-              )}
-              onClick={() => onStarClick(message)}
-              aria-label={'Save message as template'}
-            >
-              <StarIcon width={12} height={12} />
-            </IconButton>
-          </Tooltip>
-        )}
-
-        {/* Copy Button */}
-        {showCopyButton && (
-          <Tooltip content="Copy message text">
-            <IconButton
-              variant="ghost"
-              color="gray"
-              size="1"
-              className={cn(
-                'absolute top-2 right-2 p-0.5 transition-all z-10',
-                'opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
-                'hover:bg-[var(--gray-a4)] rounded-md'
-              )}
-              onClick={handleCopy}
-              aria-label="Copy message text"
-            >
-              <CopyIcon width={14} height={14} />
-            </IconButton>
-          </Tooltip>
-        )}
-
         {/* Message Content */}
         {showWaitingIndicator ? (
           <Flex align="center" gap="2" className="text-[var(--gray-11)] px-1">
@@ -149,6 +104,42 @@ export function ChatMessageBubble({
           </Box>
         )}
       </Box>
+
+      {/* Action Row */}
+      {(showCopyButton || isUser) && (
+        <Flex
+          mt="1"
+          width="100%"
+          justify={isUser ? 'end' : 'start'}
+          className={cn(
+            'opacity-0 group-hover:opacity-100 transition-opacity duration-200',
+            'text-[var(--gray-9)]'
+          )}
+        >
+          {showCopyButton && (
+            <Flex
+              align="center"
+              gap="1"
+              className="cursor-pointer hover:text-[var(--gray-11)]"
+              onClick={handleCopy}
+            >
+              <CopyIcon width={12} height={12} />
+              <Text size="1">Copy</Text>
+            </Flex>
+          )}
+          {isUser && (
+            <Flex
+              align="center"
+              gap="1"
+              className="cursor-pointer hover:text-[var(--gray-11)]"
+              onClick={() => onStarClick(message)}
+            >
+              <StarIcon width={12} height={12} />
+              <Text size="1">Save as template</Text>
+            </Flex>
+          )}
+        </Flex>
+      )}
     </Flex>
   );
 }
