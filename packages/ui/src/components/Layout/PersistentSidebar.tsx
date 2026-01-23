@@ -27,6 +27,7 @@ import {
   Spinner,
   Text,
   Badge,
+  Select,
 } from '@radix-ui/themes';
 import { themeAtom, Theme } from '../../store/ui/themeAtom';
 import { effectiveThemeAtom } from '../../store';
@@ -220,16 +221,22 @@ export function PersistentSidebar() {
               >
                 Theme
               </Text>
-              <select
+              <Select.Root
                 value={theme}
-                onChange={(e) => setTheme(e.target.value as Theme)}
-                className="w-full p-2 text-sm bg-[var(--gray-3)] border border-[var(--gray-6)] text-[var(--gray-12)] rounded-md focus:outline-none focus:ring-2 focus:ring-[var(--accent-8)] transition-colors cursor-pointer hover:bg-[var(--gray-4)]"
-                aria-label="Select theme"
+                onValueChange={(value) => setTheme(value as Theme)}
+                size="2"
               >
-                <option value="light">Light Mode</option>
-                <option value="dark">Dark Mode</option>
-                <option value="system">System</option>
-              </select>
+                <Select.Trigger
+                  placeholder="Select theme..."
+                  style={{ width: '100%' }}
+                  aria-label="Select theme"
+                />
+                <Select.Content>
+                  <Select.Item value="light">Light Mode</Select.Item>
+                  <Select.Item value="dark">Dark Mode</Select.Item>
+                  <Select.Item value="system">System</Select.Item>
+                </Select.Content>
+              </Select.Root>
             </div>
           ) : (
             <div
