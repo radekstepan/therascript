@@ -1,5 +1,5 @@
 // packages/ui/src/hooks/useAnalysisStream.ts
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 
 const API_BASE_URL = axios.defaults.baseURL || 'http://localhost:3001';
@@ -63,6 +63,13 @@ export function useAnalysisStream(jobId: number | null) {
     tokensPerSecond: undefined,
   });
 
+  const mapLogsRef = useRef<Record<number, string>>({});
+  const reduceLogRef = useRef('');
+  const mapPhaseStartTimeRef = useRef<Record<number, number>>({});
+  const reducePhaseStartTimeRef = useRef<number | null>(null);
+  const mapPromptTokensRef = useRef<Record<number, number>>({});
+  const reducePromptTokensRef = useRef<number | null>(null);
+
   useEffect(() => {
     if (!jobId) {
       setMapLogs({});
@@ -80,6 +87,12 @@ export function useAnalysisStream(jobId: number | null) {
         duration: undefined,
         tokensPerSecond: undefined,
       });
+      mapLogsRef.current = {};
+      reduceLogRef.current = '';
+      mapPhaseStartTimeRef.current = {};
+      reducePhaseStartTimeRef.current = null;
+      mapPromptTokensRef.current = {};
+      reducePromptTokensRef.current = null;
       return;
     }
 
@@ -98,6 +111,12 @@ export function useAnalysisStream(jobId: number | null) {
       duration: undefined,
       tokensPerSecond: undefined,
     });
+    mapLogsRef.current = {};
+    reduceLogRef.current = '';
+    mapPhaseStartTimeRef.current = {};
+    reducePhaseStartTimeRef.current = null;
+    mapPromptTokensRef.current = {};
+    reducePromptTokensRef.current = null;
 
     const eventSource = new EventSource(
       `${API_BASE_URL}/api/analysis-jobs/${jobId}/stream`
@@ -122,7 +141,6 @@ export function useAnalysisStream(jobId: number | null) {
         const data = JSON.parse(event.data) as StreamEvent;
 
         if (data.type === 'snapshot') {
-          // Initialize logs from DB state if available
           if (data.summaries) {
             const initialMapLogs: Record<number, string> = {};
             data.summaries.forEach((s: any) => {
@@ -131,9 +149,11 @@ export function useAnalysisStream(jobId: number | null) {
               }
             });
             setMapLogs(initialMapLogs);
+            mapLogsRef.current = initialMapLogs;
           }
           if (data.job?.final_result) {
             setReduceLog(data.job.final_result);
+            reduceLogRef.current = data.job.final_result;
           }
         } else if (data.type === 'start') {
           if (data.phase === 'map' && data.summaryId && data.promptTokens) {
@@ -141,10 +161,12 @@ export function useAnalysisStream(jobId: number | null) {
               ...prev,
               [data.summaryId!]: Date.now(),
             }));
+            mapPhaseStartTimeRef.current[data.summaryId!] = Date.now();
             setMapPromptTokens((prev) => ({
               ...prev,
               [data.summaryId!]: data.promptTokens!,
             }));
+            mapPromptTokensRef.current[data.summaryId!] = data.promptTokens!;
             setMapMetrics((prev) => ({
               ...prev,
               [data.summaryId!]: {
@@ -156,7 +178,9 @@ export function useAnalysisStream(jobId: number | null) {
             }));
           } else if (data.phase === 'reduce' && data.promptTokens) {
             setReducePhaseStartTime(Date.now());
+            reducePhaseStartTimeRef.current = Date.now();
             setReducePromptTokens(data.promptTokens);
+            reducePromptTokensRef.current = data.promptTokens;
             setReduceMetrics({
               promptTokens: data.promptTokens!,
               completionTokens: undefined,
@@ -166,17 +190,18 @@ export function useAnalysisStream(jobId: number | null) {
           }
         } else if (data.type === 'token') {
           if (data.phase === 'map' && data.summaryId && data.delta) {
+            const newText =
+              (mapLogsRef.current[data.summaryId!] || '') + data.delta;
+            mapLogsRef.current[data.summaryId!] = newText;
             setMapLogs((prev) => ({
               ...prev,
-              [data.summaryId!]: (prev[data.summaryId!] || '') + data.delta,
+              [data.summaryId!]: newText,
             }));
-            const startTime = mapPhaseStartTime[data.summaryId!];
-            const promptTokens = mapPromptTokens[data.summaryId!];
+            const startTime = mapPhaseStartTimeRef.current[data.summaryId!];
+            const promptTokens = mapPromptTokensRef.current[data.summaryId!];
             if (startTime && promptTokens !== undefined) {
               const elapsedSeconds = (Date.now() - startTime) / 1000;
-              const currentText = mapLogs[data.summaryId!] || '';
-              const estimatedGeneratedTokens = currentText.length / 4;
-              const totalTokens = promptTokens + estimatedGeneratedTokens;
+              const estimatedGeneratedTokens = newText.length / 4;
               const liveTps =
                 elapsedSeconds > 0
                   ? estimatedGeneratedTokens / elapsedSeconds
@@ -192,12 +217,14 @@ export function useAnalysisStream(jobId: number | null) {
               }));
             }
           } else if (data.phase === 'reduce' && data.delta) {
+            const newText = reduceLogRef.current + data.delta;
+            reduceLogRef.current = newText;
             setReduceLog((prev) => prev + data.delta!);
-            const startTime = reducePhaseStartTime;
-            const promptTokens = reducePromptTokens;
+            const startTime = reducePhaseStartTimeRef.current;
+            const promptTokens = reducePromptTokensRef.current;
             if (startTime && promptTokens !== undefined) {
               const elapsedSeconds = (Date.now() - startTime) / 1000;
-              const estimatedGeneratedTokens = reduceLog.length / 4;
+              const estimatedGeneratedTokens = newText.length / 4;
               const liveTps =
                 elapsedSeconds > 0
                   ? estimatedGeneratedTokens / elapsedSeconds
@@ -266,6 +293,12 @@ export function useAnalysisStream(jobId: number | null) {
       console.log(`[Stream] Closing connection for job ${jobId}`);
       eventSource.close();
       setIsConnected(false);
+      mapLogsRef.current = {};
+      reduceLogRef.current = '';
+      mapPhaseStartTimeRef.current = {};
+      reducePhaseStartTimeRef.current = null;
+      mapPromptTokensRef.current = {};
+      reducePromptTokensRef.current = null;
     };
   }, [jobId]);
 
