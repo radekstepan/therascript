@@ -37,7 +37,15 @@ export function ChatHeader({
   const activeChatTitle = getChatDisplayTitle(activeChat);
 
   return (
-    <Flex align="center" justify="between" py="3" px="4" gap="3">
+    <Flex
+      align="center"
+      justify="between"
+      py="3"
+      px="4"
+      gap="3"
+      className="bg-slate-950/70 backdrop-blur-md border-b border-slate-800"
+      style={{ backgroundColor: 'rgba(15, 23, 42, 0.7)' }}
+    >
       <Flex align="center" gap="2" style={{ minWidth: 0, flexGrow: 1 }}>
         {isLoadingSessionMeta ? (
           <Spinner size="2" />

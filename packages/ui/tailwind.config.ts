@@ -28,8 +28,8 @@ module.exports = {
       // Custom color palettes (can be used alongside Radix theme colors if needed for non-component styling)
       colors: {
         // === MODIFICATION START ===
-        // Switch to Zinc for a modern, premium gray scale (similar to Vercel/Shadcn)
-        gray: colors.zinc,
+        // Switch to Slate for a midnight blue/gray tone (cooler, deeper aesthetic)
+        gray: colors.slate,
         // === MODIFICATION END ===
 
         brand: colors.blue, // Example custom brand color

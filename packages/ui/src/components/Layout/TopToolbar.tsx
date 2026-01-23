@@ -146,8 +146,8 @@ export function TopToolbar() {
       className={cn(
         'sticky top-0 z-30 flex items-center',
         // Modern glass effect
-        'bg-white/70 dark:bg-gray-900/70 backdrop-blur-md',
-        'border-b border-gray-200 dark:border-gray-800',
+        'bg-white/70 dark:bg-slate-950/70 backdrop-blur-xl',
+        'border-b border-slate-200 dark:border-slate-800',
         'px-4 md:px-6 lg:px-8',
         'py-3'
       )}
@@ -172,13 +172,13 @@ export function TopToolbar() {
             name="q"
             variant="surface"
             radius="full" // More modern pill shape
-            className="bg-gray-100 dark:bg-gray-800 border-transparent focus-within:border-[var(--accent-8)] focus-within:ring-1 focus-within:ring-[var(--accent-8)] shadow-sm"
+            className="bg-slate-100 dark:bg-slate-800 border-transparent focus-within:border-[var(--accent-8)] focus-within:ring-1 focus-within:ring-[var(--accent-8)] shadow-sm"
           >
             <TextField.Slot>
               <MagnifyingGlassIcon
                 height="16"
                 width="16"
-                className="text-gray-500"
+                className="text-slate-500"
               />
             </TextField.Slot>
             {isFetchingSearch && (
@@ -196,7 +196,7 @@ export function TopToolbar() {
                   aria-label="Clear search"
                   title="Clear search (Esc)"
                   type="button"
-                  className="rounded-full hover:bg-gray-200 dark:hover:bg-gray-700"
+                  className="rounded-full hover:bg-slate-200 dark:hover:bg-slate-700"
                 >
                   <Cross1Icon />
                 </IconButton>
@@ -217,7 +217,7 @@ export function TopToolbar() {
                 ? 'Close Configuration'
                 : 'Open Configuration'
             }
-            className="border border-gray-200 dark:border-gray-700"
+            className="border border-slate-200 dark:border-slate-700"
           >
             <GearIcon width="16" height="16" />
           </IconButton>
@@ -225,7 +225,7 @@ export function TopToolbar() {
             variant="surface"
             size="2"
             color="gray"
-            className="hidden sm:flex shadow-sm border border-gray-200 dark:border-gray-700 transition-colors"
+            className="hidden sm:flex shadow-sm border border-slate-200 dark:border-slate-700 transition-colors"
             style={{
               backgroundColor: 'var(--gray-a4)',
             }}

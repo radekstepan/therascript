@@ -262,9 +262,9 @@ export function StandaloneChatHeader({
     <>
       <Flex
         direction="column"
+        className="bg-slate-950/70 backdrop-blur-md border-b border-slate-800"
         style={{
-          borderBottom: '1px solid var(--gray-a6)',
-          backgroundColor: 'var(--color-panel-solid)',
+          backgroundColor: 'rgba(15, 23, 42, 0.7)',
           flexShrink: 0,
         }}
       >
