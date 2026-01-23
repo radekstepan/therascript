@@ -14,7 +14,11 @@ import type {
   BackendSession,
   IntermediateSummary,
 } from '@therascript/domain';
-import { streamLlmChat, type StreamResult } from '@therascript/services';
+import {
+  streamLlmChat,
+  calculateTokenCount,
+  type StreamResult,
+} from '@therascript/services';
 import config from '@therascript/config';
 import { publishStreamEvent } from '../services/streamPublisher.js';
 
@@ -83,12 +87,6 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
           summaryTask.id,
           'processing'
         );
-        publishStreamEvent(jobId, {
-          phase: 'map',
-          type: 'start',
-          sessionId: summaryTask.session_id,
-          summaryId: summaryTask.id,
-        });
 
         const session = sessionRepository.findById(summaryTask.session_id);
         if (!session)
@@ -128,6 +126,17 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
             },
           ];
         }
+
+        const mapPromptTokens =
+          calculateTokenCount(mapMessages.map((m) => m.text).join('\n')) || 0;
+
+        publishStreamEvent(jobId, {
+          phase: 'map',
+          type: 'start',
+          sessionId: summaryTask.session_id,
+          summaryId: summaryTask.id,
+          promptTokens: mapPromptTokens,
+        });
 
         let summaryText = '';
         let chunkBuffer = '';
@@ -210,6 +219,9 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
           phase: 'map',
           type: 'end',
           summaryId: summaryTask.id,
+          promptTokens: mapStreamResult.promptTokens,
+          completionTokens: mapStreamResult.completionTokens,
+          duration: mapDuration,
         });
 
         console.log(
@@ -315,7 +327,14 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
       ];
     }
 
-    publishStreamEvent(jobId, { phase: 'reduce', type: 'start' });
+    const reducePromptTokens =
+      calculateTokenCount(reduceMessages.map((m) => m.text).join('\n')) || 0;
+
+    publishStreamEvent(jobId, {
+      phase: 'reduce',
+      type: 'start',
+      promptTokens: reducePromptTokens,
+    });
 
     let finalResult = '';
     let reduceBuffer = '';
@@ -393,7 +412,13 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
       );
     }
 
-    publishStreamEvent(jobId, { phase: 'reduce', type: 'end' });
+    publishStreamEvent(jobId, {
+      phase: 'reduce',
+      type: 'end',
+      promptTokens: reduceStreamResult.promptTokens,
+      completionTokens: reduceStreamResult.completionTokens,
+      duration: reduceDuration,
+    });
 
     await job.updateProgress(100);
     analysisRepository.updateJobStatus(jobId, 'completed', finalResult);

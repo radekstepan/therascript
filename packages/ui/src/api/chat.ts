@@ -18,10 +18,9 @@ const mapBackendMessageToUi = (msg: BackendChatMessage): ChatMessage => ({
   sender: msg.sender,
   text: msg.text,
   timestamp: msg.timestamp,
-  promptTokens:
-    msg.promptTokens === null ? null : msg.promptTokens || undefined,
-  completionTokens:
-    msg.completionTokens === null ? null : msg.completionTokens || undefined,
+  promptTokens: msg.promptTokens ?? undefined,
+  completionTokens: msg.completionTokens ?? undefined,
+  duration: msg.duration ?? undefined,
 });
 
 // ==============================

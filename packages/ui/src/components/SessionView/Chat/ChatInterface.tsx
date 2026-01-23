@@ -62,6 +62,13 @@ export function ChatInterface({
   const [streamingAiMessageId, setStreamingAiMessageId] = useState<
     number | null
   >(null);
+  const [streamingStartTime, setStreamingStartTime] = useState<number | null>(
+    null
+  );
+  const [streamingTokensCount, setStreamingTokensCount] = useState<number>(0);
+  const [currentTokensPerSecond, setCurrentTokensPerSecond] = useState<
+    number | null
+  >(null);
 
   const chatQueryKey = useMemo(
     () =>
@@ -121,6 +128,12 @@ export function ChatInterface({
     let actualUserMessageId = receivedUserMsgId;
     const currentChatQueryKey = chatQueryKey;
     let streamErrored = false;
+    let localStartTime: number | null = null;
+    let localTokenCount = 0;
+
+    setStreamingStartTime(null);
+    setStreamingTokensCount(0);
+    setCurrentTokensPerSecond(null);
 
     try {
       while (true) {
@@ -160,7 +173,6 @@ export function ChatInterface({
                   );
                 }
               } else if (data.usage) {
-                // Early usage estimate from server to update header meter quickly
                 if (activeChatId) {
                   if (isStandalone) {
                     queryClient.setQueryData(
@@ -180,6 +192,10 @@ export function ChatInterface({
                   }
                 }
               } else if (data.chunk) {
+                if (localStartTime === null) {
+                  localStartTime = Date.now();
+                  setStreamingStartTime(localStartTime);
+                }
                 queryClient.setQueryData<ChatSession>(
                   currentChatQueryKey,
                   (oldData) => {
@@ -195,8 +211,44 @@ export function ChatInterface({
                     };
                   }
                 );
+                const estimatedTokens = Math.floor(data.chunk.length / 4);
+                localTokenCount += estimatedTokens;
+                setStreamingTokensCount(localTokenCount);
+                const elapsedMs = Date.now() - localStartTime;
+                const elapsedSeconds = elapsedMs / 1000;
+                if (elapsedSeconds > 0) {
+                  setCurrentTokensPerSecond(localTokenCount / elapsedSeconds);
+                }
               } else if (data.done) {
+                const completionTokens =
+                  data.completionTokens ?? streamingTokensCount;
+                const duration = data.duration ?? null;
+                const tokensPerSecond =
+                  duration && completionTokens
+                    ? (completionTokens * 1000) / duration
+                    : null;
+                queryClient.setQueryData<ChatSession>(
+                  currentChatQueryKey,
+                  (oldData) => {
+                    if (!oldData) return oldData;
+                    const currentMessages = oldData.messages ?? [];
+                    return {
+                      ...oldData,
+                      messages: currentMessages.map((msg) =>
+                        msg.id === tempAiMessageId
+                          ? {
+                              ...msg,
+                              completionTokens,
+                              duration,
+                            }
+                          : msg
+                      ),
+                    };
+                  }
+                );
                 setStreamingAiMessageId(null);
+                setStreamingStartTime(null);
+                setStreamingTokensCount(0);
                 if (activeChatId && !streamErrored) {
                   setTimeout(() => {
                     queryClient.invalidateQueries({
@@ -398,6 +450,9 @@ export function ChatInterface({
               isStandalone={isStandalone}
               streamingMessageId={streamingAiMessageId}
               isAiResponding={isAiResponding}
+              streamingTokensPerSecond={
+                streamingAiMessageId ? currentTokensPerSecond : null
+              }
             />
           </Box>
         )}

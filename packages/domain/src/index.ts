@@ -13,6 +13,7 @@ export interface BackendChatMessage {
   timestamp: number;
   promptTokens?: number | null;
   completionTokens?: number | null;
+  duration?: number | null;
 }
 
 export interface BackendChatSession {

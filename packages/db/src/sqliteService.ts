@@ -78,7 +78,7 @@ export const schema = `
 `;
 
 // --- NEW MIGRATION LOGIC ---
-export const LATEST_SCHEMA_VERSION = 8;
+export const LATEST_SCHEMA_VERSION = 9;
 
 // --- NEW SYSTEM PROMPTS ---
 export const SYSTEM_PROMPT_TEMPLATES = {
@@ -383,6 +383,23 @@ function runMigrations(dbInstance: DB) {
         dbInstance.pragma(`user_version = 8`);
         currentVersion = 8;
         console.log('[db Migrator] Version 8 applied.');
+      }
+
+      // NEW MIGRATION: Version 9 to add duration column to messages table for tracking LLM generation time
+      if (currentVersion < 9) {
+        console.log('[db Migrator] Applying version 9...');
+        const messageColumns = dbInstance.pragma('table_info(messages)') as {
+          name: string;
+        }[];
+        if (!messageColumns.some((col) => col.name === 'duration')) {
+          console.log('[db Migrator V9] Adding "duration" to messages...');
+          dbInstance.exec(
+            'ALTER TABLE messages ADD COLUMN duration INTEGER NULL'
+          );
+        }
+        dbInstance.pragma(`user_version = 9`);
+        currentVersion = 9;
+        console.log('[db Migrator] Version 9 applied.');
       }
     })();
     console.log(

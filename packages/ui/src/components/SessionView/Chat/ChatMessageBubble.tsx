@@ -10,10 +10,11 @@ import type { ChatMessage } from '../../../types';
 interface ChatMessageBubbleProps {
   message: ChatMessage;
   isCurrentlyStreaming: boolean;
-  isAiResponding: boolean; // Pass this down
+  isAiResponding: boolean;
   renderMd: boolean;
-  onStarClick: (message: ChatMessage) => void; // Callback for starring
+  onStarClick: (message: ChatMessage) => void;
   onCopyClick: (payload: { text: string; html?: string }) => void;
+  tokensPerSecond?: number | null;
 }
 
 export function ChatMessageBubble({
@@ -23,6 +24,7 @@ export function ChatMessageBubble({
   renderMd,
   onStarClick,
   onCopyClick,
+  tokensPerSecond,
 }: ChatMessageBubbleProps) {
   const animatedText = useAnimatedText(
     message.text,
@@ -37,6 +39,19 @@ export function ChatMessageBubble({
 
   const showCopyButton = message.sender === 'ai' && !isCurrentlyStreaming;
   const isUser = message.sender === 'user';
+  const showMetrics =
+    !isUser &&
+    message.completionTokens !== null &&
+    message.completionTokens !== undefined &&
+    message.completionTokens > 0 &&
+    message.duration !== null &&
+    message.duration !== undefined &&
+    message.duration > 10;
+  const displayTokensPerSecond = showMetrics
+    ? (message.completionTokens! * 1000) / message.duration!
+    : (tokensPerSecond ?? null);
+  const displayMetrics =
+    displayTokensPerSecond !== null || isCurrentlyStreaming;
 
   const handleCopy = () => {
     if (message.sender === 'ai' && renderMd && markdownContainerRef.current) {
@@ -105,6 +120,21 @@ export function ChatMessageBubble({
         )}
       </Box>
 
+      {/* Metrics Row - only for AI messages */}
+      {!isUser && displayMetrics && (
+        <Flex
+          mt="1"
+          width="100%"
+          justify="start"
+          className="text-[var(--gray-9)]"
+        >
+          <Text size="1">
+            {isCurrentlyStreaming
+              ? `~${(tokensPerSecond ?? 0).toFixed(1)} tokens/s`
+              : `${message.completionTokens} tokens (${displayTokensPerSecond!.toFixed(1)} tokens/s)`}
+          </Text>
+        </Flex>
+      )}
       {/* Action Row */}
       {(showCopyButton || isUser) && (
         <Flex

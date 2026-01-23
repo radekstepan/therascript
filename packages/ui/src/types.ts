@@ -88,6 +88,7 @@ export interface ChatMessage {
   timestamp: number;
   promptTokens?: number | null;
   completionTokens?: number | null;
+  duration?: number | null;
 }
 
 export interface ChatSession {
@@ -134,6 +135,7 @@ export interface BackendChatMessage {
   timestamp: number;
   promptTokens?: number | null;
   completionTokens?: number | null;
+  duration?: number | null;
 }
 
 export interface OllamaModelInfo {

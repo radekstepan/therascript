@@ -229,13 +229,15 @@ export const addSessionChatMessage = async ({
           if (chunk.done) {
             finalPromptTokens = chunk.prompt_eval_count;
             finalCompletionTokens = chunk.eval_count;
+            llmDuration = Date.now() - llmStartTime;
             console.log(
-              `[API ProcessStream ${chatData.id}] Ollama stream 'done'. Tokens: C=${finalCompletionTokens}, P=${finalPromptTokens}`
+              `[API ProcessStream ${chatData.id}] Ollama stream 'done'. Tokens: C=${finalCompletionTokens}, P=${finalPromptTokens}, Duration: ${llmDuration}ms`
             );
             await writeSseEvent({
               done: true,
               promptTokens: finalPromptTokens,
               completionTokens: finalCompletionTokens,
+              duration: llmDuration,
             });
             // Stream from Ollama is done, but we continue in finally to save to DB
           }
@@ -243,7 +245,6 @@ export const addSessionChatMessage = async ({
         console.log(
           `[API ProcessStream ${chatData.id}] Finished iterating Ollama stream successfully.`
         );
-        const llmDuration = Date.now() - llmStartTime;
       } catch (streamError) {
         ollamaStreamError =
           streamError instanceof Error
@@ -272,7 +273,8 @@ export const addSessionChatMessage = async ({
               'ai',
               cleanedAiText,
               finalPromptTokens,
-              finalCompletionTokens
+              finalCompletionTokens,
+              ollamaStreamError ? null : llmDuration
             );
             // ============================== FIX END ===============================
 

@@ -8,6 +8,7 @@ export const messageSchema = z.object({
   timestamp: z.number().int().nonnegative(),
   promptTokens: z.number().nullable(),
   completionTokens: z.number().nullable(),
+  duration: z.number().nullable(),
 });
 
 export type MessageRow = z.infer<typeof messageSchema>;

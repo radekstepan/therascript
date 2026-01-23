@@ -31,6 +31,7 @@ interface ChatMessagesProps {
   streamingMessageId: number | null;
   activeSessionId: number | null;
   isAiResponding: boolean;
+  streamingTokensPerSecond?: number | null;
 }
 
 interface TemplateFormState {
@@ -53,6 +54,7 @@ export function ChatMessages({
   messages,
   isAiResponding,
   streamingMessageId,
+  streamingTokensPerSecond,
 }: ChatMessagesProps) {
   const queryClient = useQueryClient();
   const setToast = useSetAtom(toastMessageAtom);
@@ -208,6 +210,13 @@ export function ChatMessages({
         onScroll={handleScrolledToBottom}
         itemContent={(index, message) => {
           const isCurrentlyStreaming = message.id === streamingMessageId;
+          const tokensPerSecond = isCurrentlyStreaming
+            ? streamingTokensPerSecond
+            : message.completionTokens &&
+                message.duration &&
+                message.duration > 10
+              ? (message.completionTokens * 1000) / message.duration
+              : null;
           return (
             <Box py="2" px="4">
               <ChatMessageBubble
@@ -218,6 +227,7 @@ export function ChatMessages({
                 renderMd={renderMd}
                 onStarClick={handleStarClick}
                 onCopyClick={handleCopyClick}
+                tokensPerSecond={tokensPerSecond}
               />
             </Box>
           );

@@ -8,4 +8,7 @@ export interface StreamEvent {
   delta?: string;
   status?: string;
   message?: string;
+  promptTokens?: number;
+  completionTokens?: number;
+  duration?: number;
 }

@@ -120,8 +120,14 @@ const StreamingBox: React.FC<{ text: string }> = ({ text }) => {
 
 const IntermediateSummaryItem: React.FC<{
   summary: IntermediateSummaryWithSessionName;
-  liveLog?: string; // Add liveLog prop
-}> = ({ summary, liveLog }) => {
+  liveLog?: string;
+  metrics?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    duration?: number;
+    tokensPerSecond?: number | undefined;
+  };
+}> = ({ summary, liveLog, metrics }) => {
   const [isOpen, setIsOpen] = useState(false);
 
   const isSuccess = summary.status === 'completed';
@@ -184,23 +190,44 @@ const IntermediateSummaryItem: React.FC<{
           )}
         </Box>
 
-        {isOpen && isProcessing && liveLog && <StreamingBox text={liveLog} />}
-
-        {isOpen && isSuccess && summary.summary_text && !isProcessing && (
-          <Box
-            p="2"
-            mt="2"
-            style={{
-              backgroundColor: 'var(--gray-a3)',
-              borderRadius: 'var(--radius-3)',
-            }}
-          >
-            <div className="markdown-ai-message">
-              <ReactMarkdown>{summary.summary_text}</ReactMarkdown>
-            </div>
-          </Box>
+        {isOpen && isProcessing && liveLog && (
+          <>
+            <StreamingBox text={liveLog} />
+            {metrics && (
+              <Flex mt="1" width="100%" justify="start">
+                <Text size="1" color="gray">
+                  ~{(metrics.tokensPerSecond ?? 0).toFixed(1)} tokens/s
+                </Text>
+              </Flex>
+            )}
+          </>
         )}
-
+        {isOpen && isSuccess && summary.summary_text && !isProcessing && (
+          <>
+            <Box
+              p="2"
+              mt="2"
+              style={{
+                backgroundColor: 'var(--gray-a3)',
+                borderRadius: 'var(--radius-3)',
+              }}
+            >
+              <div className="markdown-ai-message">
+                <ReactMarkdown>{summary.summary_text}</ReactMarkdown>
+              </div>
+            </Box>
+            {metrics && metrics.completionTokens && metrics.tokensPerSecond && (
+              <Flex mt="1" width="100%" justify="start">
+                <Text size="1" color="gray">
+                  {Math.round(
+                    (metrics.promptTokens || 0) + metrics.completionTokens
+                  )}{' '}
+                  tokens ({metrics.tokensPerSecond.toFixed(1)} tokens/s)
+                </Text>
+              </Flex>
+            )}
+          </>
+        )}
         {isOpen && isFailed && summary.error_message && (
           <Callout.Root color="red" size="1" mt="2">
             <Callout.Icon>
@@ -224,7 +251,8 @@ const JobDetailView: React.FC<{
   const queryClient = useQueryClient();
 
   // Use the stream hook
-  const { mapLogs, reduceLog, isConnected } = useAnalysisStream(jobId);
+  const { mapLogs, reduceLog, isConnected, mapMetrics, reduceMetrics } =
+    useAnalysisStream(jobId);
 
   const {
     data: job,
@@ -452,6 +480,7 @@ const JobDetailView: React.FC<{
                     key={summary.id}
                     summary={summary}
                     liveLog={mapLogs[summary.id]} // Pass live log
+                    metrics={mapMetrics[summary.id]}
                   />
                 ))}
             </Grid>
@@ -465,6 +494,13 @@ const JobDetailView: React.FC<{
               Synthesizing Final Answer...
             </Heading>
             <StreamingBox text={reduceLog} />
+            {reduceMetrics && reduceMetrics.tokensPerSecond && (
+              <Flex mt="1" width="100%" justify="start">
+                <Text size="1" color="gray">
+                  ~{reduceMetrics.tokensPerSecond.toFixed(1)} tokens/s
+                </Text>
+              </Flex>
+            )}
           </Box>
         )}
 
@@ -487,6 +523,19 @@ const JobDetailView: React.FC<{
                 </ReactMarkdown>
               </div>
             </Box>
+            {reduceMetrics &&
+              reduceMetrics.completionTokens &&
+              reduceMetrics.tokensPerSecond && (
+                <Flex mt="1" width="100%" justify="start">
+                  <Text size="1" color="gray">
+                    {Math.round(
+                      (reduceMetrics.promptTokens || 0) +
+                        reduceMetrics.completionTokens
+                    )}{' '}
+                    tokens ({reduceMetrics.tokensPerSecond.toFixed(1)} tokens/s)
+                  </Text>
+                </Flex>
+              )}
           </Box>
         )}
 
