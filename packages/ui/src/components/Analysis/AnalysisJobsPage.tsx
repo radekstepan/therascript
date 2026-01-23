@@ -65,6 +65,7 @@ import {
 import { useSetAtom, useAtomValue } from 'jotai';
 import { cn } from '../../utils';
 import { useAnalysisStream } from '../../hooks/useAnalysisStream';
+import { MapReduceVisualization } from './MapReduceVisualization';
 
 // Helper function to get badge color based on status
 const getStatusBadgeColor = (
@@ -142,7 +143,7 @@ const IntermediateSummaryItem: React.FC<{
   }, [isProcessing, liveLog]);
 
   return (
-    <Card size="2" style={{ width: '100%' }}>
+    <Card id={`summary-${summary.id}`} size="2" style={{ width: '100%' }}>
       <Flex direction="column" gap="2" height="100%">
         <Flex justify="between" align="start">
           <Flex direction="column" gap="1" style={{ minWidth: 0 }}>
@@ -415,7 +416,7 @@ const JobDetailView: React.FC<{
               <Text as="div" size="2" color="gray" mb="1">
                 Progress
               </Text>
-              <Progress value={overallProgress} size="2" />
+              <MapReduceVisualization job={job} isProcessing={isProcessing} />
             </Box>
           )}
         </Flex>

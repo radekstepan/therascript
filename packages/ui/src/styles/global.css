@@ -301,3 +301,20 @@ button[class*='rt-IconButton']:not(:disabled):hover {
 }
 
 /* --- End Modern UI Enhancements --- */
+
+/* --- Highlight Flash Animation for MapReduceVisualization --- */
+.highlight-flash {
+  animation: highlightFlash 2s ease-in-out;
+}
+
+@keyframes highlightFlash {
+  0% {
+    background-color: var(--accent-a3);
+    box-shadow: 0 0 12px var(--accent-a6);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: none;
+  }
+}
+/* --- End Highlight Flash Animation --- */
