@@ -10,7 +10,7 @@
 
 import { configureDb, db, closeDb } from '@therascript/db';
 import { LATEST_SCHEMA_VERSION } from '@therascript/db/dist/sqliteService.js';
-import config from '../packages/api/dist/config/index.js';
+import config from '../packages/config/dist/index.js';
 
 async function main() {
   console.log('--- Database Upgrade Check ---');
