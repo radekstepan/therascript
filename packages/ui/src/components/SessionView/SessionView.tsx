@@ -12,7 +12,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Flex, Box, Button, Text, Spinner } from '@radix-ui/themes';
 import { ArrowLeftIcon } from '@radix-ui/react-icons';
 import { SessionContent } from './SessionContent';
-import { EditDetailsModal } from './Modals/EditDetailsModal';
 import { SelectActiveModelModal } from './Modals/SelectActiveModelModal';
 import {
   fetchSession,
@@ -47,7 +46,6 @@ export function SessionView() {
   const setActiveSessionId = useSetAtom(activeSessionIdAtom);
   const setActiveChatId = useSetAtom(activeChatIdAtom);
   const activeChatIdAtomValue = useAtomValue(activeChatIdAtom);
-  const [isEditingMetadata, setIsEditingMetadata] = useState(false);
   const [isSelectModelModalOpen, setIsSelectModelModalOpen] = useState(false);
   const setToast = useSetAtom(toastMessageAtom);
 
@@ -240,14 +238,8 @@ export function SessionView() {
     startChatMutation.mutate();
   }, [startChatMutation]);
 
-  const handleOpenEditMetadataModal = () => setIsEditingMetadata(true);
   const handleOpenConfigureLlmModal = () => setIsSelectModelModalOpen(true);
   const handleNavigateBack = () => navigate('/sessions-list');
-  const handleMetadataSaveSuccess = (
-    updatedMetadata: Partial<SessionMetadata>
-  ) => {
-    // Toast handled by EditDetailsModal
-  };
   const handleModelSuccessfullySet = () => {
     console.log(
       '[SessionView] Model successfully set via SelectActiveModelModal.'
@@ -380,7 +372,6 @@ export function SessionView() {
             <SessionContent
               session={sessionMetadata}
               transcriptContent={transcriptContent}
-              onEditDetailsClick={handleOpenEditMetadataModal}
               activeChatId={currentActiveChatId}
               hasChats={hasChats}
               onStartFirstChat={handleStartFirstChat}
@@ -399,13 +390,6 @@ export function SessionView() {
           </Box>
         </Flex>
       </Flex>
-      <EditDetailsModal
-        isOpen={isEditingMetadata}
-        onOpenChange={setIsEditingMetadata}
-        session={sessionMetadata}
-        onSaveSuccess={handleMetadataSaveSuccess}
-      />
-
       <SelectActiveModelModal
         isOpen={isSelectModelModalOpen}
         onOpenChange={setIsSelectModelModalOpen}

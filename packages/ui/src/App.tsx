@@ -32,6 +32,7 @@ import { UploadModal } from './components/UploadModal/UploadModal';
 import { PersistentSidebar } from './components/Layout/PersistentSidebar';
 import { GeneratedBackground } from './components/Layout/GeneratedBackground';
 import { TopToolbar } from './components/Layout/TopToolbar';
+import { RunConfigSidebar } from './components/Layout/RunConfigSidebar';
 
 // Store
 import {
@@ -247,7 +248,7 @@ function App() {
           {!isSystemReady && (
             <ReadinessOverlay status={readinessStatus} error={readinessError} />
           )}
-          {/* Main layout flex container: Sidebar + Content Area */}
+          {/* Main layout flex container: Left Sidebar + Content Area + Right Sidebar */}
           <div className="flex flex-grow overflow-hidden">
             {' '}
             {/* Prevents this div from scrolling */}
@@ -255,21 +256,21 @@ function App() {
             {/* Content area that grows and handles its own internal layout */}
             <div
               className={cn(
-                'flex flex-col flex-grow transition-all duration-300 ease-in-out overflow-hidden', // Added overflow-hidden
+                'flex flex-col flex-grow transition-all duration-300 ease-in-out overflow-hidden',
                 isSidebarOpen ? 'ml-64' : 'ml-20'
               )}
             >
               <TopToolbar /> {/* App Header, fixed height */}
               {/* Main content rendering area */}
               <main
-                className="flex-grow flex flex-col overflow-y-auto relative z-10" // Ensures <main> fills space and manages overflow
+                className="flex-grow flex flex-col overflow-y-auto relative z-10"
                 id="main-content"
                 style={{ backgroundColor: 'transparent' }}
               >
-                <PageContentManager />{' '}
-                {/* Renders the current page, should fill <main> */}
+                <PageContentManager />
               </main>
             </div>
+            <RunConfigSidebar /> {/* Right sidebar, managed internally */}
           </div>
 
           <UploadModal isOpen={isModalOpen} />

@@ -9,7 +9,6 @@ import { SessionSidebar } from './Sidebar/SessionSidebar';
 
 interface SessionContentProps {
   session: Session;
-  onEditDetailsClick: () => void;
   transcriptContent: StructuredTranscript | undefined;
   activeChatId: number | null;
   hasChats: boolean;
@@ -27,7 +26,6 @@ interface SessionContentProps {
 
 export function SessionContent({
   session,
-  onEditDetailsClick,
   transcriptContent,
   activeChatId,
   hasChats,
@@ -118,7 +116,6 @@ export function SessionContent({
           <Transcription
             session={session}
             transcriptContent={transcriptContent}
-            onEditDetailsClick={onEditDetailsClick}
             isLoadingTranscript={isLoadingTranscript}
             transcriptError={transcriptError}
           />
@@ -249,7 +246,6 @@ export function SessionContent({
               <Transcription
                 session={session}
                 transcriptContent={transcriptContent}
-                onEditDetailsClick={onEditDetailsClick}
                 isLoadingTranscript={isLoadingTranscript}
                 transcriptError={transcriptError}
                 isTabActive={activeTab === 'transcription'}

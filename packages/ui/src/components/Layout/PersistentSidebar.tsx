@@ -1,7 +1,11 @@
 // packages/ui/src/components/Layout/PersistentSidebar.tsx
 import React, { useState } from 'react';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
-import { useNavigate as useReactRouterNavigate } from 'react-router-dom';
+import {
+  useNavigate as useReactRouterNavigate,
+  Link,
+  useLocation,
+} from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import {
   LayoutDashboard,
@@ -19,6 +23,8 @@ import {
   Star,
   BarChart,
   BrainCircuit,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -37,8 +43,11 @@ import { cn } from '../../utils';
 import { toastMessageAtom } from '../../store';
 import { JobsQueueModal } from '../Jobs/JobsQueueModal';
 import { requestAppShutdown, fetchActiveJobCount } from '../../api/api';
+import { fetchSessions } from '../../api/session';
+import { fetchStandaloneChats } from '../../api/chat';
 import { GpuStatusIndicator } from '../User/GpuStatusIndicator';
 import type { ActiveJobCount } from '../../types';
+import { formatTimestamp } from '../../helpers';
 
 interface NavItemType {
   id: string;
@@ -70,9 +79,12 @@ export function PersistentSidebar() {
   const effectiveTheme = useAtomValue(effectiveThemeAtom);
   const setToast = useSetAtom(toastMessageAtom);
   const reactRouterNavigate = useReactRouterNavigate();
+  const location = useLocation();
 
   const [isJobsModalOpen, setIsJobsModalOpen] = useState(false);
   const [isShutdownConfirmOpen, setIsShutdownConfirmOpen] = useState(false);
+  const [isSessionsExpanded, setIsSessionsExpanded] = useState(true);
+  const [isChatsExpanded, setIsChatsExpanded] = useState(true);
 
   const { data: activeJobCountData } = useQuery<ActiveJobCount, Error>({
     queryKey: ['activeJobCount'],
@@ -82,11 +94,27 @@ export function PersistentSidebar() {
   });
   const activeJobCount = activeJobCountData?.total ?? 0;
 
+  const { data: sessionsData } = useQuery({
+    queryKey: ['sessions'],
+    queryFn: fetchSessions,
+    staleTime: 60000,
+  });
+
+  const { data: chatsData } = useQuery({
+    queryKey: ['standaloneChats'],
+    queryFn: fetchStandaloneChats,
+    staleTime: 60000,
+  });
+
+  const recentSessions = sessionsData?.slice(0, 5) || [];
+  const recentChats = chatsData?.slice(0, 5) || [];
+
   const navigateTo = (pagePath: string) => {
     reactRouterNavigate(pagePath);
   };
 
   const isActive = (pagePath: string) => currentPage === pagePath;
+  const isPathActive = (path: string) => location.pathname === path;
 
   const handleJobsQueueClick = () => {
     setIsJobsModalOpen(true);
@@ -170,7 +198,10 @@ export function PersistentSidebar() {
         </div>
 
         {/* Navigation Section */}
-        <nav className="mt-6 flex-grow px-3" aria-label="Main navigation">
+        <nav
+          className="mt-6 flex-grow px-3 overflow-y-auto"
+          aria-label="Main navigation"
+        >
           <ul className="space-y-1">
             {navItems.map((item) => (
               <li key={item.id}>
@@ -202,6 +233,112 @@ export function PersistentSidebar() {
               </li>
             ))}
           </ul>
+
+          {isSidebarOpen && (
+            <>
+              {/* Recent Sessions */}
+              <div className="mt-6">
+                <button
+                  onClick={() => setIsSessionsExpanded(!isSessionsExpanded)}
+                  className={cn(
+                    'flex items-center w-full py-1.5 text-xs font-semibold text-[var(--gray-11)] hover:text-[var(--gray-12)] transition-colors'
+                  )}
+                >
+                  {isSessionsExpanded ? (
+                    <ChevronDown size={14} className="mr-1" />
+                  ) : (
+                    <ChevronRight size={14} className="mr-1" />
+                  )}
+                  RECENT SESSIONS
+                </button>
+                {isSessionsExpanded && (
+                  <ul className="mt-2 space-y-1">
+                    {recentSessions.map((session) => (
+                      <li key={session.id}>
+                        <Link
+                          to={`/sessions/${session.id}`}
+                          className={cn(
+                            'block py-1.5 px-3 text-sm text-[var(--gray-11)] hover:bg-[var(--gray-a3)] hover:text-[var(--gray-12)] rounded-md transition-colors',
+                            isPathActive(`/sessions/${session.id}`)
+                              ? 'bg-[var(--gray-a4)] text-[var(--gray-12)]'
+                              : ''
+                          )}
+                        >
+                          <div className="truncate">
+                            {session.sessionName || session.fileName}
+                          </div>
+                          <div className="text-[10px] text-[var(--gray-a10)]">
+                            {formatTimestamp(new Date(session.date).getTime())}
+                          </div>
+                        </Link>
+                      </li>
+                    ))}
+                    {sessionsData && sessionsData.length > 5 && (
+                      <li>
+                        <Link
+                          to="/sessions-list"
+                          className="block py-1 px-3 text-xs text-[var(--accent-11)] hover:text-[var(--accent-12)] transition-colors"
+                        >
+                          View all ({sessionsData.length})
+                        </Link>
+                      </li>
+                    )}
+                  </ul>
+                )}
+              </div>
+
+              {/* Recent Chats */}
+              <div className="mt-4">
+                <button
+                  onClick={() => setIsChatsExpanded(!isChatsExpanded)}
+                  className={cn(
+                    'flex items-center w-full py-1.5 text-xs font-semibold text-[var(--gray-11)] hover:text-[var(--gray-12)] transition-colors'
+                  )}
+                >
+                  {isChatsExpanded ? (
+                    <ChevronDown size={14} className="mr-1" />
+                  ) : (
+                    <ChevronRight size={14} className="mr-1" />
+                  )}
+                  RECENT CHATS
+                </button>
+                {isChatsExpanded && (
+                  <ul className="mt-2 space-y-1">
+                    {recentChats.map((chat) => (
+                      <li key={chat.id}>
+                        <Link
+                          to={`/chats/${chat.id}`}
+                          className={cn(
+                            'block py-1.5 px-3 text-sm text-[var(--gray-11)] hover:bg-[var(--gray-a3)] hover:text-[var(--gray-12)] rounded-md transition-colors',
+                            isPathActive(`/chats/${chat.id}`)
+                              ? 'bg-[var(--gray-a4)] text-[var(--gray-12)]'
+                              : ''
+                          )}
+                        >
+                          <div className="truncate">
+                            {chat.name || `Chat ${chat.id}`}
+                          </div>
+                          <div className="text-[10px] text-[var(--gray-a10)]">
+                            {formatTimestamp(chat.timestamp)}
+                          </div>
+                        </Link>
+                      </li>
+                    ))}
+                    {chatsData && chatsData.length > 5 && (
+                      <li>
+                        <Link
+                          to="/chats-list"
+                          className="block py-1 px-3 text-xs text-[var(--accent-11)] hover:text-[var(--accent-12)] transition-colors"
+                        >
+                          View all ({chatsData.length})
+                        </Link>
+                      </li>
+                    )}
+                  </ul>
+                )}
+              </div>
+            </>
+          )}
         </nav>
 
         {/* Bottom Section */}

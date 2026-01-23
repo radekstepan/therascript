@@ -23,9 +23,8 @@ import {
   Spinner,
   AlertDialog,
 } from '@radix-ui/themes';
-import { EditDetailsModal } from '../SessionView/Modals/EditDetailsModal';
 import { EditStandaloneChatModal } from '../StandaloneChatView/EditStandaloneChatModal';
-import { CreateAnalysisJobModal } from '../Analysis/CreateAnalysisJobModal'; // <-- ADDED
+import { CreateAnalysisJobModal } from '../Analysis/CreateAnalysisJobModal';
 import {
   fetchSessions,
   deleteSession as deleteSessionApi,
@@ -68,8 +67,6 @@ export function LandingPage() {
   const currentSessionSortCriteria = useAtomValue(sessionSortCriteriaAtom);
   const currentSessionSortDirection = useAtomValue(sessionSortDirectionAtom);
   const setSessionSort = useSetAtom(setSessionSortAtom);
-  const [isEditingModalOpen, setIsEditingModalOpen] = useState(false);
-  const [sessionToEdit, setSessionToEdit] = useState<Session | null>(null);
   const [isDeleteSessionConfirmOpen, setIsDeleteSessionConfirmOpen] =
     useState(false);
   const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null);
@@ -313,13 +310,7 @@ export function LandingPage() {
   const handleStandaloneChatSort = (criteria: StandaloneChatSortCriteria) =>
     setStandaloneChatSort(criteria);
   const handleEditSession = (session: Session) => {
-    setSessionToEdit(session);
-    setIsEditingModalOpen(true);
-  };
-  const handleEditSaveSuccess = () => {
-    setIsEditingModalOpen(false);
-    setSessionToEdit(null);
-    setToast('Session details updated.');
+    navigate(`/sessions/${session.id}`);
   };
   const handleDeleteSessionRequest = (session: Session) => {
     setSessionToDelete(session);
@@ -550,16 +541,6 @@ export function LandingPage() {
         )}
       </Box>
 
-      <EditDetailsModal
-        isOpen={isEditingModalOpen}
-        onOpenChange={(open: boolean) => {
-          setIsEditingModalOpen(open);
-          if (!open) setSessionToEdit(null);
-        }}
-        session={sessionToEdit}
-        onSaveSuccess={handleEditSaveSuccess}
-      />
-      {/* --- FIX: ADD ANALYSIS MODAL --- */}
       <CreateAnalysisJobModal
         isOpen={isAnalysisModalOpen}
         onOpenChange={setIsAnalysisModalOpen}

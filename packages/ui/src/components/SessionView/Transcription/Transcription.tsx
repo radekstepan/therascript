@@ -22,7 +22,6 @@ import {
   AlertDialog,
 } from '@radix-ui/themes';
 import {
-  Pencil1Icon,
   BookmarkIcon,
   CalendarIcon,
   PersonIcon,
@@ -115,7 +114,6 @@ const renderHeaderDetail = (
 interface TranscriptionProps {
   session: Session;
   transcriptContent: StructuredTranscript | undefined;
-  onEditDetailsClick: () => void;
   isTabActive?: boolean;
   initialScrollTop?: number;
   onScrollUpdate?: (scrollTop: number) => void;
@@ -126,7 +124,6 @@ interface TranscriptionProps {
 export function Transcription({
   session,
   transcriptContent,
-  onEditDetailsClick,
   isTabActive,
   initialScrollTop = 0,
   onScrollUpdate,
@@ -597,10 +594,6 @@ export function Transcription({
                 </IconButton>
               </DropdownMenu.Trigger>
               <DropdownMenu.Content align="end">
-                <DropdownMenu.Item onSelect={onEditDetailsClick}>
-                  <Pencil1Icon className="mr-2 h-4 w-4" /> Edit Session Details
-                </DropdownMenu.Item>
-                <DropdownMenu.Separator />
                 <DropdownMenu.Item
                   color="red"
                   onSelect={handleDeleteAudioClick}

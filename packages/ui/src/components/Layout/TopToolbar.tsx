@@ -1,7 +1,7 @@
 // packages/ui/src/components/Layout/TopToolbar.tsx
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
-import { useSetAtom, useAtomValue } from 'jotai';
+import { useSetAtom, useAtomValue, useAtom } from 'jotai';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Box,
@@ -17,12 +17,14 @@ import {
   Cross1Icon,
   ChatBubbleIcon,
   PlusCircledIcon,
+  GearIcon,
 } from '@radix-ui/react-icons';
 import {
   openUploadModalAtom,
   toastMessageAtom,
   isSystemReadyAtom,
 } from '../../store';
+import { isRunConfigSidebarOpenAtom } from '../../store/ui/runConfigSidebarAtom';
 import { createStandaloneChat as createStandaloneChatApi } from '../../api/api';
 import type { StandaloneChatListItem } from '../../types';
 import { cn } from '../../utils';
@@ -35,6 +37,9 @@ export function TopToolbar() {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const isSystemReady = useAtomValue(isSystemReadyAtom);
+  const [isRunConfigSidebarOpen, setIsRunConfigSidebarOpen] = useAtom(
+    isRunConfigSidebarOpenAtom
+  );
 
   const initialSearchQuery = searchParams.get('q') || '';
   const [searchInput, setSearchInput] = useState(initialSearchQuery);
@@ -132,6 +137,10 @@ export function TopToolbar() {
     openUploadModal();
   };
 
+  const handleToggleRunConfigSidebar = () => {
+    setIsRunConfigSidebarOpen(!isRunConfigSidebarOpen);
+  };
+
   return (
     <Box
       className={cn(
@@ -198,6 +207,20 @@ export function TopToolbar() {
 
         {/* Action Buttons - aligned to the right */}
         <Flex gap="3" align="center" flexShrink="0">
+          <IconButton
+            size="2"
+            variant="ghost"
+            color="gray"
+            onClick={handleToggleRunConfigSidebar}
+            title={
+              isRunConfigSidebarOpen
+                ? 'Close Configuration'
+                : 'Open Configuration'
+            }
+            className="border border-gray-200 dark:border-gray-700"
+          >
+            <GearIcon width="16" height="16" />
+          </IconButton>
           <RadixButton
             variant="surface"
             size="2"

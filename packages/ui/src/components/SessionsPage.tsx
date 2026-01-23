@@ -1,5 +1,6 @@
 // packages/ui/src/components/SessionsPage.tsx
 import React, { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -14,7 +15,6 @@ import {
 } from '@radix-ui/themes';
 import { TrashIcon, BarChartIcon } from '@radix-ui/react-icons';
 import { SessionListTable } from './LandingPage/SessionListTable';
-import { EditDetailsModal } from './SessionView/Modals/EditDetailsModal';
 import { CreateAnalysisJobModal } from './Analysis/CreateAnalysisJobModal';
 import { fetchSessions, deleteSession as deleteSessionApi } from '../api/api';
 import {
@@ -30,13 +30,12 @@ import { cn } from '../utils';
 export function SessionsPage() {
   const setToast = useSetAtom(toastMessageAtom);
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   const currentSortCriteria = useAtomValue(sessionSortCriteriaAtom);
   const currentSortDirection = useAtomValue(sessionSortDirectionAtom);
   const setSort = useSetAtom(setSessionSortAtom);
 
-  const [isEditingModalOpen, setIsEditingModalOpen] = useState(false);
-  const [sessionToEdit, setSessionToEdit] = useState<Session | null>(null);
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null);
 
@@ -137,14 +136,7 @@ export function SessionsPage() {
   }, [sessions, currentSortCriteria, currentSortDirection]);
 
   const handleEditSession = (session: Session) => {
-    setSessionToEdit(session);
-    setIsEditingModalOpen(true);
-  };
-
-  const handleEditSaveSuccess = (updatedMetadata: Partial<SessionMetadata>) => {
-    setIsEditingModalOpen(false);
-    setSessionToEdit(null);
-    setToast('Session details updated successfully.');
+    navigate(`/sessions/${session.id}`);
   };
 
   const handleDeleteSessionRequest = (session: Session) => {
@@ -254,17 +246,6 @@ export function SessionsPage() {
         )}
       </Box>
 
-      <EditDetailsModal
-        isOpen={isEditingModalOpen}
-        onOpenChange={(open) => {
-          setIsEditingModalOpen(open);
-          if (!open) setSessionToEdit(null);
-        }}
-        session={sessionToEdit}
-        onSaveSuccess={handleEditSaveSuccess}
-      />
-
-      {/* --- RENDER THE NEW MODAL --- */}
       <CreateAnalysisJobModal
         isOpen={isAnalysisModalOpen}
         onOpenChange={setIsAnalysisModalOpen}

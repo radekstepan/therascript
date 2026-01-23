@@ -19,6 +19,5 @@ export * from './Chat/ChatMessageBubble';
 export * from './Transcription/Transcription';
 
 // Modal Components
-export * from './Modals/EditDetailsModal';
 export * from './Modals/LlmManagementModal';
 export * from './Modals/SelectActiveModelModal';
