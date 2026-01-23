@@ -108,6 +108,8 @@ const GpuDeviceCard: React.FC<{ device: GpuDeviceStats }> = ({ device }) => {
       ? (device.memory.usedMb / device.memory.totalMb) * 100
       : 0;
 
+  const memoryLabel = device.isUnifiedMemory ? 'Memory' : 'VRAM';
+
   return (
     <Card size="2">
       <Flex direction="column" gap="3">
@@ -122,13 +124,13 @@ const GpuDeviceCard: React.FC<{ device: GpuDeviceStats }> = ({ device }) => {
           />
           <ProgressBar
             value={memUsagePercent}
-            label="VRAM Usage"
+            label={`${memoryLabel} Usage`}
             colorFn={getVramColor}
           />
         </Flex>
         <Flex direction="column" gap="1">
           <StatRow
-            label="VRAM"
+            label={memoryLabel}
             value={`${prettyBytes(device.memory.usedMb * 1024 * 1024)} / ${prettyBytes(device.memory.totalMb * 1024 * 1024)}`}
           />
           <StatRow
@@ -317,6 +319,8 @@ export function GpuStatusModal({
         : 'Running on CPU only. NVIDIA GPU metrics are unavailable.'
     : 'Runtime information is not available yet.';
 
+  const isUnifiedMemory = gpuStats?.summary?.isUnifiedMemory ?? false;
+
   return (
     <Dialog.Root open={isOpen} onOpenChange={onOpenChange}>
       <Dialog.Content style={{ maxWidth: 650 }}>
@@ -362,7 +366,7 @@ export function GpuStatusModal({
                     </>
                   )}
 
-                {gpuStats?.systemMemory && (
+                {!isUnifiedMemory && gpuStats?.systemMemory && (
                   <>
                     <SystemMemoryCard memory={gpuStats.systemMemory} />
                     <Separator size="4" />

@@ -48,6 +48,7 @@ export async function getGpuStatsService(): Promise<RuntimeAwareGpuStats> {
         avgTemperatureCelsius: null,
         totalPowerDrawWatts: null,
         totalPowerLimitWatts: null,
+        isUnifiedMemory: false,
       },
       executionProvider: determineExecutionProvider(null),
       systemMemory: {

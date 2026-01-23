@@ -71,6 +71,7 @@ export interface GpuDeviceStats {
     limitWatts: number | null;
   };
   processes: GpuProcess[];
+  isUnifiedMemory: boolean;
 }
 
 export interface SystemMemory {
@@ -94,6 +95,7 @@ export interface GpuStats {
     avgTemperatureCelsius: number | null;
     totalPowerDrawWatts: number | null;
     totalPowerLimitWatts: number | null;
+    isUnifiedMemory: boolean;
   };
   executionProvider?: 'gpu' | 'cpu' | 'metal';
   systemMemory: SystemMemory;

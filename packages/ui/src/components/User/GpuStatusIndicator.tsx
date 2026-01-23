@@ -68,6 +68,8 @@ export function GpuStatusIndicator({
       : 0
     : 0;
 
+  const isUnifiedMemory = gpuStats?.summary?.isUnifiedMemory ?? false;
+
   const getUtilColor = (
     value: number | null
   ): React.ComponentProps<typeof Progress>['color'] => {
@@ -129,7 +131,7 @@ export function GpuStatusIndicator({
                   />
                 </Tooltip>
                 <Tooltip
-                  content={`VRAM: ${prettyBytes(summary.totalMemoryUsedMb * 1024 * 1024)} / ${prettyBytes(summary.totalMemoryMb * 1024 * 1024)}`}
+                  content={`${isUnifiedMemory ? 'Memory' : 'VRAM'}: ${prettyBytes(summary.totalMemoryUsedMb * 1024 * 1024)} / ${prettyBytes(summary.totalMemoryMb * 1024 * 1024)}`}
                 >
                   <Progress
                     size="1"
@@ -149,7 +151,7 @@ export function GpuStatusIndicator({
                       : 'Runtime data unavailable.'}
               </Text>
             )}
-            {gpuStats?.systemMemory && (
+            {!isUnifiedMemory && gpuStats?.systemMemory && (
               <Tooltip
                 content={`System RAM: ${prettyBytes(gpuStats.systemMemory.usedMb * 1024 * 1024)} / ${prettyBytes(gpuStats.systemMemory.totalMb * 1024 * 1024)}`}
               >

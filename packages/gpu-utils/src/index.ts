@@ -116,6 +116,7 @@ function formatGpuDetails(rawJson: {
           limitWatts: parseValue(gpu.power_readings?.power_limit),
         },
         processes: processes,
+        isUnifiedMemory: false,
       };
     }
   );
@@ -145,6 +146,7 @@ function formatGpuDetails(rawJson: {
       memUtilCount: 0,
       tempSum: 0,
       tempCount: 0,
+      isUnifiedMemory: false,
     }
   );
 
@@ -173,6 +175,7 @@ function formatGpuDetails(rawJson: {
         summary.totalPowerDrawWatts > 0 ? summary.totalPowerDrawWatts : null,
       totalPowerLimitWatts:
         summary.totalPowerLimitWatts > 0 ? summary.totalPowerLimitWatts : null,
+      isUnifiedMemory: false,
     },
     executionProvider: 'gpu',
     systemMemory: getSystemMemoryStats(),
@@ -190,12 +193,14 @@ async function getGpuStatsFromSystemInfo(): Promise<Partial<GpuStats>> {
 
     let totalMb = 0;
     let usedMb = 0;
+    let isUnifiedMemory = false;
 
     if (typeof gpu.vram === 'number' && gpu.vram > 0) {
       totalMb = gpu.vram;
     } else if (isApple && gpu.vramDynamic) {
       totalMb = systemMemory.totalMb;
       usedMb = systemMemory.usedMb;
+      isUnifiedMemory = true;
     }
 
     const freeMb = Math.max(0, totalMb - usedMb);
@@ -222,6 +227,7 @@ async function getGpuStatsFromSystemInfo(): Promise<Partial<GpuStats>> {
         limitWatts: null,
       },
       processes: [],
+      isUnifiedMemory,
     };
   });
 
@@ -239,6 +245,7 @@ async function getGpuStatsFromSystemInfo(): Promise<Partial<GpuStats>> {
       }
       if (gpu.utilization.gpuPercent !== null) acc.gpuUtilCount++;
       if (gpu.utilization.memoryPercent !== null) acc.memUtilCount++;
+      if (gpu.isUnifiedMemory) acc.isUnifiedMemory = true;
       return acc;
     },
     {
@@ -256,6 +263,7 @@ async function getGpuStatsFromSystemInfo(): Promise<Partial<GpuStats>> {
       memUtilCount: 0,
       tempSum: 0,
       tempCount: 0,
+      isUnifiedMemory: false,
     }
   );
 
@@ -282,6 +290,7 @@ async function getGpuStatsFromSystemInfo(): Promise<Partial<GpuStats>> {
           : null,
       totalPowerDrawWatts: null,
       totalPowerLimitWatts: null,
+      isUnifiedMemory: summary.isUnifiedMemory,
     },
     systemMemory: getSystemMemoryStats(),
   };
@@ -340,6 +349,7 @@ export async function getGpuStats(): Promise<GpuStats> {
         avgTemperatureCelsius: null,
         totalPowerDrawWatts: null,
         totalPowerLimitWatts: null,
+        isUnifiedMemory: false,
       },
       executionProvider: 'cpu',
       systemMemory: getSystemMemoryStats(),
