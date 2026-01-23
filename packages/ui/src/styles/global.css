@@ -239,12 +239,7 @@ button[class*='rt-IconButton'] {
   }
 }
 
-/* Enhanced focus indicators */
-:focus-visible {
-  outline: 2px solid var(--accent-8);
-  outline-offset: 2px;
-  border-radius: var(--radius-2);
-}
+/* Enhanced focus indicators - removed to allow component-level focus styles */
 
 /* DropdownMenu smooth transitions */
 [class*='rt-DropdownMenuContent'] {

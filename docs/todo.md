@@ -3,3 +3,4 @@
 - how does max context work? If unreliable we can hardcode in config per model name
 - now that we have max context, could we tweak a prompt in deep analysis map reduce to limit the mapping step so that when reducing we don't run out of memory?
 - fix the double ram bars on macbook when showing usage in the sidebar on the left
+- the spinner on Upload New Session while transcribing, uploading etc. is redundant We don't need any green checkmarks either.

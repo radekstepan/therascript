@@ -346,13 +346,8 @@ export function UploadModal({ isOpen }: UploadModalProps) {
     overallIsLoading
       ? 'bg-gray-100 dark:bg-gray-800/50 cursor-not-allowed opacity-70 border-gray-300 dark:border-gray-700'
       : 'cursor-pointer',
-    dragActive && !overallIsLoading
-      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-      : modalFile && !overallIsLoading
-        ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20'
-        : !overallIsLoading
-          ? 'border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500'
-          : ''
+    !overallIsLoading &&
+      'border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500'
   );
 
   const getProgressText = () => {
@@ -439,29 +434,11 @@ export function UploadModal({ isOpen }: UploadModalProps) {
               disabled={overallIsLoading}
             />
             <Flex direction="column" align="center" gap="1">
-              {hasFailed ? (
+              {hasFailed && (
                 <ExclamationTriangleIcon
                   width="32"
                   height="32"
                   className="text-red-600"
-                />
-              ) : overallIsLoading ? (
-                <Spinner size="3" />
-              ) : modalFile ? (
-                <CheckCircledIcon
-                  width="32"
-                  height="32"
-                  className="text-emerald-600"
-                />
-              ) : (
-                <UploadIcon
-                  width="32"
-                  height="32"
-                  className={cn(
-                    dragActive
-                      ? 'text-blue-500'
-                      : 'text-gray-400 dark:text-gray-500'
-                  )}
                 />
               )}
               <Text size="2" color="gray" mt="2">
@@ -530,8 +507,7 @@ export function UploadModal({ isOpen }: UploadModalProps) {
                 <Box p="2">
                   {isLoadingLogs ? (
                     <Flex align="center" justify="center" p="4">
-                      <Spinner size="1" />
-                      <Text ml="2" color="gray" size="1">
+                      <Text color="gray" size="1">
                         Loading logs...
                       </Text>
                     </Flex>
@@ -691,7 +667,7 @@ export function UploadModal({ isOpen }: UploadModalProps) {
             >
               {isUploading ? (
                 <>
-                  <Spinner size="2" />
+                  <UploadIcon />
                   <Text ml="2">Uploading...</Text>
                 </>
               ) : (

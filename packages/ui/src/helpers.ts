@@ -1,3 +1,5 @@
+import { formatDistanceToNow } from 'date-fns';
+
 /**
  * Gets today's date as a string in "YYYY-MM-DD" format.
  */
@@ -7,6 +9,16 @@ export const getTodayDateString = (): string => {
   const month = String(today.getMonth() + 1).padStart(2, '0');
   const day = String(today.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+};
+
+/**
+ * Formats a timestamp into a human-readable "time ago" string (e.g., "2 hours ago").
+ */
+export const formatTimeAgo = (date?: number | string | Date): string => {
+  if (!date) return '';
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return '';
+  return formatDistanceToNow(d, { addSuffix: true });
 };
 
 /**

@@ -47,7 +47,7 @@ import { fetchSessions } from '../../api/session';
 import { fetchStandaloneChats } from '../../api/chat';
 import { GpuStatusIndicator } from '../User/GpuStatusIndicator';
 import type { ActiveJobCount } from '../../types';
-import { formatTimestamp } from '../../helpers';
+import { formatTimestamp, formatTimeAgo } from '../../helpers';
 
 interface NavItemType {
   id: string;
@@ -106,8 +106,8 @@ export function PersistentSidebar() {
     staleTime: 60000,
   });
 
-  const recentSessions = sessionsData?.slice(0, 5) || [];
-  const recentChats = chatsData?.slice(0, 5) || [];
+  const recentSessions = sessionsData?.slice(0, 2) || [];
+  const recentChats = chatsData?.slice(0, 2) || [];
 
   const navigateTo = (pagePath: string) => {
     reactRouterNavigate(pagePath);
@@ -268,21 +268,11 @@ export function PersistentSidebar() {
                             {session.sessionName || session.fileName}
                           </div>
                           <div className="text-[10px] text-[var(--gray-a10)]">
-                            {formatTimestamp(new Date(session.date).getTime())}
+                            {formatTimeAgo(session.date)}
                           </div>
                         </Link>
                       </li>
                     ))}
-                    {sessionsData && sessionsData.length > 5 && (
-                      <li>
-                        <Link
-                          to="/sessions-list"
-                          className="block py-1 px-3 text-xs text-[var(--accent-11)] hover:text-[var(--accent-12)] transition-colors"
-                        >
-                          View all ({sessionsData.length})
-                        </Link>
-                      </li>
-                    )}
                   </ul>
                 )}
               </div>
@@ -319,21 +309,11 @@ export function PersistentSidebar() {
                             {chat.name || `Chat ${chat.id}`}
                           </div>
                           <div className="text-[10px] text-[var(--gray-a10)]">
-                            {formatTimestamp(chat.timestamp)}
+                            {formatTimeAgo(chat.timestamp)}
                           </div>
                         </Link>
                       </li>
                     ))}
-                    {chatsData && chatsData.length > 5 && (
-                      <li>
-                        <Link
-                          to="/chats-list"
-                          className="block py-1 px-3 text-xs text-[var(--accent-11)] hover:text-[var(--accent-12)] transition-colors"
-                        >
-                          View all ({chatsData.length})
-                        </Link>
-                      </li>
-                    )}
                   </ul>
                 )}
               </div>
@@ -344,20 +324,13 @@ export function PersistentSidebar() {
         {/* Bottom Section */}
         <div
           className={cn(
-            'absolute bottom-0 w-full p-4',
-            'border-t border-[var(--gray-a4)] bg-[var(--gray-2)]/50',
+            'w-full p-4 mt-auto',
+            'border-t border-[var(--gray-a4)] bg-[var(--gray-2)]',
             !isSidebarOpen && 'flex flex-col items-center space-y-2'
           )}
         >
           {isSidebarOpen ? (
             <div className="mb-2">
-              <Text
-                size="1"
-                color="gray"
-                className="mb-1 ml-1 block font-medium uppercase tracking-wider"
-              >
-                Theme
-              </Text>
               <Select.Root
                 value={theme}
                 onValueChange={(value) => setTheme(value as Theme)}

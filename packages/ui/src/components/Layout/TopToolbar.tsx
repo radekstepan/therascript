@@ -171,8 +171,8 @@ export function TopToolbar() {
             }
             name="q"
             variant="surface"
-            radius="full" // More modern pill shape
-            className="bg-slate-100 dark:bg-slate-800 border-transparent focus-within:border-[var(--accent-8)] focus-within:ring-1 focus-within:ring-[var(--accent-8)] shadow-sm"
+            radius="medium"
+            className="focus-visible:outline-none [&_input]:focus-visible:outline-none"
           >
             <TextField.Slot>
               <MagnifyingGlassIcon
