@@ -1,3 +1,3 @@
 - go through report.md and fix
 - do another round of code review
-- now that we have max context, could we tweak a prompt in deep analysis map reduce to limit the mapping step so that when reducing we don't run out of memory?
+

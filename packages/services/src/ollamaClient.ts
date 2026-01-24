@@ -30,6 +30,7 @@ export interface StreamLlmChatOptions {
   temperature?: number;
   topP?: number;
   repeatPenalty?: number;
+  maxCompletionTokens?: number;
 }
 
 export interface StreamResult {
@@ -112,6 +113,7 @@ export async function* streamLlmChat(
     temperature,
     topP,
     repeatPenalty,
+    maxCompletionTokens,
   } = options || {};
 
   const startTime = Date.now();
@@ -162,6 +164,10 @@ export async function* streamLlmChat(
 
   if (repeatPenalty !== undefined) {
     ollamaOptions.repeat_penalty = repeatPenalty;
+  }
+
+  if (maxCompletionTokens !== undefined) {
+    ollamaOptions.num_predict = maxCompletionTokens;
   }
 
   const ollamaMessages = messages.map((m) => ({

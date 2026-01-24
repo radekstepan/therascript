@@ -93,7 +93,7 @@ export const SYSTEM_PROMPT_TEMPLATES = {
   ANALYSIS_STRATEGIST: {
     title: 'system_analysis_strategist',
     text: `You are an expert AI analysis strategist. Your job is to break down a complex, multi-document user query into a two-part MapReduce plan. The user's query will be run against a series of therapy session transcripts, which are ordered chronologically. Your plan must be in a JSON format with two keys:
-1. "intermediate_question": A question or task that can be executed on **each single transcript** independently to extract the necessary information. This question must be self-contained and make sense without seeing other documents.
+1. "intermediate_question": A question or task that can be executed on **each single transcript** independently to extract the necessary information. This question must be self-contained and make sense without seeing other documents. IMPORTANT: You MUST include an explicit length constraint at the end of your intermediate_question (e.g., "limit to 200 words", "max 150 words", "limit to 3 bullet points"). This prevents memory issues when many summaries are combined later.
 2. "final_synthesis_instructions": Instructions for a final AI on how to take all the intermediate answers (which will be provided in chronological order) and synthesize them into a single, cohesive answer to the user's original query.
 
 ---
@@ -102,7 +102,7 @@ export const SYSTEM_PROMPT_TEMPLATES = {
 
 **Your JSON Output:**
 {
-  "intermediate_question": "From this single transcript, extract the following data points related to depression. If a point is not mentioned, state 'not mentioned'.\\n- Patient's Self-Reported Mood:\\n- Specific Depression Symptoms Mentioned (e.g., low energy, anhedonia):\\n- Mention of Coping Skills for Depression:\\n- Any Objective Scores Mentioned (e.g., PHQ-9, BDI):",
+  "intermediate_question": "From this single transcript, extract the following data points related to depression. If a point is not mentioned, state 'not mentioned'.\\n- Patient's Self-Reported Mood:\\n- Specific Depression Symptoms Mentioned (e.g., low energy, anhedonia):\\n- Mention of Coping Skills for Depression:\\n- Any Objective Scores Mentioned (e.g., PHQ-9, BDI):\\n\\nLimit your response to 150 words.",
   "final_synthesis_instructions": "You will be given a series of chronologically ordered data extractions from multiple therapy sessions. Your task is to write a narrative that describes the patient's progress with depression over time. Synthesize the data points to identify trends, improvements, setbacks, and how the discussion of symptoms and skills has evolved across the sessions."
 }
 ---
@@ -111,7 +111,7 @@ export const SYSTEM_PROMPT_TEMPLATES = {
 
 **Your JSON Output:**
 {
-  "intermediate_question": "Acting as a clinical supervisor, review this single transcript to identify potential missed opportunities. For each one you find, describe: \\n1. The Patient's Cue/Statement.\\n2. The specific opportunity the therapist missed (e.g., chance to validate, opportunity for Socratic questioning, deeper emotional exploration). \\nIf no significant opportunities were missed, state that clearly.",
+  "intermediate_question": "Acting as a clinical supervisor, review this single transcript to identify potential missed opportunities. For each one you find, describe: \\n1. The Patient's Cue/Statement.\\n2. The specific opportunity the therapist missed (e.g., chance to validate, opportunity for Socratic questioning, deeper emotional exploration). \\nIf no significant opportunities were missed, state that clearly.\\n\\nLimit your response to 200 words.",
   "final_synthesis_instructions": "You will receive a list of potential missed opportunities from several sessions. Your task is to identify and summarize any *consistent patterns* of missed opportunities that appear across multiple sessions. Focus on recurring themes in the therapist's approach that could be areas for growth."
 }
 ---
@@ -132,17 +132,25 @@ REQUEST: "{{USER_PROMPT}}"`,
 function seedSystemTemplates(dbInstance: DB) {
   console.log('[db Seeder] Checking for system prompt templates...');
   const checkStmt = dbInstance.prepare(
-    'SELECT 1 FROM templates WHERE title = ?'
+    'SELECT text FROM templates WHERE title = ?'
   );
   const insertStmt = dbInstance.prepare(
     'INSERT INTO templates (title, text, createdAt) VALUES (?, ?, ?)'
   );
+  const updateStmt = dbInstance.prepare(
+    'UPDATE templates SET text = ?, createdAt = ? WHERE title = ?'
+  );
 
   for (const template of Object.values(SYSTEM_PROMPT_TEMPLATES)) {
-    const exists = checkStmt.get(template.title);
-    if (!exists) {
+    const existing = checkStmt.get(template.title) as
+      | { text: string }
+      | undefined;
+    if (!existing) {
       insertStmt.run(template.title, template.text, Date.now());
       console.log(`[db Seeder] Seeded system template: "${template.title}"`);
+    } else if (existing.text !== template.text) {
+      updateStmt.run(template.text, Date.now(), template.title);
+      console.log(`[db Seeder] Updated system template: "${template.title}"`);
     }
   }
 }

@@ -121,7 +121,7 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
               id: 0,
               chatId: 0,
               sender: 'user',
-              text: `USER'S QUESTION: "${jobRecord?.original_prompt}"\n\nTRANSCRIPT: """${transcriptText}"""\n\nYOUR TASK: Analyze the transcript and write a concise summary that directly answers the user's question *only for this specific session*.`,
+              text: `USER'S QUESTION: "${jobRecord?.original_prompt}"\n\nTRANSCRIPT: """${transcriptText}"""\n\nYOUR TASK: Analyze the transcript and write a concise summary that directly answers the user's question *only for this specific session* (max 250 words).`,
               timestamp: Date.now(),
             },
           ];
@@ -151,6 +151,7 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
           contextSize: jobRecord?.context_size || undefined,
           abortSignal: abortController.signal,
           ollamaBaseUrl: config.ollama.baseURL,
+          maxCompletionTokens: 500,
         });
         let iterResult = await mapGenerator.next();
         while (!iterResult.done) {

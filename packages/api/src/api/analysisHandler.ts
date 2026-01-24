@@ -262,8 +262,25 @@ export const createAnalysisJobHandler = async ({
     const modelMaxContext = selectedModelInfo?.defaultContextSize || 8192; // Fallback to 8k if not found
 
     const ANSWER_BUFFER = 4096; // Generous buffer for the answer
-    const calculatedContextSize =
-      promptTokens + maxTranscriptTokens + ANSWER_BUFFER;
+
+    let calculatedContextSize: number;
+    if (useAdvancedStrategy) {
+      const TARGET_SUMMARY_TOKENS = 500; // Aligned with maxCompletionTokens cap in analysisProcessor
+      const PER_SESSION_OVERHEAD = 30; // Headers, quotes, formatting per session
+      const FINAL_ANSWER_BUFFER = 4096;
+      const reducePhaseContext =
+        sessionIds.length * (TARGET_SUMMARY_TOKENS + PER_SESSION_OVERHEAD) +
+        FINAL_ANSWER_BUFFER;
+
+      // Use the maximum of map phase or reduce phase requirements
+      calculatedContextSize = Math.max(
+        promptTokens + maxTranscriptTokens + ANSWER_BUFFER,
+        reducePhaseContext
+      );
+    } else {
+      calculatedContextSize =
+        promptTokens + maxTranscriptTokens + ANSWER_BUFFER;
+    }
 
     if (calculatedContextSize > modelMaxContext) {
       throw new BadRequestError(
