@@ -32,7 +32,6 @@ import { UploadModal } from './components/UploadModal/UploadModal';
 import { PersistentSidebar } from './components/Layout/PersistentSidebar';
 import { GeneratedBackground } from './components/Layout/GeneratedBackground';
 import { TopToolbar } from './components/Layout/TopToolbar';
-import { RunConfigSidebar } from './components/Layout/RunConfigSidebar';
 
 // Store
 import {
@@ -270,7 +269,6 @@ function App() {
                 <PageContentManager />
               </main>
             </div>
-            <RunConfigSidebar /> {/* Right sidebar, managed internally */}
           </div>
 
           <UploadModal isOpen={isModalOpen} />
