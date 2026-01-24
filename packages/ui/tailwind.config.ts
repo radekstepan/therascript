@@ -59,7 +59,7 @@ module.exports = {
   },
   // Tailwind CSS plugins
   plugins: [
-    // require("tailwindcss-animate"), // Example: Plugin for animation utilities
+    require('tailwindcss-animate'), // Enable animation utilities
     // require('@tailwindcss/forms'),   // Example: Plugin for form styling resets (may conflict with Radix)
     // Add other necessary Tailwind plugins here
   ],

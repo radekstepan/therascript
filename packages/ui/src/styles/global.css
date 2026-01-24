@@ -222,20 +222,32 @@ button[class*='rt-IconButton'] {
   box-shadow: 0 2px 8px -2px rgba(0, 0, 0, 0.12);
 }
 
-/* Spinner fade-in animation */
-[class*='rt-Spinner'] {
-  animation: spinnerFadeIn 0.2s ease-in;
+/* Spinner fade-in animation - only applies to the container, not the leaves */
+.rt-Spinner {
+  animation: spinnerFadeIn 0.2s ease-in forwards;
 }
 
 @keyframes spinnerFadeIn {
   from {
     opacity: 0;
-    transform: scale(0.8);
   }
   to {
-    opacity: 1;
-    transform: scale(1);
+    opacity: var(--spinner-opacity, 0.65);
   }
+}
+
+/* Explicit spin utility for custom icons/loaders */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
 }
 
 /* Enhanced focus indicators - removed to allow component-level focus styles */
