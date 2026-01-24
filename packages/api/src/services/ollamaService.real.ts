@@ -34,6 +34,9 @@ import {
 import {
   getActiveModel,
   getConfiguredContextSize,
+  getConfiguredTemperature,
+  getConfiguredTopP,
+  getConfiguredRepeatPenalty,
 } from './activeModelService.js';
 import { templateRepository } from '@therascript/data';
 import { SYSTEM_PROMPT_TEMPLATES } from '@therascript/db/dist/sqliteService.js';
@@ -1100,7 +1103,14 @@ export const reloadActiveModelContext = async (): Promise<void> => {
 export const streamChatResponse = async (
   contextTranscript: string | null,
   chatHistory: BackendChatMessage[],
-  options?: { model?: string; contextSize?: number; signal?: AbortSignal }
+  options?: {
+    model?: string;
+    contextSize?: number;
+    signal?: AbortSignal;
+    temperature?: number;
+    topP?: number;
+    repeatPenalty?: number;
+  }
 ): Promise<AsyncIterable<ChatResponse>> => {
   const modelToUse = options?.model || getActiveModel();
   const contextSize =
@@ -1192,9 +1202,17 @@ export const streamChatResponse = async (
   // Convert AsyncGenerator<string, StreamResult> to AsyncIterable<ChatResponse>
   async function* convertToChatResponse(): AsyncIterable<ChatResponse> {
     try {
+      const temperature = options?.temperature ?? getConfiguredTemperature();
+      const topP = options?.topP ?? getConfiguredTopP();
+      const repeatPenalty =
+        options?.repeatPenalty ?? getConfiguredRepeatPenalty();
+
       const streamGenerator = streamLlmChat(messages, {
         model: modelToUse,
         contextSize: contextSize ?? undefined,
+        temperature,
+        topP,
+        repeatPenalty,
         abortSignal: options?.signal,
         ollamaBaseUrl: config.ollama.baseURL,
       });

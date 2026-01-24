@@ -23,7 +23,14 @@ export interface OllamaServiceInterface {
   streamChatResponse: (
     contextTranscript: string | null,
     chatHistory: BackendChatMessage[],
-    options?: { model?: string; contextSize?: number; signal?: AbortSignal }
+    options?: {
+      model?: string;
+      contextSize?: number;
+      signal?: AbortSignal;
+      temperature?: number;
+      topP?: number;
+      repeatPenalty?: number;
+    }
   ) => Promise<AsyncIterable<ChatResponse>>;
   startPullModelJob: (modelName: string) => string;
   getPullModelJobStatus: (jobId: string) => OllamaPullJobStatus | null;

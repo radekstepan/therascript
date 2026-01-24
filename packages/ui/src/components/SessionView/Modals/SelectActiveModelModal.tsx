@@ -14,6 +14,7 @@ import {
   Strong,
   Tooltip,
   Badge,
+  Slider,
 } from '@radix-ui/themes';
 import {
   InfoCircledIcon,
@@ -60,6 +61,10 @@ export function SelectActiveModelModal({
   const [contextSizeInput, setContextSizeInput] = useState('');
   const [userTouchedContext, setUserTouchedContext] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [temperature, setTemperature] = useState(0.7);
+  const [topP, setTopP] = useState(0.9);
+  const [repeatPenalty, setRepeatPenalty] = useState(1.1);
   const [vramEstimate, setVramEstimate] = useState<{
     estimated_vram_bytes: number | null;
     vram_per_token_bytes: number | null;
@@ -88,7 +93,17 @@ export function SelectActiveModelModal({
     mutationFn: (variables: {
       modelName: string;
       contextSize?: number | null;
-    }) => setOllamaModel(variables.modelName, variables.contextSize),
+      temperature?: number;
+      topP?: number;
+      repeatPenalty?: number;
+    }) =>
+      setOllamaModel(
+        variables.modelName,
+        variables.contextSize,
+        variables.temperature,
+        variables.topP,
+        variables.repeatPenalty
+      ),
     onSuccess: () => {
       onModelSuccessfullySet();
       queryClient.invalidateQueries({ queryKey: ['ollamaStatus'] });
@@ -104,16 +119,24 @@ export function SelectActiveModelModal({
       setSelectedModel(currentActiveModelName || '');
       if (currentConfiguredContextSize && currentConfiguredContextSize > 0) {
         setContextSizeInput(String(currentConfiguredContextSize));
-        // Preserve existing custom size; avoid auto-overwriting with recommended
         setUserTouchedContext(true);
       } else {
-        // Start empty; will auto-fill with recommended when available
         setContextSizeInput('');
         setUserTouchedContext(false);
       }
+      setTemperature(ollamaStatus?.configuredTemperature ?? 0.7);
+      setTopP(ollamaStatus?.configuredTopP ?? 0.9);
+      setRepeatPenalty(ollamaStatus?.configuredRepeatPenalty ?? 1.1);
       setError(null);
     }
-  }, [isOpen, currentActiveModelName, currentConfiguredContextSize]);
+  }, [
+    isOpen,
+    currentActiveModelName,
+    currentConfiguredContextSize,
+    ollamaStatus?.configuredTemperature,
+    ollamaStatus?.configuredTopP,
+    ollamaStatus?.configuredRepeatPenalty,
+  ]);
 
   const handleSave = () => {
     setError(null);
@@ -128,7 +151,13 @@ export function SelectActiveModelModal({
       setError('Context size must be a positive number if provided.');
       return;
     }
-    setModelMutation.mutate({ modelName: selectedModel, contextSize });
+    setModelMutation.mutate({
+      modelName: selectedModel,
+      contextSize,
+      temperature,
+      topP,
+      repeatPenalty,
+    });
   };
 
   const isSaving = setModelMutation.isPending;
@@ -286,6 +315,61 @@ export function SelectActiveModelModal({
               disabled={isSaving}
             />
           </label>
+
+          <Box>
+            <Text as="div" size="2" mb="2" weight="medium">
+              Model Parameters
+            </Text>
+            <Box className="space-y-4">
+              <Box>
+                <Flex align="center" justify="between" mb="2">
+                  <Text size="1">Temperature</Text>
+                  <Badge variant="outline" size="1">
+                    {temperature.toFixed(1)}
+                  </Badge>
+                </Flex>
+                <Slider
+                  value={[temperature]}
+                  onValueChange={([value]) => setTemperature(value)}
+                  min={0}
+                  max={2}
+                  step={0.1}
+                />
+              </Box>
+
+              <Box>
+                <Flex align="center" justify="between" mb="2">
+                  <Text size="1">Top-P</Text>
+                  <Badge variant="outline" size="1">
+                    {topP.toFixed(2)}
+                  </Badge>
+                </Flex>
+                <Slider
+                  value={[topP]}
+                  onValueChange={([value]) => setTopP(value)}
+                  min={0}
+                  max={1}
+                  step={0.05}
+                />
+              </Box>
+
+              <Box>
+                <Flex align="center" justify="between" mb="2">
+                  <Text size="1">Repeat Penalty</Text>
+                  <Badge variant="outline" size="1">
+                    {repeatPenalty.toFixed(1)}
+                  </Badge>
+                </Flex>
+                <Slider
+                  value={[repeatPenalty]}
+                  onValueChange={([value]) => setRepeatPenalty(value)}
+                  min={0.5}
+                  max={2}
+                  step={0.1}
+                />
+              </Box>
+            </Box>
+          </Box>
 
           {vramEstimate && (
             <Callout.Root size="1" color={vramEstimate.error ? 'gray' : 'blue'}>

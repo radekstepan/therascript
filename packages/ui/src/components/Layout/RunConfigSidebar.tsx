@@ -2,29 +2,16 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { useAtom, useAtomValue } from 'jotai';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import {
-  Box,
-  Flex,
-  Text,
-  TextField,
-  Slider,
-  Badge,
-  Select,
-} from '@radix-ui/themes';
+import { Box, Flex, Text, TextField, Select, Badge } from '@radix-ui/themes';
 import {
   GearIcon,
   ChevronRightIcon,
   ChevronDownIcon,
-  LightningBoltIcon,
   InfoCircledIcon,
 } from '@radix-ui/react-icons';
 import {
   isRunConfigSidebarOpenAtom,
   runConfigSidebarWidthAtom,
-  temperatureAtom,
-  topPAtom,
-  repeatPenaltyAtom,
-  systemPromptOverrideAtom,
 } from '../../store/ui/runConfigSidebarAtom';
 import { SESSION_TYPES, THERAPY_TYPES } from '../../constants';
 import { updateSessionMetadata } from '../../api/session';
@@ -38,8 +25,6 @@ import {
 } from '../../helpers';
 
 interface SectionState {
-  modelParams: boolean;
-  systemPrompt: boolean;
   metadata: boolean;
 }
 
@@ -50,16 +35,8 @@ export function RunConfigSidebar() {
   }>();
   const [isOpen, setIsOpen] = useAtom(isRunConfigSidebarOpenAtom);
   const sidebarWidth = useAtomValue(runConfigSidebarWidthAtom);
-  const [temperature, setTemperature] = useAtom(temperatureAtom);
-  const [topP, setTopP] = useAtom(topPAtom);
-  const [repeatPenalty, setRepeatPenalty] = useAtom(repeatPenaltyAtom);
-  const [systemPromptOverrides, setSystemPromptOverrides] = useAtom(
-    systemPromptOverrideAtom
-  );
 
   const [sections, setSections] = useState<SectionState>({
-    modelParams: true,
-    systemPrompt: true,
     metadata: true,
   });
 
@@ -83,10 +60,6 @@ export function RunConfigSidebar() {
       }
     };
   }, []);
-
-  const currentSystemPromptOverride = currentSessionId
-    ? systemPromptOverrides[currentSessionId] || ''
-    : '';
 
   const queryClient = useQueryClient();
 
@@ -169,14 +142,6 @@ export function RunConfigSidebar() {
     debouncedSave(newState);
   };
 
-  const handleSystemPromptChange = (value: string) => {
-    if (!currentSessionId) return;
-    setSystemPromptOverrides({
-      ...systemPromptOverrides,
-      [currentSessionId]: value,
-    });
-  };
-
   const toggleSection = (section: keyof SectionState) => {
     setSections((prev) => ({ ...prev, [section]: !prev[section] }));
   };
@@ -215,147 +180,6 @@ export function RunConfigSidebar() {
       </div>
 
       <div className="flex-grow overflow-y-auto px-4 py-4 space-y-6">
-        <Box>
-          <button
-            onClick={() => toggleSection('modelParams')}
-            className="flex items-center w-full text-left mb-3"
-          >
-            {sections.modelParams ? (
-              <ChevronDownIcon
-                width={14}
-                height={14}
-                className="mr-2 text-[var(--gray-10)]"
-              />
-            ) : (
-              <ChevronRightIcon
-                width={14}
-                height={14}
-                className="mr-2 text-[var(--gray-10)]"
-              />
-            )}
-            <Text size="2" weight="medium" className="text-[var(--gray-12)]">
-              Model Parameters
-            </Text>
-          </button>
-
-          {sections.modelParams && (
-            <Box className="space-y-4 pl-6">
-              <Box>
-                <Flex align="center" justify="between" mb="2">
-                  <Text size="1" className="text-[var(--gray-11)]">
-                    Temperature
-                  </Text>
-                  <Badge variant="outline" size="1">
-                    {temperature.toFixed(1)}
-                  </Badge>
-                </Flex>
-                <Slider
-                  value={[temperature]}
-                  onValueChange={([value]) => setTemperature(value)}
-                  min={0}
-                  max={2}
-                  step={0.1}
-                  className="w-full"
-                />
-              </Box>
-
-              <Box>
-                <Flex align="center" justify="between" mb="2">
-                  <Text size="1" className="text-[var(--gray-11)]">
-                    Top-P
-                  </Text>
-                  <Badge variant="outline" size="1">
-                    {topP.toFixed(2)}
-                  </Badge>
-                </Flex>
-                <Slider
-                  value={[topP]}
-                  onValueChange={([value]) => setTopP(value)}
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  className="w-full"
-                />
-              </Box>
-
-              <Box>
-                <Flex align="center" justify="between" mb="2">
-                  <Text size="1" className="text-[var(--gray-11)]">
-                    Repeat Penalty
-                  </Text>
-                  <Badge variant="outline" size="1">
-                    {repeatPenalty.toFixed(1)}
-                  </Badge>
-                </Flex>
-                <Slider
-                  value={[repeatPenalty]}
-                  onValueChange={([value]) => setRepeatPenalty(value)}
-                  min={0.5}
-                  max={2}
-                  step={0.1}
-                  className="w-full"
-                />
-              </Box>
-            </Box>
-          )}
-        </Box>
-
-        <Box>
-          <button
-            onClick={() => toggleSection('systemPrompt')}
-            className="flex items-center w-full text-left mb-3"
-          >
-            {sections.systemPrompt ? (
-              <ChevronDownIcon
-                width={14}
-                height={14}
-                className="mr-2 text-[var(--gray-10)]"
-              />
-            ) : (
-              <ChevronRightIcon
-                width={14}
-                height={14}
-                className="mr-2 text-[var(--gray-10)]"
-              />
-            )}
-            <Flex align="center" gap="2">
-              <LightningBoltIcon
-                width={14}
-                height={14}
-                className="text-[var(--gray-10)]"
-              />
-              <Text size="2" weight="medium" className="text-[var(--gray-12)]">
-                System Prompt
-              </Text>
-            </Flex>
-          </button>
-
-          {sections.systemPrompt && (
-            <Box className="pl-6">
-              <Flex align="center" gap="2" mb="2">
-                <InfoCircledIcon
-                  width={12}
-                  height={12}
-                  className="text-[var(--gray-a10)]"
-                />
-                <Text size="1" color="gray">
-                  Override the default system prompt for this session
-                </Text>
-              </Flex>
-              <textarea
-                value={currentSystemPromptOverride}
-                onChange={(e) => handleSystemPromptChange(e.target.value)}
-                placeholder="Enter custom system prompt..."
-                rows={6}
-                className={cn(
-                  'w-full flex-grow rounded-md border border-[--gray-a7] bg-[--gray-1] focus:border-[--accent-8] focus:shadow-[0_0_0_1px_var(--accent-8)]',
-                  'px-2 py-1 text-sm text-[--gray-12] placeholder:text-[--gray-a9] focus-visible:outline-none resize-y min-h-[120px]'
-                )}
-              />
-            </Box>
-          )}
-        </Box>
-
         {shouldRenderMetadata && (
           <Box>
             <button

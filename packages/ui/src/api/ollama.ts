@@ -63,13 +63,19 @@ export const fetchAvailableModels =
  */
 export const setOllamaModel = async (
   modelName: string,
-  contextSize?: number | null
+  contextSize?: number | null,
+  temperature?: number,
+  topP?: number,
+  repeatPenalty?: number
 ): Promise<{ message: string }> => {
   // Prepare payload, ensuring contextSize is null if invalid or not provided
   const payload = {
     modelName,
     contextSize:
       contextSize === undefined || (contextSize ?? 0) <= 0 ? null : contextSize,
+    temperature,
+    topP,
+    repeatPenalty,
   };
   const response = await axios.post('/api/ollama/set-model', payload);
   return response.data;

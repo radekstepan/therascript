@@ -27,6 +27,9 @@ export interface StreamLlmChatOptions {
   timeoutMs?: number;
   stopTokens?: string[];
   ollamaBaseUrl?: string;
+  temperature?: number;
+  topP?: number;
+  repeatPenalty?: number;
 }
 
 export interface StreamResult {
@@ -106,6 +109,9 @@ export async function* streamLlmChat(
     timeoutMs = 120000,
     stopTokens = DEFAULT_STOP_TOKENS,
     ollamaBaseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
+    temperature,
+    topP,
+    repeatPenalty,
   } = options || {};
 
   const startTime = Date.now();
@@ -144,6 +150,18 @@ export async function* streamLlmChat(
 
   if (contextSize !== null && contextSize !== undefined) {
     ollamaOptions.num_ctx = contextSize;
+  }
+
+  if (temperature !== undefined) {
+    ollamaOptions.temperature = temperature;
+  }
+
+  if (topP !== undefined) {
+    ollamaOptions.top_p = topP;
+  }
+
+  if (repeatPenalty !== undefined) {
+    ollamaOptions.repeat_penalty = repeatPenalty;
   }
 
   const ollamaMessages = messages.map((m) => ({

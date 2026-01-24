@@ -17,6 +17,9 @@ import config from '@therascript/config';
 import {
   getActiveModel,
   getConfiguredContextSize,
+  getConfiguredTemperature,
+  getConfiguredTopP,
+  getConfiguredRepeatPenalty,
 } from './activeModelService.js';
 
 // --- Mock Configuration ---
@@ -146,7 +149,14 @@ export const reloadActiveModelContext = async (): Promise<void> => {
 export const streamChatResponse = async (
   contextTranscript: string | null,
   chatHistory: BackendChatMessage[],
-  options?: { model?: string; contextSize?: number; signal?: AbortSignal }
+  options?: {
+    model?: string;
+    contextSize?: number;
+    signal?: AbortSignal;
+    temperature?: number;
+    topP?: number;
+    repeatPenalty?: number;
+  }
 ): Promise<AsyncIterable<ChatResponse>> => {
   const modelToUse = options?.model || getActiveModel();
   const contextSize =

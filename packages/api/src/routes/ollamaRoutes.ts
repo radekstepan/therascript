@@ -23,9 +23,12 @@ import {
   getVramPerToken,
 } from '../services/ollamaService.js';
 import {
-  setActiveModelAndContext,
+  setActiveModelAndContextAndParams,
   getActiveModel,
   getConfiguredContextSize,
+  getConfiguredTemperature,
+  getConfiguredTopP,
+  getConfiguredRepeatPenalty,
 } from '../services/activeModelService.js';
 import type {
   OllamaModelInfo,
@@ -61,6 +64,9 @@ const OllamaStatusResponseSchema = t.Object({
   loaded: t.Boolean(),
   details: t.Optional(OllamaModelInfoSchema),
   configuredContextSize: t.Optional(t.Union([t.Number(), t.Null()])),
+  configuredTemperature: t.Optional(t.Number()),
+  configuredTopP: t.Optional(t.Number()),
+  configuredRepeatPenalty: t.Optional(t.Number()),
 });
 const SetModelBodySchema = t.Object({
   modelName: t.String({ minLength: 1, error: 'Model name is required.' }),
@@ -73,6 +79,9 @@ const SetModelBodySchema = t.Object({
       t.Null(),
     ])
   ),
+  temperature: t.Optional(t.Number({ minimum: 0, maximum: 2 })),
+  topP: t.Optional(t.Number({ minimum: 0, maximum: 1 })),
+  repeatPenalty: t.Optional(t.Number({ minimum: 0.5, maximum: 2 })),
 });
 const PullModelBodySchema = t.Object({
   modelName: t.String({ minLength: 1, error: 'Model name is required.' }),
@@ -175,7 +184,8 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
       .post(
         '/set-model',
         async ({ body, set }) => {
-          const { modelName, contextSize } = body;
+          const { modelName, contextSize, temperature, topP, repeatPenalty } =
+            body;
           const sizeLog =
             contextSize === undefined
               ? 'default'
@@ -183,10 +193,16 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
                 ? 'explicit default'
                 : contextSize;
           console.log(
-            `[API SetModel] Request: Set active model=${modelName}, contextSize=${sizeLog}`
+            `[API SetModel] Request: Set active model=${modelName}, contextSize=${sizeLog}, temperature=${temperature}, topP=${topP}, repeatPenalty=${repeatPenalty}`
           );
           try {
-            setActiveModelAndContext(modelName, contextSize);
+            setActiveModelAndContextAndParams(
+              modelName,
+              contextSize,
+              temperature,
+              topP,
+              repeatPenalty
+            );
             await loadOllamaModel(modelName);
             set.status = 200;
             return {
@@ -421,9 +437,12 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
         async ({ query, set }) => {
           const currentActiveModel = getActiveModel();
           const currentConfiguredContext = getConfiguredContextSize();
+          const currentConfiguredTemperature = getConfiguredTemperature();
+          const currentConfiguredTopP = getConfiguredTopP();
+          const currentConfiguredRepeatPenalty = getConfiguredRepeatPenalty();
           const modelNameToCheck = query.modelName ?? currentActiveModel;
           console.log(
-            `[API Status] Checking status for model: ${modelNameToCheck} (Current Active: ${currentActiveModel}, Configured Context: ${currentConfiguredContext ?? 'default'})`
+            `[API Status] Checking status for model: ${modelNameToCheck} (Current Active: ${currentActiveModel}, Configured Context: ${currentConfiguredContext ?? 'default'}, Temperature: ${currentConfiguredTemperature}, TopP: ${currentConfiguredTopP}, RepeatPenalty: ${currentConfiguredRepeatPenalty})`
           );
           try {
             const loadedModelResult = await checkModelStatus(modelNameToCheck);
@@ -440,6 +459,9 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
                 loaded: false,
                 details: undefined,
                 configuredContextSize: currentConfiguredContext,
+                configuredTemperature: currentConfiguredTemperature,
+                configuredTopP: currentConfiguredTopP,
+                configuredRepeatPenalty: currentConfiguredRepeatPenalty,
               };
             } else {
               const loadedModelInfo =
@@ -460,6 +482,9 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
                 loaded: !!loadedModelInfo,
                 details: detailsResponse,
                 configuredContextSize: currentConfiguredContext,
+                configuredTemperature: currentConfiguredTemperature,
+                configuredTopP: currentConfiguredTopP,
+                configuredRepeatPenalty: currentConfiguredRepeatPenalty,
               };
             }
           } catch (error: any) {

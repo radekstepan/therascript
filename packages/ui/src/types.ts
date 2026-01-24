@@ -169,6 +169,9 @@ export interface OllamaStatus {
   loaded: boolean;
   details?: OllamaModelInfo | null; // Contains details of modelChecked, including defaultContextSize
   configuredContextSize?: number | null; // The num_ctx the backend is currently using for the activeModel
+  configuredTemperature?: number;
+  configuredTopP?: number;
+  configuredRepeatPenalty?: number;
 }
 export interface AvailableModelsResponse {
   models: OllamaModelInfo[];
