@@ -18,7 +18,9 @@ import {
   getPullModelJobStatus,
   cancelPullModelJob,
   deleteOllamaModel as deleteOllamaModelService,
-  unloadActiveModel, // <-- Import the new service function
+  unloadActiveModel,
+  estimateVramUsage,
+  getVramPerToken,
 } from '../services/ollamaService.js';
 import {
   setActiveModelAndContext,
@@ -40,16 +42,14 @@ const OllamaModelDetailSchema = t.Object({
   quantization_level: t.String(),
 });
 const OllamaModelInfoSchema = t.Object({
-  // This schema defines the API output (strings for dates)
   name: t.String(),
   modified_at: t.String(),
   size: t.Number(),
   digest: t.String(),
   details: OllamaModelDetailSchema,
-  defaultContextSize: t.Optional(t.Union([t.Number(), t.Null()])), // <-- ADDED
+  defaultContextSize: t.Optional(t.Union([t.Number(), t.Null()])),
   size_vram: t.Optional(t.Number()),
   expires_at: t.Optional(t.String()),
-  // size_total removed
 });
 const AvailableModelsResponseSchema = t.Object({
   models: t.Array(OllamaModelInfoSchema),
@@ -59,7 +59,7 @@ const OllamaStatusResponseSchema = t.Object({
   activeModel: t.String(),
   modelChecked: t.String(),
   loaded: t.Boolean(),
-  details: t.Optional(OllamaModelInfoSchema), // Uses the string-date schema, will include defaultContextSize
+  details: t.Optional(OllamaModelInfoSchema),
   configuredContextSize: t.Optional(t.Union([t.Number(), t.Null()])),
 });
 const SetModelBodySchema = t.Object({
@@ -110,6 +110,19 @@ const DeleteModelBodySchema = t.Object({
   modelName: t.String({ minLength: 1, error: 'Model name is required.' }),
 });
 const DeleteModelResponseSchema = t.Object({ message: t.String() });
+const EstimateVramResponseSchema = t.Object({
+  model: t.String(),
+  context_size: t.Number(),
+  estimated_vram_bytes: t.Union([t.Number(), t.Null()]),
+  vram_per_token_bytes: t.Union([t.Number(), t.Null()]),
+  breakdown: t.Optional(
+    t.Object({
+      weights_bytes: t.Number(),
+      kv_cache_bytes: t.Number(),
+    })
+  ),
+  error: t.Optional(t.String()),
+});
 
 export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
   .model({
@@ -124,6 +137,7 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
     cancelPullResponse: CancelPullResponseSchema,
     deleteModelBody: DeleteModelBodySchema,
     deleteModelResponse: DeleteModelResponseSchema,
+    estimateVramResponse: EstimateVramResponseSchema,
   })
   .group('', { detail: { tags: ['Ollama'] } }, (app) =>
     app
@@ -132,14 +146,13 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
         async ({ set }) => {
           console.log(`[API Models] Requesting available models`);
           try {
-            const models = await listModels(); // Service returns internal type (Date objects, defaultContextSize)
+            const models = await listModels();
             set.status = 200;
-            // Convert Date objects to strings and ensure defaultContextSize is included
             const responseModels = models.map((m) => ({
               ...m,
               modified_at: m.modified_at.toISOString(),
               expires_at: m.expires_at?.toISOString(),
-              defaultContextSize: m.defaultContextSize ?? null, // Ensure it's null if undefined
+              defaultContextSize: m.defaultContextSize ?? null,
             }));
             return { models: responseModels };
           } catch (error: any) {
@@ -212,7 +225,7 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
             `[API Unload] Received request to unload active model: ${modelToUnload}`
           );
           try {
-            const resultMessage = await unloadActiveModel(); // Call service function
+            const resultMessage = await unloadActiveModel();
             set.status = 200;
             return { message: resultMessage };
           } catch (error: any) {
@@ -220,7 +233,6 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
               `[API Unload] Error during unload for ${modelToUnload}:`,
               error
             );
-            // Re-throw specific errors or default to InternalServerError
             if (error instanceof ApiError) throw error;
             throw new InternalServerError(
               `Failed to unload model ${modelToUnload}.`,
@@ -284,12 +296,11 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
           );
           try {
             const status: OllamaPullJobStatus | null =
-              getPullModelJobStatus(jobId); // Service returns internal type
+              getPullModelJobStatus(jobId);
             if (!status) {
               throw new NotFoundError(`Pull job with ID ${jobId} not found.`);
             }
             set.status = 200;
-            // Return object conforming to PullStatusResponseSchema
             return {
               jobId: status.jobId,
               modelName: status.modelName,
@@ -439,7 +450,7 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
                     modified_at: loadedModelInfo.modified_at.toISOString(),
                     expires_at: loadedModelInfo.expires_at?.toISOString(),
                     defaultContextSize:
-                      loadedModelInfo.defaultContextSize ?? null, // Ensure null if undefined
+                      loadedModelInfo.defaultContextSize ?? null,
                   }
                 : undefined;
               return {
@@ -467,6 +478,74 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
           detail: {
             summary:
               'Check loaded status & configured/default context sizes for active/specific model',
+          },
+        }
+      )
+      .get(
+        '/models/:name/estimate-vram',
+        async ({ params, query, set }) => {
+          const modelName = decodeURIComponent(params.name);
+          const contextSize = query.context_size;
+
+          if (!contextSize || contextSize <= 0) {
+            throw new BadRequestError(
+              'context_size query parameter is required'
+            );
+          }
+
+          const models = await listModels();
+          const model = models.find((m) => m.name === modelName);
+
+          if (!model) {
+            throw new NotFoundError(`Model '${modelName}' not found`);
+          }
+
+          const vramBytes = estimateVramUsage(model, contextSize);
+
+          if (vramBytes === null) {
+            return {
+              model: modelName,
+              context_size: contextSize,
+              estimated_vram_bytes: null,
+              vram_per_token_bytes: model.architecture
+                ? getVramPerToken(model)
+                : null,
+              error: 'Insufficient architectural metadata to estimate VRAM',
+            };
+          }
+
+          const vramPerToken = getVramPerToken(model);
+
+          return {
+            model: modelName,
+            context_size: contextSize,
+            estimated_vram_bytes: vramBytes,
+            vram_per_token_bytes: vramPerToken,
+            breakdown: {
+              weights_bytes: model.size,
+              kv_cache_bytes: vramBytes - model.size,
+            },
+          };
+        },
+        {
+          params: t.Object({
+            name: t.String({ minLength: 1, error: 'Model name is required.' }),
+          }),
+          query: t.Object({
+            context_size: t.Number({
+              minimum: 1,
+              error: 'Context size must be a positive integer.',
+            }),
+          }),
+          response: {
+            200: 'estimateVramResponse',
+            400: t.Any(),
+            404: t.Any(),
+            500: t.Any(),
+          },
+          detail: {
+            summary:
+              'Estimate VRAM usage for a model at a specific context size',
           },
         }
       )

@@ -2,3 +2,4 @@
 - do another round of code review
 - how does max context work? If unreliable we can hardcode in config per model name
 - now that we have max context, could we tweak a prompt in deep analysis map reduce to limit the mapping step so that when reducing we don't run out of memory?
+- remove System Prompt from Run Configuration; do these params work per request or when a model is loaded? If so then we need to move this config to where we select a model and its context size

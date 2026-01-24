@@ -152,9 +152,16 @@ export interface OllamaModelInfo {
     parameter_size: string;
     quantization_level: string;
   };
-  defaultContextSize?: number | null; // <-- ADDED
+  defaultContextSize?: number | null;
   size_vram?: number;
   expires_at?: string | null; // ISO string
+  architecture?: {
+    num_layers?: number;
+    num_attention_heads?: number;
+    num_key_value_heads?: number;
+    hidden_size?: number;
+    precision?: number;
+  } | null;
 }
 export interface OllamaStatus {
   activeModel: string;
@@ -165,6 +172,18 @@ export interface OllamaStatus {
 }
 export interface AvailableModelsResponse {
   models: OllamaModelInfo[];
+}
+
+export interface VramEstimateResponse {
+  model: string;
+  context_size: number;
+  estimated_vram_bytes: number | null;
+  vram_per_token_bytes: number | null;
+  breakdown?: {
+    weights_bytes: number;
+    kv_cache_bytes: number;
+  };
+  error?: string;
 }
 export type UIPullJobStatusState =
   /* ... as before ... */

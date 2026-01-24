@@ -144,6 +144,15 @@ export interface OllamaModelInfo {
   defaultContextSize?: number | null;
   size_vram?: number;
   expires_at?: Date;
+
+  architecture?: {
+    num_layers?: number;
+    num_attention_heads?: number;
+    num_key_value_heads?: number;
+    hidden_size?: number;
+    head_dim?: number;
+    precision?: number;
+  } | null;
 }
 
 export type OllamaPullJobStatusState =

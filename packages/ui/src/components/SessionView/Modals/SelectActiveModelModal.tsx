@@ -21,8 +21,17 @@ import {
   CheckIcon,
   LightningBoltIcon,
 } from '@radix-ui/react-icons';
-import { fetchAvailableModels, setOllamaModel } from '../../../api/api';
-import type { OllamaModelInfo, OllamaStatus } from '../../../types';
+import {
+  fetchAvailableModels,
+  setOllamaModel,
+  estimateModelVram,
+  fetchGpuStats,
+} from '../../../api/api';
+import type {
+  OllamaModelInfo,
+  OllamaStatus,
+  VramEstimateResponse,
+} from '../../../types';
 import prettyBytes from 'pretty-bytes';
 
 interface SelectActiveModelModalProps {
@@ -51,12 +60,28 @@ export function SelectActiveModelModal({
   const [contextSizeInput, setContextSizeInput] = useState('');
   const [userTouchedContext, setUserTouchedContext] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [vramEstimate, setVramEstimate] = useState<{
+    estimated_vram_bytes: number | null;
+    vram_per_token_bytes: number | null;
+    breakdown?: {
+      weights_bytes: number;
+      kv_cache_bytes: number;
+    };
+    error?: string;
+  } | null>(null);
 
   const { data: availableModelsData, isLoading: isLoadingModels } = useQuery({
     queryKey: ['availableOllamaModels'],
     queryFn: fetchAvailableModels,
     enabled: isOpen,
     staleTime: 60 * 1000,
+  });
+
+  const { data: gpuStats } = useQuery({
+    queryKey: ['gpuStats'],
+    queryFn: fetchGpuStats,
+    enabled: isOpen,
+    refetchInterval: 10000,
   });
 
   const setModelMutation = useMutation({
@@ -137,6 +162,54 @@ export function SelectActiveModelModal({
     }
   }, [isOpen, userTouchedContext, recommendedContextSize]);
 
+  // Update VRAM estimate when model or context size changes
+  useEffect(() => {
+    if (!selectedModel || !contextSizeInput) {
+      setVramEstimate(null);
+      return;
+    }
+
+    const contextSize = parseInt(contextSizeInput, 10);
+    if (isNaN(contextSize) || contextSize <= 0) return;
+
+    estimateModelVram(selectedModel, contextSize)
+      .then(setVramEstimate)
+      .catch((err) => {
+        console.error('Failed to estimate VRAM:', err);
+        setVramEstimate({
+          estimated_vram_bytes: null,
+          vram_per_token_bytes: null,
+          error: err.message,
+        });
+      });
+  }, [selectedModel, contextSizeInput]);
+
+  // Calculate VRAM warning based on available GPU memory
+  const vramWarning = React.useMemo(() => {
+    if (!vramEstimate?.estimated_vram_bytes || !gpuStats?.available)
+      return null;
+
+    const totalGpuMemory = gpuStats.gpus[0]?.memory.totalMb * 1024 * 1024 || 0;
+    const estimate = vramEstimate.estimated_vram_bytes;
+
+    if (estimate > totalGpuMemory) {
+      return {
+        type: 'error' as const,
+        message: `Estimated VRAM (${prettyBytes(estimate)}) exceeds GPU capacity (${prettyBytes(totalGpuMemory)}). This will force CPU offloading and degrade performance.`,
+      };
+    }
+
+    const percentUsed = (estimate / totalGpuMemory) * 100;
+    if (percentUsed > 90) {
+      return {
+        type: 'warning' as const,
+        message: `Estimated VRAM (${prettyBytes(estimate)}) is very close to GPU capacity (${prettyBytes(totalGpuMemory)}). Consider reducing context size.`,
+      };
+    }
+
+    return null;
+  }, [vramEstimate, gpuStats]);
+
   return (
     <Dialog.Root open={isOpen} onOpenChange={onOpenChange}>
       <Dialog.Content style={{ maxWidth: 450 }}>
@@ -212,8 +285,52 @@ export function SelectActiveModelModal({
               }}
               disabled={isSaving}
             />
-            {/* Removed explicit Recommended UI in favor of info message below */}
           </label>
+
+          {vramEstimate && (
+            <Callout.Root size="1" color={vramEstimate.error ? 'gray' : 'blue'}>
+              <Callout.Icon>
+                <LightningBoltIcon />
+              </Callout.Icon>
+              <Callout.Text>
+                {vramEstimate.error ? (
+                  <>VRAM estimation unavailable: {vramEstimate.error}</>
+                ) : vramEstimate.estimated_vram_bytes ? (
+                  <>
+                    Estimated VRAM:{' '}
+                    <Strong>
+                      {prettyBytes(vramEstimate.estimated_vram_bytes)}
+                    </Strong>
+                    {vramEstimate.breakdown && (
+                      <>
+                        {' '}
+                        ({prettyBytes(
+                          vramEstimate.breakdown.weights_bytes
+                        )}{' '}
+                        weights +{' '}
+                        {prettyBytes(vramEstimate.breakdown.kv_cache_bytes)} KV
+                        cache )
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <>VRAM data unavailable for this model</>
+                )}
+              </Callout.Text>
+            </Callout.Root>
+          )}
+
+          {vramWarning && (
+            <Callout.Root
+              size="1"
+              color={vramWarning.type === 'error' ? 'red' : 'amber'}
+            >
+              <Callout.Icon>
+                <InfoCircledIcon />
+              </Callout.Icon>
+              <Callout.Text>{vramWarning.message}</Callout.Text>
+            </Callout.Root>
+          )}
 
           {activeTranscriptTokens && (
             <Callout.Root

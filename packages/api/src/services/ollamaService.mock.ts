@@ -327,3 +327,55 @@ export const deleteOllamaModel = async (modelName: string): Promise<string> => {
   console.log(`[Mock Ollama] Successfully deleted model '${modelName}'.`);
   return `Model '${modelName}' deleted successfully.`;
 };
+
+export const estimateVramUsage = (
+  model: OllamaModelInfo,
+  contextSize: number
+): number | null => {
+  if (!model.size || !model.architecture || !contextSize) {
+    return null;
+  }
+
+  const {
+    num_layers,
+    num_attention_heads,
+    num_key_value_heads,
+    hidden_size,
+    head_dim: explicit_head_dim,
+    precision,
+  } = model.architecture;
+
+  if (!num_layers || !num_attention_heads || !hidden_size || !precision) {
+    return null;
+  }
+
+  const kv_heads = num_key_value_heads || num_attention_heads;
+  const head_dim = explicit_head_dim ?? hidden_size / num_attention_heads;
+
+  const kvCacheBytes =
+    2 * num_layers * kv_heads * head_dim * precision * contextSize;
+
+  return model.size + kvCacheBytes;
+};
+
+export const getVramPerToken = (model: OllamaModelInfo): number | null => {
+  if (!model.architecture) return null;
+
+  const {
+    num_layers,
+    num_attention_heads,
+    num_key_value_heads,
+    hidden_size,
+    head_dim: explicit_head_dim,
+    precision,
+  } = model.architecture;
+
+  if (!num_layers || !num_attention_heads || !hidden_size || !precision) {
+    return null;
+  }
+
+  const kv_heads = num_key_value_heads || num_attention_heads;
+  const head_dim = explicit_head_dim ?? hidden_size / num_attention_heads;
+
+  return 2 * num_layers * kv_heads * head_dim * precision;
+};

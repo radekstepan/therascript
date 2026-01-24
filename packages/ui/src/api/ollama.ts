@@ -163,3 +163,24 @@ export const deleteOllamaModel = async (
   );
   return response.data;
 };
+
+export const estimateModelVram = async (
+  modelName: string,
+  contextSize: number
+): Promise<{
+  model: string;
+  context_size: number;
+  estimated_vram_bytes: number | null;
+  vram_per_token_bytes: number | null;
+  breakdown?: {
+    weights_bytes: number;
+    kv_cache_bytes: number;
+  };
+  error?: string;
+}> => {
+  const response = await axios.get(
+    `/api/ollama/models/${encodeURIComponent(modelName)}/estimate-vram`,
+    { params: { context_size: contextSize } }
+  );
+  return response.data;
+};

@@ -51,6 +51,102 @@ const runtime = getOllamaRuntime();
 
 const WHISPER_API_URL = process.env.WHISPER_API_URL || 'http://localhost:8000';
 
+const MODEL_ARCHITECTURE_FALLBACKS: Record<
+  string,
+  {
+    num_layers: number;
+    num_attention_heads: number;
+    num_key_value_heads: number;
+    hidden_size: number;
+    head_dim?: number;
+    precision: number;
+  }
+> = {
+  gemma3: {
+    num_layers: 34,
+    num_attention_heads: 8,
+    num_key_value_heads: 4,
+    hidden_size: 2560,
+    head_dim: 256,
+    precision: 2,
+  },
+};
+
+function getArchitectureFallback(modelName: string): {
+  num_layers: number;
+  num_attention_heads: number;
+  num_key_value_heads: number;
+  hidden_size: number;
+  head_dim?: number;
+  precision: number;
+} | null {
+  const lowerName = modelName.toLowerCase();
+  for (const [key, arch] of Object.entries(MODEL_ARCHITECTURE_FALLBACKS)) {
+    if (lowerName.includes(key)) {
+      console.log(
+        `[OllamaService] Using fallback architecture for ${modelName} (matched: ${key})`
+      );
+      return { ...arch };
+    }
+  }
+  return null;
+}
+
+function extractArchitecture(
+  showResponse: ShowResponse,
+  modelName: string
+): {
+  num_layers?: number;
+  num_attention_heads?: number;
+  num_key_value_heads?: number;
+  hidden_size?: number;
+  head_dim?: number;
+  precision: number;
+} | null {
+  if (!showResponse.model_info || typeof showResponse.model_info !== 'object') {
+    return null;
+  }
+
+  const info =
+    showResponse.model_info instanceof Map
+      ? Object.fromEntries(showResponse.model_info.entries())
+      : showResponse.model_info;
+
+  const architecture: any = {};
+  const keys = Object.keys(info);
+
+  for (const key of keys) {
+    // Layers
+    if (key.includes('num_layers') || key.includes('block_count'))
+      architecture.num_layers = info[key];
+    // Attention Heads (Query)
+    if (
+      key.includes('num_attention_heads') ||
+      (key.includes('attention.head_count') && !key.includes('_kv'))
+    )
+      architecture.num_attention_heads = info[key];
+    // KV Heads
+    if (
+      key.includes('num_key_value_heads') ||
+      key.includes('attention.head_count_kv')
+    )
+      architecture.num_key_value_heads = info[key];
+    // Hidden Size
+    if (key.includes('hidden_size') || key.includes('embedding_length'))
+      architecture.hidden_size = info[key];
+    // Explicit Head Dimension
+    if (key.includes('attention.key_length')) architecture.head_dim = info[key];
+  }
+
+  architecture.precision = 2;
+
+  if (Object.keys(architecture).length <= 1) {
+    return getArchitectureFallback(modelName);
+  }
+
+  return architecture;
+}
+
 async function ensureWhisperUnloaded(): Promise<void> {
   try {
     console.log(
@@ -126,12 +222,15 @@ const activePullJobs = new Map<string, OllamaPullJobStatus>();
 const pullJobCancellationFlags = new Map<string, boolean>();
 
 // --- *** UPDATED FUNCTION *** ---
-// Helper to fetch model details and parse context size
-async function _fetchModelDefaultContextSize(
+// Helper to fetch model details and parse context size and architecture
+async function _fetchModelMetadata(
   modelName: string
-): Promise<number | null> {
+): Promise<{ contextSize: number | null; architecture: any }> {
   try {
     const showResponse: ShowResponse = await ollama.show({ model: modelName });
+
+    // Extract context size (existing logic)
+    let contextSize: number | null = null;
 
     // NEW: Prioritize the structured `model_info` object from newer library versions
     if (
@@ -169,12 +268,12 @@ async function _fetchModelDefaultContextSize(
         console.log(
           `[Real OllamaService] Parsed default context size (${contextLengthKey}) ${contextLength} for model ${modelName}`
         );
-        return contextLength;
+        contextSize = contextLength;
       }
     }
 
     // OLD FALLBACK: Check the `parameters` string for 'num_ctx' for older library versions
-    if (showResponse.parameters) {
+    if (contextSize === null && showResponse.parameters) {
       const parametersString = showResponse.parameters;
       const lines = parametersString.split('\n');
 
@@ -186,26 +285,91 @@ async function _fetchModelDefaultContextSize(
             console.log(
               `[Real OllamaService] Parsed default context size (num_ctx) ${numCtx} for model ${modelName}`
             );
-            return numCtx;
+            contextSize = numCtx;
+            break;
           }
         }
       }
     }
 
     // If neither method found a context size, log it.
-    console.log(
-      `[Real OllamaService] Could not find a default context size parameter for model ${modelName}. Ollama will use its own default.`
-    );
-    return null;
+    if (contextSize === null) {
+      console.log(
+        `[Real OllamaService] Could not find a default context size parameter for model ${modelName}. Ollama will use its own default.`
+      );
+    }
+
+    // Extract architecture metadata (NEW)
+    const architecture = extractArchitecture(showResponse, modelName);
+
+    return { contextSize, architecture };
   } catch (error: any) {
     console.error(
-      `[Real OllamaService] Error fetching details for ${modelName} to get context size:`,
+      `[Real OllamaService] Error fetching details for ${modelName}:`,
       error.message || error
     );
-    return null;
+    return { contextSize: null, architecture: null };
   }
 }
 // --- *** END UPDATED FUNCTION *** ---
+
+/**
+ * Estimate VRAM usage for a model at a specific context size
+ * @param model Model information with architecture
+ * @param contextSize Context window size in tokens
+ * @returns Estimated VRAM usage in bytes
+ */
+export function estimateVramUsage(
+  model: OllamaModelInfo,
+  contextSize: number
+): number | null {
+  if (!model.size || !model.architecture || !contextSize) {
+    return null;
+  }
+
+  const {
+    num_layers,
+    num_attention_heads,
+    num_key_value_heads,
+    hidden_size,
+    head_dim: explicit_head_dim,
+    precision,
+  } = model.architecture;
+
+  if (!num_layers || !num_attention_heads || !hidden_size || !precision) {
+    return null;
+  }
+
+  const kv_heads = num_key_value_heads || num_attention_heads;
+  const head_dim = explicit_head_dim ?? hidden_size / num_attention_heads;
+
+  const kvCacheBytes =
+    2 * num_layers * kv_heads * head_dim * precision * contextSize;
+
+  return model.size + kvCacheBytes;
+}
+
+export function getVramPerToken(model: OllamaModelInfo): number | null {
+  if (!model.architecture) return null;
+
+  const {
+    num_layers,
+    num_attention_heads,
+    num_key_value_heads,
+    hidden_size,
+    head_dim: explicit_head_dim,
+    precision,
+  } = model.architecture;
+
+  if (!num_layers || !num_attention_heads || !hidden_size || !precision) {
+    return null;
+  }
+
+  const kv_heads = num_key_value_heads || num_attention_heads;
+  const head_dim = explicit_head_dim ?? hidden_size / num_attention_heads;
+
+  return 2 * num_layers * kv_heads * head_dim * precision;
+}
 
 // --- MODIFIED: listModels to include defaultContextSize ---
 export const listModels = async (): Promise<OllamaModelInfo[]> => {
@@ -229,10 +393,9 @@ export const listModels = async (): Promise<OllamaModelInfo[]> => {
               ? new Date(model.expires_at)
               : (model.expires_at ?? undefined);
 
-          // Fetch default context size for each model
-          const defaultCtxSize = await _fetchModelDefaultContextSize(
-            model.name
-          );
+          // Fetch metadata for each model
+          const { contextSize: defaultCtxSize, architecture } =
+            await _fetchModelMetadata(model.name);
 
           return {
             name: model.name,
@@ -246,9 +409,10 @@ export const listModels = async (): Promise<OllamaModelInfo[]> => {
               parameter_size: model.details.parameter_size,
               quantization_level: model.details.quantization_level,
             },
-            defaultContextSize: defaultCtxSize, // <-- ADDED
+            defaultContextSize: defaultCtxSize,
             size_vram: model.size_vram,
             expires_at: expiresAtDate,
+            architecture: architecture,
           };
         }
       )
@@ -634,8 +798,9 @@ export const checkModelStatus = async (
         ? new Date(loadedModelEntry.expires_at)
         : undefined;
 
-      // Fetch default context size for the loaded model
-      const defaultCtxSize = await _fetchModelDefaultContextSize(modelToCheck);
+      // Fetch metadata for the loaded model
+      const { contextSize: defaultCtxSize, architecture } =
+        await _fetchModelMetadata(modelToCheck);
 
       return {
         name: loadedModelEntry.name,
@@ -649,9 +814,10 @@ export const checkModelStatus = async (
           parameter_size: 'unknown',
           quantization_level: 'unknown',
         },
-        defaultContextSize: defaultCtxSize, // <-- ADDED
+        defaultContextSize: defaultCtxSize,
         size_vram: loadedModelEntry.size_vram,
         expires_at: expiresAtDate,
+        architecture: architecture,
       };
     } else {
       console.log(

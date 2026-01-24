@@ -30,6 +30,11 @@ export interface OllamaServiceInterface {
   cancelPullModelJob: (jobId: string) => boolean;
   deleteOllamaModel: (modelName: string) => Promise<string>;
   checkOllamaApiHealth: () => Promise<boolean>;
+  estimateVramUsage: (
+    model: OllamaModelInfo,
+    contextSize: number
+  ) => number | null;
+  getVramPerToken: (model: OllamaModelInfo) => number | null;
 }
 
 let service: OllamaServiceInterface;
@@ -57,3 +62,7 @@ export const getPullModelJobStatus = service.getPullModelJobStatus;
 export const cancelPullModelJob = service.cancelPullModelJob;
 export const deleteOllamaModel = service.deleteOllamaModel;
 export const checkOllamaApiHealth = service.checkOllamaApiHealth;
+export const estimateVramUsage = (service as OllamaServiceInterface)
+  .estimateVramUsage;
+export const getVramPerToken = (service as OllamaServiceInterface)
+  .getVramPerToken;
