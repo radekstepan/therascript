@@ -315,13 +315,11 @@ export function SessionView() {
         {/* --- Resizer Handle --- */}
         <div
           onMouseDown={handleMouseDown}
-          className="hidden lg:block w-1.5 h-full cursor-col-resize group"
-          style={{
-            flexShrink: 0,
-            backgroundColor: 'var(--gray-a4)',
-          }}
+          className="hidden lg:block w-2 h-full cursor-col-resize group relative z-10 -mx-1"
+          style={{ flexShrink: 0, backgroundColor: 'transparent' }}
         >
-          <div className="w-full h-full bg-transparent group-hover:bg-[var(--accent-a7)] transition-colors duration-150" />
+          <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-[var(--gray-a5)] group-hover:bg-[var(--accent-a9)] group-hover:w-[2px] transition-all duration-150" />
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1.5 h-8 rounded-full bg-[var(--accent-a9)] opacity-0 group-hover:opacity-100 transition-opacity duration-150" />
         </div>
         {/* --- End Resizer Handle --- */}
 
