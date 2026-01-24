@@ -96,6 +96,10 @@ Before you begin, ensure you have the following installed:
 2.  **Docker and Docker Compose:**
     *   Docker Desktop for Windows/macOS or Docker Engine + Docker Compose plugin for Linux.
     *   Ensure the Docker daemon is running.
+    *   Make sure current user is in the Docker group:
+        ```bash
+        sudo usermod -aG docker $USER
+        ```
 3.  **Configure Docker to use NVIDIA runtime**
         ```bash
         sudo nvidia-ctk runtime configure --runtime=docker
@@ -131,6 +135,12 @@ Before you begin, ensure you have the following installed:
     ```
 
 ## Running the Application
+
+Therascript can be configured to start automatically on system start:
+
+```bash
+cat ~/.config/autostart/therascript.desktop
+```
 
 ### Development Mode
 
