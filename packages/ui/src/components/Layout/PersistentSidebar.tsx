@@ -199,7 +199,7 @@ export function PersistentSidebar() {
 
         {/* Navigation Section */}
         <nav
-          className="mt-6 flex-grow px-3 overflow-y-auto"
+          className="mt-6 flex-grow px-3 overflow-y-auto pt-2 pb-4"
           aria-label="Main navigation"
         >
           <ul className="space-y-1">
