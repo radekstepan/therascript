@@ -2,6 +2,4 @@
 - do another round of code review
 - now that we have max context, could we tweak a prompt in deep analysis map reduce to limit the mapping step so that when reducing we don't run out of memory?
 - The vertical bar resizong the ui on chats UI separating chats list from the transcript chat is ugly. Improve.
-- In dark mode the user chat bubble renders incorrectly (theme glob but otherwise dark)
-- In a light mode the chat header is dark, wrong
 - Do we need the Open Configuration button and Run Configuration sidebar? remove

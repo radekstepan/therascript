@@ -264,7 +264,7 @@ export function SessionSidebar({
     return (
       <Box
         p="4"
-        className="flex flex-col h-full w-full overflow-hidden items-center justify-center bg-white dark:bg-gray-800" // MODIFIED
+        className="flex flex-col h-full w-full overflow-hidden items-center justify-center bg-white dark:bg-[var(--color-panel)]"
       >
         <Spinner size="2" />{' '}
         <Text size="1" color="gray" mt="2">
@@ -277,7 +277,7 @@ export function SessionSidebar({
     return (
       <Box
         p="4"
-        className="flex flex-col h-full w-full overflow-hidden items-center justify-center bg-white dark:bg-gray-800" // MODIFIED
+        className="flex flex-col h-full w-full overflow-hidden items-center justify-center bg-white dark:bg-[var(--color-panel)]"
       >
         <Text size="1" color="red">
           Error: {sessionError?.message || 'Could not load session.'}
@@ -354,7 +354,7 @@ export function SessionSidebar({
     <>
       <Box
         p={hideHeader ? '1' : '4'}
-        className="flex flex-col h-full w-full overflow-hidden bg-white dark:bg-gray-800" // MODIFIED
+        className="flex flex-col h-full w-full overflow-hidden bg-white dark:bg-[var(--color-panel)]"
       >
         {/* Header (Conditional) */}
         {!hideHeader && (

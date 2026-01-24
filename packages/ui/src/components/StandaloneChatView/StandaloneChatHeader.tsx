@@ -262,11 +262,8 @@ export function StandaloneChatHeader({
     <>
       <Flex
         direction="column"
-        className="bg-slate-950/70 backdrop-blur-md border-b border-slate-800"
-        style={{
-          backgroundColor: 'rgba(15, 23, 42, 0.7)',
-          flexShrink: 0,
-        }}
+        className="bg-white/70 dark:bg-slate-950/70 backdrop-blur-md border-b border-slate-200 dark:border-slate-800"
+        style={{ flexShrink: 0 }}
       >
         <Flex
           align="center"

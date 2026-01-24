@@ -43,8 +43,7 @@ export function ChatHeader({
       py="3"
       px="4"
       gap="3"
-      className="bg-slate-950/70 backdrop-blur-md border-b border-slate-800"
-      style={{ backgroundColor: 'rgba(15, 23, 42, 0.7)' }}
+      className="bg-white/70 dark:bg-slate-950/70 backdrop-blur-md border-b border-slate-200 dark:border-slate-800"
     >
       <Flex align="center" gap="2" style={{ minWidth: 0, flexGrow: 1 }}>
         {isLoadingSessionMeta ? (

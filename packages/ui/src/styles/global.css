@@ -53,8 +53,7 @@ body {
   --gray-12: #e0e5ec;
 }
 
-.custom-dark-theme [class*='rt-Card'],
-.custom-dark-theme [class*='rt-Box'][class*='bg-'] {
+.custom-dark-theme [class*='rt-Card'] {
   background-color: var(--color-panel);
 }
 
