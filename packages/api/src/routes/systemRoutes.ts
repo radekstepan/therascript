@@ -31,6 +31,7 @@ const GpuDeviceStatsSchema = t.Object({
     limitWatts: t.Nullable(t.Number()),
   }),
   processes: t.Array(GpuProcessSchema),
+  isUnifiedMemory: t.Boolean(),
 });
 
 const GpuStatsSummarySchema = t.Object({
@@ -42,6 +43,7 @@ const GpuStatsSummarySchema = t.Object({
   avgTemperatureCelsius: t.Nullable(t.Number()),
   totalPowerDrawWatts: t.Nullable(t.Number()),
   totalPowerLimitWatts: t.Nullable(t.Number()),
+  isUnifiedMemory: t.Boolean(),
 });
 
 const SystemMemorySchema = t.Object({

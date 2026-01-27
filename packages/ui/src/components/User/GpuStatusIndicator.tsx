@@ -115,21 +115,25 @@ export function GpuStatusIndicator({
                   Runtime: {runtimeDisplay}
                 </Text>
               </Tooltip>
-              {hasMetrics && summary ? (
-                <Text size="1">{summary.avgTemperatureCelsius ?? '--'}°C</Text>
+              {hasMetrics &&
+              summary &&
+              summary.avgTemperatureCelsius !== null ? (
+                <Text size="1">{summary.avgTemperatureCelsius}°C</Text>
               ) : null}
             </Flex>
             {hasMetrics && summary ? (
               <>
-                <Tooltip
-                  content={`GPU Utilization: ${summary.avgGpuUtilizationPercent ?? 'N/A'}%`}
-                >
-                  <Progress
-                    size="1"
-                    value={summary.avgGpuUtilizationPercent ?? 0}
-                    color={getUtilColor(summary.avgGpuUtilizationPercent)}
-                  />
-                </Tooltip>
+                {summary.avgGpuUtilizationPercent !== null && (
+                  <Tooltip
+                    content={`GPU Utilization: ${summary.avgGpuUtilizationPercent}%`}
+                  >
+                    <Progress
+                      size="1"
+                      value={summary.avgGpuUtilizationPercent}
+                      color={getUtilColor(summary.avgGpuUtilizationPercent)}
+                    />
+                  </Tooltip>
+                )}
                 <Tooltip
                   content={`${isUnifiedMemory ? 'Memory' : 'VRAM'}: ${prettyBytes(summary.totalMemoryUsedMb * 1024 * 1024)} / ${prettyBytes(summary.totalMemoryMb * 1024 * 1024)}`}
                 >

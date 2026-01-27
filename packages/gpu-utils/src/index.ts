@@ -27,17 +27,34 @@ const xmlParser = new XMLParser({
 let _nvidiaSmiPath: string | null = null;
 let _nvidiaSmiChecked = false;
 
-function getSystemMemoryStats() {
-  const totalBytes = os.totalmem();
-  const freeBytes = os.freemem();
-  const usedBytes = totalBytes - freeBytes;
+export async function getSystemMemoryStats() {
+  // Use systeminformation for more accurate memory stats on macOS
+  // which properly accounts for cached/reclaimable memory
+  try {
+    const memInfo = await si.mem();
+    const totalBytes = memInfo.total;
+    const availableBytes = memInfo.available || memInfo.free;
+    const usedBytes = totalBytes - availableBytes;
 
-  return {
-    totalMb: Math.round(totalBytes / (1024 * 1024)),
-    usedMb: Math.round(usedBytes / (1024 * 1024)),
-    freeMb: Math.round(freeBytes / (1024 * 1024)),
-    percentUsed: (usedBytes / totalBytes) * 100,
-  };
+    return {
+      totalMb: Math.round(totalBytes / (1024 * 1024)),
+      usedMb: Math.round(usedBytes / (1024 * 1024)),
+      freeMb: Math.round(availableBytes / (1024 * 1024)),
+      percentUsed: (usedBytes / totalBytes) * 100,
+    };
+  } catch (error) {
+    // Fallback to os module if systeminformation fails
+    const totalBytes = os.totalmem();
+    const freeBytes = os.freemem();
+    const usedBytes = totalBytes - freeBytes;
+
+    return {
+      totalMb: Math.round(totalBytes / (1024 * 1024)),
+      usedMb: Math.round(usedBytes / (1024 * 1024)),
+      freeMb: Math.round(freeBytes / (1024 * 1024)),
+      percentUsed: (usedBytes / totalBytes) * 100,
+    };
+  }
 }
 
 async function getNvidiaSmiPath(): Promise<string | null> {
@@ -71,9 +88,9 @@ function parseValue(value: string | number | undefined): number | null {
   return isNaN(parsed) ? null : parsed;
 }
 
-function formatGpuDetails(rawJson: {
+async function formatGpuDetails(rawJson: {
   nvidia_smi_log: RawNvidiaSmiLog;
-}): GpuStats {
+}): Promise<GpuStats> {
   const log = rawJson.nvidia_smi_log;
   const rawGpus = Array.isArray(log.gpu) ? log.gpu : [log.gpu];
 
@@ -178,13 +195,13 @@ function formatGpuDetails(rawJson: {
       isUnifiedMemory: false,
     },
     executionProvider: 'gpu',
-    systemMemory: getSystemMemoryStats(),
+    systemMemory: await getSystemMemoryStats(),
   };
 }
 
 async function getGpuStatsFromSystemInfo(): Promise<Partial<GpuStats>> {
   const graphics = await si.graphics();
-  const systemMemory = getSystemMemoryStats();
+  const systemMemory = await getSystemMemoryStats();
 
   const gpus: GpuDeviceStats[] = graphics.controllers.map((gpu, index) => {
     const isApple =
@@ -292,7 +309,7 @@ async function getGpuStatsFromSystemInfo(): Promise<Partial<GpuStats>> {
       totalPowerLimitWatts: null,
       isUnifiedMemory: summary.isUnifiedMemory,
     },
-    systemMemory: getSystemMemoryStats(),
+    systemMemory: await getSystemMemoryStats(),
   };
 }
 
@@ -318,7 +335,7 @@ export async function getGpuStats(): Promise<GpuStats> {
     try {
       const { stdout } = await execAsync(`${smiPath} -q -x`);
       const rawJson = xmlParser.parse(stdout);
-      const stats = formatGpuDetails(rawJson);
+      const stats = await formatGpuDetails(rawJson);
       stats.executionProvider = 'gpu';
       return stats;
     } catch (error) {
@@ -352,7 +369,7 @@ export async function getGpuStats(): Promise<GpuStats> {
         isUnifiedMemory: false,
       },
       executionProvider: 'cpu',
-      systemMemory: getSystemMemoryStats(),
+      systemMemory: await getSystemMemoryStats(),
     };
   }
 }

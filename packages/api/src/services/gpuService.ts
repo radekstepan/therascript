@@ -1,6 +1,6 @@
 // packages/api/src/services/gpuService.ts
 import os from 'os';
-import { getGpuStats } from '@therascript/gpu-utils';
+import { getGpuStats, getSystemMemoryStats } from '@therascript/gpu-utils';
 import type { GpuStats } from '@therascript/gpu-utils';
 import config from '@therascript/config';
 
@@ -31,9 +31,7 @@ export async function getGpuStatsService(): Promise<RuntimeAwareGpuStats> {
   } catch (error) {
     // If fetching fails, return an 'unavailable' state but don't cache it
     console.error('[GpuService] Failed to get GPU stats:', error);
-    const totalBytes = os.totalmem();
-    const freeBytes = os.freemem();
-    const usedBytes = totalBytes - freeBytes;
+    const systemMemory = await getSystemMemoryStats();
     return {
       available: false,
       driverVersion: null,
@@ -51,12 +49,7 @@ export async function getGpuStatsService(): Promise<RuntimeAwareGpuStats> {
         isUnifiedMemory: false,
       },
       executionProvider: determineExecutionProvider(null),
-      systemMemory: {
-        totalMb: Math.round(totalBytes / (1024 * 1024)),
-        usedMb: Math.round(usedBytes / (1024 * 1024)),
-        freeMb: Math.round(freeBytes / (1024 * 1024)),
-        percentUsed: (usedBytes / totalBytes) * 100,
-      },
+      systemMemory,
     };
   }
 }
@@ -65,6 +58,14 @@ function determineExecutionProvider(
   stats: GpuStats | null
 ): 'gpu' | 'cpu' | 'metal' {
   if (stats && stats.available && stats.summary.gpuCount > 0) {
+    // Check if this is Apple Silicon with unified memory
+    if (
+      stats.summary.isUnifiedMemory ||
+      (process.platform === 'darwin' &&
+        stats.gpus.some((g) => g.name?.toLowerCase().includes('apple')))
+    ) {
+      return 'metal';
+    }
     return 'gpu';
   }
   if (config.ollama.runtime === 'native' && process.platform === 'darwin') {

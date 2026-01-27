@@ -15,7 +15,6 @@ import {
   Progress,
   Card,
   Separator,
-  TextField,
 } from '@radix-ui/themes';
 import {
   Cross2Icon,
@@ -26,7 +25,6 @@ import {
 } from '@radix-ui/react-icons';
 import type { GpuStats, GpuDeviceStats, OllamaStatus } from '../../types';
 import prettyBytes from 'pretty-bytes';
-import { estimateModelVram } from '../../api/api';
 
 interface GpuStatusModalProps {
   isOpen: boolean;
@@ -119,11 +117,13 @@ const GpuDeviceCard: React.FC<{ device: GpuDeviceStats }> = ({ device }) => {
           GPU {device.id}: {device.name}
         </Heading>
         <Flex direction="column" gap="2">
-          <ProgressBar
-            value={device.utilization.gpuPercent}
-            label="GPU Utilization"
-            colorFn={getUtilColor}
-          />
+          {device.utilization.gpuPercent !== null && (
+            <ProgressBar
+              value={device.utilization.gpuPercent}
+              label="GPU Utilization"
+              colorFn={getUtilColor}
+            />
+          )}
           <ProgressBar
             value={memUsagePercent}
             label={`${memoryLabel} Usage`}
@@ -135,27 +135,22 @@ const GpuDeviceCard: React.FC<{ device: GpuDeviceStats }> = ({ device }) => {
             label={memoryLabel}
             value={`${prettyBytes(device.memory.usedMb * 1024 * 1024)} / ${prettyBytes(device.memory.totalMb * 1024 * 1024)}`}
           />
-          <StatRow
-            label="Temperature"
-            value={
-              device.temperature.currentCelsius !== null
-                ? `${device.temperature.currentCelsius}°C`
-                : 'N/A'
-            }
-          />
-          <StatRow
-            label="Power"
-            value={
-              device.power.drawWatts !== null &&
-              device.power.limitWatts !== null
-                ? `${device.power.drawWatts}W / ${device.power.limitWatts}W`
-                : 'N/A'
-            }
-          />
-          <StatRow
-            label="Fan Speed"
-            value={`${device.fanSpeedPercent ?? 'N/A'}%`}
-          />
+          {device.temperature.currentCelsius !== null && (
+            <StatRow
+              label="Temperature"
+              value={`${device.temperature.currentCelsius}°C`}
+            />
+          )}
+          {device.power.drawWatts !== null &&
+            device.power.limitWatts !== null && (
+              <StatRow
+                label="Power"
+                value={`${device.power.drawWatts}W / ${device.power.limitWatts}W`}
+              />
+            )}
+          {device.fanSpeedPercent !== null && (
+            <StatRow label="Fan Speed" value={`${device.fanSpeedPercent}%`} />
+          )}
         </Flex>
 
         {device.processes.length > 0 && (
@@ -195,21 +190,6 @@ const GpuDeviceCard: React.FC<{ device: GpuDeviceStats }> = ({ device }) => {
 };
 
 const ActiveModelCard: React.FC<{ status: OllamaStatus }> = ({ status }) => {
-  const [projectedContextSize, setProjectedContextSize] =
-    React.useState<number>(8192);
-  const [projectedVram, setProjectedVram] = React.useState<number | null>(null);
-
-  React.useEffect(() => {
-    if (!status.details) {
-      setProjectedVram(null);
-      return;
-    }
-
-    estimateModelVram(status.activeModel, projectedContextSize)
-      .then((result) => setProjectedVram(result.estimated_vram_bytes))
-      .catch(() => setProjectedVram(null));
-  }, [status, projectedContextSize]);
-
   if (!status.activeModel || !status.loaded || !status.details) return null;
 
   const details = status.details;
@@ -235,33 +215,6 @@ const ActiveModelCard: React.FC<{ status: OllamaStatus }> = ({ status }) => {
           </Text>
           <Text size="2">{status.activeModel}</Text>
         </Flex>
-
-        <Box>
-          <Text size="2" weight="medium" mb="2">
-            Projected VRAM Usage
-          </Text>
-          <Flex align="center" gap="2">
-            <TextField.Root
-              type="number"
-              value={projectedContextSize.toString()}
-              onChange={(e) =>
-                setProjectedContextSize(parseInt(e.target.value, 10) || 8192)
-              }
-              min="1024"
-              step="1024"
-              size="1"
-              style={{ width: '120px' }}
-            />
-            <Text size="1" color="gray">
-              tokens context
-            </Text>
-          </Flex>
-          {projectedVram && (
-            <Text size="2" color="blue" mt="2">
-              → {prettyBytes(projectedVram)} estimated
-            </Text>
-          )}
-        </Box>
 
         <Box>
           <Flex justify="between" mb="1">
@@ -430,18 +383,24 @@ export function GpuStatusModal({
                   </Callout.Root>
                 ) : (
                   <>
-                    <Flex
-                      justify="between"
-                      gap="4"
-                      style={{ flexWrap: 'wrap' }}
-                    >
-                      <Badge color="gray" variant="soft">
-                        Driver: {gpuStats.driverVersion}
-                      </Badge>
-                      <Badge color="gray" variant="soft">
-                        CUDA: {gpuStats.cudaVersion}
-                      </Badge>
-                    </Flex>
+                    {(gpuStats.driverVersion || gpuStats.cudaVersion) && (
+                      <Flex
+                        justify="between"
+                        gap="4"
+                        style={{ flexWrap: 'wrap' }}
+                      >
+                        {gpuStats.driverVersion && (
+                          <Badge color="gray" variant="soft">
+                            Driver: {gpuStats.driverVersion}
+                          </Badge>
+                        )}
+                        {gpuStats.cudaVersion && (
+                          <Badge color="gray" variant="soft">
+                            CUDA: {gpuStats.cudaVersion}
+                          </Badge>
+                        )}
+                      </Flex>
+                    )}
                     {gpuStats.gpus.map((device) => (
                       <GpuDeviceCard key={device.id} device={device} />
                     ))}
