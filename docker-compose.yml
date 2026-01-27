@@ -9,20 +9,16 @@ services:
       context: .
       # FIX: Specify the path to the Dockerfile relative to the new context
       dockerfile: packages/whisper/Dockerfile
-      args:
-        # By default, use CUDA nightly channel (Linux/WSL). On macOS we override these via env.
-        TORCH_INDEX_URL: ${WHISPER_TORCH_INDEX_URL:-https://download.pytorch.org/whl/nightly/cu128}
-        TORCH_FLAGS: ${WHISPER_TORCH_FLAGS:---pre}
     image: therascript/whisper
     container_name: therascript_whisper_service
     ports:
-      - "127.0.0.1:8000:8000"
+      - '127.0.0.1:8000:8000'
     volumes:
       # MODIFIED: Use a named volume for persisting downloaded models
       - whisper_models:/root/.cache/whisper
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8000/health"]
+      test: ['CMD', 'curl', '--fail', 'http://localhost:8000/health']
       interval: 15s
       timeout: 5s
       retries: 3
@@ -45,12 +41,16 @@ services:
         soft: 65536
         hard: 65536
     ports:
-      - "127.0.0.1:9200:9200" # Elasticsearch API
+      - '127.0.0.1:9200:9200' # Elasticsearch API
       # - "127.0.0.1:9300:9300" # Elasticsearch transport (typically not needed for client)
     volumes:
       - es_data:/usr/share/elasticsearch/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsSL http://localhost:9200/_cat/health?h=status | grep -q 'green\\|yellow'"]
+      test:
+        [
+          'CMD-SHELL',
+          "curl -fsSL http://localhost:9200/_cat/health?h=status | grep -q 'green\\|yellow'",
+        ]
       interval: 10s
       timeout: 10s
       retries: 10
@@ -63,7 +63,7 @@ services:
     environment:
       - ELASTICSEARCH_HOSTS=http://therascript_elasticsearch_service:9200 # Connect to ES container
     ports:
-      - "127.0.0.1:5601:5601"
+      - '127.0.0.1:5601:5601'
     depends_on:
       elasticsearch:
         condition: service_healthy
@@ -74,12 +74,12 @@ services:
     image: redis:7.2-alpine
     container_name: therascript_redis_service
     ports:
-      - "127.0.0.1:6379:6379"
+      - '127.0.0.1:6379:6379'
     volumes:
       - redis_data:/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ['CMD', 'redis-cli', 'ping']
       interval: 10s
       timeout: 5s
       retries: 5

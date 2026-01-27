@@ -2,14 +2,14 @@ import os
 import json
 import asyncio
 import subprocess
+import gc
 from datetime import datetime
 from typing import Optional, Dict, Any
 from contextlib import asynccontextmanager
 from enum import Enum
 
 import httpx
-import torch
-import whisper
+from faster_whisper import WhisperModel
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -63,88 +63,97 @@ class TranscribeResponse(BaseModel):
 
 
 class WhisperModelManager:
-    
+
     def __init__(self):
-        self._model: Optional[whisper.Whisper] = None
+        self._model: Optional[WhisperModel] = None
         self._model_name: Optional[str] = None
         self._last_used: float = 0
         self._lock = asyncio.Lock()
         self._idle_task: Optional[asyncio.Task] = None
         self._active_jobs: int = 0
-    
+
     @property
     def is_loaded(self) -> bool:
         return self._model is not None
-    
+
     @property
     def model_name(self) -> Optional[str]:
         return self._model_name
-    
+
     @property
     def last_used(self) -> float:
         return self._last_used
-    
-    async def acquire_model(self, model_name: str) -> whisper.Whisper:
+
+    async def acquire_model(self, model_name: str) -> WhisperModel:
         async with self._lock:
             if self._model is not None and self._model_name != model_name:
                 if self._active_jobs > 0:
                     raise RuntimeError(f"Cannot switch models while {self._active_jobs} jobs active")
                 print(f"[WhisperManager] Switching from {self._model_name} to {model_name}")
                 await self._unload_unsafe()
-            
+
             if self._model is None:
                 await ensure_ollama_unloaded()
-                
+
                 print(f"[WhisperManager] Loading model '{model_name}'...")
                 start = datetime.now()
-                
-                self._model = whisper.load_model(model_name)
+
+                # Determine config
+                try:
+                    import torch
+                    device = "cuda" if torch.cuda.is_available() else "cpu"
+                except ImportError:
+                    device = "cpu"
+
+                # On CPU (Mac Docker), int8 is faster. On GPU, float16 is standard.
+                compute_type = "float16" if device == "cuda" else "int8"
+
+                self._model = WhisperModel(model_name, device=device, compute_type=compute_type)
                 self._model_name = model_name
-                
+
                 elapsed = (datetime.now() - start).total_seconds()
                 print(f"[WhisperManager] Model '{model_name}' loaded in {elapsed:.2f}s")
-            
+
             self._active_jobs += 1
             self._last_used = datetime.now().timestamp()
             return self._model
-    
+
     async def release_model(self):
         async with self._lock:
             self._active_jobs -= 1
             self._last_used = datetime.now().timestamp()
             self._reset_idle_timer()
-    
+
     async def unload(self) -> bool:
         async with self._lock:
             if self._active_jobs > 0:
                 return False
             return await self._unload_unsafe()
-    
+
     async def _unload_unsafe(self) -> bool:
         if self._model is None:
             return False
-        
+
         model_name = self._model_name
         print(f"[WhisperManager] Unloading model '{model_name}'...")
-        
+
+        # faster-whisper/CTranslate2 models are harder to explicitly unload from GPU VRAM
+        # than PyTorch models. Usually deleting the object and calling GC works.
         del self._model
         self._model = None
         self._model_name = None
-        
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            torch.cuda.synchronize()
-        
+        gc.collect()
+
         print(f"[WhisperManager] Model '{model_name}' unloaded, VRAM freed")
         return True
-    
+
     def _reset_idle_timer(self):
         if self._idle_task is not None:
             self._idle_task.cancel()
-        
+
         if MODEL_IDLE_TIMEOUT > 0:
             self._idle_task = asyncio.create_task(self._idle_unload())
-    
+
     async def _idle_unload(self):
         try:
             await asyncio.sleep(MODEL_IDLE_TIMEOUT)
@@ -156,16 +165,22 @@ class WhisperModelManager:
                         await self._unload_unsafe()
         except asyncio.CancelledError:
             pass
-    
+
     def get_status(self) -> ModelStatus:
-        vram_mb = None
+        # Use pynvml (NVIDIA Management Library) for VRAM if available
+        vram_mb = 0
         device = "cpu"
-        
-        if torch.cuda.is_available():
-            device = f"cuda:{torch.cuda.current_device()}"
-            if self._model is not None:
-                vram_mb = torch.cuda.memory_allocated() / (1024 * 1024)
-        
+        try:
+            import pynvml
+            pynvml.nvmlInit()
+            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+            info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+            vram_mb = info.used / (1024 * 1024)
+            pynvml.nvmlShutdown()
+            device = "cuda"
+        except:
+            pass # Not NVIDIA or not available
+
         return ModelStatus(
             loaded=self.is_loaded,
             model_name=self._model_name,
@@ -235,49 +250,86 @@ async def run_transcription(job_id: str, input_path: str, model_name: str):
     job = jobs.get(job_id)
     if not job:
         return
-    
+
     output_path = os.path.join(TEMP_OUTPUT_DIR, f"{job_id}.json")
-    
+
     try:
         async with transcribe_semaphore:
             job.status = JobStatusState.model_loading
             job.message = f"Loading model '{model_name}'..."
             job.start_time = datetime.now().timestamp()
-            
+
             if cancel_flags.get(job_id):
                 job.status = JobStatusState.canceled
                 job.message = "Canceled before model load"
                 return
-            
+
             duration = get_audio_duration(input_path)
             if duration <= 0:
                 raise ValueError("Could not determine audio duration")
             job.duration = duration
-            
+
             model = await model_manager.acquire_model(model_name)
-            
+
             if cancel_flags.get(job_id):
                 job.status = JobStatusState.canceled
                 job.message = "Canceled after model load"
                 return
-            
+
             job.status = JobStatusState.transcribing
             job.message = "Transcribing audio..."
+            job.progress = 1.0  # Show initial progress
+
+            # Use asyncio to run transcription in executor and periodically check progress
+            # We'll use a shared state to track the last processed segment
+            last_segment_end = [0.0]  # Mutable container so the closure can update it
             
+            def transcribe_sync():
+                segments, info = model.transcribe(input_path, beam_size=5)
+                segment_list = []
+                
+                # Process segments and track progress
+                for segment in segments:
+                    segment_list.append({
+                        "id": segment.id,
+                        "start": segment.start,
+                        "end": segment.end,
+                        "text": segment.text.strip(),
+                    })
+                    # Update the last segment end time for progress tracking
+                    last_segment_end[0] = segment.end
+                
+                return {
+                    "text": "".join([s["text"] for s in segment_list]),
+                    "segments": segment_list,
+                    "language": info.language
+                }, info
+            
+            # Run transcription in background and update progress periodically
             loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None,
-                lambda: model.transcribe(input_path, language="en", verbose=False)
-            )
+            transcription_task = loop.run_in_executor(None, transcribe_sync)
             
+            # Poll progress while transcription is running
+            while not transcription_task.done():
+                await asyncio.sleep(0.5)  # Update progress every 0.5 seconds
+                if duration > 0 and last_segment_end[0] > 0:
+                    # Cap at 95% until we're actually done to avoid showing 100% prematurely
+                    progress_pct = min(95.0, (last_segment_end[0] / duration) * 100.0)
+                    if progress_pct != job.progress:  # Only log when progress changes
+                        print(f"[Whisper] Job {job_id} progress: {progress_pct:.1f}% ({last_segment_end[0]:.1f}s / {duration:.1f}s)")
+                    job.progress = progress_pct
+            
+            # Get the result
+            result, info = await transcription_task
+
             if cancel_flags.get(job_id):
                 job.status = JobStatusState.canceled
                 job.message = "Canceled during transcription"
                 return
-            
+
             with open(output_path, "w") as f:
                 json.dump(result, f, indent=2)
-            
+
             job.status = JobStatusState.completed
             job.progress = 100.0
             job.result = {
@@ -287,21 +339,21 @@ async def run_transcription(job_id: str, input_path: str, model_name: str):
             }
             job.message = "Transcription completed"
             job.end_time = datetime.now().timestamp()
-    
+
     except Exception as e:
         job.status = JobStatusState.failed
         job.error = str(e)
         job.message = f"Transcription failed: {e}"
         job.end_time = datetime.now().timestamp()
         print(f"[Whisper] Job {job_id} failed: {e}")
-    
+
     finally:
         try:
             if os.path.exists(input_path):
                 os.unlink(input_path)
         except Exception as e:
             print(f"[Whisper] Cleanup error: {e}")
-        
+
         cancel_flags.pop(job_id, None)
         await model_manager.release_model()
 
@@ -341,13 +393,13 @@ async def transcribe(
     model_name: str = Form(DEFAULT_MODEL),
 ):
     job_id = str(uuid.uuid4())
-    
+
     input_path = os.path.join(TEMP_INPUT_DIR, f"{job_id}_{file.filename}")
-    
+
     with open(input_path, "wb") as f:
         while chunk := await file.read(1024 * 1024):
             f.write(chunk)
-    
+
     job = JobStatus(
         job_id=job_id,
         status=JobStatusState.queued,
@@ -355,9 +407,9 @@ async def transcribe(
     )
     jobs[job_id] = job
     cancel_flags[job_id] = False
-    
+
     background_tasks.add_task(run_transcription, job_id, input_path, model_name)
-    
+
     print(f"[Whisper] Queued job {job_id} for {file.filename} with model '{model_name}'")
     return TranscribeResponse(job_id=job_id, message="Transcription job queued.")
 
@@ -375,14 +427,14 @@ async def cancel_job(job_id: str):
     job = jobs.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job ID not found")
-    
+
     if job.status in [JobStatusState.completed, JobStatusState.failed, JobStatusState.canceled]:
         return {"job_id": job_id, "message": f"Job already in state: {job.status}"}
-    
+
     cancel_flags[job_id] = True
     job.status = JobStatusState.canceling
     job.message = "Cancellation requested"
-    
+
     return {"job_id": job_id, "message": "Cancellation request sent"}
 
 

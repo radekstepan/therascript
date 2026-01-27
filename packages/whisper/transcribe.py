@@ -3,20 +3,17 @@ import sys
 import json
 import signal
 import subprocess
-import whisper
-import torch
+from faster_whisper import WhisperModel
 import time
 
 # Global State
 should_exit = False
 last_progress_report_time = 0
-progress_report_interval = 1 # Report progress more frequently if needed
+progress_report_interval = 1
 
 # Signal Handling
 def signal_handler(sig, frame):
     global should_exit
-    # Print a JSON message indicating cancellation due to signal
-    # Ensure this is printed to stdout for server.py to parse
     print(json.dumps({"status": "canceled", "message": f"Received signal {sig}, requesting shutdown."}), flush=True)
     should_exit = True
 
@@ -40,10 +37,9 @@ def get_audio_duration(file_path):
 # Core Transcription Logic
 def transcribe_audio(file_path, output_file, model_name):
     global should_exit, last_progress_report_time
-    should_exit = False 
-    last_progress_report_time = time.time() 
+    should_exit = False
+    last_progress_report_time = time.time()
 
-    # --- NEW LOG ---
     print(json.dumps({"status": "info", "message": "transcribe.py script started."}), flush=True)
 
     try:
@@ -52,77 +48,101 @@ def transcribe_audio(file_path, output_file, model_name):
 
         print(json.dumps({"status": "processing", "message": "Fetching audio duration..."}), flush=True)
         duration = get_audio_duration(file_path)
-        if should_exit: return # Check after potentially blocking call
+        if should_exit: return
         if duration <= 0:
             raise ValueError("Could not determine audio duration or audio is empty.")
         print(json.dumps({"status": "info", "code": "audio_duration", "message": f"{duration:.2f}"}), flush=True)
 
-        if not torch.cuda.is_available():
-            print(json.dumps({"status": "info", "code": "cuda_not_available", "message": "CUDA (GPU) not available. Using CPU (will be slow)."}), flush=True)
+        # Detect Hardware
+        # faster-whisper handles CUDA/CPU automatically, but we can be explicit
+        try:
+            import torch
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        except ImportError:
+            device = "cpu"
+
+        if device == "cpu":
+            print(json.dumps({"status": "info", "code": "cpu_detected", "message": "Using CPU for transcription."}), flush=True)
         else:
-            gpu_name = torch.cuda.get_device_name(0)
-            print(json.dumps({"status": "info", "code": "cuda_available", "message": f"Using CUDA GPU: {gpu_name}"}), flush=True)
-        
+            try:
+                gpu_name = torch.cuda.get_device_name(0)
+                print(json.dumps({"status": "info", "code": "cuda_available", "message": f"Using CUDA GPU: {gpu_name}"}), flush=True)
+            except:
+                print(json.dumps({"status": "info", "code": "cuda_available", "message": "Using CUDA GPU"}), flush=True)
+
         if should_exit: return
 
-        # --- NEW, MORE DETAILED LOGS AROUND THE CRITICAL SECTION ---
-        print(json.dumps({"status": "model_loading", "message": f"About to call whisper.load_model('{model_name}'). This is the memory-intensive step."}), flush=True)
-        
-        # This is the line that causes the OOM error on cold start
-        model = whisper.load_model(model_name)
-        
-        # If this log appears, it means the model loaded successfully
-        print(json.dumps({"status": "loading_complete", "message": f"Model '{model_name}' loaded successfully into memory."}), flush=True)
-        # --- END OF NEW LOGS ---
+        # On CPU (Mac Docker), int8 is faster. On GPU, float16 is standard.
+        compute_type = "float16" if device == "cuda" else "int8"
 
-        if should_exit: # Check immediately after potentially long load_model call
+        print(json.dumps({"status": "model_loading", "message": f"Loading {model_name} on {device} ({compute_type})..."}), flush=True)
+
+        model = WhisperModel(model_name, device=device, compute_type=compute_type)
+
+        print(json.dumps({"status": "loading_complete", "message": "Model loaded."}), flush=True)
+
+        if should_exit:
             print(json.dumps({"status": "canceled", "message": "Canceled after model load attempt."}), flush=True)
             return
 
-        # --- NEW LOG ---
-        print(json.dumps({"status": "transcribing", "message": "Starting actual transcription..."}), flush=True)
-        
-        result = model.transcribe(file_path, language="en", verbose=True) 
+        print(json.dumps({"status": "transcribing", "message": "Processing audio..."}), flush=True)
 
-        if should_exit:
-            print(json.dumps({"status": "canceled", "message": "Canceled during transcription processing."}), flush=True)
-            return
+        # Transcribe
+        # faster-whisper returns a generator. We must iterate to process.
+        segments, info = model.transcribe(file_path, beam_size=5)
+
+        segment_list = []
+        for segment in segments:
+            if should_exit:
+                print(json.dumps({"status": "canceled", "message": "Canceled during transcription processing."}), flush=True)
+                return
+            segment_list.append({
+                "id": segment.id,
+                "start": segment.start,
+                "end": segment.end,
+                "text": segment.text.strip(),
+                # faster-whisper doesn't give tokens by default in the same list format,
+                # but for this app's UI, we mostly need start/end/text.
+            })
+
+        # Construct Final Result matching Domain Types
+        result = {
+            "text": "".join([s["text"] for s in segment_list]),
+            "segments": segment_list,
+            "language": info.language
+        }
 
         with open(output_file, "w") as f:
             json.dump(result, f, indent=4)
-        
+
         print(json.dumps({
-            "status": "completed", 
+            "status": "completed",
             "message": f"Transcription completed. Output saved to: {os.path.basename(output_file)}",
-            "result_summary": { 
-                "language": result.get("language"), 
-                "segment_count": len(result.get("segments", [])), 
-                "text_length": len(result.get("text", ""))
+            "result_summary": {
+                "language": info.language,
+                "segment_count": len(segment_list),
+                "text_length": len(result["text"])
             }
         }), flush=True)
 
     except RuntimeError as e:
         err_code = "runtime_error"
-        if "Transcription canceled" in str(e): # From our hook, if ever used
-            print(json.dumps({"status": "canceled", "message": "Transcription explicitly canceled by hook"}), flush=True)
-            return # Don't exit with error for graceful cancellation
-        elif "CUDA" in str(e) or "tensorrt" in str(e).lower() or "HIP" in str(e): # Common GPU related errors
+        if "CUDA" in str(e) or "tensorrt" in str(e).lower() or "HIP" in str(e):
             err_code = "gpu_error"
-        
         print(json.dumps({ "status": "error", "code": err_code, "message": str(e)}), file=sys.stderr, flush=True)
-        sys.exit(1) # Exit with non-zero code for runtime errors
-    except ValueError as e: # Catch the ValueError from duration check or other value issues
+        sys.exit(1)
+    except ValueError as e:
         print(json.dumps({ "status": "error", "code": "audio_error", "message": str(e)}), file=sys.stderr, flush=True)
         sys.exit(1)
     except Exception as e:
         print(json.dumps({ "status": "error", "code": "unknown_error", "message": f"An unexpected error occurred: {str(e)}"}), file=sys.stderr, flush=True)
-        sys.exit(1) # Exit with non-zero for any other unhandled error
+        sys.exit(1)
 
 if __name__ == "__main__":
     if len(sys.argv) != 4:
         print(json.dumps({ "status": "error", "code": "invalid_arguments", "message": "Usage: python3 transcribe.py <input_audio_file> <output_json_file> <model_name>" }), file=sys.stderr, flush=True)
         sys.exit(1)
-    
+
     audio_file_path_arg = sys.argv[1]
     output_json_path_arg = sys.argv[2]
     model_name_arg = sys.argv[3]
@@ -130,5 +150,5 @@ if __name__ == "__main__":
     if not os.path.isfile(audio_file_path_arg):
         print(json.dumps({ "status": "error", "code": "file_not_found", "message": f"Input audio file not found: {audio_file_path_arg}" }), file=sys.stderr, flush=True)
         sys.exit(1)
-        
+
     transcribe_audio(audio_file_path_arg, output_json_path_arg, model_name_arg)

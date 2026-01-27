@@ -1,4 +1,0 @@
-- go through report.md and fix
-- do another round of code review
-- on Linux Whisper runs on CPU; how can we run on CUDA there while still running on CPU (MLX) on a Mac?
-- loading spinner is not animated, make sure it is throughout the app

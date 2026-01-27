@@ -58,12 +58,9 @@ const isMacOS = process.platform === 'darwin';
 const isLinux = process.platform === 'linux' && !isWSL();
 const isWsl = isWSL();
 
+// faster-whisper handles dependencies automatically.
+// We still keep the docker-compose override logic for Mac to remove GPU device reservation.
 if (isMacOS) {
-  // Ensure Whisper uses CPU wheels on macOS (Apple Silicon) during Docker build.
-  process.env.WHISPER_TORCH_INDEX_URL = 'https://download.pytorch.org/whl/cpu';
-  // Prefer stable CPU wheels (no --pre). Empty string disables the flag.
-  process.env.WHISPER_TORCH_FLAGS = '';
-  // Use a compose override file that removes NVIDIA GPU requirements on macOS
   const path = require('node:path');
   const repoRoot = path.resolve(__dirname, '..');
   const noGpuCompose = path.join(repoRoot, 'docker-compose.no-gpu.yml');
@@ -74,15 +71,6 @@ if (isMacOS) {
       noGpuCompose
     );
   }
-  console.log(
-    '[RunDev] OS detected: macOS. Configuring Whisper build for CPU PyTorch wheels.'
-  );
-} else if (isLinux || isWsl) {
-  console.log(
-    '[RunDev] OS detected: ' +
-      (isWsl ? 'WSL' : 'Linux') +
-      '. Using CUDA nightly PyTorch wheels for Whisper (default).'
-  );
 }
 // --- End OS Detection & Env Tweaks ---
 
