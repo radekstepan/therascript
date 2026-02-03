@@ -93,6 +93,7 @@ export const listSessions = ({ set }: SessionHandlerContextNoSessionData) => {
       status: s.status,
       whisperJobId: s.whisperJobId,
       transcriptTokenCount: s.transcriptTokenCount,
+      errorMessage: s.errorMessage,
     }));
     set.status = 200;
     return sessionDTOs;
@@ -131,6 +132,7 @@ export const getSessionDetails = ({
       status: sessionData.status,
       whisperJobId: sessionData.whisperJobId,
       transcriptTokenCount: sessionData.transcriptTokenCount,
+      errorMessage: sessionData.errorMessage,
       chats: chatMetadata,
     };
   } catch (error) {
