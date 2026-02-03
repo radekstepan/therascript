@@ -59,6 +59,7 @@ async function pollWhisperStatus(
   const inactivityTimeoutMs = config.whisper.inactivityTimeoutMs;
   let lastProgress: number | null = null;
   let lastStatus: string | null = null;
+  let lastMessage: string | null = null;
   let lastActivityTime = Date.now();
 
   while (true) {
@@ -74,11 +75,17 @@ async function pollWhisperStatus(
       { timeout: 10000 }
     );
 
-    // Track activity: if progress changed or status changed, reset timer
-    if (status.progress !== lastProgress || status.status !== lastStatus) {
+    // Track activity: if progress, status, or message changed, reset timer
+    const currentMessage = status.message ?? null;
+    if (
+      status.progress !== lastProgress ||
+      status.status !== lastStatus ||
+      currentMessage !== lastMessage
+    ) {
       lastActivityTime = Date.now();
       lastProgress = status.progress ?? null;
       lastStatus = status.status;
+      lastMessage = currentMessage;
     }
 
     if (
