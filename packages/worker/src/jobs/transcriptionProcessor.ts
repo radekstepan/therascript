@@ -56,13 +56,16 @@ async function startWhisperJob(filePath: string): Promise<string> {
 async function pollWhisperStatus(
   whisperJobId: string
 ): Promise<WhisperJobStatus> {
-  const startTime = Date.now();
-  const maxWaitMs = config.whisper.pollingTimeoutMs;
+  const inactivityTimeoutMs = config.whisper.inactivityTimeoutMs;
+  let lastProgress: number | null = null;
+  let lastStatus: string | null = null;
+  let lastActivityTime = Date.now();
 
   while (true) {
-    if (Date.now() - startTime > maxWaitMs) {
+    const timeSinceLastActivity = Date.now() - lastActivityTime;
+    if (timeSinceLastActivity > inactivityTimeoutMs) {
       throw new Error(
-        `Whisper job ${whisperJobId} timed out after ${maxWaitMs}ms`
+        `Whisper job ${whisperJobId} timed out due to ${Math.round(inactivityTimeoutMs / 60000)} minutes of inactivity`
       );
     }
 
@@ -70,6 +73,13 @@ async function pollWhisperStatus(
       `${config.whisper.apiUrl}/status/${whisperJobId}`,
       { timeout: 10000 }
     );
+
+    // Track activity: if progress changed or status changed, reset timer
+    if (status.progress !== lastProgress || status.status !== lastStatus) {
+      lastActivityTime = Date.now();
+      lastProgress = status.progress ?? null;
+      lastStatus = status.status;
+    }
 
     if (
       status.status === 'completed' ||
