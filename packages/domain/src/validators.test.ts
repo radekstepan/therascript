@@ -232,6 +232,7 @@ describe('Database Entity Schemas', () => {
         timestamp: Date.now(),
         promptTokens: 50,
         completionTokens: 100,
+        duration: null,
       });
       expect(result.success).toBe(true);
     });
@@ -247,6 +248,7 @@ describe('Database Entity Schemas', () => {
           timestamp: Date.now(),
           promptTokens: null,
           completionTokens: null,
+          duration: null,
         });
         expect(result.success).toBe(true);
       }
@@ -261,6 +263,7 @@ describe('Database Entity Schemas', () => {
         timestamp: Date.now(),
         promptTokens: null,
         completionTokens: null,
+        duration: null,
       });
       expect(result.success).toBe(false);
     });

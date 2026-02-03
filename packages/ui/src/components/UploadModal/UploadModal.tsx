@@ -240,7 +240,7 @@ export function UploadModal({ isOpen }: UploadModalProps) {
     (uploadMutation.isError ? uploadMutation.error.message : null) ||
     sessionPollingError?.message ||
     (sessionStatus?.status === 'failed'
-      ? 'Processing failed. Check server logs.'
+      ? sessionStatus?.errorMessage || 'Processing failed. Check server logs.'
       : null);
 
   const handleDrag = (

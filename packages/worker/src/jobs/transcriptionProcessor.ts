@@ -159,7 +159,7 @@ export default async function (job: Job<TranscriptionJobData, any, string>) {
     const finalStatus = await pollWhisperStatus(whisperJobId);
     if (finalStatus.status !== 'completed' || !finalStatus.result?.segments) {
       throw new Error(
-        `Whisper job ${whisperJobId} failed or returned no segments. Status: ${finalStatus.status}`
+        `Whisper job ${whisperJobId} failed or returned no segments. Status: ${finalStatus.status}. Error: ${finalStatus.error || 'Unknown error'}`
       );
     }
 
@@ -217,6 +217,7 @@ export default async function (job: Job<TranscriptionJobData, any, string>) {
     sessionRepository.updateMetadata(sessionId, {
       status: 'completed',
       transcriptTokenCount: tokenCount,
+      errorMessage: null, // Clear any previous errors
     });
 
     // Create initial chat
@@ -249,7 +250,14 @@ export default async function (job: Job<TranscriptionJobData, any, string>) {
       `[Transcription Worker] FAILED job for session ${sessionId}:`,
       error
     );
-    sessionRepository.updateMetadata(sessionId, { status: 'failed' });
+    // Persist the error message to the database
+    const errorMessage =
+      error instanceof Error ? error.message : String(error).substring(0, 500);
+
+    sessionRepository.updateMetadata(sessionId, {
+      status: 'failed',
+      errorMessage: errorMessage,
+    });
     throw error; // Re-throw to let BullMQ know the job failed
   }
 }

@@ -17,6 +17,7 @@ import {
   DropdownMenu,
   ScrollArea,
   Checkbox,
+  Tooltip, // Added Tooltip import
 } from '@radix-ui/themes';
 import type { Session } from '../../types';
 import type { SessionSortCriteria, SortDirection } from '../../store';
@@ -269,7 +270,9 @@ export function SessionListTable({
                     : 'hover:bg-[var(--gray-a3)]',
                   session.status === 'failed' && 'bg-red-50 dark:bg-red-950/20'
                 )}
-                aria-label={`Load session: ${session.sessionName || session.fileName}`}
+                aria-label={`Load session: ${
+                  session.sessionName || session.fileName
+                }`}
                 tabIndex={0}
                 onKeyDown={(e) => handleKeyDown(e, session.id)}
                 style={{ verticalAlign: 'middle' }} // Enforce vertical alignment on row
@@ -307,14 +310,28 @@ export function SessionListTable({
                       </Text>
                       {session.status !== 'completed' && (
                         <div className="mt-0.5">
-                          <Badge
-                            color={getStatusBadgeColor(session.status)}
-                            variant="soft"
-                            radius="full"
-                            size="1"
+                          <Tooltip
+                            content={
+                              session.status === 'failed'
+                                ? session.errorMessage ||
+                                  'An error occurred during processing. Please try again or contact support.'
+                                : `Status: ${session.status}`
+                            }
                           >
-                            {session.status}
-                          </Badge>
+                            <Badge
+                              color={getStatusBadgeColor(session.status)}
+                              variant="soft"
+                              radius="full"
+                              size="1"
+                              className={
+                                session.status === 'failed'
+                                  ? 'cursor-help'
+                                  : undefined
+                              }
+                            >
+                              {session.status}
+                            </Badge>
+                          </Tooltip>
                         </div>
                       )}
                     </Flex>

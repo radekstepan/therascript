@@ -118,6 +118,7 @@ export interface Session extends SessionMetadata {
   whisperJobId: string | null;
   date: string; // ISO string from backend
   transcriptTokenCount?: number | null;
+  errorMessage?: string | null; // <-- ADDED
   chats: Pick<ChatSession, 'id' | 'sessionId' | 'timestamp' | 'name'>[];
 }
 

@@ -11,6 +11,17 @@ describe('gpu-utils.getGpuStats', () => {
     vi.doMock('which', () => ({
       default: vi.fn().mockRejectedValue(new Error('nope')),
     }));
+    vi.doMock('systeminformation', () => ({
+      default: {
+        graphics: vi.fn().mockResolvedValue({ controllers: [] }),
+        mem: vi
+          .fn()
+          .mockResolvedValue({
+            total: 1024 * 1024 * 1024,
+            available: 512 * 1024 * 1024,
+          }),
+      },
+    }));
     // child_process won't be used but provide a stub to be safe
     vi.doMock('child_process', () => ({ exec: vi.fn() }));
     const mod = await import('./index.js');

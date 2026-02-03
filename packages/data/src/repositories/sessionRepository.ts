@@ -9,7 +9,7 @@ let _insertSessionStmt: DbStatement | null = null;
 const insertSessionStmt = (): DbStatement => {
   if (!_insertSessionStmt) {
     _insertSessionStmt = db.prepare(
-      'INSERT INTO sessions (fileName, clientName, sessionName, date, sessionType, therapy, audioPath, status, whisperJobId, transcriptTokenCount) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO sessions (fileName, clientName, sessionName, date, sessionType, therapy, audioPath, status, whisperJobId, transcriptTokenCount, errorMessage) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
   }
   return _insertSessionStmt;
@@ -19,7 +19,7 @@ let _selectAllSessionsStmt: DbStatement | null = null;
 const selectAllSessionsStmt = (): DbStatement => {
   if (!_selectAllSessionsStmt) {
     _selectAllSessionsStmt = db.prepare(
-      'SELECT id, fileName, clientName, sessionName, date, sessionType, therapy, audioPath, status, whisperJobId, transcriptTokenCount FROM sessions ORDER BY date DESC, id DESC'
+      'SELECT id, fileName, clientName, sessionName, date, sessionType, therapy, audioPath, status, whisperJobId, transcriptTokenCount, errorMessage FROM sessions ORDER BY date DESC, id DESC'
     );
   }
   return _selectAllSessionsStmt;
@@ -29,7 +29,7 @@ let _selectSessionByIdStmt: DbStatement | null = null;
 const selectSessionByIdStmt = (): DbStatement => {
   if (!_selectSessionByIdStmt) {
     _selectSessionByIdStmt = db.prepare(
-      'SELECT id, fileName, clientName, sessionName, date, sessionType, therapy, audioPath, status, whisperJobId, transcriptTokenCount FROM sessions WHERE id = ?'
+      'SELECT id, fileName, clientName, sessionName, date, sessionType, therapy, audioPath, status, whisperJobId, transcriptTokenCount, errorMessage FROM sessions WHERE id = ?'
     );
   }
   return _selectSessionByIdStmt;
@@ -39,7 +39,7 @@ let _updateSessionMetadataStmt: DbStatement | null = null;
 const updateSessionMetadataStmt = (): DbStatement => {
   if (!_updateSessionMetadataStmt) {
     _updateSessionMetadataStmt = db.prepare(
-      `UPDATE sessions SET clientName = ?, sessionName = ?, date = ?, sessionType = ?, therapy = ?, fileName = ?, audioPath = ?, status = ?, whisperJobId = ?, transcriptTokenCount = ? WHERE id = ?`
+      `UPDATE sessions SET clientName = ?, sessionName = ?, date = ?, sessionType = ?, therapy = ?, fileName = ?, audioPath = ?, status = ?, whisperJobId = ?, transcriptTokenCount = ?, errorMessage = ? WHERE id = ?`
     );
   }
   return _updateSessionMetadataStmt;
@@ -106,7 +106,8 @@ export const sessionRepository = {
         audioIdentifier,
         'pending',
         null,
-        null
+        null,
+        null // Initial errorMessage
       );
       const newId = info.lastInsertRowid as number;
       console.log(`[SessionRepo:create] Insert successful. New ID: ${newId}`);
@@ -162,6 +163,7 @@ export const sessionRepository = {
         whisperJobId?: string | null;
         date?: string;
         transcriptTokenCount?: number | null;
+        errorMessage?: string | null;
       }
     >
   ): BackendSession | null => {
@@ -193,7 +195,7 @@ export const sessionRepository = {
       }
 
       console.log(
-        `[SessionRepo:update] Executing update for ID ${id} with audioPath: ${updatedData.audioPath}, tokenCount: ${updatedData.transcriptTokenCount ?? 'N/A'}`
+        `[SessionRepo:update] Executing update for ID ${id} with status: ${updatedData.status}, error: ${updatedData.errorMessage}`
       );
       const info: DbRunResult = updateSessionMetadataStmt().run(
         updatedData.clientName,
@@ -206,6 +208,7 @@ export const sessionRepository = {
         updatedData.status,
         updatedData.whisperJobId,
         updatedData.transcriptTokenCount,
+        updatedData.errorMessage || null,
         id
       );
       if (info.changes === 0) {

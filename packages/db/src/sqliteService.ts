@@ -24,7 +24,8 @@ export const schema = `
         status TEXT NOT NULL DEFAULT 'pending',
         whisperJobId TEXT NULL,
         audioPath TEXT NULL,
-        transcriptTokenCount INTEGER NULL
+        transcriptTokenCount INTEGER NULL,
+        errorMessage TEXT NULL
     );
 
     -- Transcript Paragraphs Table Definition
@@ -60,6 +61,7 @@ export const schema = `
         timestamp INTEGER NOT NULL,
         promptTokens INTEGER,
         completionTokens INTEGER,
+        duration INTEGER NULL,
         FOREIGN KEY (chatId) REFERENCES chats (id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_message_chat ON messages (chatId);
@@ -74,11 +76,24 @@ export const schema = `
     );
     CREATE INDEX IF NOT EXISTS idx_template_created_at ON templates (createdAt);
 
-    -- REMOVED: schema_metadata table creation is now handled by the migration logic
+    -- Usage Logs Table
+    CREATE TABLE IF NOT EXISTS usage_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL CHECK(type IN ('llm', 'whisper')),
+        source TEXT NOT NULL,
+        model TEXT NOT NULL,
+        promptTokens INTEGER NULL,
+        completionTokens INTEGER NULL,
+        duration INTEGER NULL,
+        timestamp INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_usage_logs_timestamp ON usage_logs (timestamp);
+    CREATE INDEX IF NOT EXISTS idx_usage_logs_type ON usage_logs (type);
+    CREATE INDEX IF NOT EXISTS idx_usage_logs_type_timestamp ON usage_logs (type, timestamp);
 `;
 
 // --- NEW MIGRATION LOGIC ---
-export const LATEST_SCHEMA_VERSION = 9;
+export const LATEST_SCHEMA_VERSION = 10;
 
 // --- NEW SYSTEM PROMPTS ---
 export const SYSTEM_PROMPT_TEMPLATES = {
@@ -408,6 +423,23 @@ function runMigrations(dbInstance: DB) {
         dbInstance.pragma(`user_version = 9`);
         currentVersion = 9;
         console.log('[db Migrator] Version 9 applied.');
+      }
+
+      // NEW MIGRATION: Version 10 to add errorMessage column to sessions table
+      if (currentVersion < 10) {
+        console.log('[db Migrator] Applying version 10...');
+        const sessionColumns = dbInstance.pragma('table_info(sessions)') as {
+          name: string;
+        }[];
+        if (!sessionColumns.some((col) => col.name === 'errorMessage')) {
+          console.log('[db Migrator V10] Adding "errorMessage" to sessions...');
+          dbInstance.exec(
+            'ALTER TABLE sessions ADD COLUMN errorMessage TEXT NULL'
+          );
+        }
+        dbInstance.pragma(`user_version = 10`);
+        currentVersion = 10;
+        console.log('[db Migrator] Version 10 applied.');
       }
     })();
     console.log(
