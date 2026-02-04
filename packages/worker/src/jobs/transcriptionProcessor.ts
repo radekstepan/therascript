@@ -77,15 +77,27 @@ async function pollWhisperStatus(
 
     // Track activity: if progress, status, or message changed, reset timer
     const currentMessage = status.message ?? null;
-    if (
+    const hasActivity =
       status.progress !== lastProgress ||
       status.status !== lastStatus ||
-      currentMessage !== lastMessage
-    ) {
+      currentMessage !== lastMessage;
+
+    if (hasActivity) {
+      console.log(
+        `[Whisper Poll] Job ${whisperJobId}: status=${status.status}, progress=${status.progress ?? 'N/A'}, message=${currentMessage ?? 'N/A'}`
+      );
       lastActivityTime = Date.now();
       lastProgress = status.progress ?? null;
       lastStatus = status.status;
       lastMessage = currentMessage;
+    } else {
+      const idleSeconds = Math.round((Date.now() - lastActivityTime) / 1000);
+      if (idleSeconds > 60 && idleSeconds % 30 === 0) {
+        // Log every 30s after 1 minute idle
+        console.log(
+          `[Whisper Poll] Job ${whisperJobId}: No activity for ${idleSeconds}s (timeout at ${Math.round(inactivityTimeoutMs / 1000)}s). Last status=${lastStatus}, progress=${lastProgress ?? 'N/A'}`
+        );
+      }
     }
 
     if (
