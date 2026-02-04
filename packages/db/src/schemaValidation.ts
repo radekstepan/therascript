@@ -54,6 +54,9 @@ const validateSchemaAgainstZod = (
 
   // Check for missing columns
   for (const field of zodFields) {
+    // Ignore virtual/aggregated fields that are present in the Zod schema but not in the database table
+    if (tableName === 'sessions' && field === 'chats') continue;
+
     if (!dbColumns.includes(field)) {
       warnings.push(
         `Zod field '${field}' not found in database table '${tableName}'`
