@@ -63,17 +63,12 @@ async function pollWhisperStatus(
   let lastActivityTime = Date.now();
 
   while (true) {
-    const timeSinceLastActivity = Date.now() - lastActivityTime;
-    if (timeSinceLastActivity > inactivityTimeoutMs) {
-      throw new Error(
-        `Whisper job ${whisperJobId} timed out due to ${Math.round(inactivityTimeoutMs / 60000)} minutes of inactivity`
-      );
-    }
-
     const { data: status } = await axios.get<WhisperJobStatus>(
       `${config.whisper.apiUrl}/status/${whisperJobId}`,
       { timeout: 10000 }
     );
+    // Treat a successful status poll as activity (log heartbeat)
+    lastActivityTime = Date.now();
 
     // Track activity: if progress, status, or message changed, reset timer
     const currentMessage = status.message ?? null;
@@ -86,7 +81,6 @@ async function pollWhisperStatus(
       console.log(
         `[Whisper Poll] Job ${whisperJobId}: status=${status.status}, progress=${status.progress ?? 'N/A'}, message=${currentMessage ?? 'N/A'}`
       );
-      lastActivityTime = Date.now();
       lastProgress = status.progress ?? null;
       lastStatus = status.status;
       lastMessage = currentMessage;
@@ -98,6 +92,13 @@ async function pollWhisperStatus(
           `[Whisper Poll] Job ${whisperJobId}: No activity for ${idleSeconds}s (timeout at ${Math.round(inactivityTimeoutMs / 1000)}s). Last status=${lastStatus}, progress=${lastProgress ?? 'N/A'}`
         );
       }
+    }
+
+    const timeSinceLastActivity = Date.now() - lastActivityTime;
+    if (timeSinceLastActivity > inactivityTimeoutMs) {
+      throw new Error(
+        `Whisper job ${whisperJobId} timed out due to ${Math.round(inactivityTimeoutMs / 60000)} minutes of inactivity`
+      );
     }
 
     if (

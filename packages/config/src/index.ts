@@ -119,7 +119,7 @@ const config = {
     model: getEnvVar('WHISPER_MODEL', 'tiny'),
     inactivityTimeoutMs: parseIntEnvVar(
       'WHISPER_INACTIVITY_TIMEOUT_MS',
-      5 * 60 * 1000 // 5 minutes of no progress
+      30 * 60 * 1000 // 30 minutes of no progress
     ),
   },
   elasticsearch: {
