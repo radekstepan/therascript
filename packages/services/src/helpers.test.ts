@@ -7,10 +7,10 @@ import {
 import type { BackendSession } from '@therascript/domain';
 
 describe('helpers.cleanLlmOutput', () => {
-  it('removes known tokens and trims/normalizes whitespace', () => {
+  it('removes known tokens and preserves formatting', () => {
     const input = `Hello <|end_of_turn|> world\n\n<start_of_turn>user  [INST]  Text </s>  `;
     const out = cleanLlmOutput(input);
-    expect(out).toBe('Hello world Text');
+    expect(out).toBe('Hello  world\n\n    Text');
   });
 
   it('is idempotent for clean strings', () => {

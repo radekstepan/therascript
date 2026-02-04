@@ -3,6 +3,8 @@ import React, { useRef } from 'react';
 import { Box, Flex, Text, Spinner } from '@radix-ui/themes';
 import { StarIcon, CopyIcon } from '@radix-ui/react-icons';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 import { cn } from '../../../utils';
 import { useAnimatedText } from '../../../hooks/useAnimatedText';
 import type { ChatMessage } from '../../../types';
@@ -102,7 +104,9 @@ export function ChatMessageBubble({
           <Box className={cn(isUser ? 'text-white' : 'markdown-ai-message')}>
             {!isUser && renderMd ? (
               <Box ref={markdownContainerRef}>
-                <ReactMarkdown>{displayText}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
+                  {displayText}
+                </ReactMarkdown>
               </Box>
             ) : (
               <Text

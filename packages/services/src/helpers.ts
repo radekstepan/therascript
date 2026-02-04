@@ -35,11 +35,7 @@ export const cleanLlmOutput = (text: string): string => {
     cleanedText = cleanedText.replace(regex, '');
   }
 
-  cleanedText = cleanedText
-    .replace(/\s+/g, ' ')
-    .replace(/^\s+|\s+$/gm, '')
-    .replace(/(\r\n|\n|\r){2,}/g, '\n')
-    .trim();
+  cleanedText = cleanedText.replace(/^\s+|\s+$/g, '').trim();
 
   return cleanedText;
 };
