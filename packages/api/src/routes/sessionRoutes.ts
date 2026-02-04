@@ -183,6 +183,9 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
           } = body as Static<typeof UploadBodySchema>;
           let newSess: BackendSession | null = null;
           try {
+            console.log(
+              `[Upload] audioFile.name=${audioFile?.name}, type=${audioFile?.type}, size=${audioFile?.size}`
+            );
             const isoDate = dateToIsoStringForStorage(dateInput);
             newSess = sessionRepository.create(
               { ...metadata, date: isoDate },
