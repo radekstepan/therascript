@@ -419,6 +419,13 @@ const server = http.createServer(async (req, res) => {
     });
 });
 
+// Configure server timeouts to handle large file uploads
+// Node.js default is often 5 minutes (300,000ms), which can be too short for slow uploads of large audio files.
+server.timeout = 0; // Disable idle timeout
+server.headersTimeout = 0; // Disable headers timeout
+server.requestTimeout = 0; // Disable request timeout (this is likely the 5m timeout)
+server.keepAliveTimeout = 0; // Disable keep-alive timeout if needed
+
 initializeServices()
   .then(() => {
     server.listen(config.server.port, () => {

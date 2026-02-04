@@ -187,9 +187,21 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
               `[Upload] audioFile.name=${audioFile?.name}, type=${audioFile?.type}, size=${audioFile?.size}`
             );
             const isoDate = dateToIsoStringForStorage(dateInput);
+
+            // Robustly handle cases where audioFile.name might be missing (e.g. if parsed as Blob)
+            // Use a unique fallback name that includes a timestamp and attempted extension inference
+            let originalFileName = audioFile.name;
+            if (!originalFileName) {
+              const extension = audioFile.type?.split('/')[1] || 'audio';
+              originalFileName = `upload_${Date.now()}.${extension}`;
+              console.log(
+                `[Upload] No filename provided. Using fallback: ${originalFileName}`
+              );
+            }
+
             newSess = sessionRepository.create(
               { ...metadata, date: isoDate },
-              audioFile.name,
+              originalFileName,
               null,
               new Date().toISOString()
             );
@@ -199,7 +211,7 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
             const buffer = await audioFile.arrayBuffer();
             const savedAudioId = await saveUploadedAudio(
               newSess.id,
-              audioFile.name,
+              originalFileName,
               Buffer.from(buffer)
             );
 
