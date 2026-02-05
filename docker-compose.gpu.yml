@@ -1,0 +1,21 @@
+# GPU override for Linux with NVIDIA GPU
+# Usage: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+#
+# Prerequisites:
+# 1. NVIDIA drivers installed
+# 2. NVIDIA Container Toolkit installed
+# 3. Docker configured: sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker
+
+services:
+  whisper:
+    build:
+      context: .
+      dockerfile: packages/whisper/Dockerfile.gpu
+    image: therascript/whisper:gpu
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [ gpu ]

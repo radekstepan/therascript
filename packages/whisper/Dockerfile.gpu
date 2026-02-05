@@ -1,0 +1,44 @@
+# GPU-enabled Dockerfile for Whisper - uses NVIDIA CUDA
+# Use this on Linux with NVIDIA GPU
+
+FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04
+
+WORKDIR /app
+
+# Install system dependencies + Python
+RUN apt-get update && apt-get install -y \
+    curl \
+    ffmpeg \
+    supervisor \
+    python3 \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies for GPU
+COPY packages/whisper/requirements.txt ./
+# Install torch with CUDA support first, then faster-whisper
+RUN pip3 install --no-cache-dir torch --extra-index-url https://download.pytorch.org/whl/cu121 && \
+    pip3 install --no-cache-dir -r requirements.txt
+
+# Install Node.js (for the Express wrapper)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && npm install -g yarn
+
+# Copy Node dependencies
+COPY packages/whisper/package.json ./
+COPY yarn.lock ./
+RUN yarn install --production --frozen-lockfile
+
+# Copy source code
+COPY packages/whisper/. .
+
+# Setup Directories
+RUN mkdir -p /app/temp_inputs /app/temp_outputs
+
+# Setup Supervisor
+COPY packages/whisper/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+EXPOSE 8000 8001
+
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

@@ -148,11 +148,22 @@ This mode starts the API, the background worker, the UI (with hot-reloading), an
 
 1.  **Start Docker Services:**
     The root `docker-compose.yml` manages the core background services. Start them first.
+
+    **macOS or Linux without GPU (CPU-only, default):**
     ```bash
     # Run from the project root directory
     docker compose up -d --build
     ```
+
+    **Linux with NVIDIA GPU (uses GPU for Whisper):**
+    ```bash
+    # Run from the project root directory
+    docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+    ```
+
     This will start Whisper, Elasticsearch, and Redis. Kibana is also available for exploring search data.
+    
+    > **Note:** When using `yarn dev`, the platform is automatically detected and the correct compose files are used. Linux with NVIDIA GPU will automatically use GPU mode.
 
 2.  **Start the Development Environment:**
     The `yarn dev` script orchestrates all the Node.js processes and the Ollama Docker container.
