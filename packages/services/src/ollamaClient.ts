@@ -68,7 +68,7 @@ function mapSenderToRole(
 
 async function ensureOllamaReady(
   baseUrl: string,
-  timeoutMs: number = 30000
+  timeoutMs: number = 60000
 ): Promise<void> {
   const startTime = Date.now();
   const deadline = startTime + timeoutMs;
@@ -107,7 +107,7 @@ export async function* streamLlmChat(
     model = 'llama3',
     contextSize,
     abortSignal,
-    timeoutMs = 120000,
+    timeoutMs = 300000,
     stopTokens = DEFAULT_STOP_TOKENS,
     ollamaBaseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
     temperature,
@@ -129,7 +129,7 @@ export async function* streamLlmChat(
   try {
     await ensureOllamaReady(
       ollamaBaseUrl,
-      Math.min(10000, deadline - Date.now())
+      Math.min(60000, deadline - Date.now())
     );
   } catch (error) {
     clearTimeout(timeoutId);

@@ -1110,6 +1110,7 @@ export const streamChatResponse = async (
     temperature?: number;
     topP?: number;
     repeatPenalty?: number;
+    timeoutMs?: number;
   }
 ): Promise<AsyncIterable<ChatResponse>> => {
   const modelToUse = options?.model || getActiveModel();
@@ -1215,6 +1216,8 @@ export const streamChatResponse = async (
         repeatPenalty,
         abortSignal: options?.signal,
         ollamaBaseUrl: config.ollama.baseURL,
+        timeoutMs:
+          options?.timeoutMs ?? (config.ollama as any).timeoutMs ?? 600000,
       });
 
       let result = await streamGenerator.next();

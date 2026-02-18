@@ -24,8 +24,8 @@ import type {
   ChatMessage,
   OllamaStatus,
 } from '../../../types';
-import { currentQueryAtom } from '../../../store';
-import { useAtom } from 'jotai';
+import { currentQueryAtom, toastMessageAtom } from '../../../store';
+import { useAtom, useSetAtom } from 'jotai';
 
 interface ChatInterfaceProps {
   session?: Session | null; // Optional for standalone
@@ -58,6 +58,7 @@ export function ChatInterface({
 
   const queryClient = useQueryClient();
   const [currentQuery, setCurrentQuery] = useAtom(currentQueryAtom);
+  const setToastMessage = useSetAtom(toastMessageAtom);
 
   const [streamingAiMessageId, setStreamingAiMessageId] = useState<
     number | null
@@ -262,6 +263,7 @@ export function ChatInterface({
                   'Received error event from backend stream:',
                   data.error
                 );
+                setToastMessage(`Chat Error: ${data.error}`);
                 streamErrored = true;
               }
             } catch (e) {

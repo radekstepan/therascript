@@ -112,6 +112,7 @@ const config = {
     baseURL: getEnvVar('OLLAMA_BASE_URL', 'http://localhost:11434'),
     model: getEnvVar('OLLAMA_MODEL', 'llama3'),
     keepAlive: getEnvVar('OLLAMA_CHAT_KEEP_ALIVE', '5m'),
+    timeoutMs: parseIntEnvVar('OLLAMA_TIMEOUT_MS', 600000), // Default to 10 minutes
     runtime: ollamaRuntime,
   },
   whisper: {

@@ -156,6 +156,7 @@ export const streamChatResponse = async (
     temperature?: number;
     topP?: number;
     repeatPenalty?: number;
+    timeoutMs?: number;
   }
 ): Promise<AsyncIterable<ChatResponse>> => {
   const modelToUse = options?.model || getActiveModel();

@@ -30,6 +30,7 @@ export interface OllamaServiceInterface {
       temperature?: number;
       topP?: number;
       repeatPenalty?: number;
+      timeoutMs?: number;
     }
   ) => Promise<AsyncIterable<ChatResponse>>;
   startPullModelJob: (modelName: string) => string;
