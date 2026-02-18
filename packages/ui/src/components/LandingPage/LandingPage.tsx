@@ -63,6 +63,14 @@ export function LandingPage() {
 
   const [clientFilter, setClientFilter] = useState('');
 
+  // --- FIX: Reset client filter when search is cleared ---
+  useEffect(() => {
+    if (!activeSearchQuery) {
+      setClientFilter('');
+    }
+  }, [activeSearchQuery]);
+  // --- END FIX ---
+
   // Session states
   const currentSessionSortCriteria = useAtomValue(sessionSortCriteriaAtom);
   const currentSessionSortDirection = useAtomValue(sessionSortDirectionAtom);
@@ -185,13 +193,9 @@ export function LandingPage() {
 
   const filteredSessions = useMemo(() => {
     if (!sessions) return [];
-    if (activeSearchQuery) return sessions;
-    const lowerClientFilter = clientFilter.toLowerCase().trim();
-    if (!lowerClientFilter) return sessions;
-    return sessions.filter((s) =>
-      s.clientName?.toLowerCase().includes(lowerClientFilter)
-    );
-  }, [sessions, clientFilter, activeSearchQuery]);
+    // --- FIX: Dashboard (no active search) should NOT apply the search client filter ---
+    return sessions;
+  }, [sessions]);
 
   const filteredStandaloneChats = useMemo(() => {
     if (!standaloneChats) return [];
