@@ -1,1 +1,0 @@
-- [x] Markdown formatting is messed up after full message fully arrives

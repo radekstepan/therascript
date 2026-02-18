@@ -10,6 +10,8 @@ export type SessionSortCriteria =
   | 'sessionType'
   | 'therapy'
   | 'date'
+  | 'duration'
+  | 'transcriptTokenCount'
   | 'id';
 
 /**

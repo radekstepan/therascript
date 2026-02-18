@@ -93,6 +93,7 @@ export const listSessions = ({ set }: SessionHandlerContextNoSessionData) => {
       status: s.status,
       whisperJobId: s.whisperJobId,
       transcriptTokenCount: s.transcriptTokenCount,
+      duration: s.duration,
       errorMessage: s.errorMessage,
     }));
     set.status = 200;
@@ -132,6 +133,7 @@ export const getSessionDetails = ({
       status: sessionData.status,
       whisperJobId: sessionData.whisperJobId,
       transcriptTokenCount: sessionData.transcriptTokenCount,
+      duration: sessionData.duration,
       errorMessage: sessionData.errorMessage,
       chats: chatMetadata,
     };
@@ -555,6 +557,19 @@ export const finalizeSessionHandler = async ({
       .map((p: TranscriptParagraphData) => p.text)
       .join('\n\n'); // Type for p
     const tokenCount = calculateTokenCount(fullText);
+
+    // Estimate duration if not already set (fallback for manual finalization)
+    const maxTimestampMs =
+      structuredTranscript.length > 0
+        ? Math.max(
+            ...structuredTranscript.map(
+              (p: TranscriptParagraphData) => p.timestamp || 0
+            )
+          )
+        : 0;
+    const estimatedDuration =
+      maxTimestampMs > 0 ? Math.round(maxTimestampMs / 1000) : null;
+
     transcriptRepository.insertParagraphs(sessionId, structuredTranscript);
     console.log(
       `[API Finalize] Saved ${structuredTranscript.length} transcript paragraphs to DB for session ${sessionId}.`
@@ -587,6 +602,7 @@ export const finalizeSessionHandler = async ({
     const finalizedSessionInDb = sessionRepository.updateMetadata(sessionId, {
       status: 'completed',
       transcriptTokenCount: tokenCount,
+      duration: estimatedDuration,
     });
     if (!finalizedSessionInDb)
       throw new InternalServerError(

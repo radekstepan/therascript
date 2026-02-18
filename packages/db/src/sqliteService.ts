@@ -25,6 +25,7 @@ export const schema = `
         whisperJobId TEXT NULL,
         audioPath TEXT NULL,
         transcriptTokenCount INTEGER NULL,
+        duration INTEGER NULL,
         errorMessage TEXT NULL
     );
 
@@ -93,7 +94,7 @@ export const schema = `
 `;
 
 // --- NEW MIGRATION LOGIC ---
-export const LATEST_SCHEMA_VERSION = 10;
+export const LATEST_SCHEMA_VERSION = 11;
 
 // --- NEW SYSTEM PROMPTS ---
 export const SYSTEM_PROMPT_TEMPLATES = {
@@ -440,6 +441,36 @@ function runMigrations(dbInstance: DB) {
         dbInstance.pragma(`user_version = 10`);
         currentVersion = 10;
         console.log('[db Migrator] Version 10 applied.');
+      }
+
+      // NEW MIGRATION: Version 11 to add duration column and backfill it
+      if (currentVersion < 11) {
+        console.log('[db Migrator] Applying version 11...');
+        const sessionColumns = dbInstance.pragma('table_info(sessions)') as {
+          name: string;
+        }[];
+        if (!sessionColumns.some((col) => col.name === 'duration')) {
+          console.log('[db Migrator V11] Adding "duration" to sessions...');
+          dbInstance.exec(
+            'ALTER TABLE sessions ADD COLUMN duration INTEGER NULL'
+          );
+        }
+
+        // Backfill duration from transcript_paragraphs
+        console.log('[db Migrator V11] Backfilling duration...');
+        dbInstance.exec(`
+          UPDATE sessions
+          SET duration = (
+            SELECT MAX(timestampMs) / 1000
+            FROM transcript_paragraphs
+            WHERE sessionId = sessions.id
+          )
+          WHERE status = 'completed' AND duration IS NULL;
+        `);
+
+        dbInstance.pragma(`user_version = 11`);
+        currentVersion = 11;
+        console.log('[db Migrator] Version 11 applied.');
       }
     })();
     console.log(

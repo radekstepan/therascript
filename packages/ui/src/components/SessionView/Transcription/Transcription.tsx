@@ -27,6 +27,7 @@ import {
   PersonIcon,
   BadgeIcon as SessionTypeIcon,
   ArchiveIcon,
+  ClockIcon,
   DotsHorizontalIcon,
   TrashIcon,
 } from '@radix-ui/react-icons';
@@ -37,7 +38,7 @@ import {
   deleteTranscriptParagraph,
 } from '../../../api/api';
 import { sessionColorMap, therapyColorMap } from '../../../constants';
-import { debounce, formatIsoDateToYMD } from '../../../helpers';
+import { debounce, formatIsoDateToYMD, formatDuration } from '../../../helpers';
 import axios from 'axios';
 import { useSetAtom } from 'jotai';
 import { toastMessageAtom } from '../../../store';
@@ -60,13 +61,16 @@ const renderHeaderDetail = (
   label: string,
   category?: BadgeCategory,
   isDateValue?: boolean,
-  isTokenValue?: boolean
+  isTokenValue?: boolean,
+  isDurationValue?: boolean
 ) => {
   let displayValue: string | number | undefined | null = value;
   if (isDateValue && typeof value === 'string') {
     displayValue = formatIsoDateToYMD(value);
   } else if (isTokenValue && typeof value === 'number') {
     displayValue = value.toLocaleString();
+  } else if (isDurationValue && typeof value === 'number') {
+    displayValue = formatDuration(value);
   }
 
   if (
@@ -88,7 +92,9 @@ const renderHeaderDetail = (
         <IconComponent
           className={cn(
             'flex-shrink-0',
-            isBadge || isTokenValue ? 'opacity-80' : 'text-[--gray-a10]'
+            isBadge || isTokenValue || isDurationValue
+              ? 'opacity-80'
+              : 'text-[--gray-a10]'
           )}
           width="14"
           height="14"
@@ -97,10 +103,10 @@ const renderHeaderDetail = (
           <Badge color={badgeColor} variant="soft" radius="full" size="1">
             {value}
           </Badge>
-        ) : isTokenValue ? (
-          <Badge color="gray" variant="soft" radius="full" size="1">
+        ) : isTokenValue || isDurationValue ? (
+          <Text size="1" color="gray" weight="medium">
             {displayValue}
-          </Badge>
+          </Text>
         ) : (
           <Text size="1" color="gray">
             {displayValue}
@@ -558,6 +564,16 @@ export function Transcription({
               undefined,
               true
             )}
+            {typeof session?.duration === 'number' &&
+              renderHeaderDetail(
+                ClockIcon,
+                session.duration,
+                `Transcript Length`,
+                undefined,
+                false,
+                false,
+                true
+              )}
             {renderHeaderDetail(
               SessionTypeIcon,
               session.sessionType,

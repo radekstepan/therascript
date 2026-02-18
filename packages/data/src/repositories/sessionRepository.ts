@@ -9,7 +9,7 @@ let _insertSessionStmt: DbStatement | null = null;
 const insertSessionStmt = (): DbStatement => {
   if (!_insertSessionStmt) {
     _insertSessionStmt = db.prepare(
-      'INSERT INTO sessions (fileName, clientName, sessionName, date, sessionType, therapy, audioPath, status, whisperJobId, transcriptTokenCount, errorMessage) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO sessions (fileName, clientName, sessionName, date, sessionType, therapy, audioPath, status, whisperJobId, transcriptTokenCount, duration, errorMessage) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
   }
   return _insertSessionStmt;
@@ -19,7 +19,7 @@ let _selectAllSessionsStmt: DbStatement | null = null;
 const selectAllSessionsStmt = (): DbStatement => {
   if (!_selectAllSessionsStmt) {
     _selectAllSessionsStmt = db.prepare(
-      'SELECT id, fileName, clientName, sessionName, date, sessionType, therapy, audioPath, status, whisperJobId, transcriptTokenCount, errorMessage FROM sessions ORDER BY date DESC, id DESC'
+      'SELECT id, fileName, clientName, sessionName, date, sessionType, therapy, audioPath, status, whisperJobId, transcriptTokenCount, duration, errorMessage FROM sessions ORDER BY date DESC, id DESC'
     );
   }
   return _selectAllSessionsStmt;
@@ -29,7 +29,7 @@ let _selectSessionByIdStmt: DbStatement | null = null;
 const selectSessionByIdStmt = (): DbStatement => {
   if (!_selectSessionByIdStmt) {
     _selectSessionByIdStmt = db.prepare(
-      'SELECT id, fileName, clientName, sessionName, date, sessionType, therapy, audioPath, status, whisperJobId, transcriptTokenCount, errorMessage FROM sessions WHERE id = ?'
+      'SELECT id, fileName, clientName, sessionName, date, sessionType, therapy, audioPath, status, whisperJobId, transcriptTokenCount, duration, errorMessage FROM sessions WHERE id = ?'
     );
   }
   return _selectSessionByIdStmt;
@@ -39,7 +39,7 @@ let _updateSessionMetadataStmt: DbStatement | null = null;
 const updateSessionMetadataStmt = (): DbStatement => {
   if (!_updateSessionMetadataStmt) {
     _updateSessionMetadataStmt = db.prepare(
-      `UPDATE sessions SET clientName = ?, sessionName = ?, date = ?, sessionType = ?, therapy = ?, fileName = ?, audioPath = ?, status = ?, whisperJobId = ?, transcriptTokenCount = ?, errorMessage = ? WHERE id = ?`
+      `UPDATE sessions SET clientName = ?, sessionName = ?, date = ?, sessionType = ?, therapy = ?, fileName = ?, audioPath = ?, status = ?, whisperJobId = ?, transcriptTokenCount = ?, duration = ?, errorMessage = ? WHERE id = ?`
     );
   }
   return _updateSessionMetadataStmt;
@@ -107,6 +107,7 @@ export const sessionRepository = {
         'pending',
         null,
         null,
+        null, // duration
         null // Initial errorMessage
       );
       const newId = info.lastInsertRowid as number;
@@ -163,6 +164,7 @@ export const sessionRepository = {
         whisperJobId?: string | null;
         date?: string;
         transcriptTokenCount?: number | null;
+        duration?: number | null;
         errorMessage?: string | null;
       }
     >
@@ -208,6 +210,7 @@ export const sessionRepository = {
         updatedData.status,
         updatedData.whisperJobId,
         updatedData.transcriptTokenCount,
+        updatedData.duration,
         updatedData.errorMessage || null,
         id
       );

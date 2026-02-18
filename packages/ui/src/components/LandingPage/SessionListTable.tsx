@@ -22,7 +22,7 @@ import {
 import type { Session } from '../../types';
 import type { SessionSortCriteria, SortDirection } from '../../store';
 import { sessionColorMap, therapyColorMap } from '../../constants';
-import { formatIsoDateToYMD } from '../../helpers';
+import { formatIsoDateToYMD, formatDuration } from '../../helpers';
 import { cn } from '../../utils';
 
 interface SessionListTableProps {
@@ -249,6 +249,25 @@ export function SessionListTable({
               </Flex>
             </Table.ColumnHeaderCell>
             <Table.ColumnHeaderCell
+              {...getHeaderCellProps('duration')}
+              style={{ ...getHeaderCellProps('duration').style, ...cellStyle }}
+            >
+              <Flex align="center" className="group">
+                Length {renderSortIcon('duration')}
+              </Flex>
+            </Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell
+              {...getHeaderCellProps('transcriptTokenCount')}
+              style={{
+                ...getHeaderCellProps('transcriptTokenCount').style,
+                ...cellStyle,
+              }}
+            >
+              <Flex align="center" className="group">
+                Tokens {renderSortIcon('transcriptTokenCount')}
+              </Flex>
+            </Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell
               style={{ width: '1%', whiteSpace: 'nowrap', ...cellStyle }}
               align="right"
             >
@@ -379,6 +398,16 @@ export function SessionListTable({
                 <Table.Cell style={cellStyle}>
                   <Text size="2" color="gray">
                     {formatIsoDateToYMD(session.date) || '-'}
+                  </Text>
+                </Table.Cell>
+                <Table.Cell style={cellStyle}>
+                  <Text size="2" color="gray">
+                    {formatDuration(session.duration)}
+                  </Text>
+                </Table.Cell>
+                <Table.Cell style={cellStyle}>
+                  <Text size="2" color="gray">
+                    {session.transcriptTokenCount?.toLocaleString() || '-'}
                   </Text>
                 </Table.Cell>
                 <Table.Cell

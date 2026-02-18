@@ -79,3 +79,12 @@ export const debounce = <F extends (...args: any[]) => any>(
     timeoutId = setTimeout(() => func(...args), waitFor);
   };
 };
+/**
+ * Formats a duration in seconds into a "MM:SS" or "HH:MM:SS" string.
+ */
+export const formatDuration = (seconds: number | undefined | null): string => {
+  if (seconds === undefined || seconds === null || isNaN(seconds)) return '-';
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${String(secs).padStart(2, '0')}`;
+};

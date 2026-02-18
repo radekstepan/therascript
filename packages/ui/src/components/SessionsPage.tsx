@@ -120,6 +120,13 @@ export function SessionsPage() {
           case 'date':
             compareResult = getString(b.date).localeCompare(getString(a.date));
             break;
+          case 'duration':
+            compareResult = (a.duration ?? 0) - (b.duration ?? 0);
+            break;
+          case 'transcriptTokenCount':
+            compareResult =
+              (a.transcriptTokenCount ?? 0) - (b.transcriptTokenCount ?? 0);
+            break;
           case 'id':
             compareResult = (a.id ?? 0) - (b.id ?? 0);
             break;

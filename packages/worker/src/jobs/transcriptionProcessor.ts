@@ -173,12 +173,14 @@ export default async function (job: Job<TranscriptionJobData, any, string>) {
   if (!session) throw new Error(`Session ${sessionId} not found.`);
 
   const audioPath = getAudioAbsolutePath(session.audioPath);
-  if (!audioPath)
+  if (!audioPath) {
     throw new Error(
       `Audio path for session ${sessionId} is invalid or missing.`
     );
+  }
 
   try {
+    let durationInt: number | null = null;
     await job.updateProgress(5);
     sessionRepository.updateMetadata(sessionId, { status: 'transcribing' });
 
@@ -196,7 +198,7 @@ export default async function (job: Job<TranscriptionJobData, any, string>) {
     try {
       // Duration is on WhisperJobStatus directly, not on result
       const durationSec = finalStatus.duration ?? null;
-      const durationInt = durationSec != null ? Math.round(durationSec) : null;
+      durationInt = durationSec != null ? Math.round(durationSec) : null;
       if (durationInt !== null) {
         usageRepository.insertUsageLog({
           type: 'whisper',
@@ -247,6 +249,7 @@ export default async function (job: Job<TranscriptionJobData, any, string>) {
     sessionRepository.updateMetadata(sessionId, {
       status: 'completed',
       transcriptTokenCount: tokenCount,
+      duration: durationInt,
       errorMessage: null, // Clear any previous errors
     });
 

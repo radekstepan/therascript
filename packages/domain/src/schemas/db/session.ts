@@ -12,6 +12,7 @@ export const sessionSchema = z.object({
   status: z.enum(['pending', 'queued', 'transcribing', 'completed', 'failed']),
   whisperJobId: z.string().nullable(),
   transcriptTokenCount: z.number().nullable(),
+  duration: z.number().nullable().optional(),
   errorMessage: z.string().nullable().optional(),
   chats: z
     .array(

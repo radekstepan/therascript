@@ -95,6 +95,7 @@ const SessionMetadataResponseSchema = t.Object({
   status: t.String(),
   whisperJobId: t.Union([t.String(), t.Null()]),
   transcriptTokenCount: t.Optional(t.Union([t.Number(), t.Null()])),
+  duration: t.Optional(t.Union([t.Number(), t.Null()])),
   errorMessage: t.Optional(t.Union([t.String(), t.Null()])),
 });
 const SessionListResponseItemSchema = SessionMetadataResponseSchema;
@@ -120,6 +121,7 @@ const SessionWithChatsMetadataResponseSchema = t.Object({
   status: t.String(),
   whisperJobId: t.Union([t.String(), t.Null()]),
   transcriptTokenCount: t.Optional(t.Union([t.Number(), t.Null()])),
+  duration: t.Optional(t.Union([t.Number(), t.Null()])),
   errorMessage: t.Optional(t.Union([t.String(), t.Null()])),
   chats: t.Array(SessionChatMetadataSchema),
 });

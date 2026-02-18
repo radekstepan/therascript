@@ -98,6 +98,7 @@ export interface BackendSession {
   status: 'pending' | 'queued' | 'transcribing' | 'completed' | 'failed';
   whisperJobId: string | null;
   transcriptTokenCount?: number | null;
+  duration?: number | null;
   errorMessage?: string | null;
   chats?: (Omit<ChatMetadata, 'tags'> & { sessionId: number })[];
 }
@@ -111,6 +112,7 @@ export type BackendSessionMetadata = Omit<
   | 'status'
   | 'whisperJobId'
   | 'audioPath'
+  | 'duration'
   | 'errorMessage'
 >;
 
