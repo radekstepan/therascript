@@ -1,5 +1,6 @@
 // packages/ui/src/components/SessionsPage.tsx
 import React, { useMemo, useState } from 'react';
+import { SessionFilters } from './SessionsPage/SessionFilters';
 import { useNavigate } from 'react-router-dom';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -45,6 +46,11 @@ export function SessionsPage() {
   );
   const [isAnalysisModalOpen, setIsAnalysisModalOpen] = useState(false);
   // --- END NEW STATE ---
+
+  // Filter state
+  const [filterClient, setFilterClient] = useState('');
+  const [filterType, setFilterType] = useState('');
+  const [filterTherapy, setFilterTherapy] = useState('');
 
   const {
     data: sessions,
@@ -142,6 +148,27 @@ export function SessionsPage() {
     });
   }, [sessions, currentSortCriteria, currentSortDirection]);
 
+  // Unique, sorted client names derived from the full session list
+  const uniqueClients = useMemo(() => {
+    if (!sessions) return [];
+    const names = sessions
+      .map((s) => s.clientName)
+      .filter((name): name is string => !!name);
+    return Array.from(new Set(names)).sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: 'base' })
+    );
+  }, [sessions]);
+
+  // Apply filters to the sorted list
+  const filteredSessions = useMemo(() => {
+    return sortedSessions.filter((s) => {
+      if (filterClient && s.clientName !== filterClient) return false;
+      if (filterType && s.sessionType !== filterType) return false;
+      if (filterTherapy && s.therapy !== filterTherapy) return false;
+      return true;
+    });
+  }, [sortedSessions, filterClient, filterType, filterTherapy]);
+
   const handleEditSession = (session: Session) => {
     navigate(`/sessions/${session.id}`);
   };
@@ -200,7 +227,7 @@ export function SessionsPage() {
           'py-6'
         )}
       >
-        <Flex justify="between" align="center" mb="6">
+        <Flex justify="between" align="center" mb="5">
           <Heading
             as="h1"
             size="7"
@@ -208,7 +235,7 @@ export function SessionsPage() {
           >
             All Sessions
           </Heading>
-          {/* --- NEW "Analyze" BUTTON --- */}
+          {/* --- "Analyze" BUTTON --- */}
           <Button
             variant="solid"
             size="2"
@@ -220,7 +247,17 @@ export function SessionsPage() {
           </Button>
         </Flex>
 
-        {sortedSessions && sortedSessions.length > 0 ? (
+        <SessionFilters
+          clients={uniqueClients}
+          filterClient={filterClient}
+          filterType={filterType}
+          filterTherapy={filterTherapy}
+          onClientChange={setFilterClient}
+          onTypeChange={setFilterType}
+          onTherapyChange={setFilterTherapy}
+        />
+
+        {filteredSessions.length > 0 ? (
           <Card
             className="flex flex-col overflow-hidden flex-grow"
             style={{ width: '100%' }}
@@ -230,7 +267,7 @@ export function SessionsPage() {
               style={{ minHeight: '300px' }}
             >
               <SessionListTable
-                sessions={sortedSessions}
+                sessions={filteredSessions}
                 sortCriteria={currentSortCriteria}
                 sortDirection={currentSortDirection}
                 onSort={(criteria) => setSort(criteria)}
@@ -245,8 +282,9 @@ export function SessionsPage() {
           <Card style={{ width: '100%' }}>
             <Flex justify="center" align="center" p="6">
               <Text color="gray">
-                No sessions found. Click "New Session" in the toolbar to upload
-                one.
+                {sortedSessions.length === 0
+                  ? 'No sessions found. Click "New Session" in the toolbar to upload one.'
+                  : 'No sessions match the selected filters.'}
               </Text>
             </Flex>
           </Card>
