@@ -30,6 +30,7 @@ import {
   ClockIcon,
   DotsHorizontalIcon,
   TrashIcon,
+  CopyIcon,
 } from '@radix-ui/react-icons';
 import { cn } from '../../../utils';
 import {
@@ -42,6 +43,7 @@ import { debounce, formatIsoDateToYMD, formatDuration } from '../../../helpers';
 import axios from 'axios';
 import { useSetAtom } from 'jotai';
 import { toastMessageAtom } from '../../../store';
+import copy from 'copy-to-clipboard';
 
 const API_BASE_URL = axios.defaults.baseURL || 'http://localhost:3001';
 
@@ -505,6 +507,16 @@ export function Transcription({
     deleteAudioMutation.mutate();
   };
 
+  const handleCopyTranscriptClick = () => {
+    if (!transcriptContent || transcriptContent.length === 0) {
+      setToast('Transcript is empty.');
+      return;
+    }
+    const fullText = transcriptContent.map((p) => p.text).join('\n\n');
+    copy(fullText);
+    setToast('Transcription copied to clipboard.');
+  };
+
   return (
     <>
       <style>
@@ -610,6 +622,14 @@ export function Transcription({
                 </IconButton>
               </DropdownMenu.Trigger>
               <DropdownMenu.Content align="end">
+                <DropdownMenu.Item
+                  onSelect={handleCopyTranscriptClick}
+                  disabled={
+                    !transcriptContent || transcriptContent.length === 0
+                  }
+                >
+                  <CopyIcon className="mr-2 h-4 w-4" /> Copy Transcript
+                </DropdownMenu.Item>
                 <DropdownMenu.Item
                   color="red"
                   onSelect={handleDeleteAudioClick}
