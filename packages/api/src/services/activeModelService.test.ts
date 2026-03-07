@@ -31,3 +31,93 @@ describe('activeModelService', () => {
     expect(svc.getConfiguredContextSize()).toBe(beforeCtx);
   });
 });
+
+describe('activeModelService — numGpuLayers', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it('starts as null (auto) by default', async () => {
+    const svc = await import('./activeModelService.js');
+    expect(svc.getConfiguredNumGpuLayers()).toBeNull();
+  });
+
+  it('stores a valid positive layer count', async () => {
+    const svc = await import('./activeModelService.js');
+    svc.setActiveModelAndContextAndParams(
+      'gemma3:12b',
+      null,
+      0.7,
+      0.9,
+      1.1,
+      16
+    );
+    expect(svc.getConfiguredNumGpuLayers()).toBe(16);
+  });
+
+  it('stores 0 (CPU-only mode)', async () => {
+    const svc = await import('./activeModelService.js');
+    svc.setActiveModelAndContextAndParams('gemma3:12b', null, 0.7, 0.9, 1.1, 0);
+    expect(svc.getConfiguredNumGpuLayers()).toBe(0);
+  });
+
+  it('stores null when passed null (auto mode)', async () => {
+    const svc = await import('./activeModelService.js');
+    // First set a value, then reset to auto
+    svc.setActiveModelAndContextAndParams('gemma3:12b', null, 0.7, 0.9, 1.1, 8);
+    expect(svc.getConfiguredNumGpuLayers()).toBe(8);
+    svc.setActiveModelAndContextAndParams(
+      'gemma3:12b',
+      null,
+      0.7,
+      0.9,
+      1.1,
+      null
+    );
+    expect(svc.getConfiguredNumGpuLayers()).toBeNull();
+  });
+
+  it('rejects negative numGpuLayers and falls back to null (auto)', async () => {
+    const svc = await import('./activeModelService.js');
+    svc.setActiveModelAndContextAndParams(
+      'gemma3:12b',
+      null,
+      0.7,
+      0.9,
+      1.1,
+      -1
+    );
+    expect(svc.getConfiguredNumGpuLayers()).toBeNull();
+  });
+
+  it('rejects non-integer numGpuLayers and falls back to null (auto)', async () => {
+    const svc = await import('./activeModelService.js');
+    svc.setActiveModelAndContextAndParams(
+      'gemma3:12b',
+      null,
+      0.7,
+      0.9,
+      1.1,
+      4.5 as any
+    );
+    expect(svc.getConfiguredNumGpuLayers()).toBeNull();
+  });
+
+  it('persists sampling params independently of GPU layers', async () => {
+    const svc = await import('./activeModelService.js');
+    svc.setActiveModelAndContextAndParams(
+      'llama3:8b',
+      8192,
+      1.2,
+      0.85,
+      1.3,
+      24
+    );
+    expect(svc.getActiveModel()).toBe('llama3:8b');
+    expect(svc.getConfiguredContextSize()).toBe(8192);
+    expect(svc.getConfiguredTemperature()).toBe(1.2);
+    expect(svc.getConfiguredTopP()).toBe(0.85);
+    expect(svc.getConfiguredRepeatPenalty()).toBe(1.3);
+    expect(svc.getConfiguredNumGpuLayers()).toBe(24);
+  });
+});

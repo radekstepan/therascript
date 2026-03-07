@@ -174,6 +174,8 @@ export interface OllamaStatus {
   configuredTemperature?: number;
   configuredTopP?: number;
   configuredRepeatPenalty?: number;
+  /** Number of GPU layers configured; null = auto (Ollama decides) */
+  configuredNumGpuLayers?: number | null;
 }
 export interface AvailableModelsResponse {
   models: OllamaModelInfo[];
@@ -182,11 +184,16 @@ export interface AvailableModelsResponse {
 export interface VramEstimateResponse {
   model: string;
   context_size: number;
+  num_gpu_layers?: number | null;
   estimated_vram_bytes: number | null;
+  estimated_ram_bytes: number | null;
   vram_per_token_bytes: number | null;
   breakdown?: {
     weights_bytes: number;
+    weights_vram_bytes: number;
+    weights_ram_bytes: number;
     kv_cache_bytes: number;
+    overhead_bytes: number;
   };
   error?: string;
 }

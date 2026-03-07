@@ -22,6 +22,7 @@ import {
   OllamaModelInfo,
   OllamaPullJobStatus,
   OllamaPullJobStatusState,
+  VramEstimate,
 } from '@therascript/domain';
 // --- End Import ---
 import {
@@ -37,6 +38,7 @@ import {
   getConfiguredTemperature,
   getConfiguredTopP,
   getConfiguredRepeatPenalty,
+  getConfiguredNumGpuLayers,
 } from './activeModelService.js';
 import { templateRepository } from '@therascript/data';
 import { SYSTEM_PROMPT_TEMPLATES } from '@therascript/db/dist/sqliteService.js';
@@ -74,6 +76,79 @@ const MODEL_ARCHITECTURE_FALLBACKS: Record<
     precision: 2,
   },
 };
+
+/** CUDA/cuBLAS baseline VRAM overhead (buffers, workspace, scratchpad) */
+const CUDA_OVERHEAD_BYTES = 512 * 1024 * 1024; // 512 MB
+
+/**
+ * Map quantization labels to approximate bits-per-weight.
+ * Values sourced from llama.cpp GGUF spec and community benchmarks.
+ */
+export function getBitsPerWeight(quantizationLevel: string): number {
+  const q = quantizationLevel.toUpperCase().replace(/-/g, '_');
+  if (q === 'F32') return 32;
+  if (q === 'F16' || q === 'BF16') return 16;
+  if (q === 'Q8_0' || q === 'Q8_1') return 8.5;
+  if (q === 'Q6_K') return 6.56;
+  if (q === 'Q5_0' || q === 'Q5_1') return 5.0;
+  if (q === 'Q5_K_S' || q === 'Q5_K_M' || q === 'Q5_K') return 5.5;
+  if (q === 'Q4_0' || q === 'Q4_1') return 4.0;
+  if (q === 'Q4_K_S') return 4.37;
+  if (q === 'Q4_K_M' || q === 'Q4_K') return 4.5;
+  if (q === 'Q3_K_S') return 3.5;
+  if (q === 'Q3_K_M') return 3.91;
+  if (q === 'Q3_K_L' || q === 'Q3_K') return 4.27;
+  if (q === 'Q2_K' || q === 'Q2_K_S') return 2.63;
+  if (q === 'IQ1_S' || q === 'IQ1_M') return 1.56;
+  if (q === 'IQ2_XXS') return 2.06;
+  if (q === 'IQ2_XS') return 2.31;
+  if (q === 'IQ2_S' || q === 'IQ2_M') return 2.5;
+  if (q === 'IQ3_XXS') return 3.06;
+  if (q === 'IQ3_XS') return 3.3;
+  if (q === 'IQ3_S' || q === 'IQ3_M') return 3.5;
+  if (q === 'IQ4_XS') return 4.25;
+  if (q === 'IQ4_NL') return 4.5;
+  return 0; // unknown — signals fallback to file size
+}
+
+/**
+ * Parse a parameter count string (e.g. "8B", "3.8B", "70B") into an integer count.
+ * Assumes values without a suffix are in billions (appropriate for LLMs).
+ * Returns null if parsing fails.
+ */
+export function parseParamCount(parameterSize: string): number | null {
+  if (!parameterSize) return null;
+  const match = parameterSize.trim().match(/^([\d.]+)\s*([KMBT]?)/i);
+  if (!match) return null;
+  const value = parseFloat(match[1]);
+  if (isNaN(value)) return null;
+  const suffix = match[2].toUpperCase();
+  if (suffix === 'B' || suffix === '') return Math.round(value * 1e9);
+  if (suffix === 'K') return Math.round(value * 1e3);
+  if (suffix === 'M') return Math.round(value * 1e6);
+  if (suffix === 'T') return Math.round(value * 1e12);
+  return null;
+}
+
+/**
+ * Estimate model weight memory in bytes using bits-per-weight × parameter count.
+ * Falls back to the GGUF file size when either value can't be determined.
+ */
+function estimateWeightsBytes(model: OllamaModelInfo): number {
+  const paramCount = parseParamCount(model.details.parameter_size);
+  const bitsPerWeight = getBitsPerWeight(model.details.quantization_level);
+  if (paramCount !== null && bitsPerWeight > 0) {
+    const bytes = Math.round((paramCount * bitsPerWeight) / 8);
+    console.log(
+      `[OllamaService] Weight estimate for ${model.name}: ${(paramCount / 1e9).toFixed(1)}B params × ${bitsPerWeight} bpw = ${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
+    );
+    return bytes;
+  }
+  console.log(
+    `[OllamaService] Falling back to file size for ${model.name} weights (quant="${model.details.quantization_level}", params="${model.details.parameter_size}")`
+  );
+  return model.size;
+}
 
 function getArchitectureFallback(modelName: string): {
   num_layers: number;
@@ -317,15 +392,19 @@ async function _fetchModelMetadata(
 // --- *** END UPDATED FUNCTION *** ---
 
 /**
- * Estimate VRAM usage for a model at a specific context size
- * @param model Model information with architecture
- * @param contextSize Context window size in tokens
- * @returns Estimated VRAM usage in bytes
+ * Estimate VRAM and RAM usage for a model at a specific context size.
+ *
+ * @param model - Model information with architecture metadata
+ * @param contextSize - Context window size in tokens
+ * @param numGpuLayers - Number of transformer layers to place on GPU. null/undefined =
+ *   let Ollama decide (we assume all layers on GPU for the estimate). 0 = CPU only.
+ * @returns Breakdown of VRAM and RAM in bytes, or null if metadata is insufficient
  */
 export function estimateVramUsage(
   model: OllamaModelInfo,
-  contextSize: number
-): number | null {
+  contextSize: number,
+  numGpuLayers?: number | null
+): VramEstimate | null {
   if (!model.size || !model.architecture || !contextSize) {
     return null;
   }
@@ -345,11 +424,29 @@ export function estimateVramUsage(
 
   const kv_heads = num_key_value_heads || num_attention_heads;
   const head_dim = explicit_head_dim ?? hidden_size / num_attention_heads;
-
-  const kvCacheBytes =
+  const kv_cache_bytes =
     2 * num_layers * kv_heads * head_dim * precision * contextSize;
 
-  return model.size + kvCacheBytes;
+  const weights_bytes = estimateWeightsBytes(model);
+
+  // Determine how many layers land on GPU
+  const gpu_layers =
+    numGpuLayers != null && numGpuLayers >= 0
+      ? Math.min(numGpuLayers, num_layers)
+      : num_layers; // default: assume all layers on GPU
+  const gpu_ratio = gpu_layers / num_layers;
+
+  const overhead_bytes = gpu_ratio > 0 ? CUDA_OVERHEAD_BYTES : 0;
+  const weights_vram = Math.round(weights_bytes * gpu_ratio);
+  const weights_ram = weights_bytes - weights_vram;
+
+  return {
+    vram_bytes: weights_vram + kv_cache_bytes + overhead_bytes,
+    ram_bytes: weights_ram,
+    weights_bytes,
+    kv_cache_bytes,
+    overhead_bytes,
+  };
 }
 
 export function getVramPerToken(model: OllamaModelInfo): number | null {
@@ -871,44 +968,50 @@ export const loadOllamaModel = async (modelName: string): Promise<void> => {
   } catch (error) {
     throw error;
   }
+  // Use /api/generate with an empty prompt so Ollama loads the model into memory
+  // without running any inference. This is significantly faster than sending a
+  // real chat message (especially on CPU/Metal) since no tokens are generated.
   console.log(
-    `[Real OllamaService] Triggering load for model '${modelName}' using a minimal chat request...`
+    `[Real OllamaService] Triggering load for model '${modelName}' using a no-op generate request...`
   );
   try {
-    const response = await ollama.chat({
+    const numGpuLayers = getConfiguredNumGpuLayers();
+    const body: Record<string, any> = {
       model: modelName,
-      messages: [{ role: 'user', content: 'ping' }],
-      stream: false,
-      keep_alive: config.ollama.keepAlive, // Use configured keep_alive
+      prompt: '',
+      keep_alive: config.ollama.keepAlive,
+    };
+    if (numGpuLayers !== null) {
+      body.options = { num_gpu: numGpuLayers };
+    }
+    await axios.post(`${config.ollama.baseURL}/api/generate`, body, {
+      timeout: 60000, // allow time for model swap/reload
     });
     console.log(
-      `[Real OllamaService] Minimal chat request completed for '${modelName}'. Status: ${response.done}. Ollama should now be loading/have loaded it.`
+      `[Real OllamaService] No-op generate completed for '${modelName}'. Model is now loaded.`
     );
   } catch (error: any) {
     console.error(
-      `[Real OllamaService] Error during load trigger chat request for '${modelName}':`,
+      `[Real OllamaService] Error during load trigger for '${modelName}':`,
       error
     );
-    const isModelNotFoundError =
-      error.status === 404 ||
-      (error.message?.includes('model') &&
-        (error.message?.includes('not found') ||
-          error.message?.includes('missing')));
-    if (isModelNotFoundError) {
-      console.error(
-        `[Real OllamaService] Model '${modelName}' not found locally during load attempt. It needs to be pulled first.`
-      );
+    const msg: string = error?.response?.data?.error ?? error?.message ?? '';
+    if (
+      error?.response?.status === 404 ||
+      (msg.includes('model') &&
+        (msg.includes('not found') || msg.includes('missing')))
+    ) {
       throw new BadRequestError(
         `Model '${modelName}' not found locally. Please pull the model first.`
       );
     }
-    if (error.message?.includes('ECONNREFUSED')) {
+    if (msg.includes('ECONNREFUSED')) {
       throw new InternalServerError(
         `Connection refused: Could not connect to Ollama at ${config.ollama.baseURL} to load model.`
       );
     }
     throw new InternalServerError(
-      `Failed to trigger load for model '${modelName}' via chat request.`,
+      `Failed to trigger load for model '${modelName}'.`,
       error instanceof Error ? error : undefined
     );
   }
@@ -948,13 +1051,15 @@ export const unloadActiveModel = async (
         `[Real OllamaService:unload] Model '${modelToUnload}' is currently loaded. Sending unload request (keep_alive: 0)...`
       );
 
-      // Send the request to unload the model.
-      await ollama.chat({
-        model: modelToUnload,
-        messages: [{ role: 'user', content: 'unload request' }],
-        keep_alive: 0, // This is the key part that tells Ollama to unload after the request.
-        stream: false,
-      });
+      // Use /api/generate with no prompt so Ollama skips inference entirely and
+      // immediately evicts the model due to keep_alive: 0. Using ollama.chat()
+      // with a message would force token generation first, which is extremely
+      // slow on CPU-only or Apple Silicon Metal models (minutes for a 12B model).
+      await axios.post(
+        `${config.ollama.baseURL}/api/generate`,
+        { model: modelToUnload, keep_alive: 0 },
+        { timeout: 10000 }
+      );
 
       console.log(
         `[Real OllamaService:unload] Unload request sent successfully for ${modelToUnload}.`
@@ -1214,6 +1319,7 @@ export const streamChatResponse = async (
         temperature,
         topP,
         repeatPenalty,
+        numGpuLayers: getConfiguredNumGpuLayers() ?? undefined,
         abortSignal: options?.signal,
         ollamaBaseUrl: config.ollama.baseURL,
         timeoutMs:

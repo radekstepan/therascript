@@ -8,6 +8,8 @@ let configuredContextSize: number | null = null;
 let configuredTemperature: number = 0.7;
 let configuredTopP: number = 0.9;
 let configuredRepeatPenalty: number = 1.1;
+// null = let Ollama/llama.cpp decide automatically; >= 0 = explicit layer count
+let configuredNumGpuLayers: number | null = null;
 
 export const getActiveModel = (): string => {
   return activeModelName;
@@ -23,6 +25,8 @@ export const getConfiguredContextSize = (): number | null => {
 export const getConfiguredTemperature = (): number => configuredTemperature;
 export const getConfiguredTopP = (): number => configuredTopP;
 export const getConfiguredRepeatPenalty = (): number => configuredRepeatPenalty;
+export const getConfiguredNumGpuLayers = (): number | null =>
+  configuredNumGpuLayers;
 // --- End New Getters ---
 
 // --- Modified Setter to include context size ---
@@ -80,7 +84,8 @@ export const setActiveModelAndContextAndParams = (
   newContextSize?: number | null,
   newTemperature?: number,
   newTopP?: number,
-  newRepeatPenalty?: number
+  newRepeatPenalty?: number,
+  newNumGpuLayers?: number | null
 ): void => {
   if (!newModelName || typeof newModelName !== 'string') {
     console.error(
@@ -95,6 +100,7 @@ export const setActiveModelAndContextAndParams = (
   let temperatureChanged = false;
   let topPChanged = false;
   let repeatPenaltyChanged = false;
+  let numGpuLayersChanged = false;
 
   if (newModelName !== activeModelName) {
     console.log(
@@ -169,12 +175,30 @@ export const setActiveModelAndContextAndParams = (
     }
   }
 
+  // Validate and update GPU layers
+  const validNumGpuLayers =
+    newNumGpuLayers !== undefined &&
+    newNumGpuLayers !== null &&
+    Number.isInteger(newNumGpuLayers) &&
+    newNumGpuLayers >= 0
+      ? newNumGpuLayers
+      : null; // null = let Ollama decide automatically
+
+  if (validNumGpuLayers !== configuredNumGpuLayers) {
+    console.log(
+      `[ActiveModelService] Changing GPU layers from '${configuredNumGpuLayers ?? 'auto'}' to '${validNumGpuLayers ?? 'auto'}'`
+    );
+    configuredNumGpuLayers = validNumGpuLayers;
+    numGpuLayersChanged = true;
+  }
+
   if (
     !modelChanged &&
     !contextChanged &&
     !temperatureChanged &&
     !topPChanged &&
-    !repeatPenaltyChanged
+    !repeatPenaltyChanged &&
+    !numGpuLayersChanged
   ) {
     console.log(
       `[ActiveModelService] Model and all parameters are already active.`

@@ -6,6 +6,7 @@ import type {
   OllamaModelInfo,
   OllamaPullJobStatus,
   OllamaPullJobStatusState,
+  VramEstimate,
 } from '@therascript/domain';
 // --- End Import ---
 import {
@@ -341,8 +342,9 @@ export const deleteOllamaModel = async (modelName: string): Promise<string> => {
 
 export const estimateVramUsage = (
   model: OllamaModelInfo,
-  contextSize: number
-): number | null => {
+  contextSize: number,
+  numGpuLayers?: number | null
+): VramEstimate | null => {
   if (!model.size || !model.architecture || !contextSize) {
     return null;
   }
@@ -362,11 +364,27 @@ export const estimateVramUsage = (
 
   const kv_heads = num_key_value_heads || num_attention_heads;
   const head_dim = explicit_head_dim ?? hidden_size / num_attention_heads;
-
-  const kvCacheBytes =
+  const kv_cache_bytes =
     2 * num_layers * kv_heads * head_dim * precision * contextSize;
 
-  return model.size + kvCacheBytes;
+  const weights_bytes = model.size; // mock uses file size directly
+
+  const gpu_layers =
+    numGpuLayers != null && numGpuLayers >= 0
+      ? Math.min(numGpuLayers, num_layers)
+      : num_layers;
+  const gpu_ratio = gpu_layers / num_layers;
+  const CUDA_OVERHEAD = 512 * 1024 * 1024;
+  const overhead_bytes = gpu_ratio > 0 ? CUDA_OVERHEAD : 0;
+  const weights_vram = Math.round(weights_bytes * gpu_ratio);
+
+  return {
+    vram_bytes: weights_vram + kv_cache_bytes + overhead_bytes,
+    ram_bytes: weights_bytes - weights_vram,
+    weights_bytes,
+    kv_cache_bytes,
+    overhead_bytes,
+  };
 };
 
 export const getVramPerToken = (model: OllamaModelInfo): number | null => {

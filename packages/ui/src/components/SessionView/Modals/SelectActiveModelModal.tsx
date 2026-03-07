@@ -65,12 +65,20 @@ export function SelectActiveModelModal({
   const [temperature, setTemperature] = useState(0.7);
   const [topP, setTopP] = useState(0.9);
   const [repeatPenalty, setRepeatPenalty] = useState(1.1);
+  // undefined = Auto (let Ollama decide); 0 = CPU only; N = N layers on GPU
+  const [numGpuLayers, setNumGpuLayers] = useState<number | undefined>(
+    undefined
+  );
   const [vramEstimate, setVramEstimate] = useState<{
     estimated_vram_bytes: number | null;
+    estimated_ram_bytes: number | null;
     vram_per_token_bytes: number | null;
     breakdown?: {
       weights_bytes: number;
+      weights_vram_bytes: number;
+      weights_ram_bytes: number;
       kv_cache_bytes: number;
+      overhead_bytes: number;
     };
     error?: string;
   } | null>(null);
@@ -96,13 +104,15 @@ export function SelectActiveModelModal({
       temperature?: number;
       topP?: number;
       repeatPenalty?: number;
+      numGpuLayers?: number | null;
     }) =>
       setOllamaModel(
         variables.modelName,
         variables.contextSize,
         variables.temperature,
         variables.topP,
-        variables.repeatPenalty
+        variables.repeatPenalty,
+        variables.numGpuLayers
       ),
     onSuccess: () => {
       onModelSuccessfullySet();
@@ -127,6 +137,11 @@ export function SelectActiveModelModal({
       setTemperature(ollamaStatus?.configuredTemperature ?? 0.7);
       setTopP(ollamaStatus?.configuredTopP ?? 0.9);
       setRepeatPenalty(ollamaStatus?.configuredRepeatPenalty ?? 1.1);
+      setNumGpuLayers(
+        ollamaStatus?.configuredNumGpuLayers != null
+          ? ollamaStatus.configuredNumGpuLayers
+          : undefined
+      );
       setError(null);
     }
   }, [
@@ -136,6 +151,7 @@ export function SelectActiveModelModal({
     ollamaStatus?.configuredTemperature,
     ollamaStatus?.configuredTopP,
     ollamaStatus?.configuredRepeatPenalty,
+    ollamaStatus?.configuredNumGpuLayers,
   ]);
 
   const handleSave = () => {
@@ -157,6 +173,7 @@ export function SelectActiveModelModal({
       temperature,
       topP,
       repeatPenalty,
+      numGpuLayers: numGpuLayers ?? null,
     });
   };
 
@@ -172,6 +189,13 @@ export function SelectActiveModelModal({
       ? activeTranscriptTokens < effectiveContextSize
       : true
     : true;
+
+  // Reset GPU layers to Auto when the user picks a different model
+  useEffect(() => {
+    if (selectedModel !== currentActiveModelName) {
+      setNumGpuLayers(undefined);
+    }
+  }, [selectedModel]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // --- Recommended Context Size (avoid max by default) ---
   const recommendedContextSize = React.useMemo(() => {
@@ -201,17 +225,18 @@ export function SelectActiveModelModal({
     const contextSize = parseInt(contextSizeInput, 10);
     if (isNaN(contextSize) || contextSize <= 0) return;
 
-    estimateModelVram(selectedModel, contextSize)
+    estimateModelVram(selectedModel, contextSize, numGpuLayers)
       .then(setVramEstimate)
       .catch((err) => {
         console.error('Failed to estimate VRAM:', err);
         setVramEstimate({
           estimated_vram_bytes: null,
+          estimated_ram_bytes: null,
           vram_per_token_bytes: null,
           error: err.message,
         });
       });
-  }, [selectedModel, contextSizeInput]);
+  }, [selectedModel, contextSizeInput, numGpuLayers]);
 
   // Calculate VRAM warning based on available GPU memory
   const vramWarning = React.useMemo(() => {
@@ -321,6 +346,63 @@ export function SelectActiveModelModal({
               Model Parameters
             </Text>
             <Box className="space-y-4">
+              {/* GPU Layers — only shown when architecture metadata is available */}
+              {selectedModelDetails?.architecture?.num_layers != null && (
+                <Box>
+                  <Flex align="center" justify="between" mb="2">
+                    <Text size="1">GPU Layers</Text>
+                    <Badge variant="outline" size="1">
+                      {numGpuLayers === undefined ||
+                      numGpuLayers >=
+                        selectedModelDetails.architecture.num_layers!
+                        ? `Auto (all GPU)`
+                        : numGpuLayers === 0
+                          ? 'CPU Only'
+                          : `${numGpuLayers} / ${selectedModelDetails.architecture.num_layers}`}
+                    </Badge>
+                  </Flex>
+                  <Slider
+                    value={[
+                      numGpuLayers ??
+                        selectedModelDetails.architecture.num_layers!,
+                    ]}
+                    onValueChange={([value]) => {
+                      const max =
+                        selectedModelDetails.architecture!.num_layers!;
+                      // Treat max as "auto" (undefined = let Ollama decide)
+                      setNumGpuLayers(value >= max ? undefined : value);
+                    }}
+                    min={0}
+                    max={selectedModelDetails.architecture.num_layers!}
+                    step={1}
+                    disabled={isSaving}
+                  />
+                  <Flex justify="between" mt="2">
+                    <Text size="1" color="gray" style={{ fontSize: '10px' }}>
+                      CPU Only
+                    </Text>
+                    <Text size="1" color="gray" style={{ fontSize: '10px' }}>
+                      Auto (all GPU)
+                    </Text>
+                  </Flex>
+                  {numGpuLayers != null &&
+                    numGpuLayers > 0 &&
+                    numGpuLayers <
+                      selectedModelDetails.architecture.num_layers! && (
+                      <Callout.Root size="1" color="amber" mt="2">
+                        <Callout.Icon>
+                          <InfoCircledIcon />
+                        </Callout.Icon>
+                        <Callout.Text>
+                          Partial GPU offloading severely hurts performance.
+                          Even one layer on CPU forces a GPU↔CPU round-trip on
+                          every token. Use <Strong>Auto (all GPU)</Strong> or{' '}
+                          <Strong>CPU Only</Strong>.
+                        </Callout.Text>
+                      </Callout.Root>
+                    )}
+                </Box>
+              )}
               <Box>
                 <Flex align="center" justify="between" mb="2">
                   <Text size="1">Temperature</Text>
@@ -381,21 +463,34 @@ export function SelectActiveModelModal({
                   <>VRAM estimation unavailable: {vramEstimate.error}</>
                 ) : vramEstimate.estimated_vram_bytes ? (
                   <>
-                    Estimated VRAM:{' '}
+                    VRAM:{' '}
                     <Strong>
                       {prettyBytes(vramEstimate.estimated_vram_bytes)}
                     </Strong>
                     {vramEstimate.breakdown && (
                       <>
                         {' '}
-                        ({prettyBytes(
-                          vramEstimate.breakdown.weights_bytes
+                        (
+                        {prettyBytes(
+                          vramEstimate.breakdown.weights_vram_bytes
                         )}{' '}
                         weights +{' '}
                         {prettyBytes(vramEstimate.breakdown.kv_cache_bytes)} KV
-                        cache )
+                        cache +{' '}
+                        {prettyBytes(vramEstimate.breakdown.overhead_bytes)}{' '}
+                        CUDA)
                       </>
                     )}
+                    {vramEstimate.estimated_ram_bytes != null &&
+                      vramEstimate.estimated_ram_bytes > 0 && (
+                        <>
+                          {' · '}RAM:{' '}
+                          <Strong>
+                            {prettyBytes(vramEstimate.estimated_ram_bytes)}
+                          </Strong>{' '}
+                          (CPU offload)
+                        </>
+                      )}
                   </>
                 ) : (
                   <>VRAM data unavailable for this model</>

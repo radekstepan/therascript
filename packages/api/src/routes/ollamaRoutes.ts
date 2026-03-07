@@ -29,6 +29,7 @@ import {
   getConfiguredTemperature,
   getConfiguredTopP,
   getConfiguredRepeatPenalty,
+  getConfiguredNumGpuLayers,
 } from '../services/activeModelService.js';
 import type {
   OllamaModelInfo,
@@ -67,6 +68,7 @@ const OllamaStatusResponseSchema = t.Object({
   configuredTemperature: t.Optional(t.Number()),
   configuredTopP: t.Optional(t.Number()),
   configuredRepeatPenalty: t.Optional(t.Number()),
+  configuredNumGpuLayers: t.Optional(t.Union([t.Number(), t.Null()])),
 });
 const SetModelBodySchema = t.Object({
   modelName: t.String({ minLength: 1, error: 'Model name is required.' }),
@@ -82,6 +84,7 @@ const SetModelBodySchema = t.Object({
   temperature: t.Optional(t.Number({ minimum: 0, maximum: 2 })),
   topP: t.Optional(t.Number({ minimum: 0, maximum: 1 })),
   repeatPenalty: t.Optional(t.Number({ minimum: 0.5, maximum: 2 })),
+  numGpuLayers: t.Optional(t.Union([t.Number({ minimum: 0 }), t.Null()])),
 });
 const PullModelBodySchema = t.Object({
   modelName: t.String({ minLength: 1, error: 'Model name is required.' }),
@@ -122,12 +125,17 @@ const DeleteModelResponseSchema = t.Object({ message: t.String() });
 const EstimateVramResponseSchema = t.Object({
   model: t.String(),
   context_size: t.Number(),
+  num_gpu_layers: t.Optional(t.Union([t.Number(), t.Null()])),
   estimated_vram_bytes: t.Union([t.Number(), t.Null()]),
+  estimated_ram_bytes: t.Union([t.Number(), t.Null()]),
   vram_per_token_bytes: t.Union([t.Number(), t.Null()]),
   breakdown: t.Optional(
     t.Object({
       weights_bytes: t.Number(),
+      weights_vram_bytes: t.Number(),
+      weights_ram_bytes: t.Number(),
       kv_cache_bytes: t.Number(),
+      overhead_bytes: t.Number(),
     })
   ),
   error: t.Optional(t.String()),
@@ -184,8 +192,14 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
       .post(
         '/set-model',
         async ({ body, set }) => {
-          const { modelName, contextSize, temperature, topP, repeatPenalty } =
-            body;
+          const {
+            modelName,
+            contextSize,
+            temperature,
+            topP,
+            repeatPenalty,
+            numGpuLayers,
+          } = body;
           const sizeLog =
             contextSize === undefined
               ? 'default'
@@ -193,7 +207,7 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
                 ? 'explicit default'
                 : contextSize;
           console.log(
-            `[API SetModel] Request: Set active model=${modelName}, contextSize=${sizeLog}, temperature=${temperature}, topP=${topP}, repeatPenalty=${repeatPenalty}`
+            `[API SetModel] Request: Set active model=${modelName}, contextSize=${sizeLog}, temperature=${temperature}, topP=${topP}, repeatPenalty=${repeatPenalty}, numGpuLayers=${numGpuLayers ?? 'auto'}`
           );
           try {
             setActiveModelAndContextAndParams(
@@ -201,7 +215,8 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
               contextSize,
               temperature,
               topP,
-              repeatPenalty
+              repeatPenalty,
+              numGpuLayers
             );
             await loadOllamaModel(modelName);
             set.status = 200;
@@ -440,9 +455,10 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
           const currentConfiguredTemperature = getConfiguredTemperature();
           const currentConfiguredTopP = getConfiguredTopP();
           const currentConfiguredRepeatPenalty = getConfiguredRepeatPenalty();
+          const currentConfiguredNumGpuLayers = getConfiguredNumGpuLayers();
           const modelNameToCheck = query.modelName ?? currentActiveModel;
           console.log(
-            `[API Status] Checking status for model: ${modelNameToCheck} (Current Active: ${currentActiveModel}, Configured Context: ${currentConfiguredContext ?? 'default'}, Temperature: ${currentConfiguredTemperature}, TopP: ${currentConfiguredTopP}, RepeatPenalty: ${currentConfiguredRepeatPenalty})`
+            `[API Status] Checking status for model: ${modelNameToCheck} (Current Active: ${currentActiveModel}, Configured Context: ${currentConfiguredContext ?? 'default'}, Temperature: ${currentConfiguredTemperature}, TopP: ${currentConfiguredTopP}, RepeatPenalty: ${currentConfiguredRepeatPenalty}, NumGpuLayers: ${currentConfiguredNumGpuLayers ?? 'auto'})`
           );
           try {
             const loadedModelResult = await checkModelStatus(modelNameToCheck);
@@ -462,6 +478,7 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
                 configuredTemperature: currentConfiguredTemperature,
                 configuredTopP: currentConfiguredTopP,
                 configuredRepeatPenalty: currentConfiguredRepeatPenalty,
+                configuredNumGpuLayers: currentConfiguredNumGpuLayers,
               };
             } else {
               const loadedModelInfo =
@@ -485,6 +502,7 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
                 configuredTemperature: currentConfiguredTemperature,
                 configuredTopP: currentConfiguredTopP,
                 configuredRepeatPenalty: currentConfiguredRepeatPenalty,
+                configuredNumGpuLayers: currentConfiguredNumGpuLayers,
               };
             }
           } catch (error: any) {
@@ -511,6 +529,7 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
         async ({ params, query, set }) => {
           const modelName = decodeURIComponent(params.name);
           const contextSize = query.context_size;
+          const numGpuLayers = query.num_gpu_layers;
 
           if (!contextSize || contextSize <= 0) {
             throw new BadRequestError(
@@ -525,13 +544,15 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
             throw new NotFoundError(`Model '${modelName}' not found`);
           }
 
-          const vramBytes = estimateVramUsage(model, contextSize);
+          const estimate = estimateVramUsage(model, contextSize, numGpuLayers);
 
-          if (vramBytes === null) {
+          if (estimate === null) {
             return {
               model: modelName,
               context_size: contextSize,
+              num_gpu_layers: numGpuLayers ?? null,
               estimated_vram_bytes: null,
+              estimated_ram_bytes: null,
               vram_per_token_bytes: model.architecture
                 ? getVramPerToken(model)
                 : null,
@@ -544,11 +565,16 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
           return {
             model: modelName,
             context_size: contextSize,
-            estimated_vram_bytes: vramBytes,
+            num_gpu_layers: numGpuLayers ?? null,
+            estimated_vram_bytes: estimate.vram_bytes,
+            estimated_ram_bytes: estimate.ram_bytes,
             vram_per_token_bytes: vramPerToken,
             breakdown: {
-              weights_bytes: model.size,
-              kv_cache_bytes: vramBytes - model.size,
+              weights_bytes: estimate.weights_bytes,
+              weights_vram_bytes: estimate.weights_bytes - estimate.ram_bytes,
+              weights_ram_bytes: estimate.ram_bytes,
+              kv_cache_bytes: estimate.kv_cache_bytes,
+              overhead_bytes: estimate.overhead_bytes,
             },
           };
         },
@@ -561,6 +587,9 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
               minimum: 1,
               error: 'Context size must be a positive integer.',
             }),
+            num_gpu_layers: t.Optional(
+              t.Union([t.Number({ minimum: 0 }), t.Null()])
+            ),
           }),
           response: {
             200: 'estimateVramResponse',

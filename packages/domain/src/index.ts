@@ -1,3 +1,16 @@
+export interface VramEstimate {
+  /** Total estimated VRAM required (weights on GPU + KV cache + CUDA overhead) */
+  vram_bytes: number;
+  /** Total estimated CPU RAM required (weights on CPU when layers are split) */
+  ram_bytes: number;
+  /** Estimated model weight size in bytes (from quant formula or file size fallback) */
+  weights_bytes: number;
+  /** KV cache size in bytes for the requested context length */
+  kv_cache_bytes: number;
+  /** CUDA/cuBLAS baseline overhead bytes (only present when any layers are on GPU) */
+  overhead_bytes: number;
+}
+
 export interface Template {
   id: number;
   title: string;

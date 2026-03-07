@@ -66,7 +66,8 @@ export const setOllamaModel = async (
   contextSize?: number | null,
   temperature?: number,
   topP?: number,
-  repeatPenalty?: number
+  repeatPenalty?: number,
+  numGpuLayers?: number | null
 ): Promise<{ message: string }> => {
   // Prepare payload, ensuring contextSize is null if invalid or not provided
   const payload = {
@@ -76,6 +77,7 @@ export const setOllamaModel = async (
     temperature,
     topP,
     repeatPenalty,
+    numGpuLayers: numGpuLayers ?? null,
   };
   const response = await axios.post('/api/ollama/set-model', payload);
   return response.data;
@@ -172,21 +174,31 @@ export const deleteOllamaModel = async (
 
 export const estimateModelVram = async (
   modelName: string,
-  contextSize: number
+  contextSize: number,
+  numGpuLayers?: number | null
 ): Promise<{
   model: string;
   context_size: number;
+  num_gpu_layers?: number | null;
   estimated_vram_bytes: number | null;
+  estimated_ram_bytes: number | null;
   vram_per_token_bytes: number | null;
   breakdown?: {
     weights_bytes: number;
+    weights_vram_bytes: number;
+    weights_ram_bytes: number;
     kv_cache_bytes: number;
+    overhead_bytes: number;
   };
   error?: string;
 }> => {
+  const params: Record<string, any> = { context_size: contextSize };
+  if (numGpuLayers !== undefined && numGpuLayers !== null) {
+    params.num_gpu_layers = numGpuLayers;
+  }
   const response = await axios.get(
     `/api/ollama/models/${encodeURIComponent(modelName)}/estimate-vram`,
-    { params: { context_size: contextSize } }
+    { params }
   );
   return response.data;
 };

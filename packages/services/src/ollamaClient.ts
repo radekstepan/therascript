@@ -31,6 +31,8 @@ export interface StreamLlmChatOptions {
   topP?: number;
   repeatPenalty?: number;
   maxCompletionTokens?: number;
+  /** Number of model layers to offload to GPU. null/undefined = let Ollama decide. 0 = CPU only. */
+  numGpuLayers?: number | null;
 }
 
 export interface StreamResult {
@@ -114,6 +116,7 @@ export async function* streamLlmChat(
     topP,
     repeatPenalty,
     maxCompletionTokens,
+    numGpuLayers,
   } = options || {};
 
   const startTime = Date.now();
@@ -168,6 +171,10 @@ export async function* streamLlmChat(
 
   if (maxCompletionTokens !== undefined) {
     ollamaOptions.num_predict = maxCompletionTokens;
+  }
+
+  if (numGpuLayers !== undefined && numGpuLayers !== null) {
+    ollamaOptions.num_gpu = numGpuLayers;
   }
 
   const ollamaMessages = messages.map((m) => ({

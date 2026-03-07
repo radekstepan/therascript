@@ -3,6 +3,7 @@ import type {
   BackendChatMessage,
   OllamaModelInfo,
   OllamaPullJobStatus,
+  VramEstimate,
 } from '@therascript/domain'; // Added OllamaPullJobStatus
 import type { ChatResponse, ListResponse, ProgressResponse } from 'ollama';
 import type * as RealService from './ollamaService.real.js'; // Use .real suffix
@@ -40,8 +41,9 @@ export interface OllamaServiceInterface {
   checkOllamaApiHealth: () => Promise<boolean>;
   estimateVramUsage: (
     model: OllamaModelInfo,
-    contextSize: number
-  ) => number | null;
+    contextSize: number,
+    numGpuLayers?: number | null
+  ) => VramEstimate | null;
   getVramPerToken: (model: OllamaModelInfo) => number | null;
 }
 
