@@ -985,7 +985,7 @@ export const loadOllamaModel = async (modelName: string): Promise<void> => {
       body.options = { num_gpu: numGpuLayers };
     }
     await axios.post(`${config.ollama.baseURL}/api/generate`, body, {
-      timeout: 60000, // allow time for model swap/reload
+      timeout: 300000, // 5 min — large models on CUDA can take >60s to load into VRAM
     });
     console.log(
       `[Real OllamaService] No-op generate completed for '${modelName}'. Model is now loaded.`
