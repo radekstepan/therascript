@@ -34,6 +34,19 @@ body {
   background-attachment: fixed;
 }
 
+/* Fix text selection visibility for light and dark themes */
+::selection {
+  background-color: var(--accent-a5);
+  color: inherit;
+}
+
+/* Specifically for user messages with solid background colors */
+.bg-\[var\(--accent-9\)\]::selection,
+.bg-\[var\(--accent-9\)\] *::selection {
+  background-color: rgba(255, 255, 255, 0.3);
+  color: white;
+}
+
 /* Beautiful Dark Theme */
 .custom-dark-theme {
   --color-background: #0b0e14;
