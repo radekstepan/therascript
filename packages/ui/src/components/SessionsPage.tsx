@@ -16,6 +16,7 @@ import {
 } from '@radix-ui/themes';
 import { TrashIcon, BarChartIcon } from '@radix-ui/react-icons';
 import { SessionListTable } from './LandingPage/SessionListTable';
+import { EditSessionModal } from './Shared/EditSessionModal';
 import { CreateAnalysisJobModal } from './Analysis/CreateAnalysisJobModal';
 import { fetchSessions, deleteSession as deleteSessionApi } from '../api/api';
 import {
@@ -38,6 +39,8 @@ export function SessionsPage() {
   const setSort = useSetAtom(setSessionSortAtom);
 
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [sessionToEdit, setSessionToEdit] = useState<Session | null>(null);
+  const [isEditSessionModalOpen, setIsEditSessionModalOpen] = useState(false);
   const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null);
 
   // --- NEW STATE for session selection and analysis modal ---
@@ -170,7 +173,8 @@ export function SessionsPage() {
   }, [sortedSessions, filterClient, filterType, filterTherapy]);
 
   const handleEditSession = (session: Session) => {
-    navigate(`/sessions/${session.id}`);
+    setSessionToEdit(session);
+    setIsEditSessionModalOpen(true);
   };
 
   const handleDeleteSessionRequest = (session: Session) => {
@@ -295,6 +299,12 @@ export function SessionsPage() {
         isOpen={isAnalysisModalOpen}
         onOpenChange={setIsAnalysisModalOpen}
         sessionIds={Array.from(selectedSessionIds)}
+      />
+
+      <EditSessionModal
+        isOpen={isEditSessionModalOpen}
+        onOpenChange={setIsEditSessionModalOpen}
+        session={sessionToEdit}
       />
 
       <AlertDialog.Root

@@ -24,6 +24,7 @@ import {
   AlertDialog,
 } from '@radix-ui/themes';
 import { EditStandaloneChatModal } from '../StandaloneChatView/EditStandaloneChatModal';
+import { EditSessionModal } from '../Shared/EditSessionModal';
 import { CreateAnalysisJobModal } from '../Analysis/CreateAnalysisJobModal';
 import {
   fetchSessions,
@@ -77,6 +78,8 @@ export function LandingPage() {
   const setSessionSort = useSetAtom(setSessionSortAtom);
   const [isDeleteSessionConfirmOpen, setIsDeleteSessionConfirmOpen] =
     useState(false);
+  const [sessionToEdit, setSessionToEdit] = useState<Session | null>(null);
+  const [isEditSessionModalOpen, setIsEditSessionModalOpen] = useState(false);
   const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null);
   // --- FIX: ADDED STATE FOR LANDING PAGE SELECTION ---
   const [selectedSessionIds, setSelectedSessionIds] = useState<Set<number>>(
@@ -321,7 +324,8 @@ export function LandingPage() {
   const handleStandaloneChatSort = (criteria: StandaloneChatSortCriteria) =>
     setStandaloneChatSort(criteria);
   const handleEditSession = (session: Session) => {
-    navigate(`/sessions/${session.id}`);
+    setSessionToEdit(session);
+    setIsEditSessionModalOpen(true);
   };
   const handleDeleteSessionRequest = (session: Session) => {
     setSessionToDelete(session);
@@ -558,6 +562,11 @@ export function LandingPage() {
         sessionIds={Array.from(selectedSessionIds)}
       />
       {/* --- END FIX --- */}
+      <EditSessionModal
+        isOpen={isEditSessionModalOpen}
+        onOpenChange={setIsEditSessionModalOpen}
+        session={sessionToEdit}
+      />
       <AlertDialog.Root
         open={isDeleteSessionConfirmOpen}
         onOpenChange={setIsDeleteSessionConfirmOpen}

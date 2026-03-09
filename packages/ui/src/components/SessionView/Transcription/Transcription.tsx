@@ -9,6 +9,7 @@ import type {
   TranscriptParagraphData,
 } from '../../../types';
 import { TranscriptParagraph } from '../../Transcription/TranscriptParagraph';
+import { EditSessionModal } from '../../Shared/EditSessionModal';
 import {
   Box,
   Text,
@@ -31,6 +32,7 @@ import {
   DotsHorizontalIcon,
   TrashIcon,
   CopyIcon,
+  Pencil1Icon,
 } from '@radix-ui/react-icons';
 import { cn } from '../../../utils';
 import {
@@ -162,6 +164,7 @@ export function Transcription({
   const [paragraphToDelete, setParagraphToDelete] =
     useState<TranscriptParagraphData | null>(null);
   const [isDeleteParaConfirmOpen, setIsDeleteParaConfirmOpen] = useState(false);
+  const [isEditSessionModalOpen, setIsEditSessionModalOpen] = useState(false);
 
   const transcriptTokenCount = session?.transcriptTokenCount;
   const isAudioAvailable = !!session?.audioPath;
@@ -623,6 +626,11 @@ export function Transcription({
               </DropdownMenu.Trigger>
               <DropdownMenu.Content align="end">
                 <DropdownMenu.Item
+                  onSelect={() => setIsEditSessionModalOpen(true)}
+                >
+                  <Pencil1Icon className="mr-2 h-4 w-4" /> Edit Details
+                </DropdownMenu.Item>
+                <DropdownMenu.Item
                   onSelect={handleCopyTranscriptClick}
                   disabled={
                     !transcriptContent || transcriptContent.length === 0
@@ -813,36 +821,39 @@ export function Transcription({
                 wordBreak: 'break-word',
               }}
             >
-              {paragraphToDelete?.text}
+              &ldquo;{paragraphToDelete?.text}&rdquo;
             </Text>
           </Box>
           <Flex gap="3" mt="4" justify="end">
-            <AlertDialog.Cancel>
-              <Button
-                variant="soft"
-                color="gray"
-                disabled={deleteParagraphMutation.isPending}
-              >
-                Cancel
-              </Button>
-            </AlertDialog.Cancel>
-            <AlertDialog.Action>
-              <Button
-                color="red"
-                onClick={handleConfirmDeleteParagraph}
-                disabled={deleteParagraphMutation.isPending}
-              >
-                {deleteParagraphMutation.isPending ? (
-                  <Spinner size="1" />
-                ) : (
-                  <TrashIcon />
-                )}
-                <Text ml="1">Delete Paragraph</Text>
-              </Button>
-            </AlertDialog.Action>
+            <Button
+              variant="soft"
+              color="gray"
+              onClick={() => setIsDeleteParaConfirmOpen(false)}
+              disabled={deleteParagraphMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              color="red"
+              onClick={handleConfirmDeleteParagraph}
+              disabled={deleteParagraphMutation.isPending}
+            >
+              {deleteParagraphMutation.isPending ? (
+                <Spinner size="1" />
+              ) : (
+                <TrashIcon />
+              )}
+              <Text ml="1">Delete Paragraph</Text>
+            </Button>
           </Flex>
         </AlertDialog.Content>
       </AlertDialog.Root>
+
+      <EditSessionModal
+        isOpen={isEditSessionModalOpen}
+        onOpenChange={setIsEditSessionModalOpen}
+        session={session}
+      />
     </>
   );
 }
