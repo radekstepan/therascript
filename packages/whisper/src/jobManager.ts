@@ -52,6 +52,7 @@ export async function cancelJob(
 export async function submitTranscriptionJob(
   inputPath: string,
   modelName: string,
+  numSpeakers: number = 2,
   maxRetries: number = 3
 ): Promise<string> {
   let lastError: Error | null = null;
@@ -61,6 +62,7 @@ export async function submitTranscriptionJob(
       const form = new FormData();
       form.append('file', fs.createReadStream(inputPath));
       form.append('model_name', modelName);
+      form.append('num_speakers', String(numSpeakers));
 
       const response = await axios.post(`${PYTHON_API_URL}/transcribe`, form, {
         headers: form.getHeaders(),

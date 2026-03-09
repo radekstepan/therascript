@@ -6,7 +6,7 @@ This document outlines the data structures used in SQLite (primary storage) and 
 
 Defined in `src/sqliteService.ts`. Migrations are handled programmatically via `user_version` pragma.
 
-**Current Schema Version:** 7
+**Current Schema Version:** 12
 
 ### Core Tables
 
@@ -37,6 +37,7 @@ Stores the actual content of the session, segmented by time.
 | `paragraphIndex` | INTEGER | NOT NULL | Ordering index within session |
 | `timestampMs` | INTEGER | NOT NULL | Start time in milliseconds |
 | `text` | TEXT | NOT NULL | Paragraph content |
+| `speaker` | TEXT | NULL | Speaker label (e.g. `SPEAKER_00`) |
 
 **Indices:** `idx_paragraph_session`, `idx_paragraph_session_index`
 
@@ -137,6 +138,7 @@ Stores transcript paragraphs for full-text search.
 | `text` | text (+ `text.stem` with English analyzer) | Paragraph content |
 | `session_id` | keyword | Session identifier for filtering |
 | `paragraph_index` | integer | Ordering within session |
+| `speaker` | keyword | Speaker label (optional) |
 | `timestamp_ms` | long | Start time in milliseconds |
 | `client_name` | keyword | Client name for filtering |
 | `session_name` | keyword | Session name for filtering |

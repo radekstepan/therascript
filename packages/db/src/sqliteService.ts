@@ -94,7 +94,7 @@ export const schema = `
 `;
 
 // --- NEW MIGRATION LOGIC ---
-export const LATEST_SCHEMA_VERSION = 11;
+export const LATEST_SCHEMA_VERSION = 12;
 
 // --- NEW SYSTEM PROMPTS ---
 export const SYSTEM_PROMPT_TEMPLATES = {
@@ -471,6 +471,27 @@ function runMigrations(dbInstance: DB) {
         dbInstance.pragma(`user_version = 11`);
         currentVersion = 11;
         console.log('[db Migrator] Version 11 applied.');
+      }
+
+      // NEW MIGRATION: Version 12 to add speaker column to transcript_paragraphs for diarization
+      if (currentVersion < 12) {
+        console.log('[db Migrator] Applying version 12...');
+        const paragraphColumns = dbInstance.pragma(
+          'table_info(transcript_paragraphs)'
+        ) as {
+          name: string;
+        }[];
+        if (!paragraphColumns.some((col) => col.name === 'speaker')) {
+          console.log(
+            '[db Migrator V12] Adding "speaker" to transcript_paragraphs...'
+          );
+          dbInstance.exec(
+            'ALTER TABLE transcript_paragraphs ADD COLUMN speaker TEXT DEFAULT NULL'
+          );
+        }
+        dbInstance.pragma(`user_version = 12`);
+        currentVersion = 12;
+        console.log('[db Migrator] Version 12 applied.');
       }
     })();
     console.log(

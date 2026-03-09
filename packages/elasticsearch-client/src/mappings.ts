@@ -35,6 +35,7 @@ export const transcriptsIndexMapping = {
         },
       },
       timestamp_ms: { type: 'long' },
+      speaker: { type: 'keyword' },
       client_name: {
         type: 'text',
         fields: { keyword: { type: 'keyword', ignore_above: 256 } },

@@ -86,6 +86,16 @@ export const addAnalysisJob = async (data: AnalysisJobData) => {
   return job;
 };
 
+/**
+ * Obliterates all jobs in the transcription queue, including active ones.
+ * Useful for clearing stuck jobs.
+ */
+export const resetTranscriptionQueue = async () => {
+  console.log('[JobQueueService] Obliterating transcription queue...');
+  await transcriptionQueue.obliterate({ force: true });
+  console.log('[JobQueueService] Transcription queue obliterated.');
+};
+
 // --- Graceful Shutdown ---
 export async function closeQueues() {
   console.log('[JobQueueService] Closing BullMQ queues...');

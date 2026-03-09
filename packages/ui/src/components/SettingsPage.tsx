@@ -34,6 +34,7 @@ import {
   TrashIcon,
   DownloadIcon,
   UploadIcon,
+  ResetIcon,
 } from '@radix-ui/react-icons';
 import {
   accentColorAtom,
@@ -46,6 +47,7 @@ import {
   requestReindexElasticsearch,
   requestResetAllData,
   requestImportData,
+  requestResetTranscriptionQueue,
 } from '../api/api';
 import { cn } from '../utils';
 import axios from 'axios';
@@ -62,7 +64,23 @@ export function SettingsPage() {
   const [isReindexConfirmOpen, setIsReindexConfirmOpen] = useState(false);
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
   const [isImportConfirmOpen, setIsImportConfirmOpen] = useState(false);
+  const [isResetQueueConfirmOpen, setIsResetQueueConfirmOpen] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
+
+  const resetTranscriptionQueueMutation = useMutation({
+    mutationFn: requestResetTranscriptionQueue,
+    onSuccess: () => {
+      setToast('✅ Transcription queue cleared.');
+      queryClient.invalidateQueries();
+    },
+    onError: (error: Error) => {
+      setToast(`❌ Queue Reset Error: ${error.message}`);
+      console.error('Queue reset failed:', error);
+    },
+    onSettled: () => {
+      setIsResetQueueConfirmOpen(false);
+    },
+  });
 
   const reindexMutation = useMutation({
     mutationFn: requestReindexElasticsearch,
@@ -132,6 +150,10 @@ export function SettingsPage() {
 
   const handleReindexClick = () => setIsReindexConfirmOpen(true);
   const handleConfirmReindex = () => reindexMutation.mutate();
+
+  const handleResetQueueClick = () => setIsResetQueueConfirmOpen(true);
+  const handleConfirmResetQueue = () =>
+    resetTranscriptionQueueMutation.mutate();
 
   const handleResetAllDataClick = () => setIsResetConfirmOpen(true);
   const handleConfirmResetAllData = () => resetAllDataMutation.mutate();
@@ -375,6 +397,37 @@ export function SettingsPage() {
                 size="4"
                 style={{ backgroundColor: 'var(--red-6)' }}
               />
+              <Flex align="center" justify="between" mb="2">
+                <Text
+                  size="3"
+                  weight="medium"
+                  className="text-red-800 dark:text-red-200"
+                >
+                  Reset Transcription Queue
+                </Text>
+                <Button
+                  variant="outline"
+                  color="orange"
+                  onClick={handleResetQueueClick}
+                  disabled={resetTranscriptionQueueMutation.isPending}
+                >
+                  {resetTranscriptionQueueMutation.isPending ? (
+                    <Spinner />
+                  ) : (
+                    <ResetIcon />
+                  )}
+                  <Text ml="1">Reset Queue</Text>
+                </Button>
+              </Flex>
+              <Text as="p" size="2" color="red" mb="4">
+                Removes all queued and in-progress transcription jobs. Use when
+                jobs are stuck and won&apos;t complete.
+              </Text>
+              <Separator
+                my="3"
+                size="4"
+                style={{ backgroundColor: 'var(--red-6)' }}
+              />
               <Box>
                 <Flex align="center" justify="between">
                   <Text
@@ -477,6 +530,47 @@ export function SettingsPage() {
               >
                 {reindexMutation.isPending ? <Spinner /> : <UpdateIcon />}
                 <Text ml="1">Confirm Re-index</Text>
+              </Button>
+            </AlertDialog.Action>
+          </Flex>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
+
+      <AlertDialog.Root
+        open={isResetQueueConfirmOpen}
+        onOpenChange={setIsResetQueueConfirmOpen}
+      >
+        <AlertDialog.Content style={{ maxWidth: 450 }}>
+          <AlertDialog.Title>Reset Transcription Queue</AlertDialog.Title>
+          <AlertDialog.Description size="2">
+            This will forcefully remove{' '}
+            <Strong>all queued and in-progress transcription jobs</Strong>,
+            including any currently running. Sessions that were being
+            transcribed will remain in a pending state and will need to be
+            re-queued. This cannot be undone.
+          </AlertDialog.Description>
+          <Flex gap="3" mt="4" justify="end">
+            <AlertDialog.Cancel>
+              <Button
+                variant="soft"
+                color="gray"
+                disabled={resetTranscriptionQueueMutation.isPending}
+              >
+                Cancel
+              </Button>
+            </AlertDialog.Cancel>
+            <AlertDialog.Action>
+              <Button
+                color="orange"
+                onClick={handleConfirmResetQueue}
+                disabled={resetTranscriptionQueueMutation.isPending}
+              >
+                {resetTranscriptionQueueMutation.isPending ? (
+                  <Spinner />
+                ) : (
+                  <ResetIcon />
+                )}
+                <Text ml="1">Yes, Reset Queue</Text>
               </Button>
             </AlertDialog.Action>
           </Flex>

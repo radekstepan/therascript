@@ -1,7 +1,25 @@
-# Python dependencies for the Whisper transcription service.
+# Python dependencies for the WhisperX transcription + diarization service.
+# NOTE: whisperx itself is installed via --no-deps in the Dockerfile to avoid the
+# torchcodec aarch64 conflict (pyannote-audio>=4.0.0 requires torchcodec, no aarch64 wheel).
+# All of whisperx's runtime dependencies are listed explicitly below instead.
 
-# --- Core Dependencies ---
-faster-whisper
+# --- WhisperX runtime deps (installed because whisperx was --no-deps) ---
+faster-whisper>=1.1.1
+ctranslate2>=4.5.0
+transformers>=4.48.0
+pandas>=2.2.3
+nltk>=3.9.1
+numpy
+# huggingface_hub 1.0 removed use_auth_token; pyannote.audio 3.3.2 still uses it internally.
+# Pin to last 0.x release that is compatible with both transformers>=4.48 and pyannote 3.3.2.
+huggingface-hub>=0.21,<1.0
+omegaconf>=2.3.0
+# Pin to 3.x — last release before torchcodec was introduced; no aarch64 wheel exists
+# for torchcodec so we stay on 3.3.2 which the whisperx DiarizationPipeline still works with.
+pyannote.audio==3.3.2
+matplotlib
+
+# --- API / Service Dependencies ---
 fastapi
 uvicorn[standard]
 pydantic

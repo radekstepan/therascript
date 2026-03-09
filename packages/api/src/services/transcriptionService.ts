@@ -26,7 +26,10 @@ export async function getTranscriptionStatus(
   return response.data;
 }
 
-export async function startTranscriptionJob(sessionId: number): Promise<void> {
+export async function startTranscriptionJob(
+  sessionId: number,
+  numSpeakers: number = 2
+): Promise<void> {
   console.log(
     `[TranscriptionService] Checking Whisper service availability before enqueuing...`
   );
@@ -58,7 +61,7 @@ export async function startTranscriptionJob(sessionId: number): Promise<void> {
   console.log(
     `[TranscriptionService] Enqueuing transcription job for session ID: ${sessionId}`
   );
-  await addTranscriptionJob({ sessionId });
+  await addTranscriptionJob({ sessionId, numSpeakers });
 }
 
 export async function getStructuredTranscriptionResult(

@@ -33,10 +33,14 @@ import { safeValidateTranscriptionJob } from '@therascript/domain';
 
 const esClient = getElasticsearchClient(config.elasticsearch.url);
 
-async function startWhisperJob(filePath: string): Promise<string> {
+async function startWhisperJob(
+  filePath: string,
+  numSpeakers: number
+): Promise<string> {
   const form = new FormData();
   form.append('file', fs.createReadStream(filePath));
   form.append('model_name', config.whisper.model);
+  form.append('num_speakers', String(numSpeakers));
 
   const response = await axios.post(
     `${config.whisper.apiUrl}/transcribe`,
@@ -117,16 +121,31 @@ function groupSegmentsIntoParagraphs(
   segments: WhisperSegment[]
 ): StructuredTranscript {
   if (!segments || segments.length === 0) return [];
-  const paragraphs: { id: number; timestamp: number; text: string }[] = [];
+  const paragraphs: TranscriptParagraphData[] = [];
   let currentText = '';
+  let currentSpeaker: string | undefined = undefined;
   let startTimeMs = segments[0]?.start * 1000 || 0;
   let paragraphIndex = 0;
 
   segments.forEach((segment, index) => {
     const segmentText = segment.text.trim();
+    const segmentSpeaker = segment.speaker ?? undefined;
+
+    // Split on speaker change
+    if (segmentSpeaker !== currentSpeaker && currentText) {
+      paragraphs.push({
+        id: paragraphIndex++,
+        timestamp: Math.round(startTimeMs),
+        text: currentText,
+        speaker: currentSpeaker,
+      });
+      currentText = '';
+    }
+
     if (segmentText) {
       if (!currentText) startTimeMs = segment.start * 1000;
       currentText += (currentText ? ' ' : '') + segmentText;
+      currentSpeaker = segmentSpeaker;
     }
 
     const nextSegment = segments[index + 1];
@@ -135,6 +154,7 @@ function groupSegmentsIntoParagraphs(
       : Infinity;
     const endsWithPunctuation = /[.!?]$/.test(segment.text.trim());
 
+    // Also split on time gaps (existing logic)
     if (
       index === segments.length - 1 ||
       timeGapMs > 1000 ||
@@ -145,8 +165,10 @@ function groupSegmentsIntoParagraphs(
           id: paragraphIndex++,
           timestamp: Math.round(startTimeMs),
           text: currentText,
+          speaker: currentSpeaker,
         });
         currentText = '';
+        currentSpeaker = undefined;
       }
     }
   });
@@ -184,7 +206,10 @@ export default async function (job: Job<TranscriptionJobData, any, string>) {
     await job.updateProgress(5);
     sessionRepository.updateMetadata(sessionId, { status: 'transcribing' });
 
-    const whisperJobId = await startWhisperJob(audioPath);
+    const whisperJobId = await startWhisperJob(
+      audioPath,
+      validationResult.data.numSpeakers ?? config.whisper.numSpeakers
+    );
     sessionRepository.updateMetadata(sessionId, { whisperJobId });
     await job.updateProgress(10);
 
@@ -233,6 +258,7 @@ export default async function (job: Job<TranscriptionJobData, any, string>) {
           session_id: sessionId,
           paragraph_index: p.id,
           text: p.text,
+          speaker: p.speaker ?? null,
           timestamp_ms: p.timestamp,
           client_name: session.clientName,
           session_name: session.sessionName,

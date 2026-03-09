@@ -64,6 +64,7 @@ export function UploadModal({ isOpen }: UploadModalProps) {
   const [sessionNameInput, setSessionNameInput] = useState('');
   const [sessionTypeInput, setSessionTypeInput] = useState(SESSION_TYPES[0]);
   const [therapyInput, setTherapyInput] = useState(THERAPY_TYPES[0]);
+  const [numSpeakersInput, setNumSpeakersInput] = useState(2);
   const [formError, setFormError] = useState<string | null>(null);
 
   const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
@@ -100,6 +101,7 @@ export function UploadModal({ isOpen }: UploadModalProps) {
     setSessionNameInput('');
     setSessionTypeInput(SESSION_TYPES[0]);
     setTherapyInput(THERAPY_TYPES[0]);
+    setNumSpeakersInput(2);
     setDragActive(false);
     setFormError(null);
     setShowLogs(false);
@@ -315,6 +317,7 @@ export function UploadModal({ isOpen }: UploadModalProps) {
           date: sessionDate,
           sessionType: sessionTypeInput,
           therapy: therapyInput,
+          numSpeakers: numSpeakersInput,
         };
         uploadMutation.mutate({ file: modalFile, metadata });
       } catch (err) {
@@ -629,6 +632,31 @@ export function UploadModal({ isOpen }: UploadModalProps) {
                   </Select.Content>
                 </Select.Root>
               </label>
+            </Box>
+            <Box className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <label>
+                <Text as="div" size="2" mb="1" weight="medium">
+                  Number of Speakers
+                </Text>
+                <TextField.Root
+                  size="2"
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={String(numSpeakersInput)}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    if (!isNaN(v) && v >= 1 && v <= 10) setNumSpeakersInput(v);
+                  }}
+                  disabled={overallIsLoading}
+                />
+              </label>
+              <Flex align="end" pb="1">
+                <Text size="1" color="gray">
+                  Typically 2 (therapist + patient). Used for speaker
+                  diarization.
+                </Text>
+              </Flex>
             </Box>
           </Flex>
 

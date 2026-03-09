@@ -215,6 +215,20 @@ export function TranscriptParagraph({
         style={textStyles}
         id={paragraphDomId}
       >
+        {paragraph.speaker && (
+          <Text
+            size="1"
+            weight="medium"
+            style={{
+              fontFamily: 'var(--font-mono)',
+              color: 'var(--accent-a11)',
+              display: 'block',
+              marginBottom: '2px',
+            }}
+          >
+            {paragraph.speaker}
+          </Text>
+        )}
         {paragraph.text.trim() ? (
           paragraph.text
         ) : (

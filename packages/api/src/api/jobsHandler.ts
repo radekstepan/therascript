@@ -1,11 +1,30 @@
 // packages/api/src/api/jobsHandler.ts
-import { getActiveJobCounts } from '../services/jobQueueService.js';
+import {
+  getActiveJobCounts,
+  resetTranscriptionQueue,
+} from '../services/jobQueueService.js';
 import { InternalServerError } from '../errors.js';
 import { analysisRepository } from '@therascript/data';
 
 interface JobsHandlerContext {
   set: { status?: number | string };
 }
+
+export const resetTranscriptionQueueHandler = async ({
+  set,
+}: JobsHandlerContext) => {
+  try {
+    await resetTranscriptionQueue();
+    set.status = 200;
+    return { success: true };
+  } catch (error) {
+    console.error('[JobsHandler] Error resetting transcription queue:', error);
+    throw new InternalServerError(
+      'Failed to reset transcription queue.',
+      error instanceof Error ? error : undefined
+    );
+  }
+};
 
 export const getActiveJobCountHandler = async ({ set }: JobsHandlerContext) => {
   try {

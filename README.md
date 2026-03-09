@@ -7,7 +7,7 @@ Therascript is a comprehensive application designed to assist therapists by stre
 ## Key Features
 
 *   **Session Management:** Upload audio files, manage session metadata (client details, date, type, therapy modality), and view a history of all sessions.
-*   **Audio Transcription:** Utilizes OpenAI's Whisper model (via a dedicated Docker service) to accurately transcribe session audio.
+*   **Audio Transcription & Diarization:** Utilizes **WhisperX** (transcription + forced alignment + speaker diarization) to accurately transcribe session audio and automatically identify multiple speakers (e.g. `SPEAKER_00`, `SPEAKER_01`).
 *   **AI-Powered Chat Analysis:**
     *   Interact with an AI (powered by local LLMs via Ollama) to ask questions about specific session transcripts.
     *   Engage in standalone AI chat sessions not tied to a specific therapy session.
@@ -133,6 +133,12 @@ Before you begin, ensure you have the following installed:
     ```bash
     yarn build
     ```
+
+3.  **Hugging Face Account & Token (for Diarization):**
+    *   Create an account at [huggingface.co](https://huggingface.co).
+    *   Explicitly accept the user agreements for [`pyannote/speaker-diarization-3.1`](https://huggingface.co/pyannote/speaker-diarization-3.1) and [`pyannote/segmentation-3.0`](https://huggingface.co/pyannote/segmentation-3.0).
+    *   Generate a Hugging Face Access Token (`HF_TOKEN`) with `read` permissions.
+    *   Add `HF_TOKEN=hf_xxxxx` to your `.env` files.
 
 ## Running the Application
 

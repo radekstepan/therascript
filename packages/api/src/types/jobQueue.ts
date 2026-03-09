@@ -5,6 +5,7 @@
  */
 export interface TranscriptionJobData {
   sessionId: number;
+  numSpeakers?: number;
 }
 
 /**

@@ -700,9 +700,11 @@ const JobList: React.FC<{
                     </Badge>
                   </Tooltip>
                 </Table.Cell>
-                <Table.Cell>
-                  <Flex align="center" gap="2">
-                    {isSummarizing && <Spinner size="1" />}
+                <Table.Cell style={{ maxWidth: 0 }}>
+                  <Flex align="center" gap="2" style={{ minWidth: 0 }}>
+                    {isSummarizing && (
+                      <Spinner size="1" className="flex-shrink-0" />
+                    )}
                     <Text truncate title={job.original_prompt}>
                       {job.short_prompt}
                     </Text>

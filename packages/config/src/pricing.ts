@@ -19,7 +19,7 @@ export const pricing: PricingConfig = {
     default: { promptCostPer1M: 0.15, completionCostPer1M: 0.6 },
   },
   whisper: {
-    large: { costPerMinute: 0.006 },
-    default: { costPerMinute: 0.006 },
+    large: { costPerMinute: 0.011 }, // whisper with diarization
+    default: { costPerMinute: 0.011 }, // whisper with diarization
   },
 };

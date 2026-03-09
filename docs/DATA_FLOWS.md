@@ -13,18 +13,19 @@ This document details the step-by-step data flows for the core operations of the
 
 2.  **Job Enqueue (API -> Redis)**
     *   API calls `startTranscriptionJob` service.
-    *   Adds a job to `transcription-jobs` queue via BullMQ.
+    *   Adds a job to `transcription-jobs` queue via BullMQ, including the requested `numSpeakers`.
     *   **File:** `packages/api/src/services/jobQueueService.ts`
 
 3.  **Job Processing (Worker)**
     *   Worker consumes job in `transcriptionProcessor.ts`.
-    *   **Action 1:** Worker sends audio path to Whisper Service via HTTP POST.
-    *   **Action 2:** Worker polls Whisper status endpoint until completion.
+    *   **Action 1:** Worker sends audio path and `numSpeakers` to WhisperX Service via HTTP POST.
+    *   **Action 2:** Worker polls WhisperX status endpoint until completion.
     *   **Action 3:** On success, parses JSON segments into `TranscriptParagraphData`.
+    *   **Pipeline Details:** The service runs 4 stages: **ASR** (Transcription) -> **Alignment** (Phoneme-level timestamps) -> **Diarization** (Speaker ID) -> **Assignment** (Mapping speakers to text).
 
 4.  **Persistence (Worker -> DB/ES)**
-    *   **SQLite:** Paragraphs inserted into `transcript_paragraphs` table via `transcriptRepository.ts`.
-    *   **Elasticsearch:** Paragraphs indexed into `therascript_transcripts` index via `bulkIndexDocuments`.
+    *   **SQLite:** Paragraphs inserted into `transcript_paragraphs` table (including the `speaker` column) via `transcriptRepository.ts`.
+    *   **Elasticsearch:** Paragraphs indexed into `therascript_transcripts` index (including the `speaker` field) via `bulkIndexDocuments`.
     *   **Status:** Session status updated to `completed`.
     *   **Initialization:** An initial "AI" message is created in the `messages` table and indexed to ES to start the chat history.
 

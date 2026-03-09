@@ -16,7 +16,7 @@ let _selectParagraphsStmt: DbStatement | null = null;
 const selectParagraphsStmt = (): DbStatement => {
   if (!_selectParagraphsStmt) {
     _selectParagraphsStmt = db.prepare(`
-      SELECT id, paragraphIndex, timestampMs, text
+      SELECT id, paragraphIndex, timestampMs, text, speaker
       FROM transcript_paragraphs
       WHERE sessionId = ?
       ORDER BY paragraphIndex ASC
@@ -35,8 +35,8 @@ let _insertParagraphStmt: DbStatement | null = null;
 const insertParagraphStmt = (): DbStatement => {
   if (!_insertParagraphStmt) {
     _insertParagraphStmt = db.prepare(`
-      INSERT INTO transcript_paragraphs (sessionId, paragraphIndex, timestampMs, text)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO transcript_paragraphs (sessionId, paragraphIndex, timestampMs, text, speaker)
+      VALUES (?, ?, ?, ?, ?)
     `);
   }
   return _insertParagraphStmt;
@@ -83,6 +83,7 @@ export const transcriptRepository = {
         id: row.paragraphIndex,
         timestamp: row.timestampMs,
         text: row.text,
+        speaker: row.speaker ?? undefined,
       }));
     } catch (error) {
       console.error(
@@ -119,7 +120,13 @@ export const transcriptRepository = {
         (items: { sessionId: number; paragraphs: StructuredTranscript }) => {
           const stmt = insertParagraphStmt();
           for (const para of items.paragraphs) {
-            stmt.run(items.sessionId, para.id, para.timestamp, para.text);
+            stmt.run(
+              items.sessionId,
+              para.id,
+              para.timestamp,
+              para.text,
+              para.speaker ?? null
+            );
           }
         }
       );

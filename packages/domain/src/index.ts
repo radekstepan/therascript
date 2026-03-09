@@ -48,27 +48,30 @@ export interface BackendTranscriptParagraph {
   paragraphIndex: number;
   timestampMs: number;
   text: string;
+  speaker?: string | null;
 }
 
 export interface TranscriptParagraphData {
   id: number;
   timestamp: number;
   text: string;
+  speaker?: string;
 }
 
 export type StructuredTranscript = TranscriptParagraphData[];
 
 export interface WhisperSegment {
-  id: number;
-  seek: number;
+  id?: number;
+  seek?: number;
   start: number;
   end: number;
   text: string;
-  tokens: number[];
-  temperature: number;
-  avg_logprob: number;
-  compression_ratio: number;
-  no_speech_prob: number;
+  speaker?: string;
+  tokens?: number[];
+  temperature?: number;
+  avg_logprob?: number;
+  compression_ratio?: number;
+  no_speech_prob?: number;
 }
 
 export interface WhisperTranscriptionResult {

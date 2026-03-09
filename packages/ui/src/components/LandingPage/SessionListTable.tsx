@@ -311,8 +311,11 @@ export function SessionListTable({
                     />
                   </Flex>
                 </Table.Cell>
-                <Table.RowHeaderCell justify="start" style={cellStyle}>
-                  <Flex align="center" gap="3">
+                <Table.RowHeaderCell
+                  justify="start"
+                  style={{ ...cellStyle, maxWidth: 0 }}
+                >
+                  <Flex align="center" gap="3" style={{ minWidth: 0 }}>
                     <div
                       className={cn(
                         'p-1.5 rounded-md flex-shrink-0',
@@ -323,7 +326,7 @@ export function SessionListTable({
                     >
                       <FileTextIcon width={16} height={16} />
                     </div>
-                    <Flex direction="column" gap="0">
+                    <Flex direction="column" gap="0" style={{ minWidth: 0 }}>
                       <Text weight="medium" size="2" truncate>
                         {session.sessionName || session.fileName}
                       </Text>

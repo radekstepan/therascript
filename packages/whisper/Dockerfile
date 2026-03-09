@@ -2,16 +2,23 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# Install system dependencies (ffmpeg is still required)
+# Install system dependencies (ffmpeg is required by whisperx)
 RUN apt-get update && apt-get install -y \
     curl \
     ffmpeg \
+    git \
     supervisor \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
+# Install PyTorch CPU first.
+# whisperx is installed with --no-deps because its transitive dep pyannote-audio>=4.0.0
+# requires torchcodec which has no aarch64 Linux wheel (Apple Silicon / ARM Docker).
+# We pin pyannote.audio==3.3.2 (last release without torchcodec) in requirements.txt
+# and list whisperx's other deps there explicitly.
 COPY packages/whisper/requirements.txt ./
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN pip3 install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu && \
+    pip3 install --no-cache-dir --no-deps git+https://github.com/m-bain/whisperx.git && \
+    pip3 install --no-cache-dir -r requirements.txt
 
 # Install Node.js (for the Express wrapper)
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \

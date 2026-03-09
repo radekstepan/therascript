@@ -79,6 +79,7 @@ export interface TranscriptParagraphData {
   id: number;
   timestamp: number; // start time in milliseconds
   text: string;
+  speaker?: string;
 }
 export type StructuredTranscript = TranscriptParagraphData[];
 
@@ -108,6 +109,7 @@ export interface SessionMetadata {
   date: string; // YYYY-MM-DD for input
   sessionType: string;
   therapy: string;
+  numSpeakers: number;
 }
 
 export interface Session extends SessionMetadata {

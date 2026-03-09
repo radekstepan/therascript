@@ -122,6 +122,7 @@ const config = {
       'WHISPER_INACTIVITY_TIMEOUT_MS',
       30 * 60 * 1000 // 30 minutes of no progress
     ),
+    numSpeakers: parseIntEnvVar('WHISPER_NUM_SPEAKERS', 2),
   },
   elasticsearch: {
     url: getEnvVar('ELASTICSEARCH_URL', 'http://localhost:9200'),

@@ -3,8 +3,10 @@ import sys
 import json
 import signal
 import subprocess
-from faster_whisper import WhisperModel
+import gc
 import time
+import whisperx
+import torch
 
 # Global State
 should_exit = False
@@ -35,10 +37,12 @@ def get_audio_duration(file_path):
         return 0
 
 # Core Transcription Logic
-def transcribe_audio(file_path, output_file, model_name):
+def transcribe_audio(file_path, output_file, model_name, num_speakers=2):
     global should_exit, last_progress_report_time
     should_exit = False
     last_progress_report_time = time.time()
+
+    HF_TOKEN = os.environ.get("HF_TOKEN")
 
     print(json.dumps({"status": "info", "message": "transcribe.py script started."}), flush=True)
 
@@ -53,13 +57,7 @@ def transcribe_audio(file_path, output_file, model_name):
             raise ValueError("Could not determine audio duration or audio is empty.")
         print(json.dumps({"status": "info", "code": "audio_duration", "message": f"{duration:.2f}"}), flush=True)
 
-        # Detect Hardware
-        # faster-whisper handles CUDA/CPU automatically, but we can be explicit
-        try:
-            import torch
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-        except ImportError:
-            device = "cpu"
+        device = "cuda" if torch.cuda.is_available() else "cpu"
 
         if device == "cpu":
             print(json.dumps({"status": "info", "code": "cpu_detected", "message": "Using CPU for transcription."}), flush=True)
@@ -72,56 +70,76 @@ def transcribe_audio(file_path, output_file, model_name):
 
         if should_exit: return
 
-        # On CPU (Mac Docker), int8 is faster. On GPU, float16 is standard.
         compute_type = "float16" if device == "cuda" else "int8"
 
         print(json.dumps({"status": "model_loading", "message": f"Loading {model_name} on {device} ({compute_type})..."}), flush=True)
-
-        model = WhisperModel(model_name, device=device, compute_type=compute_type)
-
-        print(json.dumps({"status": "loading_complete", "message": "Model loaded."}), flush=True)
+        asr_model = whisperx.load_model(model_name, device, compute_type=compute_type)
+        print(json.dumps({"status": "loading_complete", "message": "ASR model loaded."}), flush=True)
 
         if should_exit:
             print(json.dumps({"status": "canceled", "message": "Canceled after model load attempt."}), flush=True)
             return
 
-        print(json.dumps({"status": "transcribing", "message": "Processing audio..."}), flush=True)
+        # Step 1: Transcribe
+        print(json.dumps({"status": "transcribing", "message": "Step 1/4: Transcribing audio..."}), flush=True)
+        audio = whisperx.load_audio(file_path)
+        result = asr_model.transcribe(audio, batch_size=16)
+        detected_language = result.get("language", "en")
+        print(json.dumps({"status": "info", "message": f"Detected language: {detected_language}"}), flush=True)
 
-        # Transcribe
-        # faster-whisper returns a generator. We must iterate to process.
-        segments, info = model.transcribe(file_path, beam_size=5)
+        if should_exit: return
+
+        # Step 2: Align
+        print(json.dumps({"status": "transcribing", "message": "Step 2/4: Aligning word timestamps..."}), flush=True)
+        align_model, metadata = whisperx.load_align_model(language_code=detected_language, device=device)
+        result = whisperx.align(
+            result["segments"], align_model, metadata, audio, device,
+            return_char_alignments=False
+        )
+        del align_model
+        gc.collect()
+        if device == "cuda":
+            torch.cuda.empty_cache()
+
+        if should_exit: return
+
+        # Step 3: Diarize (if HF_TOKEN available)
+        if HF_TOKEN:
+            print(json.dumps({"status": "transcribing", "message": f"Step 3/4: Diarizing with {num_speakers} speakers..."}), flush=True)
+            diarize_model = whisperx.DiarizationPipeline(use_auth_token=HF_TOKEN, device=device)
+            diarize_segments = diarize_model(audio, min_speakers=num_speakers, max_speakers=num_speakers)
+
+            # Step 4: Assign speakers
+            print(json.dumps({"status": "transcribing", "message": "Step 4/4: Assigning speakers..."}), flush=True)
+            result = whisperx.assign_word_speakers(diarize_segments, result)
+        else:
+            print(json.dumps({"status": "info", "message": "No HF_TOKEN set, skipping diarization."}), flush=True)
 
         segment_list = []
-        for segment in segments:
-            if should_exit:
-                print(json.dumps({"status": "canceled", "message": "Canceled during transcription processing."}), flush=True)
-                return
+        for seg in result.get("segments", []):
             segment_list.append({
-                "id": segment.id,
-                "start": segment.start,
-                "end": segment.end,
-                "text": segment.text.strip(),
-                # faster-whisper doesn't give tokens by default in the same list format,
-                # but for this app's UI, we mostly need start/end/text.
+                "start": seg.get("start", 0),
+                "end": seg.get("end", 0),
+                "text": seg.get("text", "").strip(),
+                "speaker": seg.get("speaker"),
             })
 
-        # Construct Final Result matching Domain Types
-        result = {
-            "text": "".join([s["text"] for s in segment_list]),
+        if should_exit: return
+
+        final_result = {
             "segments": segment_list,
-            "language": info.language
+            "language": detected_language,
         }
 
         with open(output_file, "w") as f:
-            json.dump(result, f, indent=4)
+            json.dump(final_result, f, indent=4)
 
         print(json.dumps({
             "status": "completed",
             "message": f"Transcription completed. Output saved to: {os.path.basename(output_file)}",
             "result_summary": {
-                "language": info.language,
+                "language": detected_language,
                 "segment_count": len(segment_list),
-                "text_length": len(result["text"])
             }
         }), flush=True)
 
@@ -139,16 +157,17 @@ def transcribe_audio(file_path, output_file, model_name):
         sys.exit(1)
 
 if __name__ == "__main__":
-    if len(sys.argv) != 4:
-        print(json.dumps({ "status": "error", "code": "invalid_arguments", "message": "Usage: python3 transcribe.py <input_audio_file> <output_json_file> <model_name>" }), file=sys.stderr, flush=True)
+    if len(sys.argv) < 4 or len(sys.argv) > 5:
+        print(json.dumps({ "status": "error", "code": "invalid_arguments", "message": "Usage: python3 transcribe.py <input_audio_file> <output_json_file> <model_name> [num_speakers]" }), file=sys.stderr, flush=True)
         sys.exit(1)
 
     audio_file_path_arg = sys.argv[1]
     output_json_path_arg = sys.argv[2]
     model_name_arg = sys.argv[3]
+    num_speakers_arg = int(sys.argv[4]) if len(sys.argv) == 5 else 2
 
     if not os.path.isfile(audio_file_path_arg):
         print(json.dumps({ "status": "error", "code": "file_not_found", "message": f"Input audio file not found: {audio_file_path_arg}" }), file=sys.stderr, flush=True)
         sys.exit(1)
 
-    transcribe_audio(audio_file_path_arg, output_json_path_arg, model_name_arg)
+    transcribe_audio(audio_file_path_arg, output_json_path_arg, model_name_arg, num_speakers_arg)

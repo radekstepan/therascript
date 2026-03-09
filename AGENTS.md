@@ -17,17 +17,18 @@ Located in `packages/worker`, these agents run asynchronously to handle heavy co
 ### Transcription Agent
 *   **Type:** BullMQ Worker (`transcription-jobs`)
 *   **Source:** `packages/worker/src/jobs/transcriptionProcessor.ts`
-*   **Responsibility:** "The Ears"
+*   **Responsibility:** "The Ears" (Now with Diarization)
 *   **Workflow:**
-    1.  Receives `sessionId` from the API after file upload.
+    1.  Receives `sessionId` and `numSpeakers` from the API after file upload.
     2.  Fetches audio path from SQLite.
-    3.  Submits audio to the **Whisper Service** (`packages/whisper`) and polls for completion.
+    3.  Submits audio to the **WhisperX Service** (`packages/whisper`) and polls for completion.
     4.  **Post-Processing:**
-        *   Parses raw segments into time-stamped paragraphs.
+        *   The pipeline runs 4 stages: **Transcribe** (ASR), **Align** (word-level timestamps), **Diarize** (speaker identification via Pyannote), and **Assign** (mapping speakers to text).
+        *   Parses enriched segments into time-stamped paragraphs, splitting on speaker changes.
         *   Calculates token counts.
-        *   Indexes paragraphs into **Elasticsearch** (`therascript_transcripts`).
+        *   Indexes paragraphs into **Elasticsearch** (`therascript_transcripts`), including the `speaker` label.
         *   Creates the initial "AI" chat message in the database.
-*   **Infrastructure:** Depends on GPU availability (via Whisper Docker container).
+*   **Infrastructure:** Depends on GPU availability (via WhisperX Docker container/CUDA) or CPU (int8 quantization). Requires `HF_TOKEN` for diarization model weights.
 
 ### Analysis Agent (The Researcher)
 *   **Type:** BullMQ Worker (`analysis-jobs`)

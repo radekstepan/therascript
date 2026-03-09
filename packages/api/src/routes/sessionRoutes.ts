@@ -138,6 +138,7 @@ const UploadBodySchema = t.Object({
   date: t.RegExp(/^\d{4}-\d{2}-\d{2}$/, { error: 'Date must be YYYY-MM-DD.' }),
   sessionType: t.String({ minLength: 1, error: 'Session type required.' }),
   therapy: t.String({ minLength: 1, error: 'Therapy type required.' }),
+  numSpeakers: t.Optional(t.Numeric()),
 });
 const DeleteResponseSchema = t.Object({ message: t.String() });
 
@@ -181,8 +182,13 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
           const {
             audioFile,
             date: dateInput,
+            numSpeakers,
             ...metadata
           } = body as Static<typeof UploadBodySchema>;
+          const resolvedNumSpeakers = Math.max(
+            1,
+            Math.min(10, Math.round(numSpeakers ?? 2))
+          );
           let newSess: BackendSession | null = null;
           try {
             console.log(
@@ -222,7 +228,7 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
               status: 'queued',
             });
 
-            await startTranscriptionJob(newSess.id);
+            await startTranscriptionJob(newSess.id, resolvedNumSpeakers);
 
             set.status = 202;
             return {

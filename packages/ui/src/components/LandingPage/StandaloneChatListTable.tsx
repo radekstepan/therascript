@@ -165,9 +165,9 @@ export function StandaloneChatListTable({
               tabIndex={0}
             >
               {/* Name Cell */}
-              <Table.RowHeaderCell justify="start">
-                <Flex align="center" gap="2">
-                  <ChatBubbleIcon className="text-[--gray-a10]" />
+              <Table.RowHeaderCell justify="start" style={{ maxWidth: 0 }}>
+                <Flex align="center" gap="2" style={{ minWidth: 0 }}>
+                  <ChatBubbleIcon className="text-[--gray-a10] flex-shrink-0" />
                   <Text weight="medium" truncate>
                     {getChatDisplayTitle(chat)}
                   </Text>

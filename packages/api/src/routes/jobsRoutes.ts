@@ -1,6 +1,9 @@
 // packages/api/src/routes/jobsRoutes.ts
 import { Elysia, t } from 'elysia';
-import { getActiveJobCountHandler } from '../api/jobsHandler.js';
+import {
+  getActiveJobCountHandler,
+  resetTranscriptionQueueHandler,
+} from '../api/jobsHandler.js';
 
 const ActiveJobCountResponseSchema = t.Object({
   total: t.Number(),
@@ -13,12 +16,18 @@ export const jobsRoutes = new Elysia({ prefix: '/api/jobs' })
     activeJobCountResponse: ActiveJobCountResponseSchema,
   })
   .group('', { detail: { tags: ['Jobs'] } }, (app) =>
-    app.get('/active-count', getActiveJobCountHandler, {
-      response: {
-        200: 'activeJobCountResponse',
-      },
-      detail: {
-        summary: 'Get the count of active and waiting background jobs',
-      },
-    })
+    app
+      .get('/active-count', getActiveJobCountHandler, {
+        response: {
+          200: 'activeJobCountResponse',
+        },
+        detail: {
+          summary: 'Get the count of active and waiting background jobs',
+        },
+      })
+      .post('/reset-transcription', resetTranscriptionQueueHandler, {
+        detail: {
+          summary: 'Obliterate all jobs in the transcription queue',
+        },
+      })
   );

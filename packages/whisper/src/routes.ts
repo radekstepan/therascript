@@ -61,10 +61,15 @@ router.post(
       return res.status(400).json({ error: 'No file uploaded.' });
     }
     const model_name = req.body.model_name || 'tiny';
+    const num_speakers = parseInt(req.body.num_speakers || '2', 10);
     const input_path = req.file.path;
 
     try {
-      const job_id = await submitTranscriptionJob(input_path, model_name);
+      const job_id = await submitTranscriptionJob(
+        input_path,
+        model_name,
+        num_speakers
+      );
 
       console.log(
         `Queued job ${job_id} for file ${req.file.originalname} with model '${model_name}'`

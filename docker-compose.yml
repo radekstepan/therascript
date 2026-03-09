@@ -18,13 +18,17 @@ services:
       - '127.0.0.1:8000:8000'
     volumes:
       - whisper_models:/root/.cache/whisper
+      - hf_cache:/root/.cache/huggingface
+      - torch_cache:/root/.cache/torch
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
     restart: unless-stopped
     healthcheck:
       test: [ 'CMD', 'curl', '--fail', 'http://localhost:8000/health' ]
       interval: 15s
       timeout: 5s
       retries: 3
-      start_period: 30s
+      start_period: 60s
 
   # Elasticsearch Service
   elasticsearch:
@@ -85,6 +89,10 @@ volumes:
   es_data:
     driver: local
   whisper_models:
+    driver: local
+  hf_cache:
+    driver: local
+  torch_cache:
     driver: local
   redis_data:
     driver: local
