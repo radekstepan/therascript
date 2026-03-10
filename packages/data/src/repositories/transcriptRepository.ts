@@ -201,7 +201,9 @@ export const transcriptRepository = {
       const rows = selectParagraphsStmt().all(
         sessionId
       ) as BackendTranscriptParagraph[];
-      return rows.map((p) => p.text).join('\n\n');
+      return rows
+        .map((p) => (p.speaker ? `${p.speaker}: ${p.text}` : p.text))
+        .join('\n\n');
     } catch (error) {
       console.error(
         `[TranscriptRepo] Error fetching transcript text for session ${sessionId}:`,
@@ -209,6 +211,27 @@ export const transcriptRepository = {
       );
       throw new Error(
         `Database error fetching transcript text for session ${sessionId}.`
+      );
+    }
+  },
+
+  renameSpeaker: (sessionId: number, from: string, to: string): number => {
+    try {
+      const stmt = db.prepare(
+        `UPDATE transcript_paragraphs SET speaker = ? WHERE sessionId = ? AND speaker = ?`
+      );
+      const info = stmt.run(to, sessionId, from);
+      console.log(
+        `[TranscriptRepo] Renamed speaker "${from}" → "${to}" for session ${sessionId}: ${info.changes} rows updated.`
+      );
+      return info.changes;
+    } catch (error) {
+      console.error(
+        `[TranscriptRepo] Error renaming speaker for session ${sessionId}:`,
+        error
+      );
+      throw new Error(
+        `Database error renaming speaker for session ${sessionId}.`
       );
     }
   },

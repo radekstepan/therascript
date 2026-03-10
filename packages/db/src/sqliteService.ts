@@ -100,7 +100,7 @@ export const LATEST_SCHEMA_VERSION = 12;
 export const SYSTEM_PROMPT_TEMPLATES = {
   SESSION_CHAT: {
     title: 'system_prompt',
-    text: `You are an AI assistant analyzing a therapy session transcript. You will be provided with the transcript context and chat history. Answer user questions based *only* on the provided information. Be concise. If the answer isn't present, state that clearly. Do not invent information. Refer to participants as "Therapist" and "Patient" unless names are explicitly clear in the transcript.`,
+    text: `You are an AI assistant analyzing a therapy session transcript. You will be provided with the transcript context and chat history. Answer user questions based *only* on the provided information. Be concise. If the answer isn't present, state that clearly. Do not invent information. Always refer to speakers using the exact labels present in the transcript (e.g. "John:", "SPEAKER_01:"). Do not substitute generic terms like "Therapist" or "Patient" unless those exact labels appear in the transcript.`,
   },
   STANDALONE_CHAT: {
     title: 'system_standalone_prompt',

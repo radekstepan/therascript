@@ -668,6 +668,89 @@ export const finalizeSessionHandler = async ({
   }
 };
 
+export const renameSpeakersHandler = async ({
+  body,
+  sessionData,
+  set,
+}: SessionHandlerContext) => {
+  const sessionId = sessionData.id;
+
+  if (!Array.isArray(body)) {
+    throw new BadRequestError('Body must be an array of { from, to } objects.');
+  }
+
+  const renames = body as { from: string; to: string }[];
+
+  for (const rename of renames) {
+    if (
+      typeof rename.from !== 'string' ||
+      typeof rename.to !== 'string' ||
+      !rename.from.trim() ||
+      !rename.to.trim()
+    ) {
+      throw new BadRequestError(
+        'Each rename entry must have non-empty "from" and "to" string fields.'
+      );
+    }
+    if (rename.from === rename.to) continue;
+  }
+
+  const filtered = renames.filter((r) => r.from.trim() !== r.to.trim());
+
+  if (filtered.length === 0) {
+    set.status = 200;
+    return { message: 'No changes needed.' };
+  }
+
+  try {
+    for (const { from, to } of filtered) {
+      // Update SQLite
+      transcriptRepository.renameSpeaker(sessionId, from, to);
+
+      // Update Elasticsearch
+      try {
+        await esClient.updateByQuery({
+          index: TRANSCRIPTS_INDEX,
+          body: {
+            script: {
+              source: 'ctx._source.speaker = params.to',
+              lang: 'painless',
+              params: { to },
+            },
+            query: {
+              bool: {
+                must: [
+                  { term: { session_id: sessionId } },
+                  { term: { speaker: from } },
+                ],
+              },
+            },
+          },
+        } as any);
+        console.log(
+          `[API renameSpeakers] ES update: "${from}" → "${to}" for session ${sessionId}.`
+        );
+      } catch (esError) {
+        console.error(
+          `[API renameSpeakers] ES update failed for "${from}" → "${to}" (session ${sessionId}):`,
+          esError
+        );
+        // Non-fatal: SQLite is the source of truth for the UI
+      }
+    }
+
+    set.status = 200;
+    return { message: `Speaker labels updated for session ${sessionId}.` };
+  } catch (error) {
+    console.error(`[API Error] renameSpeakers (ID: ${sessionId}):`, error);
+    if (error instanceof ApiError) throw error;
+    throw new InternalServerError(
+      `Failed to rename speakers for session ${sessionId}`,
+      error instanceof Error ? error : undefined
+    );
+  }
+};
+
 export const deleteSessionAudioHandler = async ({
   sessionData,
   set,

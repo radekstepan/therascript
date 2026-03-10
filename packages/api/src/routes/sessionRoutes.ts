@@ -11,6 +11,7 @@ import {
   updateTranscriptParagraph,
   deleteSessionAudioHandler,
   deleteTranscriptParagraph,
+  renameSpeakersHandler,
 } from '../api/sessionHandler.js';
 import {
   deleteUploadedAudioFile,
@@ -329,6 +330,15 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
             {
               response: { 200: 'transcriptResponse' },
               detail: { summary: 'Get structured transcript content' },
+            }
+          )
+          .patch(
+            '/:sessionId/speakers',
+            async (context) => renameSpeakersHandler(context as any),
+            {
+              body: t.Array(t.Object({ from: t.String(), to: t.String() })),
+              response: { 200: t.Object({ message: t.String() }) },
+              detail: { summary: 'Rename speaker labels for a session' },
             }
           )
           .patch(

@@ -203,3 +203,23 @@ export const deleteSession = async (
   const response = await axios.delete(`/api/sessions/${sessionId}`);
   return response.data;
 };
+
+/**
+ * Renames one or more speaker labels for a session's transcript.
+ * Makes a PATCH request to `/api/sessions/{sessionId}/speakers`.
+ *
+ * @param {number} sessionId - The ID of the session.
+ * @param {{ from: string; to: string }[]} renames - Array of from/to speaker label pairs.
+ * @returns {Promise<{ message: string }>} A promise resolving to a confirmation message.
+ * @throws {Error} If the API request fails.
+ */
+export const renameSpeakers = async (
+  sessionId: number,
+  renames: { from: string; to: string }[]
+): Promise<{ message: string }> => {
+  const response = await axios.patch(
+    `/api/sessions/${sessionId}/speakers`,
+    renames
+  );
+  return response.data;
+};

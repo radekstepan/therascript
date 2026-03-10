@@ -10,6 +10,7 @@ import type {
 } from '../../../types';
 import { TranscriptParagraph } from '../../Transcription/TranscriptParagraph';
 import { EditSessionModal } from '../../Shared/EditSessionModal';
+import { RenameSpeakersModal } from './RenameSpeakersModal';
 import {
   Box,
   Text,
@@ -33,6 +34,7 @@ import {
   TrashIcon,
   CopyIcon,
   Pencil1Icon,
+  MixerHorizontalIcon,
 } from '@radix-ui/react-icons';
 import { cn } from '../../../utils';
 import {
@@ -165,6 +167,8 @@ export function Transcription({
     useState<TranscriptParagraphData | null>(null);
   const [isDeleteParaConfirmOpen, setIsDeleteParaConfirmOpen] = useState(false);
   const [isEditSessionModalOpen, setIsEditSessionModalOpen] = useState(false);
+  const [isRenameSpeakersModalOpen, setIsRenameSpeakersModalOpen] =
+    useState(false);
 
   const transcriptTokenCount = session?.transcriptTokenCount;
   const isAudioAvailable = !!session?.audioPath;
@@ -631,6 +635,15 @@ export function Transcription({
                   <Pencil1Icon className="mr-2 h-4 w-4" /> Edit Details
                 </DropdownMenu.Item>
                 <DropdownMenu.Item
+                  onSelect={() => setIsRenameSpeakersModalOpen(true)}
+                  disabled={
+                    !transcriptContent || transcriptContent.length === 0
+                  }
+                >
+                  <MixerHorizontalIcon className="mr-2 h-4 w-4" /> Rename
+                  Speakers
+                </DropdownMenu.Item>
+                <DropdownMenu.Item
                   onSelect={handleCopyTranscriptClick}
                   disabled={
                     !transcriptContent || transcriptContent.length === 0
@@ -853,6 +866,12 @@ export function Transcription({
         isOpen={isEditSessionModalOpen}
         onOpenChange={setIsEditSessionModalOpen}
         session={session}
+      />
+      <RenameSpeakersModal
+        isOpen={isRenameSpeakersModalOpen}
+        onOpenChange={setIsRenameSpeakersModalOpen}
+        sessionId={session?.id ?? 0}
+        transcriptContent={transcriptContent}
       />
     </>
   );
