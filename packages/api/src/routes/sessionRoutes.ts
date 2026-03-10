@@ -130,6 +130,7 @@ const TranscriptParagraphSchema = t.Object({
   id: t.Number(),
   timestamp: t.Number(),
   text: t.String(),
+  speaker: t.Optional(t.Union([t.String(), t.Null()])),
 });
 const TranscriptResponseSchema = t.Array(TranscriptParagraphSchema);
 const UploadBodySchema = t.Object({
