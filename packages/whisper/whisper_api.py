@@ -170,15 +170,13 @@ class WhisperModelManager:
                 )
                 self._model_name = model_name
 
-                # Load diarization pipeline (requires HF_TOKEN)
-                if HF_TOKEN:
-                    print(f"[WhisperManager] Loading diarization pipeline...")
-                    self._diarize_model = _DiarizationPipeline(
-                        token=HF_TOKEN, device=device
-                    )
-                else:
-                    self._diarize_model = None
-                    print("[WhisperManager] WARNING: HF_TOKEN not set, diarization disabled")
+                # Load diarization pipeline (required — fails hard without HF_TOKEN)
+                if not HF_TOKEN:
+                    raise RuntimeError("HF_TOKEN is not set — diarization pipeline cannot be loaded. Set HF_TOKEN and restart.")
+                print(f"[WhisperManager] Loading diarization pipeline...")
+                self._diarize_model = _DiarizationPipeline(
+                    token=HF_TOKEN, device=device
+                )
 
                 elapsed = (datetime.now() - start).total_seconds()
                 print(f"[WhisperManager] Model '{model_name}' loaded in {elapsed:.2f}s")
@@ -409,52 +407,52 @@ async def run_transcription(job_id: str, input_path: str, model_name: str, num_s
                 if manager._device == "cuda":
                     torch.cuda.empty_cache()
 
-                # Step 3: Diarize (if available)
-                if manager._diarize_model is not None:
-                    last_stage[0] = "diarizing"
-                    stage_start_time[0] = datetime.now().timestamp()
-                    diarize_progress[0] = 0.0
-                    print(f"[Whisper] Job {job_id}: Step 3/4 - Diarizing with {num_speakers} speakers...", flush=True)
+                # Step 3: Diarize (required — fails hard if model is not loaded)
+                if manager._diarize_model is None:
+                    raise RuntimeError("Diarization model is not loaded — cannot proceed without speaker diarization.")
 
-                    # pyannote hook: maps sub-step names → fractional progress
-                    # Steps (approximate): segmentation ~30%, embedding ~80%, clustering ~95%
-                    _DIARIZE_STEP_FRACTIONS = {
-                        "segmentation": 0.30,
-                        "speaker embedding": 0.75,
-                        "embeddings": 0.75,
-                        "clustering": 0.90,
-                        "discrete diarization": 0.92,
-                        "diarization": 0.97,
-                    }
-                    def _diarize_hook(step_name=None, *args, **kwargs):
-                        if step_name is None and args:
-                            step_name = args[0]
-                        name = str(step_name).lower() if step_name else ""
-                        for key, frac in _DIARIZE_STEP_FRACTIONS.items():
-                            if key in name:
-                                diarize_progress[0] = frac
-                                print(f"[Whisper] Job {job_id}: diarize hook '{name}' → {frac*100:.0f}%", flush=True)
-                                break
+                last_stage[0] = "diarizing"
+                stage_start_time[0] = datetime.now().timestamp()
+                diarize_progress[0] = 0.0
+                print(f"[Whisper] Job {job_id}: Step 3/4 - Diarizing with {num_speakers} speakers...", flush=True)
 
-                    diarize_segments = manager._diarize_model(
-                        audio,
-                        min_speakers=num_speakers,
-                        max_speakers=num_speakers,
-                        hook=_diarize_hook,
-                    )
-                    # Step 4: Assign speakers to segments
-                    last_stage[0] = "assigning"
-                    stage_start_time[0] = datetime.now().timestamp()
-                    print(f"[Whisper] Job {job_id}: Step 4/4 - Assigning speakers...", flush=True)
-                    result = whisperx.assign_word_speakers(diarize_segments, result)
-                    # Log each final segment with speaker label
-                    final_segs = result.get("segments", [])
-                    print(f"[Whisper] Job {job_id}: Speaker assignment done - {len(final_segs)} segments", flush=True)
-                    for i, seg in enumerate(final_segs):
-                        speaker_tag = f"[{seg.get('speaker', 'UNKNOWN')}] "
-                        print(f"[Whisper] Job {job_id}:   seg {i+1:03d} [{seg.get('start',0):.2f}s-{seg.get('end',0):.2f}s] {speaker_tag}{seg.get('text','').strip()}", flush=True)
-                else:
-                    print(f"[Whisper] Job {job_id}: Skipping diarization (no HF_TOKEN)", flush=True)
+                # pyannote hook: maps sub-step names → fractional progress
+                # Steps (approximate): segmentation ~30%, embedding ~80%, clustering ~95%
+                _DIARIZE_STEP_FRACTIONS = {
+                    "segmentation": 0.30,
+                    "speaker embedding": 0.75,
+                    "embeddings": 0.75,
+                    "clustering": 0.90,
+                    "discrete diarization": 0.92,
+                    "diarization": 0.97,
+                }
+                def _diarize_hook(step_name=None, *args, **kwargs):
+                    if step_name is None and args:
+                        step_name = args[0]
+                    name = str(step_name).lower() if step_name else ""
+                    for key, frac in _DIARIZE_STEP_FRACTIONS.items():
+                        if key in name:
+                            diarize_progress[0] = frac
+                            print(f"[Whisper] Job {job_id}: diarize hook '{name}' → {frac*100:.0f}%", flush=True)
+                            break
+
+                diarize_segments = manager._diarize_model(
+                    audio,
+                    min_speakers=num_speakers,
+                    max_speakers=num_speakers,
+                    hook=_diarize_hook,
+                )
+                # Step 4: Assign speakers to segments
+                last_stage[0] = "assigning"
+                stage_start_time[0] = datetime.now().timestamp()
+                print(f"[Whisper] Job {job_id}: Step 4/4 - Assigning speakers...", flush=True)
+                result = whisperx.assign_word_speakers(diarize_segments, result)
+                # Log each final segment with speaker label
+                final_segs = result.get("segments", [])
+                print(f"[Whisper] Job {job_id}: Speaker assignment done - {len(final_segs)} segments", flush=True)
+                for i, seg in enumerate(final_segs):
+                    speaker_tag = f"[{seg.get('speaker', 'UNKNOWN')}] "
+                    print(f"[Whisper] Job {job_id}:   seg {i+1:03d} [{seg.get('start',0):.2f}s-{seg.get('end',0):.2f}s] {speaker_tag}{seg.get('text','').strip()}", flush=True)
 
                 segments_out = []
                 for seg in result.get("segments", []):

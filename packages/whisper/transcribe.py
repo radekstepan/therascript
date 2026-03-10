@@ -103,17 +103,17 @@ def transcribe_audio(file_path, output_file, model_name, num_speakers=2):
 
         if should_exit: return
 
-        # Step 3: Diarize (if HF_TOKEN available)
-        if HF_TOKEN:
-            print(json.dumps({"status": "transcribing", "message": f"Step 3/4: Diarizing with {num_speakers} speakers..."}), flush=True)
-            diarize_model = whisperx.DiarizationPipeline(use_auth_token=HF_TOKEN, device=device)
-            diarize_segments = diarize_model(audio, min_speakers=num_speakers, max_speakers=num_speakers)
+        # Step 3: Diarize (required — fails hard without HF_TOKEN)
+        if not HF_TOKEN:
+            raise RuntimeError("HF_TOKEN is not set — diarization is required and cannot be skipped.")
 
-            # Step 4: Assign speakers
-            print(json.dumps({"status": "transcribing", "message": "Step 4/4: Assigning speakers..."}), flush=True)
-            result = whisperx.assign_word_speakers(diarize_segments, result)
-        else:
-            print(json.dumps({"status": "info", "message": "No HF_TOKEN set, skipping diarization."}), flush=True)
+        print(json.dumps({"status": "transcribing", "message": f"Step 3/4: Diarizing with {num_speakers} speakers..."}), flush=True)
+        diarize_model = whisperx.DiarizationPipeline(use_auth_token=HF_TOKEN, device=device)
+        diarize_segments = diarize_model(audio, min_speakers=num_speakers, max_speakers=num_speakers)
+
+        # Step 4: Assign speakers
+        print(json.dumps({"status": "transcribing", "message": "Step 4/4: Assigning speakers..."}), flush=True)
+        result = whisperx.assign_word_speakers(diarize_segments, result)
 
         segment_list = []
         for seg in result.get("segments", []):

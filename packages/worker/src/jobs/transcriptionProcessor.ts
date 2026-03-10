@@ -219,6 +219,11 @@ export default async function (job: Job<TranscriptionJobData, any, string>) {
         `Whisper job ${whisperJobId} failed or returned no segments. Status: ${finalStatus.status}. Error: ${finalStatus.error || 'Unknown error'}`
       );
     }
+    if (!finalStatus.result.segments.some((s) => s.speaker != null)) {
+      throw new Error(
+        `Whisper job ${whisperJobId} completed without diarization — all speaker labels are null. Ensure HF_TOKEN is set and the diarization model is cached.`
+      );
+    }
 
     try {
       // Duration is on WhisperJobStatus directly, not on result
