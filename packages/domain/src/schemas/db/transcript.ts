@@ -6,6 +6,7 @@ export const transcriptSchema = z.object({
   paragraphIndex: z.number().int().nonnegative(),
   timestampMs: z.number().int().nonnegative(),
   text: z.string(),
+  speaker: z.string().nullable().optional(),
 });
 
 export type TranscriptRow = z.infer<typeof transcriptSchema>;

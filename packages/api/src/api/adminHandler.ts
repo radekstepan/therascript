@@ -342,6 +342,7 @@ const TranscriptParagraphSchema = z.object({
   paragraphIndex: z.number(),
   timestampMs: z.number(),
   text: z.string(),
+  speaker: z.string().nullable().optional(),
 });
 const AnalysisJobSchema = z.object({
   id: z.number(),
