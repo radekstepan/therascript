@@ -12,7 +12,7 @@
 ### Routes (`/routes/*.ts`) — HTTP endpoint definitions
 | File | Purpose |
 |------|---------|
-| `sessionRoutes.ts` | Session CRUD, file upload |
+| `sessionRoutes.ts` | Session CRUD, file upload, diarization readiness gate, speaker rename |
 | `chatRoutes.ts` | Session-bound chat endpoints |
 | `standaloneChatRoutes.ts` | Standalone chat (no session context) |
 | `analysisRoutes.ts` | Multi-session analysis jobs |
@@ -21,7 +21,7 @@
 | `ollamaRoutes.ts` | Model management (list, load, unload) |
 | `templateRoutes.ts` | Prompt template CRUD |
 | `systemRoutes.ts` | System prompts management |
-| `jobsRoutes.ts` | Background job status |
+| `jobsRoutes.ts` | Background job status + transcription queue reset |
 | `dockerRoutes.ts` | Docker container management |
 | `adminRoutes.ts` | Admin/debug endpoints |
 | `metaRoutes.ts` | Health checks, readiness |
@@ -29,12 +29,12 @@
 ### Handlers (`/api/*.ts`) — Business logic for complex operations
 | File | Purpose |
 |------|---------|
-| `sessionHandler.ts` | Session creation, deletion logic |
+| `sessionHandler.ts` | Session creation/deletion logic, transcript speaker rename |
 | `sessionChatHandler.ts` | RAG chat with transcript context |
 | `standaloneChatHandler.ts` | General-purpose chat (no context) |
 | `analysisHandler.ts` | Strategy generation, MapReduce orchestration |
 | `templateHandler.ts` | Template management logic |
-| `jobsHandler.ts` | Job queue operations |
+| `jobsHandler.ts` | Job queue operations (active count + queue reset) |
 | `gpuHandler.ts` | GPU availability checks |
 | `metaHandler.ts` | System metadata, readiness |
 | `adminHandler.ts` | Admin operations |
@@ -47,10 +47,10 @@
 | `ollamaService.mock.ts` | Mock for testing |
 | `ollamaRuntime.ts` | Model lifecycle management |
 | `activeModelService.ts` | Track currently loaded model |
-| `transcriptionService.ts` | Whisper integration (facade) |
+| `transcriptionService.ts` | Whisper integration + diarization readiness/prefetch checks |
 | `transcriptionService.real.ts` | Actual Whisper API client |
 | `fileService.ts` | Audio file handling, storage |
-| `jobQueueService.ts` | BullMQ job submission |
+| `jobQueueService.ts` | BullMQ job submission + transcription queue obliteration/reset |
 | `analysisJobService.ts` | Analysis job orchestration |
 | `dockerManagementService.ts` | Container start/stop |
 | `gpuService.ts` | GPU detection |
@@ -127,7 +127,7 @@
 | Directory | Purpose |
 |-----------|---------|
 | `Analysis/` | Analysis jobs UI, `AnalysisJobsPage.tsx` |
-| `SessionView/` | Session detail, chat, transcript display |
+| `SessionView/` | Session detail, chat, transcript display, speaker rename modal |
 | `StandaloneChatView/` | Standalone chat interface |
 | `Search/` | Search UI components |
 | `Transcription/` | Transcription progress, display |
@@ -142,7 +142,7 @@
 | File | Purpose |
 |------|---------|
 | `api.ts` | Base axios configuration |
-| `session.ts` | Session API calls |
+| `session.ts` | Session API calls (including `PATCH /sessions/:id/speakers`) |
 | `chat.ts` | Chat API calls |
 | `analysis.ts` | Analysis job API calls |
 | `search.ts` | Search API calls |
@@ -150,9 +150,9 @@
 | `transcription.ts` | Transcription API |
 | `templates.ts` | Templates API |
 | `system.ts` | System prompts API |
-| `jobs.ts` | Jobs API |
+| `jobs.ts` | Jobs API (active count + reset transcription queue) |
 | `docker.ts` | Docker management API |
-| `meta.ts` | Health/readiness API |
+| `meta.ts` | Health/readiness API (explicit 200/503 readiness handling) |
 
 ### React Hooks (`/hooks/*.ts`)
 | File | Purpose |

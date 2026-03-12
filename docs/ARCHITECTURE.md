@@ -4,7 +4,7 @@ This document provides a high-level overview of Therascript's architecture, incl
 
 ## High-Level Overview
 
-Therascript is a **monorepo** containing 10 packages that work together to provide therapy session transcription and AI-powered analysis. The system runs as three main processes backed by four Dockerized services.
+Therascript is a **monorepo** containing 10 packages that work together to provide therapy session transcription (WhisperX + diarization) and AI-powered analysis. The system runs as three main processes backed by four Dockerized services.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
@@ -76,9 +76,9 @@ packages/
 │   └── gpu-utils/              # NVIDIA GPU monitoring
 │
 └── External Service Wrappers
-    ├── ollama/                 # Ollama Docker management
-    ├── whisper/                # Python FastAPI transcription service
-    └── elasticsearch-manager/  # ES container management
+     ├── ollama/                 # Ollama Docker management
+     ├── whisper/                # Python FastAPI WhisperX service
+     └── elasticsearch-manager/  # ES container management
 ```
 
 ### Application Layer
@@ -103,7 +103,7 @@ packages/
 | Package | Technology | Purpose |
 |---------|------------|---------|
 | `packages/ollama` | Docker Compose | Ollama container config and lifecycle management |
-| `packages/whisper` | Python/FastAPI | Audio transcription service (OpenAI Whisper model) |
+| `packages/whisper` | Python/FastAPI | Audio transcription + diarization service (WhisperX + pyannote) |
 | `packages/elasticsearch-manager` | dockerode | ES container health and management |
 
 ## Infrastructure Layer
@@ -133,7 +133,7 @@ packages/
 │   transcription-jobs                 analysis-jobs                  │
 │   ┌──────────────────┐              ┌──────────────────┐            │
 │   │ sessionId        │              │ jobId            │            │
-│   │ audioPath        │              │ strategy (JSON)  │            │
+│   │ numSpeakers      │              │ strategy (JSON)  │            │
 │   │ modelName        │              │ sessionIds[]     │            │
 │   └──────────────────┘              └──────────────────┘            │
 │                                                                     │
@@ -148,10 +148,10 @@ packages/
 │          Ollama                  │           Whisper                │
 │        (port 11434)              │         (port 8000)              │
 ├──────────────────────────────────┼──────────────────────────────────┤
-│ • LLM inference                  │ • Audio transcription            │
-│ • Model management               │ • OpenAI Whisper model           │
-│   (pull, load, unload, delete)   │ • GPU acceleration (CUDA)        │
-│ • Streaming responses            │ • Status polling                 │
+│ • LLM inference                  │ • ASR + alignment + diarization  │
+│ • Model management               │ • WhisperX + pyannote pipeline   │
+│   (pull, load, unload, delete)   │ • GPU acceleration (CUDA) / CPU int8 │
+│ • Streaming responses            │ • Status polling + readiness checks │
 │ • Context window management      │                                  │
 └──────────────────────────────────┴──────────────────────────────────┘
 ```
@@ -188,12 +188,15 @@ API                         Redis (BullMQ)                    Worker
 │◄─ subscribe(progress) ──────── │                               │
 ```
 
-### 3. Worker ↔ Whisper: HTTP Polling
+### 3. API/Worker ↔ Whisper: Readiness + HTTP Polling
 
 ```
-Worker                              Whisper Service
+API / Worker                         Whisper Service
 │                                        │
-│─── POST /transcribe (audio file) ────► │
+│─── GET /diarization/check ───────────► │  (readiness gate before enqueue)
+│◄── { ready, hf_token_set, ... } ───── │
+│                                        │
+│─── POST /transcribe (audio file + num_speakers) ────► │
 │◄── { job_id, status: "processing" } ── │
 │                                        │
 │─── GET /status/{job_id} ─────────────► │  (poll every N seconds)
@@ -233,7 +236,7 @@ Worker                    Redis                       API                      U
 │  UI  │───►│ API │───►│ Redis │───►│ Worker │───►│ Whisper │───►│ SQLite │
 └──────┘    └─────┘    └───────┘    └────────┘    └─────────┘    │   ES   │
                                                                  └────────┘
-1. Upload audio          2. Queue job       3. Process       4. Transcribe    5. Store
+1. Upload audio + readiness check   2. Queue job (numSpeakers)   3. Process   4. Transcribe + align + diarize   5. Store with speaker labels
 ```
 
 ### Chat Pipeline (RAG)
@@ -289,7 +292,7 @@ Worker                    Redis                       API                      U
 | **Search** | Elasticsearch 8.x |
 | **Job Queue** | Redis + BullMQ |
 | **LLM** | Ollama (Llama, Mistral, Gemma) |
-| **Transcription** | OpenAI Whisper (PyTorch/CUDA) |
+| **Transcription** | WhisperX + pyannote (PyTorch/CUDA or CPU int8) |
 | **Containerization** | Docker, Docker Compose |
 | **Monorepo** | Lerna, Yarn Workspaces |
 

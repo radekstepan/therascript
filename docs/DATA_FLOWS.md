@@ -9,7 +9,8 @@ This document details the step-by-step data flows for the core operations of the
     *   User uploads file via `UploadModal.tsx`.
     *   `POST /api/sessions/upload` handles the file.
     *   **File:** `packages/api/src/routes/sessionRoutes.ts`
-    *   **Action:** Audio saved to disk (`fileService.ts`), Session record created in SQLite with status `pending`.
+    *   **Action 1:** API checks Whisper diarization readiness (`GET /diarization/check`). If not ready, returns `503` and may trigger a background prefetch (`POST /diarization/prefetch`).
+    *   **Action 2:** Audio saved to disk (`fileService.ts`), Session record created in SQLite with status `pending`.
 
 2.  **Job Enqueue (API -> Redis)**
     *   API calls `startTranscriptionJob` service.
@@ -29,7 +30,22 @@ This document details the step-by-step data flows for the core operations of the
     *   **Status:** Session status updated to `completed`.
     *   **Initialization:** An initial "AI" message is created in the `messages` table and indexed to ES to start the chat history.
 
-## 2. Interactive Chat Pipeline (RAG)
+## 2. Speaker Rename Flow
+**Goal:** Replace auto-detected speaker labels (for example `SPEAKER_00`) with user-defined names.
+
+1.  **Rename Request (UI -> API)**
+    *   User opens `RenameSpeakersModal.tsx` from session transcription actions.
+    *   UI sends `PATCH /api/sessions/:sessionId/speakers` with `[{ from, to }]` pairs.
+
+2.  **Write Through (API -> SQLite/ES)**
+    *   API validates entries and skips no-op renames.
+    *   SQLite update via `transcriptRepository.renameSpeaker`.
+    *   Elasticsearch update via `updateByQuery` on `therascript_transcripts`.
+
+3.  **UI Refresh**
+    *   On success, transcript/session queries are invalidated and reloaded.
+
+## 3. Interactive Chat Pipeline (RAG)
 **Goal:** Answer user questions based on the session transcript.
 
 1.  **User Message (UI -> API)**
@@ -54,7 +70,7 @@ This document details the step-by-step data flows for the core operations of the
 5.  **Finalization**
     *   Once stream completes, the full AI response is saved to SQLite and indexed to Elasticsearch.
 
-## 3. Multi-Session Analysis (MapReduce)
+## 4. Multi-Session Analysis (MapReduce)
 **Goal:** Answer a high-level question across multiple selected sessions.
 
 1.  **Job Creation (UI -> API)**
@@ -79,3 +95,18 @@ This document details the step-by-step data flows for the core operations of the
 4.  **Real-time Updates (Redis Pub/Sub)**
     *   Throughout Map and Reduce, the worker publishes token chunks to a Redis channel.
     *   The UI listens via SSE (`/api/analysis-jobs/:id/stream`) to display live progress.
+
+## 5. Transcription Queue Reset
+**Goal:** Recover quickly from stuck or corrupted transcription queue states.
+
+1.  **Admin Action (UI -> API)**
+    *   User confirms reset action from `SettingsPage.tsx`.
+    *   UI calls `POST /api/jobs/reset-transcription`.
+
+2.  **Queue Obliterate (API -> Redis/BullMQ)**
+    *   API handler calls `resetTranscriptionQueue` in `jobQueueService.ts`.
+    *   BullMQ executes `transcriptionQueue.obliterate({ force: true })`.
+
+3.  **Aftermath**
+    *   Queued and active transcription jobs are removed.
+    *   Sessions that were in-flight remain in pending/transcribing metadata state until manually re-queued.

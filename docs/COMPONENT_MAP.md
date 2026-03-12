@@ -10,6 +10,8 @@ This document provides a detailed breakdown of the monorepo's package structure,
 ### Responsibilities
 - **REST API:** Exposes endpoints for the UI to manage sessions, chats, and analysis jobs.
 - **Orchestration:** Coordinators interactions between the Database, Search Engine, Redis Queue, and AI Services (Ollama, Whisper).
+- **Transcription Gating:** Verifies Whisper diarization readiness (`/diarization/check`) before upload/job enqueue and can trigger prefetch (`/diarization/prefetch`).
+- **Transcript Speaker Operations:** Supports session-level speaker label rename and propagates updates to SQLite and Elasticsearch.
 - **Context Management:** Calculates token usage and manages LLM context windows (`src/services/contextUsageService.ts`).
 - **Service Management:** Monitors and manages Docker containers for AI services (`src/services/dockerManagementService.ts`).
 
@@ -29,9 +31,9 @@ This document provides a detailed breakdown of the monorepo's package structure,
 
 ### Responsibilities
 - **Job Consumption:** Consumes jobs from Redis queues (`transcription-jobs`, `analysis-jobs`).
-- **Transcription Processing:** coordinates file handling and status polling with the Whisper Service (`src/jobs/transcriptionProcessor.ts`).
+- **Transcription Processing:** Coordinates file handling and status polling with WhisperX, validates diarization readiness, and enforces speaker-labeled output (`src/jobs/transcriptionProcessor.ts`).
 - **Analysis Execution:** Executes MapReduce strategies using Ollama to analyze multiple sessions (`src/jobs/analysisProcessor.ts`).
-- **Data Indexing:** Pushes processed transcripts and analysis results to Elasticsearch.
+- **Data Indexing:** Pushes processed transcripts (including `speaker`) and analysis results to Elasticsearch.
 
 ### Key Libraries
 - **`bullmq`**: For defining and processing job workers.
@@ -45,6 +47,7 @@ This document provides a detailed breakdown of the monorepo's package structure,
 
 ### Responsibilities
 - **User Interaction:** Provides interfaces for uploading audio, chatting with AI, and viewing results.
+- **Speaker-Aware Transcripts:** Renders speaker labels, supports in-place speaker rename modal, and accepts upload-time `numSpeakers` input.
 - **State Management:** Manages local UI state (theme, sidebar) and server state (caching, optimistic updates).
 - **Streaming:** Handles Server-Sent Events (SSE) for real-time chat responses (`src/hooks/useMessageStream.ts`).
 
@@ -60,17 +63,20 @@ This document provides a detailed breakdown of the monorepo's package structure,
 ## 4. Whisper Service (`packages/whisper`)
 **Type:** Python FastAPI Service (Dockerized)
 **Location:** `packages/whisper`
-**Entry Point:** `src/server.ts` (Node wrapper) -> `transcribe.py` (Python logic)
+**Entry Point:** `src/server.ts` (Node wrapper) -> `whisper_api.py` (Python API + orchestration)
 
 ### Responsibilities
 - **Audio Transcoding:** Accepts audio files via HTTP.
-- **Inference:** Runs OpenAI's Whisper model (via PyTorch/CUDA) to transcribe audio.
-- **Status Reporting:** Exposes endpoints to poll job status and retrieve JSON results.
+- **Inference Pipeline:** Runs WhisperX ASR + alignment + pyannote diarization + speaker assignment.
+- **Readiness/Prefetch:** Exposes diarization readiness and prefetch endpoints (`GET /diarization/check`, `POST /diarization/prefetch`).
+- **Status Reporting:** Exposes endpoints to poll job status and retrieve speaker-labeled JSON results.
 
 ### Key Libraries
 - **`fastapi` / `uvicorn`**: Python web server.
-- **`openai-whisper`**: Core transcription model.
-- **`torch`**: PyTorch deep learning framework (with CUDA support for GPU).
+- **`whisperx`**: ASR + alignment pipeline.
+- **`pyannote.audio`**: Speaker diarization.
+- **`huggingface_hub`**: Diarization model cache inspection.
+- **`torch`**: PyTorch framework (CUDA on GPU, int8 compute on CPU path).
 - **`ffmpeg`**: System dependency for audio processing.
 
 ## 5. Shared Utilities

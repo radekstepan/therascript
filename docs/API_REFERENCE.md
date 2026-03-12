@@ -11,15 +11,21 @@ Session CRUD operations, audio file upload, and transcript access.
 | Method | Path | Purpose |
 |--------|------|---------|
 | `GET` | `/api/sessions` | List all sessions (metadata only) |
-| `POST` | `/api/sessions/upload` | Upload audio file with metadata, start transcription job |
+| `POST` | `/api/sessions/upload` | Upload audio file with metadata, run diarization readiness gate, start transcription job |
 | `GET` | `/api/sessions/:sessionId` | Get session metadata and associated chat list |
 | `PUT` | `/api/sessions/:sessionId/metadata` | Update session metadata (clientName, date, etc.) |
 | `DELETE` | `/api/sessions/:sessionId` | Delete session, audio files, chats, paragraphs, and ES docs |
-| `GET` | `/api/sessions/:sessionId/transcript` | Get structured transcript content (paragraphs) |
+| `GET` | `/api/sessions/:sessionId/transcript` | Get structured transcript content (paragraphs, including optional `speaker`) |
+| `PATCH` | `/api/sessions/:sessionId/speakers` | Rename one or more transcript speaker labels (`[{ from, to }]`) |
 | `PATCH` | `/api/sessions/:sessionId/transcript` | Update a specific transcript paragraph |
 | `DELETE` | `/api/sessions/:sessionId/transcript/:paragraphIndex` | Delete a single transcript paragraph |
 | `GET` | `/api/sessions/:sessionId/audio` | Stream the original session audio file (supports range requests) |
 | `DELETE` | `/api/sessions/:sessionId/audio` | Delete only the original audio file |
+
+**Upload Body Notes (`POST /api/sessions/upload`):**
+- Accepts optional `numSpeakers` (numeric, clamped to `1..10`, default `2`).
+- Before creating/enqueuing, API checks Whisper readiness via `GET /diarization/check`.
+- If diarization is not ready, API returns `503` and may trigger background prefetch.
 
 ---
 
@@ -167,6 +173,7 @@ Background job queue status.
 | Method | Path | Purpose |
 |--------|------|---------|
 | `GET` | `/api/jobs/active-count` | Get count of active and waiting background jobs |
+| `POST` | `/api/jobs/reset-transcription` | Force-clear all queued/active transcription jobs (queue obliterate) |
 
 ---
 
@@ -177,7 +184,7 @@ Health check and readiness status.
 | Method | Path | Purpose |
 |--------|------|---------|
 | `GET` | `/api/health` | Check API, Database, and Elasticsearch health |
-| `GET` | `/api/status/readiness` | Check if all dependent backend services are ready |
+| `GET` | `/api/status/readiness` | Check if all dependent backend services are ready (returns `200` when ready, `503` when degraded but with structured body) |
 | `GET` | `/api/schema` | API schema info (redirects to Swagger UI at `/api/docs`) |
 
 ---
