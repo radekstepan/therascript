@@ -72,3 +72,48 @@ export async function getStructuredTranscriptionResult(
   });
   return response.data;
 }
+
+/**
+ * Fast (no-network) check: is HF_TOKEN set in the Whisper service
+ * and are the pyannote model files present in its local HF hub cache?
+ */
+export async function checkDiarizationReadiness(): Promise<{
+  ready: boolean;
+  hfTokenSet: boolean;
+  modelCached: boolean;
+  error?: string;
+}> {
+  const response = await axios.get(
+    `${config.whisper.apiUrl}/diarization/check`,
+    { timeout: 5000 }
+  );
+  const d = response.data;
+  return {
+    ready: d.ready,
+    hfTokenSet: d.hf_token_set,
+    modelCached: d.model_cached,
+    error: d.error ?? undefined,
+  };
+}
+
+/**
+ * Trigger a background download of pyannote model files in the Whisper service.
+ * Idempotent — safe to call if a download is already in progress.
+ */
+export async function triggerDiarizationPrefetch(): Promise<{
+  started: boolean;
+  alreadyCached: boolean;
+  message: string;
+}> {
+  const response = await axios.post(
+    `${config.whisper.apiUrl}/diarization/prefetch`,
+    {},
+    { timeout: 10000 }
+  );
+  const d = response.data;
+  return {
+    started: d.started,
+    alreadyCached: d.already_cached,
+    message: d.message,
+  };
+}

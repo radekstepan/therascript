@@ -8,6 +8,17 @@ import type {
   UITranscriptionStatus, // UI type for transcription job status
 } from '../types'; // Import UI type definitions
 
+const ensureArrayResponse = (data: unknown, endpoint: string): any[] => {
+  if (!Array.isArray(data)) {
+    console.error(
+      `[UI API] Invalid response from ${endpoint}: expected array, got`,
+      data
+    );
+    return [];
+  }
+  return data;
+};
+
 /**
  * Fetches a list of all sessions (metadata only) from the backend.
  * Makes a GET request to `/api/sessions/`.
@@ -18,8 +29,9 @@ import type {
 export const fetchSessions = async (): Promise<Session[]> => {
   // Backend returns an array of session metadata
   const response = await axios.get<Omit<Session, 'chats'>[]>('/api/sessions/');
+  const sessions = ensureArrayResponse(response.data, '/api/sessions/');
   // Map response to ensure the 'chats' property exists as an empty array for the UI type
-  return response.data.map((sessionMeta: Omit<Session, 'chats'>) => ({
+  return sessions.map((sessionMeta: Omit<Session, 'chats'>) => ({
     ...sessionMeta,
     chats: [], // Ensure `chats` property exists, even if empty for list view
   }));

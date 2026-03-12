@@ -29,8 +29,25 @@ export const checkApiHealth = async (): Promise<{
  * @throws {Error} If the API request fails.
  */
 export const fetchReadinessStatus = async (): Promise<ReadinessStatus> => {
-  const response = await axios.get<ReadinessStatus>('/api/status/readiness');
-  return response.data;
+  // Accept 503 as a valid response — the body still contains {ready, services}
+  // so the overlay can show which services are down instead of showing a
+  // generic error and blocking the UI permanently.
+  const response = await axios.get<ReadinessStatus>('/api/status/readiness', {
+    validateStatus: (status) => status === 200 || status === 503,
+  });
+  const data = response.data as any;
+  const hasValidShape =
+    data &&
+    typeof data === 'object' &&
+    typeof data.ready === 'boolean' &&
+    data.services &&
+    typeof data.services === 'object';
+
+  if (!hasValidShape) {
+    throw new Error('Invalid readiness response from backend');
+  }
+
+  return data as ReadinessStatus;
 };
 
 // Placeholder for potential future meta API calls

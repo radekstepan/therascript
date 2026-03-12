@@ -3,6 +3,7 @@ import json
 import asyncio
 import subprocess
 import gc
+import threading
 import torch
 from datetime import datetime
 from typing import Optional, Dict, Any
@@ -10,6 +11,7 @@ from contextlib import asynccontextmanager
 from enum import Enum
 
 import httpx
+from huggingface_hub import scan_cache_dir
 import numpy as np
 import pandas as pd
 import whisperx
@@ -33,10 +35,25 @@ class _DiarizationPipeline:
         from pyannote.audio import Pipeline
         device_obj = torch.device(device) if isinstance(device, str) else device
         print("[WhisperManager] Loading pyannote/speaker-diarization-3.1...")
-        self.model = Pipeline.from_pretrained(
-            "pyannote/speaker-diarization-3.1",
-            use_auth_token=token,
-        ).to(device_obj)
+        try:
+            self.model = Pipeline.from_pretrained(
+                "pyannote/speaker-diarization-3.1",
+                use_auth_token=token,
+            ).to(device_obj)
+        except Exception as e:
+            err_str = str(e)
+            if "401" in err_str or "403" in err_str or "gated" in err_str.lower() or "access" in err_str.lower() or "unauthorized" in err_str.lower():
+                raise RuntimeError(
+                    f"[AUTH ERROR] HF_TOKEN lacks access to pyannote/speaker-diarization-3.1 — "
+                    f"accept the model terms at https://huggingface.co/pyannote/speaker-diarization-3.1 "
+                    f"and https://huggingface.co/pyannote/segmentation-3.0 — original: {e}"
+                ) from e
+            if torch.cuda.is_available() and "out of memory" in err_str.lower():
+                raise RuntimeError(
+                    f"[CUDA OOM] Not enough VRAM to load diarization model — "
+                    f"free VRAM or use a smaller ASR model — original: {e}"
+                ) from e
+            raise
 
     def __call__(
         self,
@@ -69,6 +86,86 @@ class _DiarizationPipeline:
         diarize_df["end"] = diarize_df["segment"].apply(lambda x: x.end)
         return diarize_df
 # ---------------------------------------------------------------------------
+
+
+# ---- Pydantic models for diarization check / prefetch endpoints ----
+
+class DiarizationCheckResponse(BaseModel):
+    hf_token_set: bool
+    model_cached: bool
+    ready: bool
+    error: Optional[str] = None
+
+
+class DiarizationPrefetchResponse(BaseModel):
+    started: bool
+    already_cached: bool
+    message: str
+
+
+# ---- Diarization cache helpers ----
+
+def _is_diarization_model_cached() -> bool:
+    """Return True if pyannote/speaker-diarization-3.1 has at least one cached revision."""
+    try:
+        cache = scan_cache_dir()
+        for repo in cache.repos:
+            if repo.repo_id == "pyannote/speaker-diarization-3.1":
+                return len(repo.revisions) > 0
+        return False
+    except Exception:
+        return False
+
+
+_prefetch_lock = threading.Lock()
+_prefetch_running = False
+
+
+def _do_prefetch_diarization_sync() -> None:
+    """
+    Blocking worker: calls Pipeline.from_pretrained (CPU only, no .to(device))
+    to trigger the full pyannote dependency tree download and cache it.
+    Run via asyncio loop.run_in_executor so it does not block the event loop.
+    """
+    global _prefetch_running
+    try:
+        print("[WhisperAPI] Prefetch: starting Pipeline.from_pretrained to cache all sub-models...", flush=True)
+        from pyannote.audio import Pipeline
+        pipeline = Pipeline.from_pretrained(
+            "pyannote/speaker-diarization-3.1",
+            use_auth_token=HF_TOKEN,
+        )
+        del pipeline
+        import gc as _gc
+        _gc.collect()
+        print("[WhisperAPI] Prefetch: diarization models cached successfully.", flush=True)
+    except Exception as e:
+        err_str = str(e)
+        if "401" in err_str or "403" in err_str or "gated" in err_str.lower() or "access" in err_str.lower() or "unauthorized" in err_str.lower():
+            print(f"[AUTH ERROR] Prefetch failed — HF_TOKEN lacks model access: {e}", flush=True)
+        else:
+            print(f"[WhisperAPI] Prefetch failed: {e}", flush=True)
+        raise
+    finally:
+        with _prefetch_lock:
+            _prefetch_running = False
+
+
+async def _start_prefetch_if_needed() -> tuple[bool, bool]:
+    """
+    Check cache and, if needed, kick off a background prefetch.
+    Returns (already_cached, started).
+    """
+    global _prefetch_running
+    if _is_diarization_model_cached():
+        return True, False
+    with _prefetch_lock:
+        if _prefetch_running:
+            return False, False  # already in progress
+        _prefetch_running = True
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, _do_prefetch_diarization_sync)
+    return False, True
 
 
 TEMP_INPUT_DIR = os.environ.get("TEMP_INPUT_DIR", "/app/temp_inputs")
@@ -542,11 +639,19 @@ async def run_transcription(job_id: str, input_path: str, model_name: str, num_s
             print(f"[Whisper] Job {job_id}: DONE in {elapsed:.1f}s — {len(result.get('segments', []))} segments, language={result.get('language', '?')}")
 
     except Exception as e:
+        err_str = str(e)
+        # Prefix well-known failure categories so callers can surface them clearly.
+        if err_str.startswith("[CUDA OOM]") or (torch.cuda.is_available() and "out of memory" in err_str.lower()):
+            tagged = err_str if err_str.startswith("[CUDA OOM]") else f"[CUDA OOM] {err_str}"
+        elif err_str.startswith("[AUTH ERROR]") or "401" in err_str or "403" in err_str or ("gated" in err_str.lower() and "huggingface" in err_str.lower()):
+            tagged = err_str if err_str.startswith("[AUTH ERROR]") else f"[AUTH ERROR] {err_str}"
+        else:
+            tagged = err_str
         job.status = JobStatusState.failed
-        job.error = str(e)
-        job.message = f"Transcription failed: {e}"
+        job.error = tagged
+        job.message = f"Transcription failed: {tagged}"
         job.end_time = datetime.now().timestamp()
-        print(f"[Whisper] Job {job_id} failed: {e}")
+        print(f"[Whisper] Job {job_id} failed: {tagged}")
 
     finally:
         try:
@@ -565,6 +670,15 @@ async def lifespan(app: FastAPI):
     os.makedirs(TEMP_OUTPUT_DIR, exist_ok=True)
     print(f"[Whisper API] Ready. Model idle timeout: {MODEL_IDLE_TIMEOUT}s")
     cleanup_task = asyncio.create_task(cleanup_old_jobs())
+    # Startup pre-warm: if HF_TOKEN is set and models are not cached, start downloading in background.
+    if HF_TOKEN:
+        if not _is_diarization_model_cached():
+            print("[WhisperAPI] Startup: pyannote models not cached — triggering background prefetch...", flush=True)
+            await _start_prefetch_if_needed()
+        else:
+            print("[WhisperAPI] Startup: pyannote models already cached — no prefetch needed.", flush=True)
+    else:
+        print("[WhisperAPI] Startup: HF_TOKEN not set — diarization prefetch skipped.", flush=True)
     yield
     cleanup_task.cancel()
     await model_manager.unload()
@@ -653,6 +767,62 @@ async def unload_model():
 @app.get("/model/status", response_model=ModelStatus)
 async def get_model_status():
     return model_manager.get_status()
+
+
+@app.get("/diarization/check", response_model=DiarizationCheckResponse)
+async def diarization_check():
+    """Fast (no-network) check: is HF_TOKEN set and are pyannote models cached locally?"""
+    token_set = bool(HF_TOKEN)
+    if not token_set:
+        return DiarizationCheckResponse(
+            hf_token_set=False,
+            model_cached=False,
+            ready=False,
+            error="HF_TOKEN is not set — diarization is disabled.",
+        )
+    cached = _is_diarization_model_cached()
+    prefetch_in_progress = _prefetch_running
+    error_msg = None
+    if not cached:
+        error_msg = (
+            "pyannote/speaker-diarization-3.1 is not in the local HF hub cache. "
+            + ("A prefetch is currently in progress." if prefetch_in_progress else "Call POST /diarization/prefetch to start downloading.")
+        )
+    return DiarizationCheckResponse(
+        hf_token_set=True,
+        model_cached=cached,
+        ready=cached,
+        error=error_msg,
+    )
+
+
+@app.post("/diarization/prefetch", response_model=DiarizationPrefetchResponse)
+async def diarization_prefetch():
+    """Trigger a background download of pyannote model files. Idempotent."""
+    if not HF_TOKEN:
+        raise HTTPException(
+            status_code=400,
+            detail="HF_TOKEN is not set — cannot prefetch diarization models.",
+        )
+    already_cached, started = await _start_prefetch_if_needed()
+    if already_cached:
+        return DiarizationPrefetchResponse(
+            started=False,
+            already_cached=True,
+            message="Models already cached — nothing to do.",
+        )
+    if started:
+        return DiarizationPrefetchResponse(
+            started=True,
+            already_cached=False,
+            message="Background download started. Call GET /diarization/check to monitor progress.",
+        )
+    # Prefetch was already running
+    return DiarizationPrefetchResponse(
+        started=False,
+        already_cached=False,
+        message="Prefetch already in progress — call GET /diarization/check to monitor.",
+    )
 
 
 if __name__ == "__main__":

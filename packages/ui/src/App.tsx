@@ -62,7 +62,7 @@ function ReadinessOverlay({
   if (error) {
     message = 'Could not connect to backend service.';
   } else if (status && !status.ready) {
-    const disconnected = Object.entries(status.services)
+    const disconnected = Object.entries(status.services ?? {})
       .filter(([, serviceStatus]) => serviceStatus === 'disconnected')
       .map(([serviceName]) => serviceName);
     if (disconnected.length > 0) {
@@ -192,20 +192,18 @@ function App() {
   });
 
   useEffect(() => {
-    if (readinessStatus) {
-      if (readinessStatus.ready && !isSystemReady) {
-        setIsSystemReady(true);
-      } else if (!readinessStatus.ready && isSystemReady) {
-        setIsSystemReady(false);
-      }
+    if (readinessStatus && typeof readinessStatus.ready === 'boolean') {
+      // Only block the UI if the API explicitly says the DB is down.
+      setIsSystemReady(readinessStatus.ready);
     }
-  }, [readinessStatus, isSystemReady, setIsSystemReady]);
+  }, [readinessStatus, setIsSystemReady]);
 
   useEffect(() => {
-    if (readinessError && isSystemReady) {
-      setIsSystemReady(false);
+    if (readinessError) {
+      // Can't reach the API at all — fail open, let the user in.
+      setIsSystemReady(true);
     }
-  }, [readinessError, isSystemReady, setIsSystemReady]);
+  }, [readinessError, setIsSystemReady]);
 
   useLayoutEffect(() => {
     const handleResize = () => {

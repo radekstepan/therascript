@@ -136,6 +136,34 @@ router.get('/model/status', async (req: Request, res: Response) => {
   }
 });
 
+router.get('/diarization/check', async (req: Request, res: Response) => {
+  try {
+    const response = await axios.get(`${PYTHON_API_URL}/diarization/check`, {
+      timeout: 5000,
+    });
+    res.status(response.status).json(response.data);
+  } catch (error: any) {
+    res
+      .status(error.response?.status ?? 503)
+      .json(error.response?.data ?? { error: error.message });
+  }
+});
+
+router.post('/diarization/prefetch', async (req: Request, res: Response) => {
+  try {
+    const response = await axios.post(
+      `${PYTHON_API_URL}/diarization/prefetch`,
+      {},
+      { timeout: 10000 }
+    );
+    res.status(response.status).json(response.data);
+  } catch (error: any) {
+    res
+      .status(error.response?.status ?? 503)
+      .json(error.response?.data ?? { error: error.message });
+  }
+});
+
 router.get('/health', (req: Request, res: Response) => {
   res.status(200).json({ status: 'healthy' });
 });

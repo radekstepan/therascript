@@ -10,6 +10,17 @@ import type {
 
 const API_BASE_URL = axios.defaults.baseURL || 'http://localhost:3001';
 
+const ensureArrayResponse = (data: unknown, endpoint: string): any[] => {
+  if (!Array.isArray(data)) {
+    console.error(
+      `[UI API] Invalid response from ${endpoint}: expected array, got`,
+      data
+    );
+    return [];
+  }
+  return data;
+};
+
 // Common Message Mapping
 const mapBackendMessageToUi = (msg: BackendChatMessage): ChatMessage => ({
   id: msg.id,
@@ -140,7 +151,8 @@ export const fetchStandaloneChats = async (): Promise<
   StandaloneChatListItem[]
 > => {
   const response = await axios.get<BackendChatSession[]>('/api/chats'); // Backend returns BackendChatSession[]
-  return response.data.map((chat) => ({
+  const chats = ensureArrayResponse(response.data, '/api/chats');
+  return chats.map((chat) => ({
     id: chat.id,
     sessionId: null, // Explicitly null
     timestamp: chat.timestamp,
