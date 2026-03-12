@@ -13,9 +13,11 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-# Install PyTorch with CUDA support, then whisperx and other deps
+# Install PyTorch with CUDA support, then whisperx and other deps.
+# whisperx is installed with --no-deps; runtime deps are pinned in requirements.txt.
 COPY packages/whisper/requirements.txt ./
-RUN pip3 install --no-cache-dir torch torchaudio --extra-index-url https://download.pytorch.org/whl/cu121 && \
+RUN pip3 install --no-cache-dir torch==2.2.2+cu121 torchaudio==2.2.2+cu121 --index-url https://download.pytorch.org/whl/cu121 && \
+    pip3 install --no-cache-dir --no-deps whisperx==3.4.2 && \
     pip3 install --no-cache-dir -r requirements.txt
 
 # Install Node.js (for the Express wrapper)
@@ -30,6 +32,9 @@ RUN yarn install --production --frozen-lockfile
 
 # Copy source code
 COPY packages/whisper/. .
+
+# Expect dist to be prebuilt from the host workspace (yarn build:whisper)
+RUN test -f /app/dist/server.js
 
 # Setup Directories
 RUN mkdir -p /app/temp_inputs /app/temp_outputs

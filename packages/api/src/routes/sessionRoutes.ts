@@ -198,36 +198,28 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
           let newSess: BackendSession | null = null;
           try {
             // ── Step 0: Pre-upload diarization readiness gate ──────────────────
-            // Only check if HF_TOKEN is configured — if not, diarization is
-            // disabled and this check is a no-op.
-            if (config.whisper.hfToken) {
-              let diarCheck;
-              try {
-                diarCheck = await checkDiarizationReadiness();
-              } catch (checkErr: any) {
-                throw new ApiError(
-                  503,
-                  `Could not reach Whisper service to verify diarization readiness: ${checkErr.message}`
-                );
-              }
-              if (!diarCheck.hfTokenSet) {
-                throw new ApiError(
-                  503,
-                  'HF_TOKEN is set in the API but the Whisper service does not see it. ' +
-                    'Check that the container environment variable is correctly passed through.'
-                );
-              }
-              if (!diarCheck.ready) {
-                // Fire-and-forget: kick off the background download so the
-                // user can retry in a few minutes.
-                triggerDiarizationPrefetch().catch(() => {});
-                throw new ApiError(
-                  503,
-                  'Diarization models are not yet downloaded. ' +
-                    'A background download has been started — please retry in a few minutes. ' +
-                    (diarCheck.error ? `Detail: ${diarCheck.error}` : '')
-                );
-              }
+            // Whisper service readiness is the source of truth for diarization.
+            // Always check it here so API/worker env differences do not bypass this gate.
+            let diarCheck;
+            try {
+              diarCheck = await checkDiarizationReadiness();
+            } catch (checkErr: any) {
+              throw new ApiError(
+                503,
+                `Could not reach Whisper service to verify diarization readiness: ${checkErr.message}`
+              );
+            }
+
+            if (!diarCheck.ready) {
+              // Fire-and-forget: kick off the background download so the
+              // user can retry in a few minutes.
+              triggerDiarizationPrefetch().catch(() => {});
+              throw new ApiError(
+                503,
+                'Diarization is not ready in the Whisper service. ' +
+                  'A background download may have been started — please retry in a few minutes. ' +
+                  (diarCheck.error ? `Detail: ${diarCheck.error}` : '')
+              );
             }
             // ── End diarization gate ────────────────────────────────────────
 

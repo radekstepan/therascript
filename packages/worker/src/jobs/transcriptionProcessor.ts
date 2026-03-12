@@ -33,6 +33,42 @@ import { safeValidateTranscriptionJob } from '@therascript/domain';
 
 const esClient = getElasticsearchClient(config.elasticsearch.url);
 
+type WhisperDiarizationCheck = {
+  ready: boolean;
+  hf_token_set: boolean;
+  model_cached: boolean;
+  missing_repos?: string[];
+  prefetch_in_progress?: boolean;
+  error?: string;
+};
+
+async function assertWhisperDiarizationReady(): Promise<void> {
+  let response;
+  try {
+    response = await axios.get<WhisperDiarizationCheck>(
+      `${config.whisper.apiUrl}/diarization/check`,
+      { timeout: 10000 }
+    );
+  } catch (error: any) {
+    throw new Error(
+      `Could not verify diarization readiness from Whisper service at ${config.whisper.apiUrl}: ${error.message}`
+    );
+  }
+
+  const readiness = response.data;
+  if (readiness.ready) {
+    return;
+  }
+
+  const missingRepos = readiness.missing_repos?.length
+    ? ` Missing repos: ${readiness.missing_repos.join(', ')}.`
+    : '';
+
+  throw new Error(
+    `Whisper diarization is not ready before job submission.${missingRepos} ${readiness.error ?? 'Check Whisper /diarization/check and /diarization/prefetch.'}`.trim()
+  );
+}
+
 async function startWhisperJob(
   filePath: string,
   numSpeakers: number
@@ -205,6 +241,8 @@ export default async function (job: Job<TranscriptionJobData, any, string>) {
     let durationInt: number | null = null;
     await job.updateProgress(5);
     sessionRepository.updateMetadata(sessionId, { status: 'transcribing' });
+
+    await assertWhisperDiarizationReady();
 
     const whisperJobId = await startWhisperJob(
       audioPath,

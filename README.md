@@ -138,7 +138,8 @@ Before you begin, ensure you have the following installed:
     *   Create an account at [huggingface.co](https://huggingface.co).
     *   Explicitly accept the user agreements for [`pyannote/speaker-diarization-3.1`](https://huggingface.co/pyannote/speaker-diarization-3.1) and [`pyannote/segmentation-3.0`](https://huggingface.co/pyannote/segmentation-3.0).
     *   Generate a Hugging Face Access Token (`HF_TOKEN`) with `read` permissions.
-    *   Add `HF_TOKEN=hf_xxxxx` to your `.env` files.
+    *   Add `HF_TOKEN=hf_xxxxx` to the root `.env` file used by Docker Compose (this is what the Whisper container reads).
+    *   If you also keep `HF_TOKEN` in `.env.api.*` / `.env.worker.*`, keep the value identical to avoid environment drift during debugging.
 
 ## Running the Application
 
@@ -155,6 +156,12 @@ This mode starts the API, the background worker, the UI (with hot-reloading), an
 1.  **Start Docker Services:**
     The root `docker-compose.yml` manages the core background services. Start them first.
 
+    Before rebuilding Whisper images after TypeScript changes, compile Whisper on the host so `packages/whisper/dist` is current:
+
+    ```bash
+    yarn build:whisper
+    ```
+
     **macOS or Linux without GPU (CPU-only, default):**
     ```bash
     # Run from the project root directory
@@ -167,7 +174,16 @@ This mode starts the API, the background worker, the UI (with hot-reloading), an
     docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
     ```
 
+    Whisper images copy prebuilt `packages/whisper/dist` from your workspace.
+    If you still see route-level 404s after code changes, force recreation:
+
+    ```bash
+    docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build --force-recreate whisper
+    ```
+
     This will start Whisper, Elasticsearch, and Redis. Kibana is also available for exploring search data.
+
+    The upload route now always checks Whisper's `GET /diarization/check` readiness directly, so behavior should match between `yarn dev` and `yarn start` as long as the Whisper container has the correct `HF_TOKEN` and model cache.
     
     > **Note:** When using `yarn dev`, the platform is automatically detected and the correct compose files are used. Linux with NVIDIA GPU will automatically use GPU mode.
 

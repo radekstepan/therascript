@@ -83,10 +83,21 @@ export async function checkDiarizationReadiness(): Promise<{
   modelCached: boolean;
   error?: string;
 }> {
-  const response = await axios.get(
-    `${config.whisper.apiUrl}/diarization/check`,
-    { timeout: 5000 }
-  );
+  let response;
+  try {
+    response = await axios.get(`${config.whisper.apiUrl}/diarization/check`, {
+      timeout: 5000,
+    });
+  } catch (error: any) {
+    if (error.response?.status === 404) {
+      throw new Error(
+        `Whisper service at ${config.whisper.apiUrl} does not expose GET /diarization/check (404). ` +
+          `The running Whisper container is likely outdated. Rebuild/restart it (e.g. 'docker compose up -d --build whisper') and restart API/worker.`
+      );
+    }
+    throw error;
+  }
+
   const d = response.data;
   return {
     ready: d.ready,

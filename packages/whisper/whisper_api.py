@@ -94,6 +94,8 @@ class DiarizationCheckResponse(BaseModel):
     hf_token_set: bool
     model_cached: bool
     ready: bool
+    missing_repos: Optional[list[str]] = None
+    prefetch_in_progress: bool = False
     error: Optional[str] = None
 
 
@@ -105,16 +107,46 @@ class DiarizationPrefetchResponse(BaseModel):
 
 # ---- Diarization cache helpers ----
 
-def _is_diarization_model_cached() -> bool:
-    """Return True if pyannote/speaker-diarization-3.1 has at least one cached revision."""
+def _get_missing_diarization_repos() -> list[str]:
+    """Return list of required diarization repos that do not have a cached revision."""
+    required_repos = [
+        "pyannote/speaker-diarization-3.1",
+        "pyannote/segmentation-3.0",
+    ]
+
+    def _repo_cached_in_torch_cache(repo_id: str) -> bool:
+        repo_cache_name = f"models--{repo_id.replace('/', '--')}"
+        root = os.path.join(os.path.expanduser("~"), ".cache", "torch", "pyannote", repo_cache_name)
+        snapshots_dir = os.path.join(root, "snapshots")
+        if not os.path.isdir(snapshots_dir):
+            return False
+        try:
+            return any(os.path.isdir(os.path.join(snapshots_dir, entry)) for entry in os.listdir(snapshots_dir))
+        except Exception:
+            return False
+
+    cached_repo_ids: set[str] = set()
     try:
         cache = scan_cache_dir()
-        for repo in cache.repos:
-            if repo.repo_id == "pyannote/speaker-diarization-3.1":
-                return len(repo.revisions) > 0
-        return False
+        cached_repo_ids = {
+            repo.repo_id
+            for repo in cache.repos
+            if len(repo.revisions) > 0
+        }
+
     except Exception:
-        return False
+        pass
+
+    return [
+        repo_id
+        for repo_id in required_repos
+        if repo_id not in cached_repo_ids and not _repo_cached_in_torch_cache(repo_id)
+    ]
+
+
+def _is_diarization_model_cached() -> bool:
+    """Return True only when all required pyannote repos are cached locally."""
+    return len(_get_missing_diarization_repos()) == 0
 
 
 _prefetch_lock = threading.Lock()
@@ -771,27 +803,36 @@ async def get_model_status():
 
 @app.get("/diarization/check", response_model=DiarizationCheckResponse)
 async def diarization_check():
-    """Fast (no-network) check: is HF_TOKEN set and are pyannote models cached locally?"""
+    """Fast (no-network) check: is HF_TOKEN set and are required pyannote repos cached locally?"""
     token_set = bool(HF_TOKEN)
+    missing_repos = _get_missing_diarization_repos()
+    cached = len(missing_repos) == 0
+    prefetch_in_progress = _prefetch_running
+
     if not token_set:
         return DiarizationCheckResponse(
             hf_token_set=False,
             model_cached=False,
             ready=False,
+            missing_repos=missing_repos,
+            prefetch_in_progress=prefetch_in_progress,
             error="HF_TOKEN is not set — diarization is disabled.",
         )
-    cached = _is_diarization_model_cached()
-    prefetch_in_progress = _prefetch_running
+
     error_msg = None
     if not cached:
+        missing_text = ", ".join(missing_repos)
         error_msg = (
-            "pyannote/speaker-diarization-3.1 is not in the local HF hub cache. "
+            f"Missing local HF cache for required diarization repos: {missing_text}. "
             + ("A prefetch is currently in progress." if prefetch_in_progress else "Call POST /diarization/prefetch to start downloading.")
         )
+
     return DiarizationCheckResponse(
         hf_token_set=True,
         model_cached=cached,
         ready=cached,
+        missing_repos=missing_repos,
+        prefetch_in_progress=prefetch_in_progress,
         error=error_msg,
     )
 

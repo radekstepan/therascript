@@ -16,8 +16,8 @@ RUN apt-get update && apt-get install -y \
 # We pin pyannote.audio==3.3.2 (last release without torchcodec) in requirements.txt
 # and list whisperx's other deps there explicitly.
 COPY packages/whisper/requirements.txt ./
-RUN pip3 install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu && \
-    pip3 install --no-cache-dir --no-deps git+https://github.com/m-bain/whisperx.git && \
+RUN pip3 install --no-cache-dir torch==2.2.2 torchaudio==2.2.2 --index-url https://download.pytorch.org/whl/cpu && \
+    pip3 install --no-cache-dir --no-deps whisperx==3.4.2 && \
     pip3 install --no-cache-dir -r requirements.txt
 
 # Install Node.js (for the Express wrapper)
@@ -32,6 +32,9 @@ RUN yarn install --production --frozen-lockfile
 
 # Copy source code
 COPY packages/whisper/. .
+
+# Expect dist to be prebuilt from the host workspace (yarn build:whisper)
+RUN test -f /app/dist/server.js
 
 # Setup Directories
 RUN mkdir -p /app/temp_inputs /app/temp_outputs

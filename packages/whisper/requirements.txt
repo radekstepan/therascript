@@ -9,7 +9,7 @@ ctranslate2>=4.5.0
 transformers>=4.48.0
 pandas>=2.2.3
 nltk>=3.9.1
-numpy
+numpy<2
 # huggingface_hub 1.0 removed use_auth_token; pyannote.audio 3.3.2 still uses it internally.
 # Pin to last 0.x release that is compatible with both transformers>=4.48 and pyannote 3.3.2.
 huggingface-hub>=0.21,<1.0
