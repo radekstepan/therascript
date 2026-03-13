@@ -251,28 +251,80 @@ const WHISPER_SERVICE_NAME = 'whisper';
 const WHISPER_CONTAINER_NAME = 'therascript_whisper_service';
 const WHISPER_HEALTH_URL = 'http://localhost:8000/health';
 
-// Auto-detect platform and set GPU mode
-// On Linux with NVIDIA GPU, use the GPU overlay; otherwise use CPU-only (default)
+// Auto-detect platform and set GPU mode.
+// Supported modes via env: WHISPER_DOCKER_MODE=auto|gpu|cpu (default: auto)
 const IS_LINUX = process.platform === 'linux';
 
-// Check if nvidia-smi is available (indicates NVIDIA GPU + drivers)
-function hasNvidiaGpu(): boolean {
-  try {
-    require('child_process').execSync('nvidia-smi', { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-if (IS_LINUX && hasNvidiaGpu() && !process.env.DOCKER_COMPOSE_EXTRA) {
-  // On Linux with NVIDIA GPU, use the GPU overlay compose file
-  process.env.DOCKER_COMPOSE_EXTRA = COMPOSE_FILE_GPU;
-  console.log(
-    '[Whisper Docker] Linux with NVIDIA GPU detected - using GPU mode'
-  );
-} else if (!process.env.DOCKER_COMPOSE_EXTRA) {
-  console.log('[Whisper Docker] Using CPU-only mode');
+async function hasNvidiaGpuWithRetries(
+  retries = 5,
+  delayMs = 1500
+): Promise<boolean> {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      await exec('nvidia-smi -L');
+      return true;
+    } catch {
+      if (attempt < retries) await sleep(delayMs);
+    }
+  }
+  return false;
+}
+
+async function configureComposeOverrideForWhisper(): Promise<void> {
+  if (process.env.DOCKER_COMPOSE_EXTRA) {
+    console.log(
+      `[Whisper Docker] Respecting pre-set DOCKER_COMPOSE_EXTRA=${process.env.DOCKER_COMPOSE_EXTRA}`
+    );
+    return;
+  }
+
+  const mode = (process.env.WHISPER_DOCKER_MODE || 'auto').toLowerCase();
+
+  if (mode === 'cpu') {
+    console.log(
+      '[Whisper Docker] WHISPER_DOCKER_MODE=cpu - using CPU-only mode'
+    );
+    return;
+  }
+
+  if (!IS_LINUX) {
+    console.log(
+      '[Whisper Docker] Non-Linux host detected - using CPU-only mode'
+    );
+    return;
+  }
+
+  if (!fs.existsSync(COMPOSE_FILE_GPU)) {
+    console.log(
+      '[Whisper Docker] GPU compose override file not found - using CPU-only mode'
+    );
+    return;
+  }
+
+  if (mode === 'gpu') {
+    process.env.DOCKER_COMPOSE_EXTRA = COMPOSE_FILE_GPU;
+    console.log(
+      `[Whisper Docker] WHISPER_DOCKER_MODE=gpu - forcing GPU mode with ${COMPOSE_FILE_GPU}`
+    );
+    return;
+  }
+
+  // auto mode
+  const hasGpu = await hasNvidiaGpuWithRetries(8, 1500);
+  if (hasGpu) {
+    process.env.DOCKER_COMPOSE_EXTRA = COMPOSE_FILE_GPU;
+    console.log(
+      '[Whisper Docker] Linux with NVIDIA GPU detected - using GPU mode'
+    );
+  } else {
+    console.log(
+      '[Whisper Docker] NVIDIA GPU not detected after retries - using CPU-only mode'
+    );
+  }
 }
 
 // --- Dockerode Initialization ---
@@ -294,6 +346,9 @@ export async function ensureWhisperRunning(): Promise<void> {
       'Docker client not initialized. Cannot ensure Whisper running.'
     );
   }
+
+  await configureComposeOverrideForWhisper();
+
   const projectName = path.basename(ROOT_DIR).replace(/[^a-z0-9]/gi, '');
   await ensureServiceReady({
     docker,
