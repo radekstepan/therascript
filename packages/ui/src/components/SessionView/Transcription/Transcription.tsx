@@ -11,6 +11,7 @@ import type {
 import { TranscriptParagraph } from '../../Transcription/TranscriptParagraph';
 import { EditSessionModal } from '../../Shared/EditSessionModal';
 import { RenameSpeakersModal } from './RenameSpeakersModal';
+import { getUniqueSpeakers } from './speakerUtils';
 import {
   Box,
   Text,
@@ -43,6 +44,7 @@ import {
   updateTranscriptParagraph,
   deleteSessionAudio,
   deleteTranscriptParagraph,
+  updateParagraphSpeaker,
 } from '../../../api/api';
 import { sessionColorMap, therapyColorMap } from '../../../constants';
 import { debounce, formatIsoDateToYMD, formatDuration } from '../../../helpers';
@@ -371,6 +373,23 @@ export function Transcription({
     },
   });
 
+  const updateSpeakerMutation = useMutation({
+    mutationFn: ({
+      paragraphId,
+      speaker,
+    }: {
+      paragraphId: number;
+      speaker: string;
+    }) => updateParagraphSpeaker(session.id, paragraphId, speaker),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transcript', session.id] });
+      setToast('Speaker updated.');
+    },
+    onError: (error: Error) => {
+      setToast(`Error updating speaker: ${error.message}`);
+    },
+  });
+
   const deleteAudioMutation = useMutation({
     mutationFn: () => {
       if (!session?.id) throw new Error('Session ID is missing');
@@ -460,6 +479,8 @@ export function Transcription({
 
   const paragraphs = transcriptContent || [];
 
+  const uniqueSpeakers = getUniqueSpeakers(transcriptContent);
+
   // Scroll to paragraph based on hash
   useEffect(() => {
     if (!isTabActive) return;
@@ -498,6 +519,20 @@ export function Transcription({
     if (isPlaying && playingParagraphIndex === paragraphId) pauseAudio();
     saveParagraphMutation.mutate({ paragraphIndex: paragraphId, newText });
   };
+
+  const handleSpeakerCycle = useCallback(
+    (paragraph: TranscriptParagraphData) => {
+      if (!paragraph.speaker || uniqueSpeakers.length < 2) return;
+      const currentIndex = uniqueSpeakers.indexOf(paragraph.speaker);
+      const nextSpeaker =
+        uniqueSpeakers[(currentIndex + 1) % uniqueSpeakers.length];
+      updateSpeakerMutation.mutate({
+        paragraphId: paragraph.id,
+        speaker: nextSpeaker,
+      });
+    },
+    [uniqueSpeakers, updateSpeakerMutation]
+  );
 
   const handleDeleteParagraphRequest = (paragraph: TranscriptParagraphData) => {
     setParagraphToDelete(paragraph);
@@ -746,6 +781,11 @@ export function Transcription({
                   isPlaying={isPlaying && playingParagraphIndex === index}
                   isAudioAvailable={isAudioAvailable}
                   isHighlighted={highlightedParagraphIndex === index}
+                  onSpeakerCycle={
+                    paragraph.speaker && uniqueSpeakers.length >= 2
+                      ? () => handleSpeakerCycle(paragraph)
+                      : undefined
+                  }
                 />
               </Box>
             )}

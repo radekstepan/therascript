@@ -9,6 +9,7 @@ import {
   updateSessionMetadata,
   getTranscript,
   updateTranscriptParagraph,
+  updateParagraphSpeakerHandler,
   deleteSessionAudioHandler,
   deleteTranscriptParagraph,
   renameSpeakersHandler,
@@ -379,6 +380,18 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
               body: 'paragraphUpdateBody',
               response: { 200: 'transcriptResponse' },
               detail: { summary: 'Update transcript paragraph' },
+            }
+          )
+          .patch(
+            '/:sessionId/transcript/:paragraphIndex/speaker',
+            async (context) => updateParagraphSpeakerHandler(context as any),
+            {
+              params: 'sessionAndParagraphParams',
+              body: t.Object({ speaker: t.String() }),
+              response: { 200: t.Object({ message: t.String() }) },
+              detail: {
+                summary: 'Update speaker label for a single paragraph',
+              },
             }
           )
           .delete(

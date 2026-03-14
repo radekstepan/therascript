@@ -14,23 +14,13 @@ import { useSetAtom } from 'jotai';
 import { toastMessageAtom } from '../../../store';
 import { renameSpeakers } from '../../../api/api';
 import type { StructuredTranscript } from '../../../types';
+import { getUniqueSpeakers } from './speakerUtils';
 
 interface RenameSpeakersModalProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   sessionId: number;
   transcriptContent: StructuredTranscript | null | undefined;
-}
-
-function getUniqueSpeakers(
-  transcript: StructuredTranscript | null | undefined
-): string[] {
-  if (!transcript) return [];
-  const seen = new Set<string>();
-  for (const p of transcript) {
-    if (p.speaker) seen.add(p.speaker);
-  }
-  return Array.from(seen).sort();
 }
 
 export function RenameSpeakersModal({

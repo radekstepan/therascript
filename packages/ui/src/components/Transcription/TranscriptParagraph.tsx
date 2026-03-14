@@ -57,6 +57,7 @@ interface TranscriptParagraphProps {
   isPlaying: boolean;
   isAudioAvailable: boolean;
   isHighlighted?: boolean;
+  onSpeakerCycle?: () => void;
 }
 
 export function TranscriptParagraph({
@@ -71,6 +72,7 @@ export function TranscriptParagraph({
   isPlaying,
   isAudioAvailable,
   isHighlighted = false,
+  onSpeakerCycle,
 }: TranscriptParagraphProps) {
   const [editValue, setEditValue] = useState(paragraph.text);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -219,11 +221,15 @@ export function TranscriptParagraph({
           <Text
             size="1"
             weight="medium"
+            onClick={onSpeakerCycle}
+            title={onSpeakerCycle ? 'Click to cycle speaker' : undefined}
             style={{
               fontFamily: 'var(--font-mono)',
               color: 'var(--accent-a11)',
               display: 'block',
               marginBottom: '2px',
+              cursor: onSpeakerCycle ? 'pointer' : 'default',
+              userSelect: 'none',
             }}
           >
             {paragraph.speaker}

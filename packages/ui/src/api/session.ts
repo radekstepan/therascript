@@ -225,6 +225,18 @@ export const deleteSession = async (
  * @returns {Promise<{ message: string }>} A promise resolving to a confirmation message.
  * @throws {Error} If the API request fails.
  */
+export const updateParagraphSpeaker = async (
+  sessionId: number,
+  paragraphIndex: number,
+  speaker: string
+): Promise<{ message: string }> => {
+  const response = await axios.patch(
+    `/api/sessions/${sessionId}/transcript/${paragraphIndex}/speaker`,
+    { speaker }
+  );
+  return response.data;
+};
+
 export const renameSpeakers = async (
   sessionId: number,
   renames: { from: string; to: string }[]

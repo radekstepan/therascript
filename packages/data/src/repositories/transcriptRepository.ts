@@ -53,6 +53,17 @@ const updateParagraphStmt = (): DbStatement => {
   return _updateParagraphStmt;
 };
 
+let _updateParagraphSpeakerStmt: DbStatement | null = null;
+const updateParagraphSpeakerStmt = (): DbStatement => {
+  if (!_updateParagraphSpeakerStmt) {
+    _updateParagraphSpeakerStmt = db.prepare(`
+      UPDATE transcript_paragraphs SET speaker = ?
+      WHERE sessionId = ? AND paragraphIndex = ?
+    `);
+  }
+  return _updateParagraphSpeakerStmt;
+};
+
 let _deleteParagraphByIndexStmt: DbStatement | null = null;
 const deleteParagraphByIndexStmt = (): DbStatement => {
   if (!_deleteParagraphByIndexStmt) {
@@ -211,6 +222,39 @@ export const transcriptRepository = {
       );
       throw new Error(
         `Database error fetching transcript text for session ${sessionId}.`
+      );
+    }
+  },
+
+  updateParagraphSpeaker: (
+    sessionId: number,
+    paragraphIndex: number,
+    newSpeaker: string
+  ): boolean => {
+    try {
+      const info = updateParagraphSpeakerStmt().run(
+        newSpeaker,
+        sessionId,
+        paragraphIndex
+      );
+      const success = info.changes > 0;
+      if (success) {
+        console.log(
+          `[TranscriptRepo] Updated speaker for paragraph ${paragraphIndex} in session ${sessionId}.`
+        );
+      } else {
+        console.warn(
+          `[TranscriptRepo] No paragraph found for session ${sessionId}, index ${paragraphIndex}.`
+        );
+      }
+      return success;
+    } catch (error) {
+      console.error(
+        `[TranscriptRepo] Error updating speaker for paragraph ${paragraphIndex} in session ${sessionId}:`,
+        error
+      );
+      throw new Error(
+        `Database error updating speaker for paragraph ${paragraphIndex} in session ${sessionId}.`
       );
     }
   },

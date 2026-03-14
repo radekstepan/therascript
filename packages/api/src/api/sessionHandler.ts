@@ -668,6 +668,91 @@ export const finalizeSessionHandler = async ({
   }
 };
 
+export const updateParagraphSpeakerHandler = async ({
+  sessionData,
+  body,
+  params,
+  set,
+}: SessionHandlerContext): Promise<{ message: string }> => {
+  const sessionId = sessionData.id;
+  const paragraphIndex = parseInt((params as any).paragraphIndex, 10);
+
+  if (isNaN(paragraphIndex) || paragraphIndex < 0) {
+    throw new BadRequestError(
+      `Invalid paragraph index: ${(params as any).paragraphIndex}.`
+    );
+  }
+
+  const { speaker } = body as { speaker: string };
+  if (typeof speaker !== 'string' || !speaker.trim()) {
+    throw new BadRequestError('Speaker must be a non-empty string.');
+  }
+
+  if (sessionData.status !== 'completed') {
+    throw new BadRequestError(
+      `Cannot update transcript for session ${sessionId}: Status is ${sessionData.status}.`
+    );
+  }
+
+  try {
+    const updateSuccess = transcriptRepository.updateParagraphSpeaker(
+      sessionId,
+      paragraphIndex,
+      speaker.trim()
+    );
+    if (!updateSuccess) {
+      throw new BadRequestError(
+        `Paragraph ${paragraphIndex} not found in session ${sessionId}.`
+      );
+    }
+
+    // Update Elasticsearch (non-fatal)
+    try {
+      await esClient.updateByQuery({
+        index: TRANSCRIPTS_INDEX,
+        body: {
+          script: {
+            source: 'ctx._source.speaker = params.speaker',
+            lang: 'painless',
+            params: { speaker: speaker.trim() },
+          },
+          query: {
+            bool: {
+              must: [
+                { term: { session_id: sessionId } },
+                { term: { paragraph_index: paragraphIndex } },
+              ],
+            },
+          },
+        },
+      } as any);
+      console.log(
+        `[API updateParagraphSpeaker] ES updated paragraph ${paragraphIndex} speaker for session ${sessionId}.`
+      );
+    } catch (esError) {
+      console.error(
+        `[API updateParagraphSpeaker] ES update failed for paragraph ${paragraphIndex} (session ${sessionId}):`,
+        esError
+      );
+    }
+
+    set.status = 200;
+    return {
+      message: `Speaker updated for paragraph ${paragraphIndex} in session ${sessionId}.`,
+    };
+  } catch (error) {
+    console.error(
+      `[API Error] updateParagraphSpeaker (session ${sessionId}, paragraph ${paragraphIndex}):`,
+      error
+    );
+    if (error instanceof ApiError) throw error;
+    throw new InternalServerError(
+      `Failed to update speaker for paragraph ${paragraphIndex} in session ${sessionId}.`,
+      error instanceof Error ? error : undefined
+    );
+  }
+};
+
 export const renameSpeakersHandler = async ({
   body,
   sessionData,
