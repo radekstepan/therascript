@@ -47,6 +47,41 @@ import type {
 import { closeUploadModalAtom } from '../../store';
 import { cn } from '../../utils';
 
+const extractDateFromFilename = (filename: string): string | null => {
+  // YYYY-MM-DD or YYYY_MM_DD
+  const yyyyMmDd = filename.match(
+    /\b(20\d{2})[-_](0[1-9]|1[0-2])[-_](0[1-9]|[12]\d|3[01])\b/
+  );
+  if (yyyyMmDd) return `${yyyyMmDd[1]}-${yyyyMmDd[2]}-${yyyyMmDd[3]}`;
+
+  // DD-MM-YYYY or DD_MM_YYYY where DD > 12
+  const ddMmYyyy = filename.match(
+    /\b(1[3-9]|[23]\d)[-_](0[1-9]|1[0-2])[-_](20\d{2})\b/
+  );
+  if (ddMmYyyy) return `${ddMmYyyy[3]}-${ddMmYyyy[2]}-${ddMmYyyy[1]}`;
+
+  // MM-DD-YYYY or MM_DD_YYYY where DD > 12
+  const mmDdYyyy = filename.match(
+    /\b(0[1-9]|1[0-2])[-_](1[3-9]|[23]\d)[-_](20\d{2})\b/
+  );
+  if (mmDdYyyy) return `${mmDdYyyy[3]}-${mmDdYyyy[1]}-${mmDdYyyy[2]}`;
+
+  // Ambiguous XX-XX-YYYY. Assume MM-DD-YYYY
+  const ambiguous = filename.match(
+    /\b(0[1-9]|1[0-2])[-_](0[1-9]|1[0-2])[-_](20\d{2})\b/
+  );
+  if (ambiguous) return `${ambiguous[3]}-${ambiguous[1]}-${ambiguous[2]}`;
+
+  // YYYYMMDD
+  const yyyyMmDdCompact = filename.match(
+    /\b(20\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\b/
+  );
+  if (yyyyMmDdCompact)
+    return `${yyyyMmDdCompact[1]}-${yyyyMmDdCompact[2]}-${yyyyMmDdCompact[3]}`;
+
+  return null;
+};
+
 interface UploadModalProps {
   isOpen: boolean;
 }
@@ -259,8 +294,23 @@ export function UploadModal({ isOpen }: UploadModalProps) {
     if (file && ALLOWED_AUDIO_VIDEO_MIME_TYPES.includes(file.type)) {
       setModalFile(file);
       setFormError(null);
-      if (!sessionNameInput)
-        setSessionNameInput(file.name.replace(/\.[^/.]+$/, ''));
+
+      const nameWithoutExt = file.name.replace(/\.[^/.]+$/, '');
+      if (!sessionNameInput) {
+        setSessionNameInput(nameWithoutExt);
+      }
+
+      if (!clientNameInput) {
+        const dashIndex = nameWithoutExt.indexOf('-');
+        if (dashIndex !== -1) {
+          setClientNameInput(nameWithoutExt.substring(0, dashIndex).trim());
+        }
+      }
+
+      const extractedDate = extractDateFromFilename(nameWithoutExt);
+      if (extractedDate) {
+        setSessionDate(extractedDate);
+      }
     } else {
       setModalFile(null);
       if (file)
