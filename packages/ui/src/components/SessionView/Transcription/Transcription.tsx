@@ -716,23 +716,6 @@ export function Transcription({
             </Text>
           </Flex>
         )}
-        {!isLoadingTranscript &&
-          !transcriptError &&
-          paragraphs.length > 0 &&
-          !paragraphs.some((p) => !!p.speaker) && (
-            <Box px="3" pt="3">
-              <Callout.Root color="amber" size="1">
-                <Callout.Icon>
-                  <ExclamationTriangleIcon />
-                </Callout.Icon>
-                <Callout.Text>
-                  No speaker labels found in this transcript. Diarization may
-                  not have run — check that <strong>HF_TOKEN</strong> is set and
-                  the diarization model is cached.
-                </Callout.Text>
-              </Callout.Root>
-            </Box>
-          )}
         {!isLoadingTranscript && !transcriptError && (
           <Virtuoso
             ref={virtuosoRef}
