@@ -93,7 +93,8 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
           throw new Error(`Session ${summaryTask.session_id} not found.`);
 
         const transcriptText = transcriptRepository.getTranscriptTextForSession(
-          summaryTask.session_id
+          summaryTask.session_id,
+          session.showSpeakers !== 0
         );
         if (!transcriptText.trim()) throw new Error('Transcript is empty.');
 
@@ -292,10 +293,14 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
       );
 
     const intermediateSummariesText = enrichedSummaries
-      .map(
-        ({ summary, session }) =>
-          `--- Analysis from Session "${session.sessionName || session.fileName}" ---\n${summary.summary_text}`
-      )
+      .map(({ summary, session }) => {
+        const transcriptText = transcriptRepository.getTranscriptTextForSession(
+          summary.session_id,
+          session.showSpeakers !== 0
+        );
+
+        return `--- Analysis from Session "${session.sessionName || session.fileName}" ---\nSOURCE TRANSCRIPT:\n"""${transcriptText}"""\n\nINTERMEDIATE SUMMARY:\n${summary.summary_text}`;
+      })
       .join('\n\n');
 
     let reduceMessages: BackendChatMessage[];

@@ -95,6 +95,7 @@ export const listSessions = ({ set }: SessionHandlerContextNoSessionData) => {
       transcriptTokenCount: s.transcriptTokenCount,
       duration: s.duration,
       errorMessage: s.errorMessage,
+      showSpeakers: s.showSpeakers,
     }));
     set.status = 200;
     return sessionDTOs;
@@ -135,6 +136,7 @@ export const getSessionDetails = ({
       transcriptTokenCount: sessionData.transcriptTokenCount,
       duration: sessionData.duration,
       errorMessage: sessionData.errorMessage,
+      showSpeakers: sessionData.showSpeakers,
       chats: chatMetadata,
     };
   } catch (error) {
@@ -156,8 +158,15 @@ export const updateSessionMetadata = async ({
 }: SessionHandlerContext) => {
   const sessionId = sessionData.id;
   const validatedBody = updateSessionRequestSchema.parse(body);
-  const { date: dateInput, ...restOfBody } = validatedBody;
+  const {
+    date: dateInput,
+    showSpeakers: showSpeakersInput,
+    ...restOfBody
+  } = validatedBody;
   const metadataUpdate: Partial<BackendSession> = { ...restOfBody };
+  if (showSpeakersInput !== undefined) {
+    metadataUpdate.showSpeakers = showSpeakersInput ? 1 : 0;
+  }
 
   if (Object.keys(validatedBody).length === 0) {
     throw new BadRequestError('No metadata provided for update.');
@@ -270,6 +279,9 @@ export const updateSessionMetadata = async ({
       status: updatedSession.status,
       whisperJobId: updatedSession.whisperJobId,
       transcriptTokenCount: updatedSession.transcriptTokenCount,
+      duration: updatedSession.duration,
+      errorMessage: updatedSession.errorMessage,
+      showSpeakers: updatedSession.showSpeakers,
     };
   } catch (error) {
     console.error(

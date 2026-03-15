@@ -116,6 +116,7 @@ export interface BackendSession {
   transcriptTokenCount?: number | null;
   duration?: number | null;
   errorMessage?: string | null;
+  showSpeakers?: number | null;
   chats?: (Omit<ChatMetadata, 'tags'> & { sessionId: number })[];
 }
 

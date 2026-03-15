@@ -38,6 +38,9 @@ import {
   Pencil1Icon,
   MixerHorizontalIcon,
   ExclamationTriangleIcon,
+  InfoCircledIcon,
+  EyeOpenIcon,
+  EyeClosedIcon,
 } from '@radix-ui/react-icons';
 import { cn } from '../../../utils';
 import {
@@ -45,6 +48,7 @@ import {
   deleteSessionAudio,
   deleteTranscriptParagraph,
   updateParagraphSpeaker,
+  updateSessionMetadata,
 } from '../../../api/api';
 import { sessionColorMap, therapyColorMap } from '../../../constants';
 import { debounce, formatIsoDateToYMD, formatDuration } from '../../../helpers';
@@ -390,6 +394,60 @@ export function Transcription({
     },
   });
 
+  const toggleSpeakersMutation = useMutation({
+    mutationFn: (showSpeakers: boolean) =>
+      updateSessionMetadata(session.id, { showSpeakers }),
+    onMutate: async (showSpeakers) => {
+      await queryClient.cancelQueries({
+        queryKey: ['sessionMeta', session.id],
+      });
+      await queryClient.cancelQueries({
+        queryKey: ['sessions'],
+      });
+      const previous = queryClient.getQueryData<Session>([
+        'sessionMeta',
+        session.id,
+      ]);
+      const previousSessions = queryClient.getQueryData<Session[]>([
+        'sessions',
+      ]);
+      queryClient.setQueryData<Session>(['sessionMeta', session.id], (old) =>
+        old ? { ...old, showSpeakers: showSpeakers ? 1 : 0 } : old
+      );
+      queryClient.setQueryData<Session[]>(['sessions'], (old) => {
+        if (!old) return old;
+        return old.map((sessionMeta) =>
+          sessionMeta.id === session.id
+            ? { ...sessionMeta, showSpeakers: showSpeakers ? 1 : 0 }
+            : sessionMeta
+        );
+      });
+      return { previous, previousSessions };
+    },
+    onError: (error: Error, _, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['sessionMeta', session.id], context.previous);
+      }
+      if (context?.previousSessions) {
+        queryClient.setQueryData(['sessions'], context.previousSessions);
+      }
+      setToast(`Error updating speaker visibility: ${error.message}`);
+    },
+    onSuccess: (_, showSpeakers) => {
+      queryClient.setQueryData<Session>(['sessionMeta', session.id], (old) =>
+        old ? { ...old, showSpeakers: showSpeakers ? 1 : 0 } : old
+      );
+      queryClient.setQueryData<Session[]>(['sessions'], (old) => {
+        if (!old) return old;
+        return old.map((sessionMeta) =>
+          sessionMeta.id === session.id
+            ? { ...sessionMeta, showSpeakers: showSpeakers ? 1 : 0 }
+            : sessionMeta
+        );
+      });
+    },
+  });
+
   const deleteAudioMutation = useMutation({
     mutationFn: () => {
       if (!session?.id) throw new Error('Session ID is missing');
@@ -480,6 +538,8 @@ export function Transcription({
   const paragraphs = transcriptContent || [];
 
   const uniqueSpeakers = getUniqueSpeakers(transcriptContent);
+  const hasSpeakers = paragraphs.some((p) => p.speaker);
+  const speakersVisible = session.showSpeakers !== 0;
 
   // Scroll to paragraph based on hash
   useEffect(() => {
@@ -556,7 +616,11 @@ export function Transcription({
       setToast('Transcript is empty.');
       return;
     }
-    const fullText = transcriptContent.map((p) => p.text).join('\n\n');
+    const fullText = transcriptContent
+      .map((p) =>
+        speakersVisible && p.speaker ? `${p.speaker}: ${p.text}` : p.text
+      )
+      .join('\n\n');
     copy(fullText);
     setToast('Transcription copied to clipboard.');
   };
@@ -680,6 +744,22 @@ export function Transcription({
                   <MixerHorizontalIcon className="mr-2 h-4 w-4" /> Rename
                   Speakers
                 </DropdownMenu.Item>
+                {hasSpeakers && (
+                  <DropdownMenu.Item
+                    onSelect={(e) => {
+                      e.preventDefault();
+                      toggleSpeakersMutation.mutate(!speakersVisible);
+                    }}
+                    disabled={toggleSpeakersMutation.isPending}
+                  >
+                    {speakersVisible ? (
+                      <EyeOpenIcon className="mr-2 h-4 w-4" />
+                    ) : (
+                      <EyeClosedIcon className="mr-2 h-4 w-4" />
+                    )}{' '}
+                    {speakersVisible ? 'Hide' : 'Show'} Speaker Labels
+                  </DropdownMenu.Item>
+                )}
                 <DropdownMenu.Item
                   onSelect={handleCopyTranscriptClick}
                   disabled={
@@ -752,59 +832,94 @@ export function Transcription({
           </Flex>
         )}
         {!isLoadingTranscript && !transcriptError && (
-          <Virtuoso
-            ref={virtuosoRef}
-            style={{ height: '100%' }}
-            data={paragraphs}
-            computeItemKey={(index, p) => p.id}
-            onScroll={handleScroll}
-            itemContent={(index, paragraph) => (
-              <Box
-                p="3"
-                pt={index === 0 ? '3' : '0'}
-                pb={index === paragraphs.length - 1 ? '3' : '0'}
+          <>
+            {hasSpeakers && !speakersVisible && (
+              <Callout.Root
+                color="blue"
+                size="1"
+                style={{
+                  flexShrink: 0,
+                  borderRadius: 0,
+                  borderBottom: '1px solid var(--blue-a6)',
+                }}
               >
-                <TranscriptParagraph
-                  key={paragraph.id}
-                  paragraph={paragraph}
-                  index={index}
-                  onSave={handleSaveParagraphInternal}
-                  onDelete={handleDeleteParagraphRequest}
-                  activeEditIndex={activeEditIndex}
-                  setActiveEditIndex={setActiveEditIndex}
-                  isSaving={
-                    saveParagraphMutation.isPending &&
-                    saveParagraphMutation.variables?.paragraphIndex ===
-                      paragraph.id
-                  }
-                  onPlayToggle={togglePlayback}
-                  isPlaying={isPlaying && playingParagraphIndex === index}
-                  isAudioAvailable={isAudioAvailable}
-                  isHighlighted={highlightedParagraphIndex === index}
-                  onSpeakerCycle={
-                    paragraph.speaker && uniqueSpeakers.length >= 2
-                      ? () => handleSpeakerCycle(paragraph)
-                      : undefined
-                  }
-                />
-              </Box>
+                <Callout.Icon>
+                  <InfoCircledIcon />
+                </Callout.Icon>
+                <Callout.Text>
+                  <Flex align="center" gap="3" justify="between">
+                    <Text size="1">
+                      Speaker labels are available but currently hidden from
+                      transcripts and AI context.
+                    </Text>
+                    <Button
+                      size="1"
+                      variant="soft"
+                      color="blue"
+                      onClick={() => toggleSpeakersMutation.mutate(true)}
+                      disabled={toggleSpeakersMutation.isPending}
+                    >
+                      Enable speakers
+                    </Button>
+                  </Flex>
+                </Callout.Text>
+              </Callout.Root>
             )}
-            components={{
-              EmptyPlaceholder: () => (
-                <Flex
-                  align="center"
-                  justify="center"
-                  style={{ minHeight: '100px' }}
+            <Virtuoso
+              ref={virtuosoRef}
+              style={{ height: '100%' }}
+              data={paragraphs}
+              computeItemKey={(index, p) => p.id}
+              onScroll={handleScroll}
+              itemContent={(index, paragraph) => (
+                <Box
+                  p="3"
+                  pt={index === 0 ? '3' : '0'}
+                  pb={index === paragraphs.length - 1 ? '3' : '0'}
                 >
-                  <Text color="gray" style={{ fontStyle: 'italic' }}>
-                    {session.status === 'completed'
-                      ? 'Transcription is empty.'
-                      : 'Transcription not available yet.'}
-                  </Text>
-                </Flex>
-              ),
-            }}
-          />
+                  <TranscriptParagraph
+                    key={paragraph.id}
+                    paragraph={paragraph}
+                    index={index}
+                    onSave={handleSaveParagraphInternal}
+                    onDelete={handleDeleteParagraphRequest}
+                    activeEditIndex={activeEditIndex}
+                    setActiveEditIndex={setActiveEditIndex}
+                    isSaving={
+                      saveParagraphMutation.isPending &&
+                      saveParagraphMutation.variables?.paragraphIndex ===
+                        paragraph.id
+                    }
+                    onPlayToggle={togglePlayback}
+                    isPlaying={isPlaying && playingParagraphIndex === index}
+                    isAudioAvailable={isAudioAvailable}
+                    isHighlighted={highlightedParagraphIndex === index}
+                    showSpeaker={speakersVisible}
+                    onSpeakerCycle={
+                      paragraph.speaker && uniqueSpeakers.length >= 2
+                        ? () => handleSpeakerCycle(paragraph)
+                        : undefined
+                    }
+                  />
+                </Box>
+              )}
+              components={{
+                EmptyPlaceholder: () => (
+                  <Flex
+                    align="center"
+                    justify="center"
+                    style={{ minHeight: '100px' }}
+                  >
+                    <Text color="gray" style={{ fontStyle: 'italic' }}>
+                      {session.status === 'completed'
+                        ? 'Transcription is empty.'
+                        : 'Transcription not available yet.'}
+                    </Text>
+                  </Flex>
+                ),
+              }}
+            />
+          </>
         )}
       </Flex>
       <AlertDialog.Root

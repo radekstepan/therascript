@@ -58,6 +58,7 @@ interface TranscriptParagraphProps {
   isAudioAvailable: boolean;
   isHighlighted?: boolean;
   onSpeakerCycle?: () => void;
+  showSpeaker?: boolean;
 }
 
 export function TranscriptParagraph({
@@ -73,6 +74,7 @@ export function TranscriptParagraph({
   isAudioAvailable,
   isHighlighted = false,
   onSpeakerCycle,
+  showSpeaker = true,
 }: TranscriptParagraphProps) {
   const [editValue, setEditValue] = useState(paragraph.text);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -217,7 +219,7 @@ export function TranscriptParagraph({
         style={textStyles}
         id={paragraphDomId}
       >
-        {paragraph.speaker && (
+        {showSpeaker && paragraph.speaker && (
           <Text
             size="1"
             weight="medium"

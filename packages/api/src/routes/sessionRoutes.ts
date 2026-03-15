@@ -87,6 +87,7 @@ const SessionMetadataUpdateBodySchema = t.Partial(
     whisperJobId: t.Optional(t.Union([t.String(), t.Null()])),
     audioPath: t.Optional(t.Union([t.String(), t.Null()])),
     transcriptTokenCount: t.Optional(t.Union([t.Number(), t.Null()])),
+    showSpeakers: t.Optional(t.Boolean()),
   })
 );
 const SessionMetadataResponseSchema = t.Object({
@@ -103,6 +104,7 @@ const SessionMetadataResponseSchema = t.Object({
   transcriptTokenCount: t.Optional(t.Union([t.Number(), t.Null()])),
   duration: t.Optional(t.Union([t.Number(), t.Null()])),
   errorMessage: t.Optional(t.Union([t.String(), t.Null()])),
+  showSpeakers: t.Optional(t.Union([t.Number(), t.Null()])),
 });
 const SessionListResponseItemSchema = SessionMetadataResponseSchema;
 const SessionChatMetadataSchema = t.Omit(
@@ -129,6 +131,7 @@ const SessionWithChatsMetadataResponseSchema = t.Object({
   transcriptTokenCount: t.Optional(t.Union([t.Number(), t.Null()])),
   duration: t.Optional(t.Union([t.Number(), t.Null()])),
   errorMessage: t.Optional(t.Union([t.String(), t.Null()])),
+  showSpeakers: t.Optional(t.Union([t.Number(), t.Null()])),
   chats: t.Array(SessionChatMetadataSchema),
 });
 const TranscriptParagraphSchema = t.Object({

@@ -11,6 +11,7 @@ export const updateSessionRequestSchema = z.object({
   therapy: z.string().min(1).optional(),
   fileName: z.string().optional(),
   audioPath: z.string().nullable().optional(),
+  showSpeakers: z.boolean().optional(),
 });
 
 export const updateTranscriptParagraphRequestSchema = z.object({

@@ -207,13 +207,18 @@ export const transcriptRepository = {
     }
   },
 
-  getTranscriptTextForSession: (sessionId: number): string => {
+  getTranscriptTextForSession: (
+    sessionId: number,
+    showSpeakers: boolean = true
+  ): string => {
     try {
       const rows = selectParagraphsStmt().all(
         sessionId
       ) as BackendTranscriptParagraph[];
       return rows
-        .map((p) => (p.speaker ? `${p.speaker}: ${p.text}` : p.text))
+        .map((p) =>
+          showSpeakers && p.speaker ? `${p.speaker}: ${p.text}` : p.text
+        )
         .join('\n\n');
     } catch (error) {
       console.error(

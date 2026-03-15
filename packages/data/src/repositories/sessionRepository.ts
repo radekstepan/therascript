@@ -19,7 +19,7 @@ let _selectAllSessionsStmt: DbStatement | null = null;
 const selectAllSessionsStmt = (): DbStatement => {
   if (!_selectAllSessionsStmt) {
     _selectAllSessionsStmt = db.prepare(
-      'SELECT id, fileName, clientName, sessionName, date, sessionType, therapy, audioPath, status, whisperJobId, transcriptTokenCount, duration, errorMessage FROM sessions ORDER BY date DESC, id DESC'
+      'SELECT id, fileName, clientName, sessionName, date, sessionType, therapy, audioPath, status, whisperJobId, transcriptTokenCount, duration, errorMessage, showSpeakers FROM sessions ORDER BY date DESC, id DESC'
     );
   }
   return _selectAllSessionsStmt;
@@ -29,7 +29,7 @@ let _selectSessionByIdStmt: DbStatement | null = null;
 const selectSessionByIdStmt = (): DbStatement => {
   if (!_selectSessionByIdStmt) {
     _selectSessionByIdStmt = db.prepare(
-      'SELECT id, fileName, clientName, sessionName, date, sessionType, therapy, audioPath, status, whisperJobId, transcriptTokenCount, duration, errorMessage FROM sessions WHERE id = ?'
+      'SELECT id, fileName, clientName, sessionName, date, sessionType, therapy, audioPath, status, whisperJobId, transcriptTokenCount, duration, errorMessage, showSpeakers FROM sessions WHERE id = ?'
     );
   }
   return _selectSessionByIdStmt;
@@ -39,7 +39,7 @@ let _updateSessionMetadataStmt: DbStatement | null = null;
 const updateSessionMetadataStmt = (): DbStatement => {
   if (!_updateSessionMetadataStmt) {
     _updateSessionMetadataStmt = db.prepare(
-      `UPDATE sessions SET clientName = ?, sessionName = ?, date = ?, sessionType = ?, therapy = ?, fileName = ?, audioPath = ?, status = ?, whisperJobId = ?, transcriptTokenCount = ?, duration = ?, errorMessage = ? WHERE id = ?`
+      `UPDATE sessions SET clientName = ?, sessionName = ?, date = ?, sessionType = ?, therapy = ?, fileName = ?, audioPath = ?, status = ?, whisperJobId = ?, transcriptTokenCount = ?, duration = ?, errorMessage = ?, showSpeakers = ? WHERE id = ?`
     );
   }
   return _updateSessionMetadataStmt;
@@ -212,6 +212,7 @@ export const sessionRepository = {
         updatedData.transcriptTokenCount,
         updatedData.duration,
         updatedData.errorMessage || null,
+        updatedData.showSpeakers ?? 1,
         id
       );
       if (info.changes === 0) {

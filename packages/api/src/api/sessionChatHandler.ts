@@ -4,6 +4,7 @@ import {
   transcriptRepository,
   messageRepository,
   usageRepository,
+  templateRepository,
 } from '@therascript/data';
 import { streamChatResponse } from '../services/ollamaService.js';
 import {
@@ -146,7 +147,8 @@ export const addSessionChatMessage = async ({
     );
 
     const transcriptString = transcriptRepository.getTranscriptTextForSession(
-      sessionData.id
+      sessionData.id,
+      sessionData.showSpeakers !== 0
     );
     const currentMessages = messageRepository.findMessagesByChatId(chatData.id);
     if (currentMessages.length === 0) {
@@ -154,6 +156,59 @@ export const addSessionChatMessage = async ({
         `CRITICAL: Chat ${chatData.id} has no messages immediately after adding one.`
       );
     }
+
+    // ============================= OVERRIDE PROMPT START ==============================
+    const showSpeakers = sessionData.showSpeakers !== 0;
+    let systemPromptText =
+      templateRepository.findByTitle('system_prompt')?.text ||
+      'You are a helpful assistant.';
+
+    if (!showSpeakers) {
+      const instructionToStrip =
+        'Always refer to speakers using the exact labels present in the transcript (e.g. "John:", "SPEAKER_01:"). Do not substitute generic terms like "Therapist" or "Patient" unless those exact labels appear in the transcript.';
+      systemPromptText = systemPromptText
+        .replace(instructionToStrip, '')
+        .trim();
+      systemPromptText +=
+        '\n\nSpeaker labels are disabled for this transcript. Do not invent or use speaker names (like "SPEAKER_01" or "John"). Refer to speakers descriptively (e.g., "the therapist" or "the patient") without using explicit names or labels.';
+    }
+
+    const systemPromptMsg: BackendChatMessage = {
+      id: 0,
+      chatId: chatData.id,
+      sender: 'system',
+      text: systemPromptText,
+      timestamp: Date.now(),
+    };
+
+    const previousHistory = currentMessages.slice(0, -1).map((msg) => {
+      if (!showSpeakers && msg.sender === 'ai') {
+        const cleanedText = msg.text.replace(
+          /((?:SPEAKER_\d+)|(?:[A-Z][A-Za-z]+)):\s/g,
+          ''
+        );
+        return { ...msg, text: cleanedText };
+      }
+      return msg;
+    });
+
+    const transcriptContextMessage: BackendChatMessage = {
+      id: 0,
+      chatId: chatData.id,
+      sender: 'user',
+      text: `CONTEXT TRANSCRIPT:\n"""\n${transcriptString || 'No transcript available.'}\n"""`,
+      timestamp: Date.now(),
+    };
+
+    const latestUserMessage = currentMessages[currentMessages.length - 1];
+
+    const streamMessages = [
+      systemPromptMsg,
+      ...previousHistory,
+      transcriptContextMessage,
+      latestUserMessage,
+    ];
+    // ============================== OVERRIDE PROMPT END ===============================
 
     // If no configured context size, recommend a sane value for this session chat
     const configured = getConfiguredContextSize();
@@ -164,7 +219,7 @@ export const addSessionChatMessage = async ({
 
     const ollamaStream = await streamChatResponse(
       transcriptString,
-      currentMessages,
+      streamMessages,
       configured == null && recommendedContext != null
         ? { contextSize: recommendedContext, signal }
         : { signal }

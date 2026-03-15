@@ -94,7 +94,7 @@ export const schema = `
 `;
 
 // --- NEW MIGRATION LOGIC ---
-export const LATEST_SCHEMA_VERSION = 12;
+export const LATEST_SCHEMA_VERSION = 13;
 
 // --- NEW SYSTEM PROMPTS ---
 export const SYSTEM_PROMPT_TEMPLATES = {
@@ -492,6 +492,23 @@ function runMigrations(dbInstance: DB) {
         dbInstance.pragma(`user_version = 12`);
         currentVersion = 12;
         console.log('[db Migrator] Version 12 applied.');
+      }
+
+      // NEW MIGRATION: Version 13 to add showSpeakers column to sessions for speaker label toggle
+      if (currentVersion < 13) {
+        console.log('[db Migrator] Applying version 13...');
+        const sessionColumns = dbInstance.pragma('table_info(sessions)') as {
+          name: string;
+        }[];
+        if (!sessionColumns.some((col) => col.name === 'showSpeakers')) {
+          console.log('[db Migrator V13] Adding "showSpeakers" to sessions...');
+          dbInstance.exec(
+            'ALTER TABLE sessions ADD COLUMN showSpeakers INTEGER NOT NULL DEFAULT 1'
+          );
+        }
+        dbInstance.pragma(`user_version = 13`);
+        currentVersion = 13;
+        console.log('[db Migrator] Version 13 applied.');
       }
     })();
     console.log(

@@ -122,6 +122,7 @@ export interface Session extends SessionMetadata {
   transcriptTokenCount?: number | null;
   duration?: number | null;
   errorMessage?: string | null;
+  showSpeakers?: number | null;
   chats: Pick<ChatSession, 'id' | 'sessionId' | 'timestamp' | 'name'>[];
 }
 

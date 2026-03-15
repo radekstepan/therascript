@@ -131,6 +131,7 @@ export const updateSessionMetadata = async (
     SessionMetadata & {
       audioPath?: string | null;
       transcriptTokenCount?: number | null;
+      showSpeakers?: boolean;
     }
   >
 ): Promise<SessionMetadata> => {
