@@ -63,6 +63,7 @@ export const schema = `
         promptTokens INTEGER,
         completionTokens INTEGER,
         duration INTEGER NULL,
+        isTruncated INTEGER NULL,
         FOREIGN KEY (chatId) REFERENCES chats (id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_message_chat ON messages (chatId);
@@ -94,7 +95,7 @@ export const schema = `
 `;
 
 // --- NEW MIGRATION LOGIC ---
-export const LATEST_SCHEMA_VERSION = 13;
+export const LATEST_SCHEMA_VERSION = 14;
 
 // --- NEW SYSTEM PROMPTS ---
 export const SYSTEM_PROMPT_TEMPLATES = {
@@ -510,6 +511,23 @@ function runMigrations(dbInstance: DB) {
         currentVersion = 13;
         console.log('[db Migrator] Version 13 applied.');
       }
+
+      // NEW MIGRATION: Version 14 to add isTruncated column to tracking token truncations
+      if (currentVersion < 14) {
+        console.log('[db Migrator] Applying version 14...');
+        const messageColumns = dbInstance.pragma('table_info(messages)') as {
+          name: string;
+        }[];
+        if (!messageColumns.some((col) => col.name === 'isTruncated')) {
+          console.log('[db Migrator V14] Adding "isTruncated" to messages...');
+          dbInstance.exec(
+            'ALTER TABLE messages ADD COLUMN isTruncated INTEGER NULL'
+          );
+        }
+        dbInstance.pragma(`user_version = 14`);
+        currentVersion = 14;
+        console.log('[db Migrator] Version 14 applied.');
+      }
     })();
     console.log(
       `[db Migrator] Migrations complete. Database is now at version ${currentVersion}.`
@@ -533,16 +551,18 @@ const getDb = (): DB => {
       fs.mkdirSync(dbDir, { recursive: true });
     }
 
-    console.log(`[db]: Initializing SQLite database connection for: ${dbPath}`);
+    console.log(
+      `[db]: Initializing SQLite database connection for: ${dbPath} `
+    );
     try {
       dbInstance = new Database(dbPath, {
         verbose: isDev ? console.log : undefined,
       });
-      console.log(`[db]: Successfully connected to database: ${dbPath}`);
+      console.log(`[db]: Successfully connected to database: ${dbPath} `);
       initializeDatabase(dbInstance);
     } catch (err) {
       console.error(
-        `[db]: FATAL: Could not connect or initialize database at ${dbPath}:`,
+        `[db]: FATAL: Could not connect or initialize database at ${dbPath}: `,
         (err as Error).message
       );
       process.exit(1);
@@ -599,7 +619,7 @@ export function initializeDatabase(dbInstance: DB) {
       if (!validationResult.valid) {
         console.warn('[db Init Func]: Schema validation warnings:');
         for (const warning of validationResult.warnings) {
-          console.warn(`  - ${warning}`);
+          console.warn(`  - ${warning} `);
         }
       }
     } catch (validationError) {
@@ -641,7 +661,7 @@ function prepare(sql: string): DbStatement {
       stmt = db.prepare(sql);
       statementCache.set(sql, stmt);
     } catch (error) {
-      console.error(`[db] Error preparing statement: ${sql}`, error);
+      console.error(`[db] Error preparing statement: ${sql} `, error);
       throw error;
     }
   }

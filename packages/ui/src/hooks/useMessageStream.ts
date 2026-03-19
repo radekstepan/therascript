@@ -173,6 +173,23 @@ export function useMessageStream({
                     data
                   );
                   // Optional: Use data.promptTokens, data.completionTokens if needed
+                  // If we got truncation info, save it to the actual message
+                  if (data.isTruncated !== undefined) {
+                    queryClient.setQueryData<ChatSession>(
+                      chatQueryKey,
+                      (old) =>
+                        old
+                          ? {
+                              ...old,
+                              messages: (old.messages ?? []).map((m) =>
+                                m.id === tempAiMessageId
+                                  ? { ...m, isTruncated: data.isTruncated }
+                                  : m
+                              ),
+                            }
+                          : old
+                    );
+                  }
                   // The finally block will handle cleanup and potential invalidation
                 }
                 // 4. Error Signal: Backend reported an error during stream generation

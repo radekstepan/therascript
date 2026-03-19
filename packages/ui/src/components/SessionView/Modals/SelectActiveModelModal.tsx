@@ -1,5 +1,5 @@
 /* packages/ui/src/components/SessionView/Modals/SelectActiveModelModal.tsx */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Dialog,
@@ -21,10 +21,12 @@ import {
   Cross2Icon,
   CheckIcon,
   LightningBoltIcon,
+  ReloadIcon,
 } from '@radix-ui/react-icons';
 import {
   fetchAvailableModels,
   setOllamaModel,
+  unloadOllamaModel,
   estimateModelVram,
   fetchGpuStats,
 } from '../../../api/api';
@@ -55,6 +57,7 @@ export function SelectActiveModelModal({
   ollamaStatus,
 }: SelectActiveModelModalProps) {
   const queryClient = useQueryClient();
+  const prevIsOpenRef = useRef(false);
   const [selectedModel, setSelectedModel] = useState(
     currentActiveModelName || ''
   );
@@ -124,8 +127,21 @@ export function SelectActiveModelModal({
     },
   });
 
+  const unloadMutation = useMutation({
+    mutationFn: unloadOllamaModel,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ollamaStatus'] });
+    },
+    onError: (err: Error) => {
+      setError(`Failed to unload model: ${err.message}`);
+    },
+  });
+
+  // Fix flickering bug: only initialize form once when modal opens
+  // Decouple from ollamaStatus polling by using ref-based guard
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !prevIsOpenRef.current) {
+      // Modal just opened — snapshot current backend state into local form
       setSelectedModel(currentActiveModelName || '');
       if (currentConfiguredContextSize && currentConfiguredContextSize > 0) {
         setContextSizeInput(String(currentConfiguredContextSize));
@@ -144,15 +160,8 @@ export function SelectActiveModelModal({
       );
       setError(null);
     }
-  }, [
-    isOpen,
-    currentActiveModelName,
-    currentConfiguredContextSize,
-    ollamaStatus?.configuredTemperature,
-    ollamaStatus?.configuredTopP,
-    ollamaStatus?.configuredRepeatPenalty,
-    ollamaStatus?.configuredNumGpuLayers,
-  ]);
+    prevIsOpenRef.current = isOpen;
+  }, [isOpen]); // ← ollamaStatus properties intentionally excluded
 
   const handleSave = () => {
     setError(null);
@@ -178,6 +187,7 @@ export function SelectActiveModelModal({
   };
 
   const isSaving = setModelMutation.isPending;
+  const isModelLoaded = ollamaStatus?.loaded === true;
   const models = availableModelsData?.models || [];
   const selectedModelDetails = models.find((m) => m.name === selectedModel);
   const effectiveContextSize =
@@ -194,6 +204,10 @@ export function SelectActiveModelModal({
   useEffect(() => {
     if (selectedModel !== currentActiveModelName) {
       setNumGpuLayers(undefined);
+      setUserTouchedContext(false); // Allow auto-fill for new model
+      setTemperature(0.7);
+      setTopP(0.9);
+      setRepeatPenalty(1.1);
     }
   }, [selectedModel]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -272,6 +286,18 @@ export function SelectActiveModelModal({
           Select the active model and optionally override its context size.
         </Dialog.Description>
         <Flex direction="column" gap="4">
+          {isModelLoaded && (
+            <Callout.Root color="blue" size="1">
+              <Callout.Icon>
+                <InfoCircledIcon />
+              </Callout.Icon>
+              <Callout.Text>
+                Model <Strong>{ollamaStatus?.activeModel}</Strong> is currently
+                loaded in memory. Unload it to change settings.
+              </Callout.Text>
+            </Callout.Root>
+          )}
+
           <label>
             <Text as="div" size="2" mb="1" weight="medium">
               Select Model
@@ -279,7 +305,7 @@ export function SelectActiveModelModal({
             <Select.Root
               value={selectedModel}
               onValueChange={setSelectedModel}
-              disabled={isSaving || isLoadingModels}
+              disabled={isSaving || isLoadingModels || isModelLoaded}
               size="2"
             >
               <Select.Trigger
@@ -337,7 +363,7 @@ export function SelectActiveModelModal({
                 setContextSizeInput(e.target.value);
                 setUserTouchedContext(true);
               }}
-              disabled={isSaving}
+              disabled={isSaving || isModelLoaded}
             />
           </label>
 
@@ -375,7 +401,7 @@ export function SelectActiveModelModal({
                     min={0}
                     max={selectedModelDetails.architecture.num_layers!}
                     step={1}
-                    disabled={isSaving}
+                    disabled={isSaving || isModelLoaded}
                   />
                   <Flex justify="between" mt="2">
                     <Text size="1" color="gray" style={{ fontSize: '10px' }}>
@@ -416,6 +442,7 @@ export function SelectActiveModelModal({
                   min={0}
                   max={2}
                   step={0.1}
+                  disabled={isModelLoaded}
                 />
               </Box>
 
@@ -432,6 +459,7 @@ export function SelectActiveModelModal({
                   min={0}
                   max={1}
                   step={0.05}
+                  disabled={isModelLoaded}
                 />
               </Box>
 
@@ -448,6 +476,7 @@ export function SelectActiveModelModal({
                   min={0.5}
                   max={2}
                   step={0.1}
+                  disabled={isModelLoaded}
                 />
               </Box>
             </Box>
@@ -550,26 +579,46 @@ export function SelectActiveModelModal({
             variant="soft"
             color="gray"
             onClick={() => onOpenChange(false)}
-            disabled={isSaving}
+            disabled={isSaving || unloadMutation.isPending}
             className="transition-all duration-150"
           >
             <Cross2Icon /> Cancel
           </Button>
-          <Button
-            onClick={handleSave}
-            disabled={isSaving || !selectedModel}
-            className="transition-all duration-150"
-          >
-            {isSaving ? (
-              <>
-                <Spinner /> <Text ml="1">Saving...</Text>
-              </>
-            ) : (
-              <>
-                <CheckIcon /> Save & Set Active
-              </>
-            )}
-          </Button>
+          {isModelLoaded ? (
+            <Button
+              color="red"
+              variant="soft"
+              onClick={() => unloadMutation.mutate()}
+              disabled={unloadMutation.isPending}
+              className="transition-all duration-150"
+            >
+              {unloadMutation.isPending ? (
+                <>
+                  <Spinner /> <Text ml="1">Unloading...</Text>
+                </>
+              ) : (
+                <>
+                  <ReloadIcon /> Unload Model to Change Settings
+                </>
+              )}
+            </Button>
+          ) : (
+            <Button
+              onClick={handleSave}
+              disabled={isSaving || !selectedModel}
+              className="transition-all duration-150"
+            >
+              {isSaving ? (
+                <>
+                  <Spinner /> <Text ml="1">Saving...</Text>
+                </>
+              ) : (
+                <>
+                  <CheckIcon /> Save & Load Model
+                </>
+              )}
+            </Button>
+          )}
         </Flex>
       </Dialog.Content>
     </Dialog.Root>

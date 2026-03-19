@@ -181,9 +181,16 @@ export function SessionSidebar({
         }
       );
       if (sessionId !== null) {
-        queryClient.invalidateQueries({
-          queryKey: ['chat', sessionId, updatedChatMetadata.id],
-        });
+        queryClient.setQueryData<ChatSession>(
+          ['chat', sessionId, updatedChatMetadata.id],
+          (oldData) => {
+            if (!oldData) return oldData;
+            return {
+              ...oldData,
+              name: updatedChatMetadata.name,
+            };
+          }
+        );
       }
       cancelRename();
     },

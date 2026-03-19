@@ -1061,10 +1061,37 @@ export const unloadActiveModel = async (
         { timeout: 10000 }
       );
 
+      // Wait until the model is actually unloaded by polling checkModelStatus
       console.log(
-        `[Real OllamaService:unload] Unload request sent successfully for ${modelToUnload}.`
+        `[Real OllamaService:unload] Waiting for model '${modelToUnload}' to unload...`
       );
-      return `Unload request sent for model ${modelToUnload}. It will be unloaded shortly.`;
+      let isLoaded = true;
+      let attempts = 0;
+      const maxAttempts = 20; // 20 * 500ms = 10 seconds timeout
+
+      while (isLoaded && attempts < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        const currentStatus = await checkModelStatus(modelToUnload);
+        // If it's unavailable or null, consider it unloaded.
+        // If it's an object with a name, it's still loaded.
+        isLoaded = !!(currentStatus && 'name' in currentStatus);
+        attempts++;
+      }
+
+      if (isLoaded) {
+        console.warn(
+          `[Real OllamaService:unload] Model '${modelToUnload}' still appears loaded after waiting.`
+        );
+      } else {
+        console.log(
+          `[Real OllamaService:unload] Model '${modelToUnload}' successfully unloaded.`
+        );
+      }
+
+      console.log(
+        `[Real OllamaService:unload] Unload request sent and processed successfully for ${modelToUnload}.`
+      );
+      return `Model ${modelToUnload} unloaded successfully.`;
     } else {
       // If the model is not loaded, do nothing that would cause it to load.
       const msg = `Model '${modelToUnload}' is not currently loaded. No unload action necessary.`;

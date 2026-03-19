@@ -52,11 +52,13 @@ interface AddMessageStreamMutationResult {
 interface ChatInputProps {
   isStandalone: boolean;
   disabled?: boolean;
+  isAiResponding: boolean;
+  onCancelStream: () => void;
   addMessageMutation: UseMutationResult<
     AddMessageStreamMutationResult,
     Error,
-    string,
-    unknown
+    { text: string; tempAiMessageId: number },
+    any
   >;
   transcriptTokenCount?: number | null; // <-- ADDED PROP
 }
@@ -64,6 +66,8 @@ interface ChatInputProps {
 export function ChatInput({
   isStandalone,
   disabled = false,
+  isAiResponding,
+  onCancelStream,
   addMessageMutation,
   transcriptTokenCount, // <-- DESTRUCTURED PROP
 }: ChatInputProps) {
@@ -95,13 +99,11 @@ export function ChatInput({
   // No longer need setModelAndLoadMutation as SelectActiveModelModal handles setting/loading
   // const setModelAndLoadMutation = useMutation(...);
 
-  const isAiResponding = addMessageMutation.isPending;
   const isEffectivelyDisabled =
     disabled ||
     isAiResponding ||
     !activeChatId ||
     isSelectModelModalOpen ||
-    // isInlineLoadingModel || // Removed
     isLoadingOllamaStatusForInput;
 
   useEffect(() => {
@@ -121,8 +123,7 @@ export function ChatInput({
   // This is now primarily triggered after SelectActiveModelModal succeeds
   useEffect(() => {
     if (
-      // !isInlineLoadingModel && // No longer an inline loading state here
-      pendingMessage && // Check if there's a message waiting
+      pendingMessage &&
       ollamaStatus?.activeModel &&
       ollamaStatus.modelChecked === ollamaStatus.activeModel &&
       ollamaStatus.loaded
@@ -131,9 +132,11 @@ export function ChatInput({
         '[ChatInput] Model confirmed loaded. Sending pending message:',
         pendingMessage
       );
-      addMessageMutation.mutate(pendingMessage);
+      addMessageMutation.mutate({
+        text: pendingMessage,
+        tempAiMessageId: -Math.floor(Math.random() * 1000000),
+      });
       setPendingMessage(null);
-      // setIsInlineLoadingModel(false); // Removed
     }
   }, [ollamaStatus, pendingMessage, addMessageMutation]);
 
@@ -186,7 +189,10 @@ export function ChatInput({
     }
 
     // Case C: Model is active and loaded
-    addMessageMutation.mutate(queryToSend);
+    addMessageMutation.mutate({
+      text: queryToSend,
+      tempAiMessageId: -Math.floor(Math.random() * 1000000),
+    });
     return true;
   };
 
@@ -217,10 +223,7 @@ export function ChatInput({
 
   const handleCancelStreamClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     e.preventDefault();
-    setToastMessageAtom('? Stream cancellation requested (if supported).');
-    if (!isEffectivelyDisabled && inputRef.current) {
-      inputRef.current.focus();
-    }
+    onCancelStream();
   };
 
   const showCancelButton = isAiResponding && !disabled; // Removed isInlineLoadingModel check
@@ -347,7 +350,7 @@ export function ChatInput({
               variant="solid"
               size="2"
               onClick={handleCancelStreamClick}
-              title="Cancel response (Not Implemented Yet)"
+              title="Cancel response"
               aria-label="Cancel AI response"
               // disabled={!isAiResponding || isInlineLoadingModel} // Removed isInlineLoadingModel
               disabled={!isAiResponding}
@@ -381,14 +384,9 @@ export function ChatInput({
         )}
 
         {/* Live usage preview hint: show only when useful (warn/danger/overflow) */}
-        {previewUsage && shouldShowPreviewHint && (
-          <Text
-            size="1"
-            color={willOverflow ? 'red' : isDanger ? 'red' : 'amber'}
-          >
-            {willOverflow
-              ? 'Warning: this message may exceed the model context.'
-              : `Approaching limit — context used ~${previewPercent}%`}
+        {previewUsage && shouldShowPreviewHint && !willOverflow && (
+          <Text size="1" color={isDanger ? 'red' : 'amber'}>
+            {`Approaching limit — context used ~${previewPercent}%`}
           </Text>
         )}
       </Flex>

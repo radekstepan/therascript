@@ -1,7 +1,11 @@
 // packages/ui/src/components/SessionView/Chat/ChatMessageBubble.tsx
 import React, { useRef } from 'react';
-import { Box, Flex, Text, Spinner } from '@radix-ui/themes';
-import { StarIcon, CopyIcon } from '@radix-ui/react-icons';
+import { Box, Flex, Text, Spinner, Callout } from '@radix-ui/themes';
+import {
+  StarIcon,
+  CopyIcon,
+  ExclamationTriangleIcon,
+} from '@radix-ui/react-icons';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
@@ -33,9 +37,29 @@ export function ChatMessageBubble({
     message.sender === 'ai' && isCurrentlyStreaming
   );
 
-  const displayText = isCurrentlyStreaming ? animatedText : message.text;
+  let displayText = isCurrentlyStreaming ? animatedText : message.text;
+
+  let thinkingText: string | null = null;
+  const thinkStart = displayText.indexOf('<think>');
+  if (thinkStart !== -1) {
+    const thinkEnd = displayText.indexOf('</think>');
+    if (thinkEnd === -1) {
+      thinkingText = displayText.substring(thinkStart + 7);
+      // Only show whatever text comes after the incomplete think tag, or before the start.
+      displayText = displayText.substring(0, thinkStart);
+    } else {
+      thinkingText = displayText.substring(thinkStart + 7, thinkEnd);
+      displayText =
+        displayText.substring(0, thinkStart) +
+        displayText.substring(thinkEnd + 8);
+    }
+  }
+
   const showWaitingIndicator =
-    isAiResponding && isCurrentlyStreaming && displayText === '';
+    isAiResponding &&
+    isCurrentlyStreaming &&
+    displayText === '' &&
+    !thinkingText;
 
   const markdownContainerRef = useRef<HTMLDivElement>(null);
 
@@ -97,32 +121,65 @@ export function ChatMessageBubble({
           <Flex align="center" gap="2" className="text-[var(--gray-11)] px-1">
             <Spinner size="1" />
             <Text size="2" style={{ fontStyle: 'italic' }}>
-              Thinking...
+              Analyzing context...
             </Text>
           </Flex>
         ) : (
           <Box className={cn(isUser ? 'text-white' : 'markdown-ai-message')}>
-            {!isUser && renderMd ? (
-              <Box ref={markdownContainerRef}>
-                <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
-                  {displayText}
-                </ReactMarkdown>
-              </Box>
-            ) : (
-              <Text
-                size="2"
+            {thinkingText && (
+              <Box
+                mb={displayText.trim() ? '3' : '0'}
+                className="text-[var(--gray-9)] italic overflow-hidden"
                 style={{
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                  lineHeight: 1.6,
+                  fontSize: '0.85em',
+                  whiteSpace: 'nowrap',
+                  textOverflow: 'ellipsis',
+                  maxWidth: '100%',
                 }}
               >
-                {displayText}
-              </Text>
+                {thinkingText}
+              </Box>
             )}
+            {displayText.trim() !== '' &&
+              (!isUser && renderMd ? (
+                <Box ref={markdownContainerRef}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
+                    {displayText}
+                  </ReactMarkdown>
+                </Box>
+              ) : (
+                <Text
+                  size="2"
+                  style={{
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    lineHeight: 1.6,
+                  }}
+                >
+                  {displayText}
+                </Text>
+              ))}
           </Box>
         )}
       </Box>
+
+      {message.isTruncated && (
+        <Box
+          mt="2"
+          width="100%"
+          className="max-w-[90%] md:max-w-[85%] lg:max-w-[75%]"
+        >
+          <Callout.Root color="amber" size="1">
+            <Callout.Icon>
+              <ExclamationTriangleIcon />
+            </Callout.Icon>
+            <Callout.Text>
+              Context limit reached. Some older messages or parts of the
+              transcript were truncated and ignored by the LLM.
+            </Callout.Text>
+          </Callout.Root>
+        </Box>
+      )}
 
       {/* Metrics Row - only for AI messages */}
       {!isUser && displayMetrics && (

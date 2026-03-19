@@ -47,7 +47,16 @@ const findChatWithMessages = (chatId: number): BackendChatSession | null => {
   try {
     const chatRow = get<RawChatRow>(selectChatByIdSql, chatId);
     if (!chatRow) return null;
-    const messages = all<BackendChatMessage>(selectMessagesByChatIdSql, chatId);
+    const messagesQueryres = all<any>(selectMessagesByChatIdSql, chatId);
+    const messages = (messagesQueryres ?? []).map((m) => ({
+      ...m,
+      isTruncated:
+        m.isTruncated === 1
+          ? true
+          : m.isTruncated === 0
+            ? false
+            : !!m.isTruncated,
+    })) as BackendChatMessage[];
     const tagsArray = parseTags(chatRow.tags);
     const result: BackendChatSession = {
       id: chatRow.id,
@@ -55,7 +64,7 @@ const findChatWithMessages = (chatId: number): BackendChatSession | null => {
       timestamp: chatRow.timestamp,
       name: chatRow.name ?? null,
       tags: tagsArray,
-      messages: messages ?? [],
+      messages,
     };
     return result;
   } catch (error) {

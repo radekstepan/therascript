@@ -2,8 +2,8 @@ import { db, run, all, get } from '@therascript/db';
 import type { BackendChatMessage } from '@therascript/domain';
 
 const insertMessageSql = `
-    INSERT INTO messages (chatId, sender, text, timestamp, promptTokens, completionTokens, duration)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO messages (chatId, sender, text, timestamp, promptTokens, completionTokens, duration, isTruncated)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 `;
 const selectMessagesByChatIdSql = `
     SELECT * FROM messages WHERE chatId = ? ORDER BY id ASC
@@ -20,7 +20,8 @@ export const messageRepository = {
     text: string,
     promptTokens?: number | null,
     completionTokens?: number | null,
-    duration?: number | null
+    duration?: number | null,
+    isTruncated?: boolean | null
   ): BackendChatMessage => {
     const timestamp = Date.now();
     try {
@@ -32,7 +33,8 @@ export const messageRepository = {
         timestamp,
         promptTokens ?? null,
         completionTokens ?? null,
-        duration ?? null
+        duration ?? null,
+        isTruncated ? 1 : 0
       );
       const newId = info.lastInsertRowid as number;
       const newMsg = get<BackendChatMessage>(selectMessageByIdSql, newId);
@@ -50,11 +52,16 @@ export const messageRepository = {
 
   findMessagesByChatId: (chatId: number): BackendChatMessage[] => {
     try {
-      const messages = all<BackendChatMessage>(
-        selectMessagesByChatIdSql,
-        chatId
-      );
-      return messages ?? [];
+      const messages = all<any>(selectMessagesByChatIdSql, chatId);
+      return (messages ?? []).map((m) => ({
+        ...m,
+        isTruncated:
+          m.isTruncated === 1
+            ? true
+            : m.isTruncated === 0
+              ? false
+              : !!m.isTruncated,
+      })) as BackendChatMessage[];
     } catch (error) {
       console.error(`DB error fetching messages for chat ${chatId}:`, error);
       throw new Error(`Database error fetching messages.`);
@@ -63,11 +70,18 @@ export const messageRepository = {
 
   findMessageById: (messageId: number): BackendChatMessage | null => {
     try {
-      const messageRow = get<BackendChatMessage>(
-        selectMessageByIdSql,
-        messageId
-      );
-      return messageRow ?? null;
+      const messageRow = get<any>(selectMessageByIdSql, messageId);
+      return messageRow
+        ? ({
+            ...messageRow,
+            isTruncated:
+              messageRow.isTruncated === 1
+                ? true
+                : messageRow.isTruncated === 0
+                  ? false
+                  : !!messageRow.isTruncated,
+          } as BackendChatMessage)
+        : null;
     } catch (error) {
       console.error(`DB error fetching message ${messageId}:`, error);
       throw new Error(`Database error fetching message.`);
@@ -76,7 +90,16 @@ export const messageRepository = {
 
   findAll: (): BackendChatMessage[] => {
     try {
-      return all<BackendChatMessage>(selectAllMessagesSql);
+      const messages = all<any>(selectAllMessagesSql);
+      return messages.map((m) => ({
+        ...m,
+        isTruncated:
+          m.isTruncated === 1
+            ? true
+            : m.isTruncated === 0
+              ? false
+              : !!m.isTruncated,
+      })) as BackendChatMessage[];
     } catch (error) {
       console.error(`DB error fetching all messages:`, error);
       throw new Error(`Database error fetching all messages.`);

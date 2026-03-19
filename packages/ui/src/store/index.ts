@@ -8,6 +8,7 @@ export * from './action/setSessionSortAtom';
 export * from './action/setStandaloneChatSortAtom';
 export * from './action/setAnalysisJobSortAtom'; // <-- ADDED
 
+export * from './chat/activeLlmJobsAtom';
 export * from './chat/chatErrorAtom';
 export * from './chat/currentQueryAtom';
 export * from './chat/toastMessageAtom';

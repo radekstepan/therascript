@@ -14,6 +14,7 @@ export const sessionSchema = z.object({
   transcriptTokenCount: z.number().nullable(),
   duration: z.number().nullable().optional(),
   errorMessage: z.string().nullable().optional(),
+  showSpeakers: z.boolean().nullable().optional(),
   chats: z
     .array(
       z.object({

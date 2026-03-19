@@ -64,6 +64,8 @@ const ChatMessageResponseSchema = t.Object({
   timestamp: t.Number(),
   promptTokens: t.Optional(t.Union([t.Number(), t.Null()])),
   completionTokens: t.Optional(t.Union([t.Number(), t.Null()])),
+  duration: t.Optional(t.Union([t.Number(), t.Null()])),
+  isTruncated: t.Optional(t.Union([t.Boolean(), t.Null()])),
 });
 
 const FullSessionChatResponseSchema = t.Object({

@@ -32,6 +32,7 @@ const mapBackendMessageToUi = (msg: BackendChatMessage): ChatMessage => ({
   promptTokens: msg.promptTokens ?? undefined,
   completionTokens: msg.completionTokens ?? undefined,
   duration: msg.duration ?? undefined,
+  isTruncated: msg.isTruncated ?? undefined,
 });
 
 // ==============================
@@ -77,12 +78,14 @@ export const startSessionChat = async (
 // Streaming Logic
 const sendMessageAndStreamResponse = async (
   url: string,
-  text: string
+  text: string,
+  opts?: { signal?: AbortSignal }
 ): Promise<{ userMessageId: number; stream: ReadableStream<Uint8Array> }> => {
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text }),
+    signal: opts?.signal,
   });
 
   if (!response.ok || !response.body) {
@@ -107,10 +110,11 @@ const sendMessageAndStreamResponse = async (
 export const addSessionChatMessageStream = async (
   sessionId: number,
   chatId: number,
-  text: string
+  text: string,
+  opts?: { signal?: AbortSignal }
 ): Promise<{ userMessageId: number; stream: ReadableStream<Uint8Array> }> => {
   const url = `${API_BASE_URL}/api/sessions/${sessionId}/chats/${chatId}/messages`;
-  return sendMessageAndStreamResponse(url, text);
+  return sendMessageAndStreamResponse(url, text, opts);
 };
 
 export const renameSessionChat = async (
@@ -191,10 +195,11 @@ export const fetchStandaloneChatDetails = async (
 
 export const addStandaloneChatMessageStream = async (
   chatId: number,
-  text: string
+  text: string,
+  opts?: { signal?: AbortSignal }
 ): Promise<{ userMessageId: number; stream: ReadableStream<Uint8Array> }> => {
   const url = `${API_BASE_URL}/api/chats/${chatId}/messages`;
-  return sendMessageAndStreamResponse(url, text);
+  return sendMessageAndStreamResponse(url, text, opts);
 };
 
 export const renameStandaloneChat = async (

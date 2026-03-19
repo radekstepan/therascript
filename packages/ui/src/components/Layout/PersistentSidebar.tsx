@@ -40,7 +40,11 @@ import { effectiveThemeAtom } from '../../store';
 import { isPersistentSidebarOpenAtom } from '../../store/ui/isPersistentSidebarOpenAtom';
 import { currentPageAtom } from '../../store/navigation/currentPageAtom';
 import { cn } from '../../utils';
-import { toastMessageAtom } from '../../store';
+import {
+  currentQueryAtom,
+  toastMessageAtom,
+  activeLlmJobsAtom,
+} from '../../store';
 import { JobsQueueModal } from '../Jobs/JobsQueueModal';
 import { requestAppShutdown, fetchActiveJobCount } from '../../api/api';
 import { fetchSessions } from '../../api/session';
@@ -93,6 +97,8 @@ export function PersistentSidebar() {
     staleTime: 4000,
   });
   const activeJobCount = activeJobCountData?.total ?? 0;
+  const activeLlmJobs = useAtomValue(activeLlmJobsAtom);
+  const totalActiveJobs = activeJobCount + activeLlmJobs.length;
 
   const { data: sessionsData } = useQuery({
     queryKey: ['sessions'],
@@ -415,15 +421,19 @@ export function PersistentSidebar() {
               )}
               aria-hidden="true"
             />
-            {isSidebarOpen && (
+            {isSidebarOpen ? (
               <Flex align="center" justify="between" width="100%">
                 <span className="text-[var(--gray-12)]">Active Jobs</span>
-                {activeJobCount > 0 && (
+                {totalActiveJobs > 0 && (
                   <Badge color="blue" variant="solid" radius="full" size="1">
-                    {activeJobCount}
+                    {totalActiveJobs}
                   </Badge>
                 )}
               </Flex>
+            ) : (
+              totalActiveJobs > 0 && (
+                <div className="absolute top-1 right-1 w-2 h-2 bg-blue-500 rounded-full" />
+              )
             )}
           </button>
 

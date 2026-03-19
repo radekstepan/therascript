@@ -24,8 +24,13 @@ import type {
   ChatMessage,
   OllamaStatus,
 } from '../../../types';
-import { currentQueryAtom, toastMessageAtom } from '../../../store';
-import { useAtom, useSetAtom } from 'jotai';
+import {
+  currentQueryAtom,
+  toastMessageAtom,
+  activeLlmJobsAtom,
+} from '../../../store';
+import type { ActiveLlmJob } from '../../../store';
+import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 
 interface ChatInterfaceProps {
   session?: Session | null; // Optional for standalone
@@ -59,6 +64,7 @@ export function ChatInterface({
   const queryClient = useQueryClient();
   const [currentQuery, setCurrentQuery] = useAtom(currentQueryAtom);
   const setToastMessage = useSetAtom(toastMessageAtom);
+  const setActiveLlmJobs = useSetAtom(activeLlmJobsAtom);
 
   const [streamingAiMessageId, setStreamingAiMessageId] = useState<
     number | null
@@ -70,6 +76,9 @@ export function ChatInterface({
   const [currentTokensPerSecond, setCurrentTokensPerSecond] = useState<
     number | null
   >(null);
+
+  const activeStreamControllerRef = useRef<AbortController | null>(null);
+  const cancelRequestedRef = useRef(false);
 
   const chatQueryKey = useMemo(
     () =>
@@ -105,6 +114,39 @@ export function ChatInterface({
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: true,
   });
+
+  // --- Context for re-mounting/persistent jobs ---
+  const activeLlmJobs = useAtomValue(activeLlmJobsAtom);
+  const currentJob = useMemo(
+    () => activeLlmJobs.find((j: ActiveLlmJob) => j.chatId === activeChatId),
+    [activeLlmJobs, activeChatId]
+  );
+
+  // Abort stream only when switching to a different chat ID
+  const prevChatIdRef = useRef<number | null>(activeChatId);
+  useEffect(() => {
+    if (prevChatIdRef.current !== activeChatId) {
+      // Truly switched chats - find and abort the stream for the previous chat
+      const prevJob = activeLlmJobs.find(
+        (j: ActiveLlmJob) => j.chatId === prevChatIdRef.current
+      );
+      if (prevJob?.controller) {
+        prevJob.controller.abort();
+      }
+      prevChatIdRef.current = activeChatId;
+    }
+  }, [activeChatId, activeLlmJobs]);
+
+  const handleCancelStream = useCallback(() => {
+    if (!currentJob?.controller) return;
+    currentJob.controller.abort();
+    // Mark job as canceling
+    setActiveLlmJobs((prev) =>
+      prev.map((j) =>
+        j.chatId === activeChatId ? { ...j, status: 'canceling' as const } : j
+      )
+    );
+  }, [activeChatId, setActiveLlmJobs, currentJob]);
 
   const lastAiMessageWithTokens = useMemo(() => {
     if (!chatData?.messages || chatData.messages.length === 0) {
@@ -224,6 +266,7 @@ export function ChatInterface({
                 const completionTokens =
                   data.completionTokens ?? streamingTokensCount;
                 const duration = data.duration ?? null;
+                const isTruncated = data.isTruncated ?? false;
                 const tokensPerSecond =
                   duration && completionTokens
                     ? (completionTokens * 1000) / duration
@@ -241,6 +284,7 @@ export function ChatInterface({
                               ...msg,
                               completionTokens,
                               duration,
+                              isTruncated,
                             }
                           : msg
                       ),
@@ -272,12 +316,27 @@ export function ChatInterface({
           }
         }
       }
-    } catch (error) {
-      console.error('Error reading stream:', error);
-      streamErrored = true;
+    } catch (error: any) {
+      const isAbort =
+        cancelRequestedRef.current || error?.name === 'AbortError';
+      if (!isAbort) {
+        console.error('Error reading stream:', error);
+        streamErrored = true;
+      }
     } finally {
+      activeStreamControllerRef.current = null;
+      cancelRequestedRef.current = false;
       setStreamingAiMessageId(null);
-      if (activeChatId && !streamErrored) {
+      setStreamingStartTime(null);
+      setStreamingTokensCount(0);
+      setCurrentTokensPerSecond(null);
+      // Remove LLM job
+      if (activeChatId) {
+        setActiveLlmJobs((prev) =>
+          prev.filter((j) => j.chatId !== activeChatId)
+        );
+      }
+      if (activeChatId) {
         setTimeout(() => {
           queryClient.invalidateQueries({ queryKey: currentChatQueryKey });
         }, 100);
@@ -285,18 +344,54 @@ export function ChatInterface({
     }
   };
 
-  const addMessageMutation = useMutation({
-    mutationFn: async (text: string) => {
+  const addMessageMutation = useMutation<
+    { userMessageId: number; stream: ReadableStream<Uint8Array> },
+    Error,
+    { text: string; tempAiMessageId: number },
+    {
+      previousChatData: ChatSession | undefined;
+      temporaryUserMessageId: number;
+      tempAiMessageId: number;
+    }
+  >({
+    mutationFn: async ({
+      text,
+      tempAiMessageId,
+    }: {
+      text: string;
+      tempAiMessageId: number;
+    }) => {
       if (!activeChatId) throw new Error('Chat ID missing');
+      cancelRequestedRef.current = false;
+      // Abort any existing stream for THIS chat specifically
+      if (currentJob?.controller) {
+        currentJob.controller.abort();
+      }
+
+      const controller = new AbortController();
+      // Store the controller in the global job atom immediately
+      setActiveLlmJobs((prev) =>
+        prev.map((j: ActiveLlmJob) =>
+          j.id === tempAiMessageId ? { ...j, controller } : j
+        )
+      );
+
+      const opts = { signal: controller.signal };
       if (isStandalone) {
-        return addStandaloneChatMessageStream(activeChatId, text);
+        return addStandaloneChatMessageStream(activeChatId, text, opts);
       } else {
         if (!activeSessionId)
           throw new Error('Session ID missing for session chat');
-        return addSessionChatMessageStream(activeSessionId, activeChatId, text);
+        return addSessionChatMessageStream(
+          activeSessionId,
+          activeChatId,
+          text,
+          opts
+        );
       }
     },
-    onMutate: async (newMessageText) => {
+    onMutate: async (variables) => {
+      const { text, tempAiMessageId } = variables;
       if (!activeChatId) return;
       const currentChatQueryKey = chatQueryKey;
       await queryClient.cancelQueries({ queryKey: currentChatQueryKey });
@@ -306,10 +401,9 @@ export function ChatInterface({
         id: createTemporaryId(),
         chatId: activeChatId,
         sender: 'user',
-        text: newMessageText,
+        text: text,
         timestamp: Date.now(),
       };
-      const tempAiMessageId = createTemporaryId();
       const temporaryAiMessage: ChatMessage = {
         id: tempAiMessageId,
         chatId: activeChatId,
@@ -333,6 +427,19 @@ export function ChatInterface({
         ],
       }));
       setStreamingAiMessageId(tempAiMessageId);
+      // Register active LLM job
+      setActiveLlmJobs((prev) => [
+        ...prev,
+        {
+          id: tempAiMessageId,
+          chatId: activeChatId,
+          sessionId: isStandalone ? null : activeSessionId,
+          isStandalone,
+          promptPreview: text.length > 80 ? text.slice(0, 80) + '…' : text,
+          startedAt: Date.now(),
+          status: 'responding',
+        },
+      ]);
       return {
         previousChatData,
         temporaryUserMessageId: temporaryUserMessage.id,
@@ -359,7 +466,11 @@ export function ChatInterface({
       });
     },
     onError: (error, newMessageText, context) => {
-      console.error('Mutation failed (Initiation or Stream Error):', error);
+      const isAbort =
+        cancelRequestedRef.current || error?.name === 'AbortError';
+      if (!isAbort) {
+        console.error('Mutation failed (Initiation or Stream Error):', error);
+      }
       const currentChatQueryKey = chatQueryKey;
       if (
         context?.previousChatData &&
@@ -368,7 +479,15 @@ export function ChatInterface({
       ) {
         queryClient.setQueryData(currentChatQueryKey, context.previousChatData);
       }
+      activeStreamControllerRef.current = null;
+      cancelRequestedRef.current = false;
       setStreamingAiMessageId(null);
+      // Remove LLM job
+      if (activeChatId) {
+        setActiveLlmJobs((prev) =>
+          prev.filter((j) => j.chatId !== activeChatId)
+        );
+      }
     },
     onSettled: () => {
       setCurrentQuery('');
@@ -382,6 +501,11 @@ export function ChatInterface({
 
   const isAiResponding =
     addMessageMutation.isPending || streamingAiMessageId !== null;
+
+  const handleSendMessage = (text: string) => {
+    const tempAiMessageId = createTemporaryId();
+    addMessageMutation.mutate({ text, tempAiMessageId });
+  };
 
   return (
     <Flex
@@ -473,7 +597,9 @@ export function ChatInterface({
       >
         <ChatInput
           isStandalone={isStandalone}
-          disabled={combinedIsLoading || !activeChatId || isAiResponding}
+          disabled={combinedIsLoading || !activeChatId}
+          isAiResponding={isAiResponding}
+          onCancelStream={handleCancelStream}
           addMessageMutation={addMessageMutation}
           transcriptTokenCount={transcriptTokenCount} // <-- PASS PROP
         />

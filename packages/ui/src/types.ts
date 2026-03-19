@@ -92,6 +92,7 @@ export interface ChatMessage {
   promptTokens?: number | null;
   completionTokens?: number | null;
   duration?: number | null;
+  isTruncated?: boolean | null;
 }
 
 export interface ChatSession {
@@ -143,6 +144,7 @@ export interface BackendChatMessage {
   promptTokens?: number | null;
   completionTokens?: number | null;
   duration?: number | null;
+  isTruncated?: boolean | null;
 }
 
 export interface OllamaModelInfo {

@@ -27,20 +27,16 @@ import {
   SymbolIcon,
   ReloadIcon,
   ExclamationTriangleIcon,
-  DownloadIcon,
   StopIcon,
   MagnifyingGlassIcon,
   LightningBoltIcon,
   DotsHorizontalIcon,
-  Pencil1Icon,
   TrashIcon,
-  CheckIcon,
 } from '@radix-ui/react-icons';
 import {
   fetchOllamaStatus,
   fetchAvailableModels,
   unloadOllamaModel,
-  setOllamaModel,
   startPullOllamaModel,
   fetchPullOllamaModelStatus,
   cancelPullOllamaModel,
@@ -69,7 +65,6 @@ export function LlmManagementModal({
   const queryClient = useQueryClient();
   const setToast = useSetAtom(toastMessageAtom);
   const [isWaitingForUnload, setIsWaitingForUnload] = useState(false);
-  const [loadingModelName, setLoadingModelName] = useState<string | null>(null);
   const [modelToPull, setModelToPull] = useState<string>('');
 
   // Ref for auto-focus
@@ -78,17 +73,6 @@ export function LlmManagementModal({
   // State for Polling
   const [pullJobId, setPullJobId] = useState<string | null>(null);
   const [pullingModelName, setPullingModelName] = useState<string | null>(null);
-
-  // State for Custom Context Modal
-  const [isContextModalOpen, setIsContextModalOpen] = useState(false);
-  const [modelForContextModal, setModelForContextModal] =
-    useState<OllamaModelInfo | null>(null);
-  const [customContextSizeInput, setCustomContextSizeInput] = useState('');
-  const [contextModalError, setContextModalError] = useState<string | null>(
-    null
-  );
-  // Ref for context input focus
-  const contextInputRef = useRef<HTMLInputElement>(null);
 
   // State for Delete Confirmation
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
@@ -108,16 +92,6 @@ export function LlmManagementModal({
       return () => clearTimeout(timer);
     }
   }, [isOpen, pullJobId]);
-
-  // --- Auto-focus on context modal open ---
-  useEffect(() => {
-    if (isContextModalOpen) {
-      const timer = setTimeout(() => {
-        contextInputRef.current?.focus();
-      }, 50);
-      return () => clearTimeout(timer);
-    }
-  }, [isContextModalOpen]);
 
   // --- Auto-focus on delete confirm modal open ---
   useEffect(() => {
@@ -141,9 +115,7 @@ export function LlmManagementModal({
     staleTime: 0,
     gcTime: 1000,
     refetchInterval:
-      isOpen && (isWaitingForUnload || loadingModelName || !!pullJobId)
-        ? 2000
-        : 10000,
+      isOpen && (isWaitingForUnload || !!pullJobId) ? 2000 : 10000,
     refetchOnWindowFocus: false,
   });
 
@@ -163,7 +135,6 @@ export function LlmManagementModal({
   const unloadMutation = useMutation({
     mutationFn: unloadOllamaModel,
     onMutate: () => {
-      setLoadingModelName(null);
       setIsWaitingForUnload(true);
     },
     onSuccess: (data) => {
@@ -176,43 +147,6 @@ export function LlmManagementModal({
         `❌ Error: ${error.message || 'Failed to send unload request.'}`
       );
       setIsWaitingForUnload(false);
-    },
-  });
-
-  const setModelMutation = useMutation({
-    mutationFn: (variables: {
-      modelName: string;
-      contextSize?: number | null;
-    }) => {
-      const { modelName, contextSize } = variables;
-      setLoadingModelName(modelName);
-      setIsWaitingForUnload(false);
-      return setOllamaModel(modelName, contextSize);
-    },
-    onSuccess: (data, variables) => {
-      setToast(`✅ ${data.message}`);
-      console.log(
-        `[LlmModal] Set model request successful for ${variables.modelName}. Waiting for status update...`
-      );
-      queryClient.invalidateQueries({ queryKey: ['ollamaStatus'] });
-      if (modelForContextModal?.name === variables.modelName) {
-        closeContextModal();
-      }
-    },
-    onError: (error: Error, variables) => {
-      console.error(
-        `Set model request failed for ${variables.modelName}:`,
-        error
-      );
-      setToast(
-        `❌ Error setting model ${variables.modelName}: ${error.message || 'Request failed.'}`
-      );
-      setLoadingModelName(null);
-      if (modelForContextModal?.name === variables.modelName) {
-        setContextModalError(
-          `Failed to set model: ${error.message || 'Request failed.'}`
-        );
-      }
     },
   });
 
@@ -329,7 +263,6 @@ export function LlmManagementModal({
   const deleteModelMutation = useMutation({
     mutationFn: deleteOllamaModel,
     onMutate: (modelName: string) => {
-      setLoadingModelName(modelName);
       console.log(
         `[LlmModal Mutate] Sending delete request for ${modelName}...`
       );
@@ -344,9 +277,6 @@ export function LlmManagementModal({
       console.error(`Error deleting model ${modelName}:`, error);
       setToast(`❌ Failed to delete model ${modelName}: ${error.message}`);
       closeDeleteConfirm();
-    },
-    onSettled: (data, error, modelName) => {
-      setLoadingModelName(null);
     },
   });
 
@@ -393,7 +323,7 @@ export function LlmManagementModal({
     }
   };
 
-  // Effects for unload/load confirmation (Unchanged)
+  // Effects for unload confirmation (Unchanged)
   useEffect(() => {
     if (isWaitingForUnload && ollamaStatus) {
       if (
@@ -404,57 +334,14 @@ export function LlmManagementModal({
       }
     }
   }, [isWaitingForUnload, ollamaStatus]);
-  useEffect(() => {
-    if (loadingModelName && ollamaStatus) {
-      if (
-        ollamaStatus.modelChecked === loadingModelName &&
-        ollamaStatus.loaded
-      ) {
-        setLoadingModelName(null);
-      }
-    }
-  }, [loadingModelName, ollamaStatus]);
 
-  // Event Handlers (Unload, Load) (Unchanged)
+  // Event Handlers (Unload) (Unchanged)
   const handleUnloadClick = () => {
     if (isAnyOperationActive || unloadMutation.isPending) return;
     unloadMutation.mutate();
   };
-  const handleLoadDefaultClick = (modelName: string) => {
-    if (isAnyOperationActive || setModelMutation.isPending) return;
-    setModelMutation.mutate({ modelName, contextSize: null });
-  };
 
   // Handlers for Modals (Unchanged)
-  const openContextModal = (model: OllamaModelInfo) => {
-    setModelForContextModal(model);
-    setCustomContextSizeInput('');
-    setContextModalError(null);
-    setIsContextModalOpen(true);
-  };
-  const closeContextModal = () => {
-    setIsContextModalOpen(false);
-    setModelForContextModal(null);
-    setCustomContextSizeInput('');
-    setContextModalError(null);
-    setModelMutation.reset();
-  };
-  const handleSaveCustomContext = () => {
-    if (!modelForContextModal || setModelMutation.isPending) return;
-    const sizeStr = customContextSizeInput.trim();
-    const sizeNum = parseInt(sizeStr, 10);
-    if (!sizeStr || isNaN(sizeNum) || sizeNum <= 0) {
-      setContextModalError(
-        'Please enter a valid positive number for context size.'
-      );
-      return;
-    }
-    setContextModalError(null);
-    setModelMutation.mutate({
-      modelName: modelForContextModal.name,
-      contextSize: sizeNum,
-    });
-  };
   const openDeleteConfirm = (model: OllamaModelInfo) => {
     setModelToDelete(model);
     setIsDeleteConfirmOpen(true);
@@ -485,13 +372,10 @@ export function LlmManagementModal({
     onOpenChange(open);
     if (!open) {
       setIsWaitingForUnload(false);
-      setLoadingModelName(null);
       setModelToPull('');
       unloadMutation.reset();
-      setModelMutation.reset();
       deleteModelMutation.reset();
       resetPullState(true);
-      closeContextModal();
       closeDeleteConfirm();
     }
   };
@@ -503,20 +387,9 @@ export function LlmManagementModal({
       handlePullClick();
     }
   };
-  const handleContextInputKeyDown = (
-    e: React.KeyboardEvent<HTMLInputElement>
-  ) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      handleSaveCustomContext();
-    }
-  };
 
   // Loading states (Unchanged)
   const isUnloading = unloadMutation.isPending || isWaitingForUnload;
-  const isLoadingSelectedModel =
-    setModelMutation.isPending ||
-    (loadingModelName !== null && !deleteModelMutation.isPending);
   const isDeletingSelectedModel = deleteModelMutation.isPending;
   const isPulling =
     !!pullJobId &&
@@ -526,8 +399,7 @@ export function LlmManagementModal({
   const isCancelingPull =
     cancelPullMutation.isPending || pullStatus?.status === 'canceling';
   const isStartingPull = startPullMutation.isPending;
-  const isAnyLoadingProcessActive =
-    isUnloading || isLoadingSelectedModel || isDeletingSelectedModel;
+  const isAnyLoadingProcessActive = isUnloading || isDeletingSelectedModel;
   const isAnyPullProcessActive = isPulling || isCancelingPull || isStartingPull;
   const isAnyOperationActive =
     isAnyLoadingProcessActive || isAnyPullProcessActive;
@@ -535,7 +407,6 @@ export function LlmManagementModal({
     statusError?.message ||
     availableError?.message ||
     unloadMutation.error?.message ||
-    setModelMutation.error?.message ||
     pullStatusError?.message ||
     pullStatus?.error ||
     deleteModelMutation.error?.message;
@@ -548,13 +419,10 @@ export function LlmManagementModal({
 
   // Render list item function (Changed)
   const renderModelListItem = (model: OllamaModelInfo) => {
-    const isCurrentlyLoadingThis =
-      (isLoadingSelectedModel || isDeletingSelectedModel) &&
-      loadingModelName === model.name;
+    const isCurrentlyLoadingThis = isDeletingSelectedModel;
     const isCurrentlyActiveAndLoaded =
       isAnyModelLoaded && loadedModelFullName === model.name;
     const actionsDisabled = isAnyOperationActive || isCurrentlyLoadingThis;
-    const canSetActive = !isCurrentlyActiveAndLoaded;
     const canDelete = !isCurrentlyActiveAndLoaded;
 
     return (
@@ -627,8 +495,7 @@ export function LlmManagementModal({
               >
                 {' '}
                 {/* Reduced minWidth */}
-                <Spinner size="1" />{' '}
-                {isDeletingSelectedModel ? 'Deleting...' : 'Loading...'}
+                <Spinner size="1" /> Deleting...
               </Badge>
             ) : isCurrentlyActiveAndLoaded ? (
               <Badge
@@ -660,23 +527,6 @@ export function LlmManagementModal({
                   </IconButton>
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Content size="1" align="end">
-                  <DropdownMenu.Item
-                    onSelect={() => handleLoadDefaultClick(model.name)}
-                    disabled={actionsDisabled || !canSetActive}
-                  >
-                    {' '}
-                    <DownloadIcon width="14" height="14" className="mr-1" /> Set
-                    Active{' '}
-                  </DropdownMenu.Item>
-                  <DropdownMenu.Item
-                    onSelect={() => openContextModal(model)}
-                    disabled={actionsDisabled || !canSetActive}
-                  >
-                    {' '}
-                    <Pencil1Icon width="14" height="14" className="mr-1" /> Set
-                    Active (Custom Ctx){' '}
-                  </DropdownMenu.Item>
-                  <DropdownMenu.Separator />
                   <DropdownMenu.Item
                     color="red"
                     onSelect={() => openDeleteConfirm(model)}
@@ -1012,16 +862,6 @@ export function LlmManagementModal({
               </Callout.Text>
             </Callout.Root>
           )}
-          {setModelMutation.isError && !isContextModalOpen && (
-            <Callout.Root color="red" size="1" mt="2">
-              <Callout.Icon>
-                <ExclamationTriangleIcon />
-              </Callout.Icon>
-              <Callout.Text>
-                Error setting model: {setModelMutation.error.message}
-              </Callout.Text>
-            </Callout.Root>
-          )}
           {deleteModelMutation.isError && (
             <Callout.Root color="red" size="1" mt="2">
               <Callout.Icon>
@@ -1035,7 +875,6 @@ export function LlmManagementModal({
           {overallError &&
             !displayPullError &&
             !unloadMutation.isError &&
-            !(setModelMutation.isError && !isContextModalOpen) &&
             !deleteModelMutation.isError && (
               <Callout.Root color="red" size="1" mt="2">
                 <Callout.Icon>
@@ -1059,94 +898,6 @@ export function LlmManagementModal({
             >
               {' '}
               <Cross2Icon /> Close{' '}
-            </Button>
-          </Flex>
-        </Dialog.Content>
-      </Dialog.Root>
-      {/* Custom Context Size Modal */}
-      <Dialog.Root
-        open={isContextModalOpen}
-        onOpenChange={(open) => !open && closeContextModal()}
-      >
-        <Dialog.Content style={{ maxWidth: 400 }}>
-          <Dialog.Title>Set Custom Context Size</Dialog.Title>
-          <Dialog.Description size="2" mb="4" color="gray">
-            {' '}
-            Enter the desired context window size (num_ctx) for{' '}
-            <Strong>{modelForContextModal?.name ?? 'this model'}</Strong>. Leave
-            empty or 0 to use the model's default.{' '}
-          </Dialog.Description>
-          <Flex direction="column" gap="3">
-            <label>
-              {' '}
-              <Text as="div" size="2" mb="1" weight="medium">
-                Context Size (e.g., 2048, 4096)
-              </Text>
-              <TextField.Root
-                ref={contextInputRef} // Attach ref for focus
-                size="2"
-                type="number"
-                min="1"
-                step="1"
-                placeholder="Enter positive number (optional)"
-                value={customContextSizeInput}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  if (/^\d*$/.test(val)) {
-                    setCustomContextSizeInput(val);
-                    if (contextModalError) setContextModalError(null);
-                  }
-                }}
-                disabled={setModelMutation.isPending}
-                onKeyDown={handleContextInputKeyDown} // Add keydown handler
-              />
-            </label>
-            {contextModalError && (
-              <Callout.Root color="red" size="1">
-                <Callout.Icon>
-                  <InfoCircledIcon />
-                </Callout.Icon>
-                <Callout.Text>{contextModalError}</Callout.Text>
-              </Callout.Root>
-            )}
-            {setModelMutation.isError && isContextModalOpen && (
-              <Callout.Root color="red" size="1">
-                <Callout.Icon>
-                  <InfoCircledIcon />
-                </Callout.Icon>
-                <Callout.Text>
-                  Error: {setModelMutation.error.message}
-                </Callout.Text>
-              </Callout.Root>
-            )}
-          </Flex>
-          <Flex gap="3" mt="4" justify="end">
-            <Button
-              variant="soft"
-              color="gray"
-              onClick={closeContextModal}
-              disabled={setModelMutation.isPending}
-            >
-              {' '}
-              <Cross2Icon /> Cancel{' '}
-            </Button>
-            <Button
-              onClick={handleSaveCustomContext}
-              disabled={setModelMutation.isPending}
-            >
-              {' '}
-              {setModelMutation.isPending &&
-              loadingModelName === modelForContextModal?.name ? (
-                <>
-                  {' '}
-                  <Spinner size="2" /> <Text ml="1">Setting...</Text>{' '}
-                </>
-              ) : (
-                <>
-                  {' '}
-                  <CheckIcon /> Set Active{' '}
-                </>
-              )}{' '}
             </Button>
           </Flex>
         </Dialog.Content>

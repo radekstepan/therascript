@@ -51,10 +51,28 @@ export function EditStandaloneChatModal({
     },
     onSuccess: (updatedChat) => {
       setToast('Chat details updated successfully.');
-      queryClient.invalidateQueries({ queryKey: ['standaloneChats'] });
-      queryClient.invalidateQueries({
-        queryKey: ['standaloneChat', updatedChat.id],
-      });
+      queryClient.setQueryData<StandaloneChatListItem[]>(
+        ['standaloneChats'],
+        (oldChats) => {
+          if (!oldChats) return oldChats;
+          return oldChats.map((chat) =>
+            chat.id === updatedChat.id
+              ? { ...chat, name: updatedChat.name, tags: updatedChat.tags }
+              : chat
+          );
+        }
+      );
+      queryClient.setQueryData(
+        ['standaloneChat', updatedChat.id],
+        (oldData: any) => {
+          if (!oldData) return oldData;
+          return {
+            ...oldData,
+            name: updatedChat.name,
+            tags: updatedChat.tags,
+          };
+        }
+      );
       onOpenChange(false);
     },
     onError: (error: Error) => {

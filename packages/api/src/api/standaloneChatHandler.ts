@@ -63,7 +63,7 @@ interface ElysiaHandlerContext {
   params: Record<string, string | undefined>;
   query: Record<string, string | undefined>;
   set: { status?: number | string; headers?: Record<string, string> };
-  signal?: AbortSignal;
+  request: Request;
   chatData?: BackendChatSession;
   messageData?: BackendChatMessage;
 }
@@ -153,7 +153,7 @@ export const addStandaloneChatMessage = async ({
   chatData,
   body,
   set,
-  signal,
+  request,
 }: ElysiaHandlerContext): Promise<Response> => {
   const validatedBody = chatRequestSchema.parse(body);
   const trimmedText = validatedBody.text.trim();
@@ -210,8 +210,8 @@ export const addStandaloneChatMessage = async ({
       null,
       currentMessages,
       configured == null && recommendedContext != null
-        ? { contextSize: recommendedContext, signal }
-        : { signal }
+        ? { contextSize: recommendedContext, signal: request.signal }
+        : { signal: request.signal }
     ); // Pass null for transcript context
 
     const headers = new Headers({
@@ -241,9 +241,11 @@ export const addStandaloneChatMessage = async ({
       let fullAiText = '';
       let finalPromptTokens: number | undefined;
       let finalCompletionTokens: number | undefined;
+      let isTruncated = false;
       let ollamaStreamError: Error | null = null;
       let llmStartTime = 0;
       let llmDuration = 0;
+      let expectedPromptTokens = 0;
 
       try {
         console.log(
@@ -255,6 +257,7 @@ export const addStandaloneChatMessage = async ({
             isStandalone: true,
             messages: currentMessages,
           });
+          expectedPromptTokens = usage.totals.promptTokens || 0;
           await writeSseEvent({ usage });
         } catch (usageErr) {
           console.warn(
@@ -273,14 +276,23 @@ export const addStandaloneChatMessage = async ({
             finalPromptTokens = chunk.prompt_eval_count;
             finalCompletionTokens = chunk.eval_count;
             llmDuration = Date.now() - llmStartTime;
+
+            if (finalPromptTokens && expectedPromptTokens) {
+              // Allow a 5% margin for tokenizer discrepancies. If difference is larger, it was truncated.
+              if (finalPromptTokens < expectedPromptTokens * 0.95) {
+                isTruncated = true;
+              }
+            }
+
             console.log(
-              `[API ProcessStream ${chatData.id}] Ollama stream 'done'. Tokens: C=${finalCompletionTokens}, P=${finalPromptTokens}, Duration: ${llmDuration}ms`
+              `[API ProcessStream ${chatData.id}] Ollama stream 'done'. Tokens: C=${finalCompletionTokens}, P=${finalPromptTokens}, Duration: ${llmDuration}ms, isTruncated: ${isTruncated}`
             );
             await writeSseEvent({
               done: true,
               promptTokens: finalPromptTokens,
               completionTokens: finalCompletionTokens,
               duration: llmDuration,
+              isTruncated,
             });
           }
         }
@@ -316,7 +328,8 @@ export const addStandaloneChatMessage = async ({
               cleanedAiText,
               finalPromptTokens,
               finalCompletionTokens,
-              ollamaStreamError ? null : llmDuration
+              ollamaStreamError ? null : llmDuration,
+              isTruncated
             );
             // ============================== FIX END ===============================
 
@@ -334,6 +347,7 @@ export const addStandaloneChatMessage = async ({
                 timestamp: aiMessage.timestamp,
                 promptTokens: aiMessage.promptTokens,
                 completionTokens: aiMessage.completionTokens,
+                isTruncated: isTruncated,
                 chat_name: chatData.name ?? null,
                 tags: chatData.tags ?? null,
                 client_name: null,

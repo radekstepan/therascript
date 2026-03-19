@@ -3,6 +3,7 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import { useAtomValue } from 'jotai';
 import {
   Dialog,
   Button,
@@ -23,9 +24,11 @@ import {
   BarChartIcon,
   FileTextIcon,
   ChevronRightIcon,
+  ChatBubbleIcon,
 } from '@radix-ui/react-icons';
 import { fetchAnalysisJobs } from '../../api/analysis';
 import { fetchSessions } from '../../api/session';
+import { activeLlmJobsAtom } from '../../store';
 import type { AnalysisJob, Session } from '../../types';
 import { formatTimestamp } from '../../helpers';
 
@@ -59,6 +62,7 @@ const getStatusBadgeColor = (
 
 export function JobsQueueModal({ isOpen, onOpenChange }: JobsQueueModalProps) {
   const navigate = useNavigate();
+  const activeLlmJobs = useAtomValue(activeLlmJobsAtom);
 
   const {
     data: analysisJobs,
@@ -100,7 +104,9 @@ export function JobsQueueModal({ isOpen, onOpenChange }: JobsQueueModalProps) {
   const isLoading = isLoadingAnalysis || isLoadingSessions;
   const error = analysisError || sessionsError;
   const hasActiveJobs =
-    activeAnalysisJobs.length > 0 || activeTranscriptionJobs.length > 0;
+    activeLlmJobs.length > 0 ||
+    activeAnalysisJobs.length > 0 ||
+    activeTranscriptionJobs.length > 0;
 
   return (
     <Dialog.Root open={isOpen} onOpenChange={onOpenChange}>
@@ -147,6 +153,65 @@ export function JobsQueueModal({ isOpen, onOpenChange }: JobsQueueModalProps) {
 
             {!isLoading && !error && hasActiveJobs && (
               <Flex direction="column" gap="4">
+                {/* LLM Responses */}
+                {activeLlmJobs.length > 0 && (
+                  <Box>
+                    <Heading as="h3" size="3" mb="2">
+                      <Flex align="center" gap="2">
+                        <ChatBubbleIcon />
+                        LLM Responses ({activeLlmJobs.length})
+                      </Flex>
+                    </Heading>
+                    <Flex direction="column" gap="2">
+                      {activeLlmJobs.map((job) => (
+                        <Card
+                          key={`llm-${job.id}`}
+                          size="1"
+                          className="cursor-pointer hover:bg-[--gray-a3]"
+                          onClick={() =>
+                            handleNavigate(
+                              job.isStandalone
+                                ? `/chats`
+                                : `/sessions/${job.sessionId}`
+                            )
+                          }
+                        >
+                          <Flex justify="between" align="center">
+                            <Flex
+                              direction="column"
+                              gap="1"
+                              style={{ minWidth: 0 }}
+                            >
+                              <Text
+                                size="2"
+                                weight="medium"
+                                truncate
+                                title={job.promptPreview}
+                              >
+                                {job.promptPreview}
+                              </Text>
+                              <Text size="1" color="gray">
+                                Started: {formatTimestamp(job.startedAt)}
+                              </Text>
+                            </Flex>
+                            <Flex align="center" gap="2" flexShrink="0">
+                              <Badge
+                                color={
+                                  job.status === 'canceling' ? 'orange' : 'blue'
+                                }
+                                variant="soft"
+                              >
+                                {job.status}
+                              </Badge>
+                              <ChevronRightIcon className="text-[--gray-a9]" />
+                            </Flex>
+                          </Flex>
+                        </Card>
+                      ))}
+                    </Flex>
+                  </Box>
+                )}
+
                 {/* Analysis Jobs */}
                 {activeAnalysisJobs.length > 0 && (
                   <Box>

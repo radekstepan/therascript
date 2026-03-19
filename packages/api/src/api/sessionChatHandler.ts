@@ -57,7 +57,7 @@ interface ElysiaHandlerContext {
   params: Record<string, string | undefined>;
   query: Record<string, string | undefined>;
   set: { status?: number | string; headers?: Record<string, string> };
-  signal?: AbortSignal;
+  request: Request;
   sessionData: BackendSession;
   chatData?: BackendChatSession;
   messageData?: BackendChatMessage;
@@ -99,7 +99,7 @@ export const addSessionChatMessage = async ({
   chatData,
   body,
   set,
-  signal,
+  request,
 }: ElysiaHandlerContext): Promise<Response> => {
   const validatedBody = chatRequestSchema.parse(body);
   const trimmedText = validatedBody.text.trim();
@@ -221,8 +221,8 @@ export const addSessionChatMessage = async ({
       transcriptString,
       streamMessages,
       configured == null && recommendedContext != null
-        ? { contextSize: recommendedContext, signal }
-        : { signal }
+        ? { contextSize: recommendedContext, signal: request.signal }
+        : { signal: request.signal }
     );
 
     const headers = new Headers({
@@ -252,9 +252,11 @@ export const addSessionChatMessage = async ({
       let fullAiText = '';
       let finalPromptTokens: number | undefined;
       let finalCompletionTokens: number | undefined;
+      let isTruncated = false;
       let ollamaStreamError: Error | null = null;
       let llmStartTime = 0;
       let llmDuration = 0;
+      let expectedPromptTokens = 0;
 
       try {
         console.log(
@@ -267,6 +269,7 @@ export const addSessionChatMessage = async ({
             sessionData,
             messages: currentMessages,
           });
+          expectedPromptTokens = usage.totals.promptTokens || 0;
           await writeSseEvent({ usage });
         } catch (usageErr) {
           console.warn(
@@ -285,14 +288,23 @@ export const addSessionChatMessage = async ({
             finalPromptTokens = chunk.prompt_eval_count;
             finalCompletionTokens = chunk.eval_count;
             llmDuration = Date.now() - llmStartTime;
+
+            if (finalPromptTokens && expectedPromptTokens) {
+              // Allow a 5% margin for tokenizer discrepancies. If difference is larger, it was truncated.
+              if (finalPromptTokens < expectedPromptTokens * 0.95) {
+                isTruncated = true;
+              }
+            }
+
             console.log(
-              `[API ProcessStream ${chatData.id}] Ollama stream 'done'. Tokens: C=${finalCompletionTokens}, P=${finalPromptTokens}, Duration: ${llmDuration}ms`
+              `[API ProcessStream ${chatData.id}] Ollama stream 'done'. Tokens: C=${finalCompletionTokens}, P=${finalPromptTokens}, Duration: ${llmDuration}ms, isTruncated: ${isTruncated}`
             );
             await writeSseEvent({
               done: true,
               promptTokens: finalPromptTokens,
               completionTokens: finalCompletionTokens,
               duration: llmDuration,
+              isTruncated,
             });
             // Stream from Ollama is done, but we continue in finally to save to DB
           }
@@ -329,7 +341,8 @@ export const addSessionChatMessage = async ({
               cleanedAiText,
               finalPromptTokens,
               finalCompletionTokens,
-              ollamaStreamError ? null : llmDuration
+              ollamaStreamError ? null : llmDuration,
+              isTruncated
             );
             // ============================== FIX END ===============================
 
@@ -347,6 +360,7 @@ export const addSessionChatMessage = async ({
                 timestamp: aiMessage.timestamp,
                 promptTokens: aiMessage.promptTokens,
                 completionTokens: aiMessage.completionTokens,
+                isTruncated: isTruncated,
                 client_name: sessionData.clientName,
                 session_name: sessionData.sessionName,
                 chat_name: null,
