@@ -171,7 +171,7 @@ export function JobsQueueModal({ isOpen, onOpenChange }: JobsQueueModalProps) {
                           onClick={() =>
                             handleNavigate(
                               job.isStandalone
-                                ? `/chats`
+                                ? `/chats/${job.chatId}`
                                 : `/sessions/${job.sessionId}`
                             )
                           }

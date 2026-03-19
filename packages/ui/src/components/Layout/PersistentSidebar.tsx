@@ -413,15 +413,22 @@ export function PersistentSidebar() {
               isSidebarOpen ? 'px-3' : 'justify-center px-0'
             )}
           >
-            <Timer
-              size={18}
+            <div
               className={cn(
-                'text-[var(--gray-11)]',
+                'relative flex items-center justify-center',
                 isSidebarOpen ? 'mr-2' : 'mr-0'
               )}
-              aria-hidden="true"
-            />
-            {isSidebarOpen ? (
+            >
+              <Timer
+                size={18}
+                className="text-[var(--gray-11)]"
+                aria-hidden="true"
+              />
+              {!isSidebarOpen && totalActiveJobs > 0 && (
+                <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-blue-500 rounded-full animate-pulse" />
+              )}
+            </div>
+            {isSidebarOpen && (
               <Flex align="center" justify="between" width="100%">
                 <span className="text-[var(--gray-12)]">Active Jobs</span>
                 {totalActiveJobs > 0 && (
@@ -430,10 +437,6 @@ export function PersistentSidebar() {
                   </Badge>
                 )}
               </Flex>
-            ) : (
-              totalActiveJobs > 0 && (
-                <div className="absolute top-1 right-1 w-2 h-2 bg-blue-500 rounded-full" />
-              )
             )}
           </button>
 
