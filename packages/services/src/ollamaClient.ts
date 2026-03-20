@@ -67,6 +67,23 @@ export class OllamaTimeoutError extends Error {
   }
 }
 
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}
+
+function isUnsupportedThinkingError(error: unknown): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+  return (
+    message.includes('does not support thinking') ||
+    message.includes("doesn't support thinking") ||
+    (message.includes('thinking') &&
+      (message.includes('unsupported') || message.includes('not supported')))
+  );
+}
+
 function mapSenderToRole(
   sender: 'user' | 'ai' | 'system'
 ): 'user' | 'assistant' | 'system' {
@@ -273,6 +290,17 @@ export async function* streamLlmChatDetailed(
       throw new OllamaTimeoutError(timeoutMs);
     }
 
+    if (think && isUnsupportedThinkingError(error)) {
+      console.warn(
+        `[OllamaClient] Model '${model}' does not support thinking; retrying without thinking.`
+      );
+      return yield* streamLlmChatDetailed(messages, {
+        ...options,
+        think: false,
+        timeoutMs: Math.max(1, deadline - Date.now()),
+      });
+    }
+
     const isModelNotFoundError =
       error.status === 404 ||
       (error.message?.includes('model') &&
@@ -293,8 +321,6 @@ export async function* streamLlmChatDetailed(
       );
     }
 
-    throw new OllamaConnectionError(
-      error instanceof Error ? error.message : String(error)
-    );
+    throw new Error(getErrorMessage(error));
   }
 }

@@ -1243,6 +1243,7 @@ export const streamChatResponse = async (
     topP?: number;
     repeatPenalty?: number;
     timeoutMs?: number;
+    think?: boolean | 'high' | 'medium' | 'low';
   }
 ): Promise<AsyncIterable<ChatResponse>> => {
   const modelToUse = options?.model || getActiveModel();
@@ -1339,6 +1340,7 @@ export const streamChatResponse = async (
       const topP = options?.topP ?? getConfiguredTopP();
       const repeatPenalty =
         options?.repeatPenalty ?? getConfiguredRepeatPenalty();
+      const requestedThinking = options?.think ?? true;
 
       const streamGenerator = streamLlmChatDetailed(messages, {
         model: modelToUse,
@@ -1346,7 +1348,7 @@ export const streamChatResponse = async (
         temperature,
         topP,
         repeatPenalty,
-        think: true,
+        think: requestedThinking,
         numGpuLayers: getConfiguredNumGpuLayers() ?? undefined,
         abortSignal: options?.signal,
         ollamaBaseUrl: config.ollama.baseURL,
@@ -1389,9 +1391,7 @@ export const streamChatResponse = async (
       }
 
       if (error instanceof OllamaConnectionError) {
-        throw new InternalServerError(
-          `Connection refused: Could not connect to Ollama at ${config.ollama.baseURL}.`
-        );
+        throw new InternalServerError(error.message);
       }
 
       if (error instanceof OllamaTimeoutError) {
