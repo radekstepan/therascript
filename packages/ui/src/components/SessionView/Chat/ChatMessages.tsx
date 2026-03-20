@@ -29,6 +29,7 @@ interface ChatMessagesProps {
   activeChatId: number | null;
   isStandalone: boolean;
   streamingMessageId: number | null;
+  streamingPhase?: 'thinking' | 'responding' | null;
   activeSessionId: number | null;
   isAiResponding: boolean;
   streamingTokensPerSecond?: number | null;
@@ -54,6 +55,7 @@ export function ChatMessages({
   messages,
   isAiResponding,
   streamingMessageId,
+  streamingPhase,
   streamingTokensPerSecond,
 }: ChatMessagesProps) {
   const queryClient = useQueryClient();
@@ -223,6 +225,9 @@ export function ChatMessages({
                 key={message.id}
                 message={message}
                 isCurrentlyStreaming={isCurrentlyStreaming}
+                streamPhase={
+                  isCurrentlyStreaming ? (streamingPhase ?? null) : null
+                }
                 isAiResponding={isAiResponding}
                 renderMd={renderMd}
                 onStarClick={handleStarClick}

@@ -44,7 +44,7 @@ import { templateRepository } from '@therascript/data';
 import { SYSTEM_PROMPT_TEMPLATES } from '@therascript/db/dist/sqliteService.js';
 import { getOllamaRuntime } from './ollamaRuntime.js';
 import {
-  streamLlmChat,
+  streamLlmChatDetailed,
   OllamaConnectionError,
   OllamaModelNotFoundError,
   OllamaTimeoutError,
@@ -1340,12 +1340,13 @@ export const streamChatResponse = async (
       const repeatPenalty =
         options?.repeatPenalty ?? getConfiguredRepeatPenalty();
 
-      const streamGenerator = streamLlmChat(messages, {
+      const streamGenerator = streamLlmChatDetailed(messages, {
         model: modelToUse,
         contextSize: contextSize ?? undefined,
         temperature,
         topP,
         repeatPenalty,
+        think: true,
         numGpuLayers: getConfiguredNumGpuLayers() ?? undefined,
         abortSignal: options?.signal,
         ollamaBaseUrl: config.ollama.baseURL,
@@ -1359,7 +1360,8 @@ export const streamChatResponse = async (
         yield {
           message: {
             role: 'assistant',
-            content: result.value,
+            content: result.value.content ?? '',
+            thinking: result.value.thinking,
           },
           done: false,
           model: modelToUse,

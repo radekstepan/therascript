@@ -16,6 +16,7 @@ import type { ChatMessage } from '../../../types';
 interface ChatMessageBubbleProps {
   message: ChatMessage;
   isCurrentlyStreaming: boolean;
+  streamPhase?: 'thinking' | 'responding' | null;
   isAiResponding: boolean;
   renderMd: boolean;
   onStarClick: (message: ChatMessage) => void;
@@ -23,42 +24,54 @@ interface ChatMessageBubbleProps {
   tokensPerSecond?: number | null;
 }
 
+function splitThinkingText(text: string) {
+  const thinkRegex = /<think>([\s\S]*?)(<\/think>|$)/g;
+  const thinkingParts: string[] = [];
+  let visibleText = '';
+  let lastIndex = 0;
+
+  for (const match of text.matchAll(thinkRegex)) {
+    const matchIndex = match.index ?? 0;
+    visibleText += text.slice(lastIndex, matchIndex);
+    const reasoningText = match[1]?.trim();
+    if (reasoningText) {
+      thinkingParts.push(reasoningText);
+    }
+    lastIndex = matchIndex + match[0].length;
+  }
+
+  visibleText += text.slice(lastIndex);
+
+  return {
+    thinkingText: thinkingParts.length > 0 ? thinkingParts.join('\n\n') : null,
+    visibleText,
+  };
+}
+
 export function ChatMessageBubble({
   message,
   isCurrentlyStreaming,
+  streamPhase,
   isAiResponding,
   renderMd,
   onStarClick,
   onCopyClick,
   tokensPerSecond,
 }: ChatMessageBubbleProps) {
+  const { thinkingText, visibleText } = splitThinkingText(message.text);
   const animatedText = useAnimatedText(
-    message.text,
+    visibleText,
     message.sender === 'ai' && isCurrentlyStreaming
   );
-
-  let displayText = isCurrentlyStreaming ? animatedText : message.text;
-
-  let thinkingText: string | null = null;
-  const thinkStart = displayText.indexOf('<think>');
-  if (thinkStart !== -1) {
-    const thinkEnd = displayText.indexOf('</think>');
-    if (thinkEnd === -1) {
-      thinkingText = displayText.substring(thinkStart + 7);
-      // Only show whatever text comes after the incomplete think tag, or before the start.
-      displayText = displayText.substring(0, thinkStart);
-    } else {
-      thinkingText = displayText.substring(thinkStart + 7, thinkEnd);
-      displayText =
-        displayText.substring(0, thinkStart) +
-        displayText.substring(thinkEnd + 8);
-    }
-  }
+  const displayText = isCurrentlyStreaming ? animatedText : visibleText;
+  const showThinkingMarquee =
+    Boolean(thinkingText) && isCurrentlyStreaming && streamPhase === 'thinking';
 
   const showWaitingIndicator =
     isAiResponding &&
     isCurrentlyStreaming &&
-    displayText === '' &&
+    streamPhase === 'thinking' &&
+    displayText.trim() === '' &&
     !thinkingText;
 
   const markdownContainerRef = useRef<HTMLDivElement>(null);
@@ -73,11 +86,16 @@ export function ChatMessageBubble({
     message.duration !== null &&
     message.duration !== undefined &&
     message.duration > 10;
+
+  // Show metrics if we have a real avg tokens/s OR if we are currently streaming (either thinking or responding)
   const displayTokensPerSecond = showMetrics
     ? (message.completionTokens! * 1000) / message.duration!
     : (tokensPerSecond ?? null);
+
+  // If streaming but no tokens yet, we might still show 0.0 or ~0.0 if we have tokensPerSecond
   const displayMetrics =
-    displayTokensPerSecond !== null || isCurrentlyStreaming;
+    displayTokensPerSecond !== null ||
+    (isCurrentlyStreaming && tokensPerSecond !== null);
 
   const handleCopy = () => {
     if (message.sender === 'ai' && renderMd && markdownContainerRef.current) {
@@ -120,24 +138,54 @@ export function ChatMessageBubble({
         {showWaitingIndicator ? (
           <Flex align="center" gap="2" className="text-[var(--gray-11)] px-1">
             <Spinner size="1" />
-            <Text size="2" style={{ fontStyle: 'italic' }}>
-              Analyzing context...
-            </Text>
+            <Box className="thinking-ticker" aria-label="Model is thinking">
+              <Box className="thinking-ticker-track">
+                <Text size="2" style={{ fontStyle: 'italic' }}>
+                  Thinking
+                </Text>
+                <Text size="2" style={{ fontStyle: 'italic' }}>
+                  Reviewing context
+                </Text>
+                <Text size="2" style={{ fontStyle: 'italic' }}>
+                  Preparing response
+                </Text>
+                <Text size="2" style={{ fontStyle: 'italic' }}>
+                  Thinking
+                </Text>
+                <Text size="2" style={{ fontStyle: 'italic' }}>
+                  Reviewing context
+                </Text>
+                <Text size="2" style={{ fontStyle: 'italic' }}>
+                  Preparing response
+                </Text>
+              </Box>
+            </Box>
           </Flex>
         ) : (
           <Box className={cn(isUser ? 'text-white' : 'markdown-ai-message')}>
-            {thinkingText && (
+            {showThinkingMarquee && (
               <Box
                 mb={displayText.trim() ? '3' : '0'}
-                className="text-[var(--gray-9)] italic overflow-hidden"
-                style={{
-                  fontSize: '0.85em',
-                  whiteSpace: 'nowrap',
-                  textOverflow: 'ellipsis',
-                  maxWidth: '100%',
-                }}
+                className="thinking-inline-strip"
+                aria-label="Model reasoning"
               >
-                {thinkingText}
+                <Text size="1" className="thinking-inline-label">
+                  Thinking
+                </Text>
+                <Box className="thinking-inline-marquee">
+                  <Box className="thinking-inline-track">
+                    <Text size="1" className="thinking-inline-copy">
+                      {thinkingText}
+                    </Text>
+                    <Text
+                      size="1"
+                      className="thinking-inline-copy"
+                      aria-hidden="true"
+                    >
+                      {thinkingText}
+                    </Text>
+                  </Box>
+                </Box>
               </Box>
             )}
             {displayText.trim() !== '' &&
@@ -190,7 +238,7 @@ export function ChatMessageBubble({
           className="text-[var(--gray-9)]"
         >
           <Text size="1">
-            {isCurrentlyStreaming
+            {isCurrentlyStreaming && displayTokensPerSecond !== null
               ? `~${(tokensPerSecond ?? 0).toFixed(1)} tokens/s`
               : `${message.completionTokens} tokens (${displayTokensPerSecond!.toFixed(1)} tokens/s)`}
           </Text>

@@ -33,11 +33,17 @@ export interface StreamLlmChatOptions {
   maxCompletionTokens?: number;
   /** Number of model layers to offload to GPU. null/undefined = let Ollama decide. 0 = CPU only. */
   numGpuLayers?: number | null;
+  think?: boolean | 'high' | 'medium' | 'low';
 }
 
 export interface StreamResult {
   promptTokens?: number;
   completionTokens?: number;
+}
+
+export interface LlmChatChunk {
+  content?: string;
+  thinking?: string;
 }
 
 export class OllamaConnectionError extends Error {
@@ -105,6 +111,23 @@ export async function* streamLlmChat(
   messages: BackendChatMessage[],
   options?: StreamLlmChatOptions
 ): AsyncGenerator<string, StreamResult> {
+  const detailedStream = streamLlmChatDetailed(messages, options);
+  let result = await detailedStream.next();
+
+  while (!result.done) {
+    if (result.value.content) {
+      yield result.value.content;
+    }
+    result = await detailedStream.next();
+  }
+
+  return result.value;
+}
+
+export async function* streamLlmChatDetailed(
+  messages: BackendChatMessage[],
+  options?: StreamLlmChatOptions
+): AsyncGenerator<LlmChatChunk, StreamResult> {
   const {
     model = 'llama3',
     contextSize,
@@ -117,6 +140,7 @@ export async function* streamLlmChat(
     repeatPenalty,
     maxCompletionTokens,
     numGpuLayers,
+    think,
   } = options || {};
 
   const startTime = Date.now();
@@ -187,10 +211,9 @@ export async function* streamLlmChat(
       model,
       messages: ollamaMessages,
       stream: true,
+      think,
       options: ollamaOptions,
     })) as any;
-
-    let accumulatedContent = '';
 
     const onAbort = () => {
       if (stream.abort) {
@@ -210,9 +233,11 @@ export async function* streamLlmChat(
           throw new OllamaTimeoutError(timeoutMs);
         }
 
-        if (chunk.message?.content) {
-          accumulatedContent += chunk.message.content;
-          yield chunk.message.content;
+        if (chunk.message?.thinking || chunk.message?.content) {
+          yield {
+            thinking: chunk.message?.thinking,
+            content: chunk.message?.content,
+          };
         }
 
         if (chunk.done) {

@@ -246,11 +246,14 @@ export const addStandaloneChatMessage = async ({
       let llmStartTime = 0;
       let llmDuration = 0;
       let expectedPromptTokens = 0;
+      let hasSentRespondingStatus = false;
+      let hasOpenThinkingBlock = false;
 
       try {
         console.log(
           `[API ProcessStream ${chatData.id}] Starting Ollama stream processing...`
         );
+        await writeSseEvent({ status: 'thinking' });
         // Emit early usage estimate for UI meter (LM Studio–style)
         try {
           const usage = await computeContextUsageForChat({
@@ -267,12 +270,33 @@ export const addStandaloneChatMessage = async ({
         }
         llmStartTime = Date.now();
         for await (const chunk of ollamaStream) {
+          if (chunk.message?.thinking) {
+            const thinkingChunk = chunk.message.thinking;
+            if (!hasOpenThinkingBlock) {
+              fullAiText += '<think>';
+              hasOpenThinkingBlock = true;
+            }
+            fullAiText += thinkingChunk;
+            await writeSseEvent({ thinkingChunk });
+          }
           if (chunk.message?.content) {
+            if (!hasSentRespondingStatus) {
+              hasSentRespondingStatus = true;
+              await writeSseEvent({ status: 'responding' });
+            }
+            if (hasOpenThinkingBlock) {
+              fullAiText += '</think>';
+              hasOpenThinkingBlock = false;
+            }
             const textChunk = chunk.message.content;
             fullAiText += textChunk;
             await writeSseEvent({ chunk: textChunk });
           }
           if (chunk.done) {
+            if (hasOpenThinkingBlock) {
+              fullAiText += '</think>';
+              hasOpenThinkingBlock = false;
+            }
             finalPromptTokens = chunk.prompt_eval_count;
             finalCompletionTokens = chunk.eval_count;
             llmDuration = Date.now() - llmStartTime;
@@ -317,6 +341,9 @@ export const addStandaloneChatMessage = async ({
         console.log(
           `[API ProcessStream Finally ${chatData.id}] Cleaning up. Ollama stream errored: ${!!ollamaStreamError}`
         );
+        if (hasOpenThinkingBlock) {
+          fullAiText += '</think>';
+        }
         if (fullAiText.trim()) {
           try {
             // ============================= FIX START ==============================

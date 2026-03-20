@@ -337,3 +337,92 @@ button[class*='rt-IconButton']:not(:disabled):hover {
   }
 }
 /* --- End Highlight Flash Animation --- */
+
+/* --- Chat Thinking States --- */
+.thinking-ticker {
+  overflow: hidden;
+  max-width: min(22rem, 70vw);
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    black 8%,
+    black 92%,
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    black 8%,
+    black 92%,
+    transparent 100%
+  );
+}
+
+.thinking-ticker-track {
+  display: inline-flex;
+  align-items: center;
+  gap: 1.25rem;
+  min-width: max-content;
+  white-space: nowrap;
+  animation: thinkingTickerSlide 9s linear infinite;
+}
+
+@keyframes thinkingTickerSlide {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.thinking-inline-strip {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  max-width: 100%;
+  padding: 0.15rem 0.25rem;
+  background: transparent;
+}
+
+.thinking-inline-label {
+  color: var(--gray-11);
+  font-style: italic;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.thinking-inline-marquee {
+  overflow: hidden;
+  flex: 1 1 auto;
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    black 6%,
+    black 94%,
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    black 6%,
+    black 94%,
+    transparent 100%
+  );
+}
+
+.thinking-inline-track {
+  display: inline-flex;
+  align-items: center;
+  gap: 2.5rem;
+  min-width: max-content;
+  white-space: nowrap;
+  animation: thinkingTickerSlide 18s linear infinite;
+}
+
+.thinking-inline-copy {
+  color: var(--gray-10);
+  font-style: italic;
+  white-space: nowrap;
+}
+/* --- End Chat Thinking States --- */

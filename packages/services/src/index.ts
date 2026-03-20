@@ -15,7 +15,9 @@ export {
 } from './fileService.js';
 export {
   streamLlmChat,
+  streamLlmChatDetailed,
   DEFAULT_STOP_TOKENS,
+  LlmChatChunk,
   StreamLlmChatOptions,
   StreamResult,
   OllamaConnectionError,

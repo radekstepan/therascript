@@ -46,6 +46,7 @@ interface ChatInterfaceProps {
 }
 
 const createTemporaryId = (): number => -Math.floor(Math.random() * 1000000);
+type StreamPhase = 'thinking' | 'responding';
 
 export function ChatInterface({
   session,
@@ -69,6 +70,7 @@ export function ChatInterface({
   const [streamingAiMessageId, setStreamingAiMessageId] = useState<
     number | null
   >(null);
+  const [streamPhase, setStreamPhase] = useState<StreamPhase | null>(null);
   const [streamingStartTime, setStreamingStartTime] = useState<number | null>(
     null
   );
@@ -173,12 +175,35 @@ export function ChatInterface({
     let streamErrored = false;
     let localStartTime: number | null = null;
     let localTokenCount = 0;
+    let hasOpenThinkingBlock = false;
 
+    setStreamPhase('thinking');
     setStreamingStartTime(null);
     setStreamingTokensCount(0);
     setCurrentTokensPerSecond(null);
 
     try {
+      const updateLiveTokenMetrics = (chunkText: string) => {
+        if (!chunkText) {
+          return;
+        }
+
+        if (localStartTime === null) {
+          localStartTime = Date.now();
+          setStreamingStartTime(localStartTime);
+        }
+
+        const estimatedTokens = Math.max(1, Math.floor(chunkText.length / 4));
+        localTokenCount += estimatedTokens;
+        setStreamingTokensCount(localTokenCount);
+
+        const elapsedMs = Date.now() - localStartTime;
+        const elapsedSeconds = elapsedMs / 1000;
+        if (elapsedSeconds > 0) {
+          setCurrentTokensPerSecond(localTokenCount / elapsedSeconds);
+        }
+      };
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -234,11 +259,56 @@ export function ChatInterface({
                     );
                   }
                 }
-              } else if (data.chunk) {
-                if (localStartTime === null) {
-                  localStartTime = Date.now();
-                  setStreamingStartTime(localStartTime);
+              } else if (
+                data.status === 'thinking' ||
+                data.status === 'responding'
+              ) {
+                if (data.status === 'responding' && hasOpenThinkingBlock) {
+                  hasOpenThinkingBlock = false;
+                  queryClient.setQueryData<ChatSession>(
+                    currentChatQueryKey,
+                    (oldData) => {
+                      if (!oldData) return oldData;
+                      const currentMessages = oldData.messages ?? [];
+                      return {
+                        ...oldData,
+                        messages: currentMessages.map((msg) =>
+                          msg.id === tempAiMessageId
+                            ? { ...msg, text: msg.text + '</think>' }
+                            : msg
+                        ),
+                      };
+                    }
+                  );
                 }
+                setStreamPhase(data.status);
+              } else if (data.thinkingChunk) {
+                setStreamPhase('thinking');
+                updateLiveTokenMetrics(data.thinkingChunk);
+                queryClient.setQueryData<ChatSession>(
+                  currentChatQueryKey,
+                  (oldData) => {
+                    if (!oldData) return oldData;
+                    const currentMessages = oldData.messages ?? [];
+                    return {
+                      ...oldData,
+                      messages: currentMessages.map((msg) => {
+                        if (msg.id !== tempAiMessageId) {
+                          return msg;
+                        }
+                        const prefix = hasOpenThinkingBlock ? '' : '<think>';
+                        return {
+                          ...msg,
+                          text: msg.text + prefix + data.thinkingChunk,
+                        };
+                      }),
+                    };
+                  }
+                );
+                hasOpenThinkingBlock = true;
+              } else if (data.chunk) {
+                setStreamPhase('responding');
+                updateLiveTokenMetrics(data.chunk);
                 queryClient.setQueryData<ChatSession>(
                   currentChatQueryKey,
                   (oldData) => {
@@ -254,17 +324,27 @@ export function ChatInterface({
                     };
                   }
                 );
-                const estimatedTokens = Math.floor(data.chunk.length / 4);
-                localTokenCount += estimatedTokens;
-                setStreamingTokensCount(localTokenCount);
-                const elapsedMs = Date.now() - localStartTime;
-                const elapsedSeconds = elapsedMs / 1000;
-                if (elapsedSeconds > 0) {
-                  setCurrentTokensPerSecond(localTokenCount / elapsedSeconds);
-                }
               } else if (data.done) {
+                if (hasOpenThinkingBlock) {
+                  hasOpenThinkingBlock = false;
+                  queryClient.setQueryData<ChatSession>(
+                    currentChatQueryKey,
+                    (oldData) => {
+                      if (!oldData) return oldData;
+                      const currentMessages = oldData.messages ?? [];
+                      return {
+                        ...oldData,
+                        messages: currentMessages.map((msg) =>
+                          msg.id === tempAiMessageId
+                            ? { ...msg, text: msg.text + '</think>' }
+                            : msg
+                        ),
+                      };
+                    }
+                  );
+                }
                 const completionTokens =
-                  data.completionTokens ?? streamingTokensCount;
+                  data.completionTokens ?? localTokenCount;
                 const duration = data.duration ?? null;
                 const isTruncated = data.isTruncated ?? false;
                 const tokensPerSecond =
@@ -292,6 +372,7 @@ export function ChatInterface({
                   }
                 );
                 setStreamingAiMessageId(null);
+                setStreamPhase(null);
                 setStreamingStartTime(null);
                 setStreamingTokensCount(0);
                 if (activeChatId && !streamErrored) {
@@ -324,9 +405,27 @@ export function ChatInterface({
         streamErrored = true;
       }
     } finally {
+      if (hasOpenThinkingBlock) {
+        queryClient.setQueryData<ChatSession>(
+          currentChatQueryKey,
+          (oldData) => {
+            if (!oldData) return oldData;
+            const currentMessages = oldData.messages ?? [];
+            return {
+              ...oldData,
+              messages: currentMessages.map((msg) =>
+                msg.id === tempAiMessageId
+                  ? { ...msg, text: msg.text + '</think>' }
+                  : msg
+              ),
+            };
+          }
+        );
+      }
       activeStreamControllerRef.current = null;
       cancelRequestedRef.current = false;
       setStreamingAiMessageId(null);
+      setStreamPhase(null);
       setStreamingStartTime(null);
       setStreamingTokensCount(0);
       setCurrentTokensPerSecond(null);
@@ -427,6 +526,7 @@ export function ChatInterface({
         ],
       }));
       setStreamingAiMessageId(tempAiMessageId);
+      setStreamPhase('thinking');
       // Register active LLM job
       setActiveLlmJobs((prev) => [
         ...prev,
@@ -462,6 +562,7 @@ export function ChatInterface({
           streamError
         );
         setStreamingAiMessageId(null);
+        setStreamPhase(null);
         throw streamError; // Rethrow to be caught by mutation's onError
       });
     },
@@ -482,6 +583,7 @@ export function ChatInterface({
       activeStreamControllerRef.current = null;
       cancelRequestedRef.current = false;
       setStreamingAiMessageId(null);
+      setStreamPhase(null);
       // Remove LLM job
       if (activeChatId) {
         setActiveLlmJobs((prev) =>
@@ -575,6 +677,7 @@ export function ChatInterface({
               activeSessionId={activeSessionId}
               isStandalone={isStandalone}
               streamingMessageId={streamingAiMessageId}
+              streamingPhase={streamPhase}
               isAiResponding={isAiResponding}
               streamingTokensPerSecond={
                 streamingAiMessageId ? currentTokensPerSecond : null
