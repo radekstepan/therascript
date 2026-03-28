@@ -84,7 +84,6 @@ async function stopAndRemoveContainer(containerName) {
 }
 
 async function cleanupDocker() {
-  console.log('[RunProd Cleanup] Running Docker container cleanup...');
   await Promise.allSettled([
     stopAndRemoveContainer(LLAMA_CONTAINER_NAME),
     stopAndRemoveContainer(WHISPER_CONTAINER_NAME),
@@ -93,6 +92,29 @@ async function cleanupDocker() {
   ]);
   console.log('[RunProd Cleanup] Docker cleanup process finished.');
 }
+
+// --- LM Studio Daemon Cleanup ---
+async function cleanupLmsDaemon() {
+  const lmsBinary =
+    process.env.LMS_BINARY_PATH ||
+    require('node:path').join(
+      require('node:os').homedir(),
+      '.lmstudio',
+      'bin',
+      'lms'
+    );
+  if (!require('node:fs').existsSync(lmsBinary)) return;
+  console.log('[RunProd Cleanup] Shutting down LM Studio daemon...');
+  try {
+    await execPromise(`"${lmsBinary}" daemon down`);
+    console.log('[RunProd Cleanup] LM Studio daemon stopped.');
+  } catch (err) {
+    console.warn(
+      `[RunProd Cleanup] Failed to stop LM Studio daemon: ${err.message}`
+    );
+  }
+}
+// --- End LM Studio Daemon Cleanup ---
 
 // --- UI Process Cleanup Function (Improved) ---
 async function cleanupUiProcess(port) {
@@ -257,6 +279,7 @@ async function handleShutdown(reason) {
 
   await new Promise((resolve) => setTimeout(resolve, 2000));
 
+  await cleanupLmsDaemon();
   await cleanupDocker();
   await cleanupUiProcess(UI_PORT);
 

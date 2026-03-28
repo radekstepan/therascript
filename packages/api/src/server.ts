@@ -64,6 +64,7 @@ import {
   getConfiguredContextSize,
 } from './services/activeModelService.js';
 import { getLlmRuntime } from './services/llamaCppRuntime.js';
+import { unloadActiveModel } from './services/llamaCppService.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -475,6 +476,13 @@ async function shutdown(signal: string) {
         resolve(null);
       });
     });
+    // Unload any loaded models before stopping the runtime
+    try {
+      await unloadActiveModel();
+      console.log('[Server] Active model unloaded.');
+    } catch (err) {
+      console.warn('[Server] Error unloading active model:', err);
+    }
     // Stop the LLM runtime (docker container or native process)
     try {
       const runtime = getLlmRuntime();

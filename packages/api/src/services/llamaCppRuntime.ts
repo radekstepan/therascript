@@ -388,5 +388,11 @@ class LmStudioRuntime implements LlmRuntime {
     } catch (e: any) {
       console.warn(`[LmStudioRuntime] Failed to stop server: ${e.message}`);
     }
+    try {
+      await this.runLms('daemon', 'down');
+      console.log('[LmStudioRuntime] Daemon stopped, model memory freed.');
+    } catch (e: any) {
+      console.warn(`[LmStudioRuntime] Failed to stop daemon: ${e.message}`);
+    }
   }
 }
