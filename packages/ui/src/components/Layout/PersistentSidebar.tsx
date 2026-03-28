@@ -46,6 +46,7 @@ import {
   activeLlmJobsAtom,
 } from '../../store';
 import { JobsQueueModal } from '../Jobs/JobsQueueModal';
+import { ShutdownScreen } from './ShutdownScreen';
 import { requestAppShutdown, fetchActiveJobCount } from '../../api/api';
 import { fetchSessions } from '../../api/session';
 import { fetchStandaloneChats } from '../../api/chat';
@@ -87,6 +88,7 @@ export function PersistentSidebar() {
 
   const [isJobsModalOpen, setIsJobsModalOpen] = useState(false);
   const [isShutdownConfirmOpen, setIsShutdownConfirmOpen] = useState(false);
+  const [showShutdownScreen, setShowShutdownScreen] = useState(false);
   const [isSessionsExpanded, setIsSessionsExpanded] = useState(true);
   const [isChatsExpanded, setIsChatsExpanded] = useState(true);
 
@@ -129,11 +131,10 @@ export function PersistentSidebar() {
   const shutdownMutation = useMutation({
     mutationFn: requestAppShutdown,
     onSuccess: (data) => {
-      setToast(
-        `✅ Shutdown initiated: ${data.message}. The application will now close.`
-      );
+      // Shutdown screen handles the final success state visually
     },
     onError: (error: Error) => {
+      setShowShutdownScreen(false);
       if (
         error.message.toLowerCase().includes('not reachable') ||
         error.message.toLowerCase().includes('network error')
@@ -155,11 +156,14 @@ export function PersistentSidebar() {
   };
 
   const handleConfirmShutdown = () => {
+    setIsShutdownConfirmOpen(false);
+    setShowShutdownScreen(true);
     shutdownMutation.mutate();
   };
 
   return (
     <>
+      {showShutdownScreen && <ShutdownScreen />}
       <div
         className={cn(
           'fixed top-0 left-0 h-full flex flex-col shadow-xl z-40 transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1.0)]',
