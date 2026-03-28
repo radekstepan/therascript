@@ -33,6 +33,8 @@ import {
   getConfiguredRepeatPenalty,
   getConfiguredNumGpuLayers,
   getConfiguredThinkingBudget,
+  getActiveModelVramEstimateBytes,
+  setActiveModelVramEstimateBytes,
 } from './activeModelService.js';
 
 import { templateRepository } from '@therascript/data';
@@ -227,65 +229,83 @@ export function getVramPerToken(model: LlmModelInfo): number | null {
   return 2 * num_layers * kv_heads * head_dim * precision;
 }
 
+function parseLMStudioEstimateOutput(
+  rawOutput: string | null | undefined
+): VramEstimate | null {
+  const output = (rawOutput ?? '')
+    .replace(/\u001b\[[0-9;]*m/g, '')
+    .replace(/\r/g, '');
+
+  const gpuMatch = output.match(/Estimated GPU Memory:\s+([\d.]+)\s+(\w+)/i);
+  const totalMatch = output.match(
+    /Estimated Total Memory:\s+([\d.]+)\s+(\w+)/i
+  );
+
+  if (!gpuMatch || !totalMatch) return null;
+
+  const parseBytes = (val: string, unit: string) => {
+    const num = parseFloat(val);
+    const u = unit.toLowerCase();
+    if (u === 'gib' || u === 'gb') return Math.round(num * 1024 * 1024 * 1024);
+    if (u === 'mib' || u === 'mb') return Math.round(num * 1024 * 1024);
+    return Math.round(num);
+  };
+
+  const vram_bytes = parseBytes(gpuMatch[1], gpuMatch[2]);
+  const total_bytes = parseBytes(totalMatch[1], totalMatch[2]);
+
+  return {
+    vram_bytes,
+    ram_bytes: Math.max(0, total_bytes - vram_bytes),
+    weights_bytes: 0,
+    kv_cache_bytes: 0,
+    overhead_bytes: 0,
+  };
+}
+
 async function nativeLMStudioEstimate(
   modelKey: string,
-  contextSize: number,
+  contextSize?: number,
   gpu?: string
 ): Promise<VramEstimate | null> {
   try {
-    let stdout: string;
+    let output: string;
 
     if (runtime.type === 'native') {
       const binary = path.join(os.homedir(), '.lmstudio', 'bin', 'lms');
-      const args = [
-        'load',
-        '--estimate-only',
-        modelKey,
-        '--context-length',
-        String(contextSize),
-      ];
+      const args = ['load', '--estimate-only', modelKey];
+      if (contextSize !== undefined)
+        args.push('--context-length', String(contextSize));
       if (gpu) args.push('--gpu', gpu);
 
-      const result = await execFileAsync(binary, args);
-      stdout = result.stdout;
+      try {
+        const result = await execFileAsync(binary, args);
+        output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
+      } catch (err: any) {
+        output = `${err?.stdout ?? ''}${err?.stderr ?? ''}`;
+        const parsedFromError = parseLMStudioEstimateOutput(output);
+        if (parsedFromError) return parsedFromError;
+
+        const contextFlag =
+          contextSize !== undefined ? ` --context-length ${contextSize}` : '';
+        const gpuFlag = gpu ? ` --gpu ${gpu}` : '';
+        const shellResult = await execAsync(
+          `"${binary}" load --estimate-only "${modelKey}"${contextFlag}${gpuFlag}`
+        );
+        output = `${shellResult.stdout ?? ''}${shellResult.stderr ?? ''}`;
+      }
     } else {
       // Docker runtime: Use 'docker exec' to run lms inside the container
       const containerName = 'therascript_llama_server';
+      const contextFlag =
+        contextSize !== undefined ? `--context-length ${contextSize}` : '';
       const gpuFlag = gpu ? `--gpu ${gpu}` : '';
-      const cmd = `docker exec ${containerName} lms load --estimate-only "${modelKey}" --context-length ${contextSize} ${gpuFlag}`;
+      const cmd = `docker exec ${containerName} lms load --estimate-only "${modelKey}" ${contextFlag} ${gpuFlag}`;
       const result = await execAsync(cmd);
-      stdout = result.stdout;
+      output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
     }
 
-    // Parsing output like:
-    // Estimated GPU Memory:   7.16 GiB
-    // Estimated Total Memory: 7.16 GiB
-    const gpuMatch = stdout.match(/Estimated GPU Memory:\s+([\d.]+)\s+(\w+)/i);
-    const totalMatch = stdout.match(
-      /Estimated Total Memory:\s+([\d.]+)\s+(\w+)/i
-    );
-
-    if (!gpuMatch || !totalMatch) return null;
-
-    const parseBytes = (val: string, unit: string) => {
-      const num = parseFloat(val);
-      const u = unit.toLowerCase();
-      if (u === 'gib' || u === 'gb')
-        return Math.round(num * 1024 * 1024 * 1024);
-      if (u === 'mib' || u === 'mb') return Math.round(num * 1024 * 1024);
-      return Math.round(num);
-    };
-
-    const vram_bytes = parseBytes(gpuMatch[1], gpuMatch[2]);
-    const total_bytes = parseBytes(totalMatch[1], totalMatch[2]);
-
-    return {
-      vram_bytes,
-      ram_bytes: Math.max(0, total_bytes - vram_bytes),
-      weights_bytes: 0, // Not explicitly provided separately
-      kv_cache_bytes: 0,
-      overhead_bytes: 0,
-    };
+    return parseLMStudioEstimateOutput(output);
   } catch (err) {
     console.warn(`[LlmService] Failed to get native memory estimate:`, err);
     return null;
@@ -294,7 +314,7 @@ async function nativeLMStudioEstimate(
 
 export async function fetchVramUsage(
   model: LlmModelInfo,
-  contextSize: number,
+  contextSize?: number,
   numGpuLayers?: number | null
 ): Promise<VramEstimate | null> {
   const gpuFlag =
@@ -304,7 +324,11 @@ export async function fetchVramUsage(
   if (est) return est;
 
   // Fallback to manual calculation if lms estimation fails or is not available
-  return estimateVramUsage(model, contextSize, numGpuLayers);
+  const fallbackContextSize =
+    contextSize ?? model.defaultContextSize ?? undefined;
+  if (fallbackContextSize === undefined) return null;
+
+  return estimateVramUsage(model, fallbackContextSize, numGpuLayers);
 }
 
 async function isLlmApiResponsive(): Promise<boolean> {
@@ -607,6 +631,10 @@ export const deleteLlmModel = async (modelPath: string): Promise<string> => {
  * context size and GPU settings.
  */
 export const loadLlmModel = async (modelPath: string): Promise<void> => {
+  // Clear any stale VRAM estimate from a previous model
+  setActiveModelVramEstimateBytes(null);
+  // Reset estimation dedup flag since we're loading a new model
+  estimatingVramForModel = null;
   // Ensure the LM Studio daemon and server are running
   await runtime.restartWithModel(modelPath);
 
@@ -670,6 +698,14 @@ export const loadLlmModel = async (modelPath: string): Promise<void> => {
       `[LlmService] Model loaded. Instance: ${loadRes.data.instance_id}, ` +
         `load time: ${loadRes.data.load_time_seconds?.toFixed(2)}s`
     );
+    // Fire-and-forget VRAM estimate so the chat header can display it
+    const gpuFlagEst =
+      numGpuLayers === 0 ? 'off' : numGpuLayers === 99 ? 'max' : undefined;
+    nativeLMStudioEstimate(modelPath, contextSize ?? undefined, gpuFlagEst)
+      .then((est) => {
+        if (est) setActiveModelVramEstimateBytes(est.vram_bytes);
+      })
+      .catch(() => {});
   } catch (err: any) {
     const detail = err.response?.data
       ? JSON.stringify(err.response.data)
@@ -732,6 +768,10 @@ export const unloadActiveModel = async (): Promise<string> => {
   return 'No models were loaded.';
 };
 
+// Dedup guard: tracks which model key is currently being estimated so we
+// don't fire duplicate background estimation calls from polling.
+let estimatingVramForModel: string | null = null;
+
 export const checkModelStatus = async (
   modelPath: string
 ): Promise<LlmModelInfo | null> => {
@@ -782,6 +822,38 @@ export const checkModelStatus = async (
 
     if (!target) return null;
 
+    // If the target model is currently loaded but we have no VRAM estimate yet,
+    // kick off a background estimation (handles server restarts with a model
+    // already loaded in LM Studio).
+    if (
+      loadedModel?.key === target.key &&
+      getActiveModelVramEstimateBytes() === null &&
+      estimatingVramForModel !== target.key
+    ) {
+      estimatingVramForModel = target.key;
+      const contextForEst = getConfiguredContextSize() ?? undefined;
+      const gpuLayersForEst = getConfiguredNumGpuLayers();
+      const gpuFlagEst =
+        gpuLayersForEst === 0
+          ? 'off'
+          : gpuLayersForEst === 99
+            ? 'max'
+            : undefined;
+      nativeLMStudioEstimate(target.key, contextForEst, gpuFlagEst)
+        .then((est) => {
+          if (est) {
+            setActiveModelVramEstimateBytes(est.vram_bytes);
+            console.log(
+              `[LlmService] VRAM estimate for ${target.key}: ${(est.vram_bytes / 1024 ** 3).toFixed(2)} GiB`
+            );
+          }
+          estimatingVramForModel = null;
+        })
+        .catch(() => {
+          estimatingVramForModel = null;
+        });
+    }
+
     return {
       name: target.key,
       modified_at: new Date(),
@@ -795,6 +867,10 @@ export const checkModelStatus = async (
         quantization_level: target.quantization?.name || 'unknown',
       },
       defaultContextSize: target.max_context_length || null,
+      size_vram:
+        loadedModel?.key === target.key
+          ? (getActiveModelVramEstimateBytes() ?? undefined)
+          : undefined,
       architecture: null,
     };
   } catch (err) {

@@ -192,7 +192,7 @@ export interface AvailableModelsResponse {
 
 export interface VramEstimateResponse {
   model: string;
-  context_size: number;
+  context_size: number | null;
   num_gpu_layers?: number | null;
   estimated_vram_bytes: number | null;
   estimated_ram_bytes: number | null;

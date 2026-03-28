@@ -74,19 +74,9 @@ export function SelectActiveModelModal({
   );
   // -1 = Unrestricted (default), 0 = Disabled, >0 = Token budget
   const [thinkingBudget, setThinkingBudget] = useState<number>(-1);
-  const [vramEstimate, setVramEstimate] = useState<{
-    estimated_vram_bytes: number | null;
-    estimated_ram_bytes: number | null;
-    vram_per_token_bytes: number | null;
-    breakdown?: {
-      weights_bytes: number;
-      weights_vram_bytes: number;
-      weights_ram_bytes: number;
-      kv_cache_bytes: number;
-      overhead_bytes: number;
-    };
-    error?: string;
-  } | null>(null);
+  const [vramEstimate, setVramEstimate] = useState<VramEstimateResponse | null>(
+    null
+  );
 
   const { data: availableModelsData, isLoading: isLoadingModels } = useQuery({
     queryKey: ['availableLlmModels'],
@@ -208,6 +198,14 @@ export function SelectActiveModelModal({
 
   // Reset GPU layers to Auto when the user picks a different model
   useEffect(() => {
+    if (!isOpen) return;
+    if (!selectedModel) return;
+    if (selectedModelDetails) return;
+    setSelectedModel('');
+    setVramEstimate(null);
+  }, [isOpen, selectedModel, selectedModelDetails]);
+
+  useEffect(() => {
     if (selectedModel !== currentActiveModelName) {
       setNumGpuLayers(undefined);
       setUserTouchedContext(false); // Allow auto-fill for new model
@@ -238,26 +236,37 @@ export function SelectActiveModelModal({
 
   // Update VRAM estimate when model or context size changes
   useEffect(() => {
-    if (!selectedModel || !contextSizeInput) {
+    if (!selectedModel || !selectedModelDetails) {
       setVramEstimate(null);
       return;
     }
 
-    const contextSize = parseInt(contextSizeInput, 10);
-    if (isNaN(contextSize) || contextSize <= 0) return;
+    const trimmedContextSize = contextSizeInput.trim();
+    const contextSize = trimmedContextSize
+      ? parseInt(trimmedContextSize, 10)
+      : null;
+
+    if (
+      trimmedContextSize &&
+      (isNaN(contextSize as number) || (contextSize as number) <= 0)
+    ) {
+      return;
+    }
 
     estimateModelVram(selectedModel, contextSize, numGpuLayers)
       .then(setVramEstimate)
       .catch((err) => {
         console.error('Failed to estimate VRAM:', err);
         setVramEstimate({
+          model: selectedModel,
+          context_size: contextSize,
           estimated_vram_bytes: null,
           estimated_ram_bytes: null,
           vram_per_token_bytes: null,
           error: err.message,
         });
       });
-  }, [selectedModel, contextSizeInput, numGpuLayers]);
+  }, [selectedModel, selectedModelDetails, contextSizeInput, numGpuLayers]);
 
   // Calculate VRAM warning based on available GPU memory
   const vramWarning = React.useMemo(() => {
@@ -530,6 +539,9 @@ export function SelectActiveModelModal({
                     <Strong>
                       {prettyBytes(vramEstimate.estimated_vram_bytes)}
                     </Strong>
+                    {vramEstimate.context_size == null && (
+                      <> using model default context</>
+                    )}
                     {vramEstimate.breakdown && (
                       <>
                         {' '}

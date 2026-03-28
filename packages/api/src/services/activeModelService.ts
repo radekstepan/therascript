@@ -19,6 +19,7 @@ let configuredRepeatPenalty: number = 1.1;
 // null = let llama.cpp decide automatically; >= 0 = explicit layer count
 let configuredNumGpuLayers: number | null = null;
 let configuredThinkingBudget: number | null = null; // null/-1 = unrestricted
+let cachedVramEstimateBytes: number | null = null;
 
 export const getActiveModel = (): string => {
   return activeModelName;
@@ -38,6 +39,11 @@ export const getConfiguredNumGpuLayers = (): number | null =>
   configuredNumGpuLayers;
 export const getConfiguredThinkingBudget = (): number | null =>
   configuredThinkingBudget;
+export const getActiveModelVramEstimateBytes = (): number | null =>
+  cachedVramEstimateBytes;
+export const setActiveModelVramEstimateBytes = (bytes: number | null): void => {
+  cachedVramEstimateBytes = bytes;
+};
 // --- End New Getters ---
 
 // --- Modified Setter to include context size ---

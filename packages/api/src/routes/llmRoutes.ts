@@ -127,7 +127,7 @@ const DeleteModelBodySchema = t.Object({
 const DeleteModelResponseSchema = t.Object({ message: t.String() });
 const EstimateVramResponseSchema = t.Object({
   model: t.String(),
-  context_size: t.Number(),
+  context_size: t.Union([t.Number(), t.Null()]),
   num_gpu_layers: t.Optional(t.Union([t.Number(), t.Null()])),
   estimated_vram_bytes: t.Union([t.Number(), t.Null()]),
   estimated_ram_bytes: t.Union([t.Number(), t.Null()]),
@@ -542,9 +542,13 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
           const contextSize = query.context_size;
           const numGpuLayers = query.num_gpu_layers;
 
-          if (!contextSize || contextSize <= 0) {
+          if (
+            contextSize !== undefined &&
+            contextSize !== null &&
+            contextSize <= 0
+          ) {
             throw new BadRequestError(
-              'context_size query parameter is required'
+              'context_size must be a positive integer when provided'
             );
           }
 
@@ -557,21 +561,23 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
 
           const estimate = await fetchVramUsage(
             model,
-            contextSize,
+            contextSize ?? undefined,
             numGpuLayers
           );
 
           if (estimate === null) {
             return {
               model: modelName,
-              context_size: contextSize,
+              context_size: contextSize ?? null,
               num_gpu_layers: numGpuLayers ?? null,
               estimated_vram_bytes: null,
               estimated_ram_bytes: null,
               vram_per_token_bytes: model.architecture
                 ? getVramPerToken(model)
                 : null,
-              error: 'Insufficient architectural metadata to estimate VRAM',
+              error: model.architecture
+                ? 'VRAM estimation failed'
+                : 'LM Studio VRAM estimate unavailable',
             };
           }
 
@@ -579,7 +585,7 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
 
           return {
             model: modelName,
-            context_size: contextSize,
+            context_size: contextSize ?? null,
             num_gpu_layers: numGpuLayers ?? null,
             estimated_vram_bytes: estimate.vram_bytes,
             estimated_ram_bytes: estimate.ram_bytes,
@@ -598,10 +604,15 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
             name: t.String({ minLength: 1, error: 'Model name is required.' }),
           }),
           query: t.Object({
-            context_size: t.Number({
-              minimum: 1,
-              error: 'Context size must be a positive integer.',
-            }),
+            context_size: t.Optional(
+              t.Union([
+                t.Number({
+                  minimum: 1,
+                  error: 'Context size must be a positive integer.',
+                }),
+                t.Null(),
+              ])
+            ),
             num_gpu_layers: t.Optional(
               t.Union([t.Number({ minimum: 0 }), t.Null()])
             ),

@@ -176,11 +176,11 @@ export const deleteLlmModel = async (
 
 export const estimateModelVram = async (
   modelName: string,
-  contextSize: number,
+  contextSize?: number | null,
   numGpuLayers?: number | null
 ): Promise<{
   model: string;
-  context_size: number;
+  context_size: number | null;
   num_gpu_layers?: number | null;
   estimated_vram_bytes: number | null;
   estimated_ram_bytes: number | null;
@@ -194,7 +194,10 @@ export const estimateModelVram = async (
   };
   error?: string;
 }> => {
-  const params: Record<string, any> = { context_size: contextSize };
+  const params: Record<string, any> = {};
+  if (contextSize !== undefined && contextSize !== null) {
+    params.context_size = contextSize;
+  }
   if (numGpuLayers !== undefined && numGpuLayers !== null) {
     params.num_gpu_layers = numGpuLayers;
   }
