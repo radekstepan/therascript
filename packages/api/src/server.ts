@@ -318,7 +318,21 @@ const app = new Elysia()
   .use(usageRoutes);
 
 async function checkOllamaConnectionOnStartup() {
-  /* ... */
+  const runtime = getLlmRuntime();
+  console.log(
+    `[Server Startup] Ensuring LM Studio is ready (runtime: ${runtime.type})...`
+  );
+  try {
+    await runtime.ensureReady();
+    console.log('[Server Startup] ✅ LM Studio daemon and server are up.');
+  } catch (err) {
+    console.error('-------------------------------------------------------');
+    console.error('[Server Startup] ⚠️ LM Studio failed to start:', err);
+    console.error(
+      '   LLM features will be unavailable until the service is running.'
+    );
+    console.error('-------------------------------------------------------');
+  }
 }
 
 async function initializeServices() {
