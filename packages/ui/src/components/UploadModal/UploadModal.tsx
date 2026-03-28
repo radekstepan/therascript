@@ -97,7 +97,9 @@ export function UploadModal({ isOpen }: UploadModalProps) {
   const [clientNameInput, setClientNameInput] = useState('');
   const [sessionDate, setSessionDate] = useState(getTodayDateString());
   const [sessionNameInput, setSessionNameInput] = useState('');
-  const [sessionTypeInput, setSessionTypeInput] = useState(SESSION_TYPES[0]);
+  const [sessionTypeInput, setSessionTypeInput] = useState(
+    SESSION_TYPES.find((t) => t === 'Individual') || SESSION_TYPES[0]
+  );
   const [therapyInput, setTherapyInput] = useState(THERAPY_TYPES[0]);
   const [numSpeakersInput, setNumSpeakersInput] = useState(2);
   const [formError, setFormError] = useState<string | null>(null);
