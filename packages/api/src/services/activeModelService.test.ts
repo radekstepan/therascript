@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('../config/index.js', () => ({
+vi.mock('@therascript/config', () => ({
   default: {
-    ollama: { model: 'llama3' },
+    llm: { modelPath: 'llama3' },
   },
 }));
 

@@ -133,7 +133,7 @@ export function getBitsPerWeight(quantizationLevel: string): number {
 
 export function parseParamCount(parameterSize: string): number | null {
   if (!parameterSize) return null;
-  const match = parameterSize.trim().match(/^([\\d.]+)\\s*([KMBT]?)/i);
+  const match = parameterSize.trim().match(/^([\d.]+)\s*([KMBT]?)/i);
   if (!match) return null;
   const value = parseFloat(match[1]);
   if (isNaN(value)) return null;
