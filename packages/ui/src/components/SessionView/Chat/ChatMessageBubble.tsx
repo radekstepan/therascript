@@ -97,6 +97,9 @@ export function ChatMessageBubble({
     displayTokensPerSecond !== null ||
     (isCurrentlyStreaming && tokensPerSecond !== null);
 
+  const hasBubbleContent =
+    displayText.trim() !== '' || showThinkingMarquee || showWaitingIndicator;
+
   const handleCopy = () => {
     if (message.sender === 'ai' && renderMd && markdownContainerRef.current) {
       onCopyClick({
@@ -115,101 +118,103 @@ export function ChatMessageBubble({
       align="start"
       className="mb-4 group"
     >
-      <Box
-        px="3"
-        py="2"
-        className={cn(
-          'relative shadow-sm transition-all duration-200 w-fit',
-          'max-w-[90%] md:max-w-[85%] lg:max-w-[75%]',
-          // Modern bubble shapes: fully rounded with subtle differences
-          isUser
-            ? 'bg-[var(--accent-9)] text-white rounded-lg ml-auto'
-            : 'bg-[var(--gray-2)] text-[var(--gray-12)] rounded-lg border border-[var(--gray-4)]',
-          showWaitingIndicator && 'min-h-[3rem] flex items-center'
-        )}
-        style={{
-          // Subtle pop
-          boxShadow: isUser
-            ? '0 2px 8px -2px var(--accent-a5)'
-            : '0 2px 4px -2px rgba(0,0,0,0.05)',
-        }}
-      >
-        {/* Message Content */}
-        {showWaitingIndicator ? (
-          <Flex align="center" gap="2" className="text-[var(--gray-11)] px-1">
-            <Spinner size="1" />
-            <Box className="thinking-ticker" aria-label="Model is thinking">
-              <Box className="thinking-ticker-track">
-                <Text size="2" style={{ fontStyle: 'italic' }}>
-                  Thinking
-                </Text>
-                <Text size="2" style={{ fontStyle: 'italic' }}>
-                  Reviewing context
-                </Text>
-                <Text size="2" style={{ fontStyle: 'italic' }}>
-                  Preparing response
-                </Text>
-                <Text size="2" style={{ fontStyle: 'italic' }}>
-                  Thinking
-                </Text>
-                <Text size="2" style={{ fontStyle: 'italic' }}>
-                  Reviewing context
-                </Text>
-                <Text size="2" style={{ fontStyle: 'italic' }}>
-                  Preparing response
-                </Text>
+      {hasBubbleContent && (
+        <Box
+          px="3"
+          py="2"
+          className={cn(
+            'relative shadow-sm transition-all duration-200 w-fit',
+            'max-w-[90%] md:max-w-[85%] lg:max-w-[75%]',
+            // Modern bubble shapes: fully rounded with subtle differences
+            isUser
+              ? 'bg-[var(--accent-9)] text-white rounded-lg ml-auto'
+              : 'bg-[var(--gray-2)] text-[var(--gray-12)] rounded-lg border border-[var(--gray-4)]',
+            showWaitingIndicator && 'min-h-[3rem] flex items-center'
+          )}
+          style={{
+            // Subtle pop
+            boxShadow: isUser
+              ? '0 2px 8px -2px var(--accent-a5)'
+              : '0 2px 4px -2px rgba(0,0,0,0.05)',
+          }}
+        >
+          {/* Message Content */}
+          {showWaitingIndicator ? (
+            <Flex align="center" gap="2" className="text-[var(--gray-11)] px-1">
+              <Spinner size="1" />
+              <Box className="thinking-ticker" aria-label="Model is thinking">
+                <Box className="thinking-ticker-track">
+                  <Text size="2" style={{ fontStyle: 'italic' }}>
+                    Thinking
+                  </Text>
+                  <Text size="2" style={{ fontStyle: 'italic' }}>
+                    Reviewing context
+                  </Text>
+                  <Text size="2" style={{ fontStyle: 'italic' }}>
+                    Preparing response
+                  </Text>
+                  <Text size="2" style={{ fontStyle: 'italic' }}>
+                    Thinking
+                  </Text>
+                  <Text size="2" style={{ fontStyle: 'italic' }}>
+                    Reviewing context
+                  </Text>
+                  <Text size="2" style={{ fontStyle: 'italic' }}>
+                    Preparing response
+                  </Text>
+                </Box>
               </Box>
-            </Box>
-          </Flex>
-        ) : (
-          <Box className={cn(isUser ? 'text-white' : 'markdown-ai-message')}>
-            {showThinkingMarquee && (
-              <Box
-                mb={displayText.trim() ? '3' : '0'}
-                className="thinking-inline-strip"
-                aria-label="Model reasoning"
-              >
-                <Text size="1" className="thinking-inline-label">
-                  Thinking
-                </Text>
-                <Box className="thinking-inline-marquee">
-                  <Box className="thinking-inline-track">
-                    <Text size="1" className="thinking-inline-copy">
-                      {thinkingText}
-                    </Text>
-                    <Text
-                      size="1"
-                      className="thinking-inline-copy"
-                      aria-hidden="true"
-                    >
-                      {thinkingText}
-                    </Text>
+            </Flex>
+          ) : (
+            <Box className={cn(isUser ? 'text-white' : 'markdown-ai-message')}>
+              {showThinkingMarquee && (
+                <Box
+                  mb={displayText.trim() !== '' ? '3' : '0'}
+                  className="thinking-inline-strip"
+                  aria-label="Model reasoning"
+                >
+                  <Text size="1" className="thinking-inline-label">
+                    Thinking
+                  </Text>
+                  <Box className="thinking-inline-marquee">
+                    <Box className="thinking-inline-track">
+                      <Text size="1" className="thinking-inline-copy">
+                        {thinkingText}
+                      </Text>
+                      <Text
+                        size="1"
+                        className="thinking-inline-copy"
+                        aria-hidden="true"
+                      >
+                        {thinkingText}
+                      </Text>
+                    </Box>
                   </Box>
                 </Box>
-              </Box>
-            )}
-            {displayText.trim() !== '' &&
-              (!isUser && renderMd ? (
-                <Box ref={markdownContainerRef}>
-                  <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
+              )}
+              {displayText.trim() !== '' &&
+                (!isUser && renderMd ? (
+                  <Box ref={markdownContainerRef}>
+                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
+                      {displayText}
+                    </ReactMarkdown>
+                  </Box>
+                ) : (
+                  <Text
+                    size="2"
+                    style={{
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                      lineHeight: 1.6,
+                    }}
+                  >
                     {displayText}
-                  </ReactMarkdown>
-                </Box>
-              ) : (
-                <Text
-                  size="2"
-                  style={{
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word',
-                    lineHeight: 1.6,
-                  }}
-                >
-                  {displayText}
-                </Text>
-              ))}
-          </Box>
-        )}
-      </Box>
+                  </Text>
+                ))}
+            </Box>
+          )}
+        </Box>
+      )}
 
       {message.isTruncated && (
         <Box
@@ -224,6 +229,26 @@ export function ChatMessageBubble({
             <Callout.Text>
               Context limit reached. Some older messages or parts of the
               transcript were truncated and ignored by the LLM.
+            </Callout.Text>
+          </Callout.Root>
+        </Box>
+      )}
+
+      {/* Warning for 0 completion tokens when model exhausts context on thinking */}
+      {!isUser && !isCurrentlyStreaming && message.completionTokens === 0 && (
+        <Box
+          mt="2"
+          width="100%"
+          className="max-w-[90%] md:max-w-[85%] lg:max-w-[75%]"
+        >
+          <Callout.Root color="orange" size="1">
+            <Callout.Icon>
+              <ExclamationTriangleIcon />
+            </Callout.Icon>
+            <Callout.Text>
+              No response generated. The model may have reached its context
+              limit while thinking. Try a shorter prompt or use a different
+              model.
             </Callout.Text>
           </Callout.Root>
         </Box>

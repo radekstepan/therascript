@@ -389,7 +389,12 @@ export function ChatInterface({
                         aiMsg.text
                           .replace(/<think>[\s\S]*?(<\/think>|$)/g, '')
                           .trim().length > 0;
-                      if (hasVisibleContent) return oldData;
+                      const hasAnyContent =
+                        aiMsg?.text && aiMsg.text.trim().length > 0;
+
+                      // Keep message if it has ANY content (including just <think> blocks)
+                      if (hasAnyContent) return oldData;
+
                       return {
                         ...oldData,
                         messages: currentMessages.filter(
@@ -398,7 +403,15 @@ export function ChatInterface({
                       };
                     }
                   );
-                  if (!streamErrored) {
+
+                  // Check if the message was completely empty to show the toast
+                  const finalSession =
+                    queryClient.getQueryData<ChatSession>(currentChatQueryKey);
+                  const messageStillExists = finalSession?.messages?.some(
+                    (m) => m.id === tempAiMessageId
+                  );
+
+                  if (!streamErrored && !messageStillExists) {
                     setToastMessage(
                       'The model returned an empty response. Try again or reduce the context size.'
                     );
@@ -474,7 +487,9 @@ export function ChatInterface({
               aiMsg?.text &&
               aiMsg.text.replace(/<think>[\s\S]*?(<\/think>|$)/g, '').trim()
                 .length > 0;
-            if (hasVisibleContent) return oldData;
+            const hasAnyContent = aiMsg?.text && aiMsg.text.trim().length > 0;
+
+            if (hasAnyContent) return oldData;
             // Remove empty AI bubble and the optimistic user message if it was never confirmed
             return {
               ...oldData,
