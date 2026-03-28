@@ -272,7 +272,11 @@ async function nativeLMStudioEstimate(
     let output: string;
 
     if (runtime.type === 'native') {
-      const binary = path.join(os.homedir(), '.lmstudio', 'bin', 'lms');
+      const binary = await runtime.getBinaryPath();
+      if (!binary) {
+        console.warn('[LlmService] lms binary not found for VRAM estimation');
+        return null;
+      }
       const args = ['load', '--estimate-only', modelKey];
       if (contextSize !== undefined)
         args.push('--context-length', String(contextSize));

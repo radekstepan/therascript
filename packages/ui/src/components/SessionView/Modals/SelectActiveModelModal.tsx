@@ -542,20 +542,24 @@ export function SelectActiveModelModal({
                     {vramEstimate.context_size == null && (
                       <> using model default context</>
                     )}
-                    {vramEstimate.breakdown && (
-                      <>
-                        {' '}
-                        (
-                        {prettyBytes(
-                          vramEstimate.breakdown.weights_vram_bytes
-                        )}{' '}
-                        weights +{' '}
-                        {prettyBytes(vramEstimate.breakdown.kv_cache_bytes)} KV
-                        cache +{' '}
-                        {prettyBytes(vramEstimate.breakdown.overhead_bytes)}{' '}
-                        CUDA)
-                      </>
-                    )}
+                    {vramEstimate.breakdown &&
+                      vramEstimate.breakdown.weights_vram_bytes +
+                        vramEstimate.breakdown.kv_cache_bytes +
+                        vramEstimate.breakdown.overhead_bytes >
+                        0 && (
+                        <>
+                          {' '}
+                          (
+                          {prettyBytes(
+                            vramEstimate.breakdown.weights_vram_bytes
+                          )}{' '}
+                          weights +{' '}
+                          {prettyBytes(vramEstimate.breakdown.kv_cache_bytes)}{' '}
+                          KV cache +{' '}
+                          {prettyBytes(vramEstimate.breakdown.overhead_bytes)}{' '}
+                          CUDA)
+                        </>
+                      )}
                     {vramEstimate.estimated_ram_bytes != null &&
                       vramEstimate.estimated_ram_bytes > 0 && (
                         <>

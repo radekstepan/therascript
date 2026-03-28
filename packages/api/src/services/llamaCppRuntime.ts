@@ -25,6 +25,7 @@ export interface LlmRuntime {
   deleteModel(modelPath: string): Promise<string>;
   restartWithModel(modelPath: string): Promise<void>;
   stop?(): Promise<void>;
+  getBinaryPath(): Promise<string | null>;
 }
 
 let cachedRuntime: LlmRuntime | null = null;
@@ -145,6 +146,10 @@ class LmStudioRuntime implements LlmRuntime {
       );
     }
     console.log('[LmStudioRuntime] Service is ready.');
+  }
+
+  async getBinaryPath(): Promise<string | null> {
+    return this.findLmsBinary();
   }
 
   async deleteModel(modelKey: string): Promise<string> {
