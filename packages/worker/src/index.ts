@@ -42,7 +42,10 @@ const transcriptionWorker = new Worker(
 console.log(`[Worker] Initializing worker for queue: "${ANALYSIS_QUEUE_NAME}"`);
 const analysisWorker = new Worker(ANALYSIS_QUEUE_NAME, analysisProcessor, {
   connection: redisConnection,
-  concurrency: 2, // Can run a couple of analysis jobs in parallel
+  // concurrency: 1 prevents a race condition where two jobs using different
+  // models simultaneously call loadLlmModelForWorker, causing them to
+  // interleave their unload/load sequences and corrupt each other's state.
+  concurrency: 1,
 });
 
 // --- Event Listeners for Logging ---

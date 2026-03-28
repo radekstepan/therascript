@@ -32,6 +32,7 @@ vi.mock('./llamaCppRuntime.js', () => ({
     restartWithModel: vi.fn().mockResolvedValue(undefined),
     stop: vi.fn().mockResolvedValue(undefined),
     deleteModel: vi.fn().mockResolvedValue('deleted'),
+    getBinaryPath: vi.fn().mockResolvedValue('/mock/lms'),
   }),
 }));
 

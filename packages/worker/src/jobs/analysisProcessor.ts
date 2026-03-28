@@ -24,7 +24,11 @@ import { publishStreamEvent } from '../services/streamPublisher.js';
 
 /**
  * Load a model in LM Studio via its REST API.
- * This is required because LM Studio doesn't auto-load models on first request like Ollama.
+ * This is required because LM Studio doesn't auto-load models on first request.
+ *
+ * Fetches the models list once, uses it both to check whether a reload is
+ * needed (early-return) and to collect instances to unload before loading
+ * the new model.
  */
 async function loadLlmModelForWorker(
   modelKey: string,
@@ -32,79 +36,63 @@ async function loadLlmModelForWorker(
 ): Promise<void> {
   const baseUrl = config.llm.baseURL;
 
-  // Check if the specific model is already loaded with sufficient context.
-  // We compare model keys explicitly to avoid accepting a different model that
-  // happens to be loaded (e.g. from a previous session chat).
+  // Single fetch — used both for the early-return check and for unloading.
+  type LmsModel = {
+    type: string;
+    key: string;
+    publisher?: string;
+    loaded_instances: Array<{
+      id: string;
+      config?: { context_length?: number };
+    }>;
+  };
+  let loadedModels: LmsModel[] = [];
   try {
     const res = await fetch(`${baseUrl}/api/v1/models`);
     if (res.ok) {
-      const data = (await res.json()) as {
-        models: Array<{
-          type: string;
-          key: string;
-          publisher?: string;
-          loaded_instances: Array<{
-            id: string;
-            config?: { context_length?: number };
-          }>;
-        }>;
-      };
-      const loadedMatch = data.models.find(
-        (m) =>
-          m.type === 'llm' &&
-          m.loaded_instances.length > 0 &&
-          (m.key === modelKey || `${m.publisher}/${m.key}` === modelKey)
-      );
-      if (loadedMatch) {
-        const loadedContext =
-          loadedMatch.loaded_instances[0]?.config?.context_length;
-        if (!contextSize || !loadedContext || loadedContext >= contextSize) {
-          console.log(
-            `[Analysis Worker] Model '${modelKey}' already loaded (context: ${loadedContext ?? 'default'}), skipping load.`
-          );
-          return;
-        }
-        console.log(
-          `[Analysis Worker] Model '${modelKey}' loaded but context ${loadedContext} < required ${contextSize}. Reloading.`
-        );
-      }
+      const data = (await res.json()) as { models: LmsModel[] };
+      loadedModels = data.models.filter((m) => m.type === 'llm');
     }
   } catch (e) {
-    console.warn(`[Analysis Worker] Could not check loaded models:`, e);
+    console.warn(`[Analysis Worker] Could not fetch loaded models:`, e);
   }
 
-  // Unload any currently loaded instances first
-  try {
-    const res = await fetch(`${baseUrl}/api/v1/models`);
-    if (res.ok) {
-      const data = (await res.json()) as {
-        models: Array<{
-          type: string;
-          loaded_instances: Array<{ id: string }>;
-        }>;
-      };
-      const loadedInstances = data.models
-        .filter((m) => m.type === 'llm')
-        .flatMap((m) => m.loaded_instances);
-
-      for (const instance of loadedInstances) {
-        try {
-          await fetch(`${baseUrl}/api/v1/models/unload`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ instance_id: instance.id }),
-          });
-          console.log(`[Analysis Worker] Unloaded instance: ${instance.id}`);
-        } catch (e) {
-          console.warn(
-            `[Analysis Worker] Failed to unload instance ${instance.id}:`,
-            e
-          );
-        }
-      }
+  // If the exact model is already loaded with sufficient context, nothing to do.
+  const loadedMatch = loadedModels.find(
+    (m) =>
+      m.loaded_instances.length > 0 &&
+      (m.key === modelKey || `${m.publisher}/${m.key}` === modelKey)
+  );
+  if (loadedMatch) {
+    const loadedContext =
+      loadedMatch.loaded_instances[0]?.config?.context_length;
+    if (!contextSize || !loadedContext || loadedContext >= contextSize) {
+      console.log(
+        `[Analysis Worker] Model '${modelKey}' already loaded (context: ${loadedContext ?? 'default'}), skipping load.`
+      );
+      return;
     }
-  } catch (e) {
-    console.warn(`[Analysis Worker] Could not enumerate loaded models:`, e);
+    console.log(
+      `[Analysis Worker] Model '${modelKey}' loaded but context ${loadedContext} < required ${contextSize}. Reloading.`
+    );
+  }
+
+  // Unload all currently loaded LLM instances before loading the new model.
+  const instancesToUnload = loadedModels.flatMap((m) => m.loaded_instances);
+  for (const instance of instancesToUnload) {
+    try {
+      await fetch(`${baseUrl}/api/v1/models/unload`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instance_id: instance.id }),
+      });
+      console.log(`[Analysis Worker] Unloaded instance: ${instance.id}`);
+    } catch (e) {
+      console.warn(
+        `[Analysis Worker] Failed to unload instance ${instance.id}:`,
+        e
+      );
+    }
   }
 
   // Load the requested model
