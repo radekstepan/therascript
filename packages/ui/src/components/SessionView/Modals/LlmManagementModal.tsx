@@ -49,6 +49,7 @@ import type {
   LlmStatus,
   UIDownloadJobStatus,
   UIDownloadJobStatusState,
+  AvailableModelsResponse,
 } from '../../../types';
 import { cn } from '../../../utils';
 import prettyBytes from 'pretty-bytes';
@@ -267,7 +268,21 @@ export function LlmManagementModal({
     },
     onSuccess: (data, modelName) => {
       setToast(`✅ ${data.message || `Model ${modelName} deleted.`}`);
-      queryClient.invalidateQueries({ queryKey: ['availableLlmModels'] });
+      // Optimistically remove from list immediately
+      queryClient.setQueryData<AvailableModelsResponse>(
+        ['availableLlmModels'],
+        (oldData) => {
+          if (!oldData) return oldData;
+          return {
+            ...oldData,
+            models: oldData.models.filter((m) => m.name !== modelName),
+          };
+        }
+      );
+      // Refetch after 5 seconds to get actual state from LM Studio
+      setTimeout(() => {
+        queryClient.refetchQueries({ queryKey: ['availableLlmModels'] });
+      }, 5000);
       queryClient.invalidateQueries({ queryKey: ['llmStatus'] });
       closeDeleteConfirm();
     },

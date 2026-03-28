@@ -153,29 +153,62 @@ class LmStudioRuntime implements LlmRuntime {
   }
 
   async deleteModel(modelKey: string): Promise<string> {
-    // LM Studio stores models in ~/.lmstudio/models/<publisher>/<model-name>/
-    const modelsBase = path.join(os.homedir(), '.lmstudio', 'models');
-    const parts = modelKey
-      .replace(/\\/g, '/')
-      .split('/')
-      .filter((p) => p.length > 0);
-    const targetPath =
-      parts.length >= 2
-        ? path.join(modelsBase, ...parts)
-        : path.join(modelsBase, modelKey);
-
-    if (fs.existsSync(targetPath)) {
-      const stat = fs.statSync(targetPath);
-      if (stat.isDirectory()) {
-        fs.rmSync(targetPath, { recursive: true, force: true });
-      } else {
-        fs.unlinkSync(targetPath);
-      }
-      return `Deleted model ${modelKey}`;
+    // Use lms ls <modelKey> --json to get the actual filesystem path
+    // indexedModelIdentifier contains format: modelKey@actualPath
+    let modelInfo: {
+      indexedModelIdentifier?: string;
+      modelKey?: string;
+    } | null = null;
+    try {
+      const { stdout } = await this.runLms('ls', modelKey, '--json');
+      const models = JSON.parse(stdout) as Array<{
+        indexedModelIdentifier?: string;
+        modelKey?: string;
+      }>;
+      // lms ls <key> returns variants (e.g., key@8bit), so check prefix match
+      modelInfo =
+        models.find(
+          (m) =>
+            m.modelKey === modelKey || m.modelKey?.startsWith(modelKey + '@')
+        ) || null;
+    } catch (e: any) {
+      throw new InternalServerError(
+        `Failed to get model info from LM Studio: ${e.message}`
+      );
     }
-    throw new NotFoundError(
-      `Model ${modelKey} not found in ~/.lmstudio/models/`
-    );
+
+    if (!modelInfo) {
+      throw new NotFoundError(`Model ${modelKey} not found in LM Studio`);
+    }
+
+    // indexedModelIdentifier format: "modelKey@actualFilesystemPath"
+    const identifier = modelInfo.indexedModelIdentifier || '';
+    const atIndex = identifier.indexOf('@');
+    if (atIndex === -1) {
+      throw new NotFoundError(
+        `Model ${modelKey} has no valid path information in LM Studio`
+      );
+    }
+    const actualPath = identifier.substring(atIndex + 1);
+
+    const modelsBase = path.join(os.homedir(), '.lmstudio', 'models');
+    const targetPath = path.join(modelsBase, actualPath);
+
+    if (!fs.existsSync(targetPath)) {
+      throw new NotFoundError(
+        `Model ${modelKey} path not found: ${actualPath}`
+      );
+    }
+
+    // Determine what to delete:
+    // - If path is a file (e.g., .../model.gguf), delete the parent directory
+    // - If path is a directory, delete it directly
+    const stat = fs.statSync(targetPath);
+    const deletePath = stat.isFile() ? path.dirname(targetPath) : targetPath;
+
+    fs.rmSync(deletePath, { recursive: true, force: true });
+
+    return `Deleted model ${modelKey}`;
   }
 
   async restartWithModel(modelKey: string): Promise<void> {
