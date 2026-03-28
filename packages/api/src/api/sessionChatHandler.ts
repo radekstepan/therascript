@@ -205,11 +205,25 @@ export const addSessionChatMessage = async ({
     // Effective context size for truncation detection
     const effectiveContextSize = configured ?? recommendedContext ?? 8192;
 
+    // Dedicated abort controller for the LLM fetch connection.
+    // request.signal in Elysia/Bun does NOT fire on SSE client disconnect —
+    // only this controller, which we abort manually on write failure, will stop
+    // the underlying fetch to LM Studio and interrupt generation.
+    const llmAbortController = new AbortController();
+    request.signal?.addEventListener(
+      'abort',
+      () => llmAbortController.abort(),
+      { once: true }
+    );
+
     const llmStream = await streamChatResponse(
       streamMessages,
       configured == null && recommendedContext != null
-        ? { contextSize: recommendedContext, abortSignal: request.signal }
-        : { abortSignal: request.signal }
+        ? {
+            contextSize: recommendedContext,
+            abortSignal: llmAbortController.signal,
+          }
+        : { abortSignal: llmAbortController.signal }
     );
 
     const headers = new Headers({
@@ -219,18 +233,36 @@ export const addSessionChatMessage = async ({
     });
     headers.set('X-User-Message-Id', String(userMessage.id));
 
-    const passthrough = new TransformStream<Uint8Array, Uint8Array>();
-    const writer = passthrough.writable.getWriter();
     const encoder = new TextEncoder();
+    let sseController: ReadableStreamDefaultController<Uint8Array>;
+    let sseStreamClosed = false;
 
-    const writeSseEvent = async (data: object) => {
-      try {
-        await writer.write(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
-      } catch (e) {
-        console.warn(
-          `[API SSE Write Error ${chatData.id}]: Failed to write to stream (client likely disconnected):`,
-          e
+    // ReadableStream with a cancel callback — Bun calls cancel() when the HTTP
+    // client closes the SSE connection. This is the only reliable disconnect hook.
+    const readable = new ReadableStream<Uint8Array>({
+      start(controller) {
+        sseController = controller;
+      },
+      cancel() {
+        console.log(
+          `[API SSE ${chatData.id}] Client disconnected — aborting LLM generation`
         );
+        sseStreamClosed = true;
+        llmAbortController.abort();
+      },
+    });
+
+    const writeSseEvent = (data: object) => {
+      if (sseStreamClosed) {
+        throw new Error('SSE stream closed, aborting stream processing.');
+      }
+      try {
+        sseController.enqueue(
+          encoder.encode(`data: ${JSON.stringify(data)}\n\n`)
+        );
+      } catch (e) {
+        sseStreamClosed = true;
+        llmAbortController.abort();
         throw new Error('SSE write failed, aborting stream processing.');
       }
     };
@@ -342,6 +374,11 @@ export const addSessionChatMessage = async ({
           streamError instanceof Error
             ? streamError
             : new Error(String(streamError));
+        // Close the generator to trigger its finally block, which cancels the
+        // reader and closes the underlying TCP connection to LM Studio.
+        (llmStream as AsyncGenerator<any, any>)
+          .return(undefined)
+          .catch(() => {});
         console.error(
           `[API ProcessStream ${chatData.id}] Error DURING LLM stream iteration:`,
           llmStreamError
@@ -450,27 +487,13 @@ export const addSessionChatMessage = async ({
           } catch {}
         }
 
-        if (llmStreamError) {
-          await writer
-            .abort(llmStreamError)
-            .catch((e) =>
-              console.warn(
-                `[API ProcessStream Finally ${chatData.id}] Error aborting writer:`,
-                e
-              )
-            );
-        } else {
-          await writer
-            .close()
-            .catch((e) =>
-              console.warn(
-                `[API ProcessStream Finally ${chatData.id}] Error closing writer:`,
-                e
-              )
-            );
+        if (!sseStreamClosed) {
+          try {
+            sseController.close();
+          } catch {}
         }
         console.log(
-          `[API ProcessStream Finally ${chatData.id}] Writer cleanup attempt finished.`
+          `[API ProcessStream Finally ${chatData.id}] Stream cleanup finished.`
         );
       }
     };
@@ -480,16 +503,14 @@ export const addSessionChatMessage = async ({
         `[API AddMsg ${chatData.id}] UNHANDLED error from background stream processing task:`,
         err
       );
-      if (writer && !writer.closed) {
-        writer
-          .abort(err)
-          .catch((abortErr) =>
-            console.error('Error aborting writer in outer catch:', abortErr)
-          );
+      if (!sseStreamClosed) {
+        try {
+          sseController.close();
+        } catch {}
       }
     });
 
-    return new Response(passthrough.readable as ReadableStream<Uint8Array>, {
+    return new Response(readable, {
       status: 200,
       headers,
     });

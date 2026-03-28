@@ -125,6 +125,9 @@ export async function* streamLlmChatDetailed(
     ? AbortSignal.any([options.abortSignal, timeoutController.signal])
     : timeoutController.signal;
 
+  // Hoisted so the finally block can cancel it and close the LM Studio TCP connection
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+
   try {
     const bodyPayload: any = {
       model: options?.model || 'default',
@@ -175,7 +178,20 @@ export async function* streamLlmChatDetailed(
     }
 
     // Parse SSE stream (text/event-stream)
-    const reader = response.body.getReader();
+    // NOTE: hoisted to outer scope so the finally block can cancel it on abort
+    reader = response.body.getReader();
+
+    // *** KEY: directly cancel the reader the moment the signal fires ***
+    // AbortSignal only controls the fetch() setup call, NOT the reader once it exists.
+    // When the generator is paused at `yield` (not inside reader.read()), aborting
+    // the signal has zero effect. This listener ensures the TCP connection to LM Studio
+    // is closed immediately — causing reader.read() to return {done:true} on the next
+    // call and gracefully terminating the generation loop.
+    const abortHandler = () => {
+      reader?.cancel().catch(() => {});
+    };
+    combinedSignal.addEventListener('abort', abortHandler, { once: true });
+
     const decoder = new TextDecoder();
     let buffer = '';
     let promptTokens = 0;
@@ -304,5 +320,11 @@ export async function* streamLlmChatDetailed(
   } finally {
     if (timeoutId !== null) clearTimeout(timeoutId);
     timeoutId = null;
+    // Cancel the reader to close the TCP connection to LM Studio.
+    // This is essential when the consumer abandons the generator (e.g. user clicks Stop)
+    // because the generator stays paused and the fetch would otherwise remain open.
+    if (reader) {
+      reader.cancel().catch(() => {});
+    }
   }
 }
