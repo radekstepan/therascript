@@ -346,11 +346,6 @@ const JobDetailView: React.FC<{
             Analysis #{job.id}
           </Heading>
           <Flex gap="3" align="center">
-            {isConnected && (
-              <Badge color="green" variant="soft">
-                <LightningBoltIcon /> Live
-              </Badge>
-            )}
             {isCancellable && (
               <Button
                 variant="soft"
@@ -387,12 +382,8 @@ const JobDetailView: React.FC<{
                 size="2"
                 variant="soft"
               >
-                {isFetching && !isDeletable && !isConnected ? (
-                  <Spinner size="1" />
-                ) : null}
-                <Text
-                  ml={isFetching && !isDeletable && !isConnected ? '1' : '0'}
-                >
+                {isFetching && !isDeletable ? <Spinner size="1" /> : null}
+                <Text ml={isFetching && !isDeletable ? '1' : '0'}>
                   {job.status}
                 </Text>
               </Badge>
@@ -674,13 +665,17 @@ const JobList: React.FC<{
               >
                 <Table.Cell>{formatTimestamp(job.created_at)}</Table.Cell>
                 <Table.Cell>
-                  <Tooltip
-                    content={
-                      job.status === 'canceling'
-                        ? 'Waiting for current step to finish before stopping.'
-                        : null
-                    }
-                  >
+                  {job.status === 'canceling' ? (
+                    <Tooltip content="Waiting for current step to finish before stopping.">
+                      <Badge
+                        color={getStatusBadgeColor(job.status)}
+                        variant="soft"
+                      >
+                        <LapTimerIcon width="12" height="12" />
+                        <Text ml="1">{job.status}</Text>
+                      </Badge>
+                    </Tooltip>
+                  ) : (
                     <Badge
                       color={getStatusBadgeColor(job.status)}
                       variant="soft"
@@ -688,8 +683,7 @@ const JobList: React.FC<{
                       {job.status === 'pending' ||
                       job.status === 'generating_strategy' ||
                       job.status === 'mapping' ||
-                      job.status === 'reducing' ||
-                      job.status === 'canceling' ? (
+                      job.status === 'reducing' ? (
                         <LapTimerIcon width="12" height="12" />
                       ) : job.status === 'completed' ? (
                         <CheckCircledIcon width="12" height="12" />
@@ -698,7 +692,7 @@ const JobList: React.FC<{
                       )}
                       <Text ml="1">{job.status}</Text>
                     </Badge>
-                  </Tooltip>
+                  )}
                 </Table.Cell>
                 <Table.Cell style={{ maxWidth: 0 }}>
                   <Flex align="center" gap="2" style={{ minWidth: 0 }}>
