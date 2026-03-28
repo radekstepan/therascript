@@ -1,26 +1,20 @@
-FROM debian:bookworm-slim AS builder
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y \
-    build-essential \
-    cmake \
-    git \
+    curl \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
-RUN git clone https://github.com/ggml-org/llama.cpp.git .
+# Install llmster (LM Studio headless inference engine)
+RUN curl -fsSL https://lmstudio.ai/install.sh | bash
 
-RUN mkdir build && cd build && \
-    cmake .. -DGGML_NATIVE=OFF -DCMAKE_CXX_FLAGS="-march=armv8-a" -DCMAKE_C_FLAGS="-march=armv8-a" && \
-    cmake --build . --config Release --target llama-server -j $(nproc)
+ENV PATH="/root/.lmstudio/bin:${PATH}"
 
-FROM debian:bookworm-slim
+EXPOSE 1234
 
-RUN apt-get update && apt-get install -y \
-    libgomp1 \
-    && rm -rf /var/lib/apt/lists/*
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
-# Copy the binary and all shared libraries built alongside it
-COPY --from=builder /app/build/bin/ /usr/local/bin/
-RUN ldconfig /usr/local/bin
-
-ENTRYPOINT ["llama-server"]
+ENTRYPOINT ["/entrypoint.sh"]

@@ -7,14 +7,11 @@ services:
       dockerfile: Dockerfile
     container_name: therascript_llama_server
     ports:
-      - '8080:8080'
+      - '1234:1234'
     volumes:
-      - ./models:/models
+      # Models directory mounted into LM Studio's model path inside the container.
+      # Place your GGUF model files (or LM Studio model folders) here.
+      - ./models:/root/.lmstudio/models
     environment:
-      - LLAMA_MODEL_PATH=${LLAMA_MODEL_PATH:-/models/default.gguf}
-    command: >
-      --host 0.0.0.0
-      --port 8080
-      --model ${LLAMA_MODEL_PATH:-/models/default.gguf}
-      --ctx-size 8192
+      - LMS_PORT=1234
     restart: unless-stopped

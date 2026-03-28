@@ -1,25 +1,18 @@
 import axios from 'axios';
-import fs from 'node:fs';
-import path from 'node:path';
 import crypto from 'node:crypto';
-import { pipeline } from 'node:stream/promises';
-import { createWriteStream } from 'node:fs';
 
 import config from '@therascript/config';
 import {
   BackendChatMessage,
   LlmModelInfo,
   ModelDownloadJobStatus,
-  ModelDownloadJobStatusState,
   VramEstimate,
 } from '@therascript/domain';
 
 import {
   InternalServerError,
   BadRequestError,
-  ApiError,
   NotFoundError,
-  ConflictError,
 } from '../errors.js';
 
 import {
@@ -44,6 +37,56 @@ import {
 } from '@therascript/services';
 
 const runtime = getLlmRuntime();
+
+// ---------------------------------------------------------------------------
+// LM Studio API response shapes
+// ---------------------------------------------------------------------------
+
+interface LmsLoadedInstance {
+  id: string;
+  config: {
+    context_length: number;
+    flash_attention?: boolean;
+    offload_kv_cache_to_gpu?: boolean;
+  };
+}
+
+interface LmsModelRecord {
+  type: 'llm' | 'embedding';
+  publisher: string;
+  key: string;
+  display_name: string;
+  architecture: string | null;
+  quantization: { name: string | null; bits_per_weight: number | null } | null;
+  size_bytes: number;
+  params_string: string | null;
+  loaded_instances: LmsLoadedInstance[];
+  max_context_length: number;
+  format: 'gguf' | 'mlx' | null;
+}
+
+interface LmsDownloadStartResponse {
+  job_id?: string;
+  status:
+    | 'downloading'
+    | 'paused'
+    | 'completed'
+    | 'failed'
+    | 'already_downloaded';
+  total_size_bytes?: number;
+  started_at?: string;
+}
+
+interface LmsDownloadStatusResponse {
+  job_id: string;
+  status: 'downloading' | 'paused' | 'completed' | 'failed';
+  bytes_per_second?: number;
+  estimated_completion?: string;
+  completed_at?: string;
+  total_size_bytes?: number;
+  downloaded_bytes?: number;
+  started_at?: string;
+}
 
 // We parse bits per weight the same way as before if needed to estimate VRAM
 export function getBitsPerWeight(quantizationLevel: string): number {
@@ -171,7 +214,7 @@ export function getVramPerToken(model: LlmModelInfo): number | null {
 
 async function isLlmApiResponsive(): Promise<boolean> {
   try {
-    const res = await axios.get(`${config.llm.baseURL}/health`, {
+    const res = await axios.get(`${config.llm.baseURL}/api/v1/models`, {
       timeout: 3000,
     });
     return res.status === 200;
@@ -212,171 +255,225 @@ const getSystemPrompt = (
 // We will implement GGUF metadata parsing in a separate PR or using a library.
 // For now, we return basic mock architecture if it's not possible to parse easily.
 export const listModels = async (): Promise<LlmModelInfo[]> => {
-  const modelsDir = config.llm.modelsDir;
-  if (!fs.existsSync(modelsDir)) {
+  try {
+    const res = await axios.get<{ models: LmsModelRecord[] }>(
+      `${config.llm.baseURL}/api/v1/models`,
+      { timeout: 5000 }
+    );
+    return res.data.models
+      .filter((m) => m.type === 'llm')
+      .map((m) => ({
+        name: m.key,
+        modified_at: new Date(),
+        size: m.size_bytes,
+        digest: m.key,
+        details: {
+          format: m.format || 'gguf',
+          family: m.architecture || 'unknown',
+          families: null,
+          parameter_size: m.params_string || 'unknown',
+          quantization_level: m.quantization?.name || 'unknown',
+        },
+        defaultContextSize: m.max_context_length || null,
+        // LM Studio does not expose per-layer architecture needed for VRAM estimation
+        architecture: null,
+      }));
+  } catch (error) {
+    console.warn(
+      '[LlmService] Could not fetch models from LM Studio API:',
+      error
+    );
     return [];
   }
-  const files = fs.readdirSync(modelsDir).filter((f) => f.endsWith('.gguf'));
-  return files.map((file) => {
-    const stats = fs.statSync(path.join(modelsDir, file));
-    return {
-      name: file,
-      modified_at: stats.mtime,
-      size: stats.size,
-      digest: file,
-      details: {
-        format: 'gguf',
-        family: 'llama',
-        families: null,
-        parameter_size: 'unknown',
-        quantization_level: 'unknown',
-      },
-      defaultContextSize: 8192,
-      architecture: {
-        num_layers: 32,
-        num_attention_heads: 32,
-        num_key_value_heads: 8,
-        hidden_size: 4096,
-        precision: 2,
-      },
-    };
-  });
 };
 
 const activeDownloadJobs = new Map<string, ModelDownloadJobStatus>();
-const downloadJobCancellationFlags = new Map<string, boolean>();
 
-export const startDownloadModelJob = (modelUrl: string): string => {
-  // Validate URL
-  let url: URL;
-  try {
-    url = new URL(modelUrl);
-  } catch (e) {
+/**
+ * Start downloading a model via the LM Studio REST API.
+ * Accepts an LM Studio model key (e.g. "publisher/model-name") or a
+ * Hugging Face URL (e.g. "https://huggingface.co/org/repo-GGUF").
+ */
+export const startDownloadModelJob = (modelRef: string): string => {
+  if (!modelRef || !modelRef.trim()) {
     throw new BadRequestError(
-      'Invalid URL provided. Must be a valid HTTP/HTTPS URL.'
+      'Model reference is required (LM Studio key or Hugging Face URL).'
     );
-  }
-
-  if (!['http:', 'https:'].includes(url.protocol)) {
-    throw new BadRequestError('URL must use http or https protocol.');
-  }
-
-  // Extract filename from URL or use a default
-  let fileName = url.pathname.split('/').pop() || 'model.gguf';
-  if (!fileName.endsWith('.gguf')) {
-    fileName += '.gguf';
   }
 
   const jobId = crypto.randomUUID();
   console.log(
-    `[LlmService] Queuing download job ${jobId} for model: ${fileName} from ${modelUrl}`
+    `[LlmService] Queuing LM Studio download job ${jobId} for: ${modelRef}`
   );
-
-  if (!fs.existsSync(config.llm.modelsDir)) {
-    fs.mkdirSync(config.llm.modelsDir, { recursive: true });
-  }
 
   activeDownloadJobs.set(jobId, {
     jobId,
-    modelName: fileName,
+    modelName: modelRef,
     status: 'queued',
     message: 'Download queued',
     startTime: Date.now(),
   });
-  downloadJobCancellationFlags.set(jobId, false);
 
-  void runDownloadInBackground(jobId, modelUrl, fileName).catch((err) => {
-    activeDownloadJobs.set(jobId, {
-      ...activeDownloadJobs.get(jobId)!,
-      status: 'failed',
-      error: 'Background task crashed',
-      message: err.message,
-      endTime: Date.now(),
-    });
+  void runLmsDownload(jobId, modelRef).catch((err) => {
+    const existing = activeDownloadJobs.get(jobId);
+    if (
+      existing &&
+      existing.status !== 'completed' &&
+      existing.status !== 'canceled'
+    ) {
+      activeDownloadJobs.set(jobId, {
+        ...existing,
+        status: 'failed',
+        message: err.message,
+        error: err.message,
+        endTime: Date.now(),
+      });
+    }
   });
 
   return jobId;
 };
 
-async function runDownloadInBackground(
-  jobId: string,
-  modelUrl: string,
-  fileName: string
-) {
-  const destPath = path.join(config.llm.modelsDir, fileName);
+async function runLmsDownload(jobId: string, modelRef: string): Promise<void> {
+  const baseUrl = config.llm.baseURL;
+
   activeDownloadJobs.set(jobId, {
     ...activeDownloadJobs.get(jobId)!,
     status: 'downloading',
-    message: 'Downloading...',
+    message: 'Initiating download via LM Studio...',
   });
 
   try {
-    const response = await axios({
-      url: modelUrl,
-      method: 'GET',
-      responseType: 'stream',
-    });
+    const res = await axios.post<LmsDownloadStartResponse>(
+      `${baseUrl}/api/v1/models/download`,
+      { model: modelRef },
+      { timeout: 30000 }
+    );
 
-    const totalBytes = parseInt(response.headers['content-length'] ?? '0', 10);
-    let completedBytes = 0;
-
-    const writer = createWriteStream(destPath);
-
-    response.data.on('data', (chunk: Buffer) => {
-      if (downloadJobCancellationFlags.get(jobId)) {
-        response.data.destroy();
-        writer.close();
-        fs.unlinkSync(destPath);
-        return;
-      }
-      completedBytes += chunk.length;
-      const progress = totalBytes
-        ? Math.round((completedBytes / totalBytes) * 100)
-        : 0;
-      activeDownloadJobs.set(jobId, {
-        ...activeDownloadJobs.get(jobId)!,
-        status: 'downloading',
-        totalBytes,
-        completedBytes,
-        progress,
-        message: `Downloading... ${progress}%`,
-      });
-    });
-
-    await pipeline(response.data, writer);
-
-    if (downloadJobCancellationFlags.get(jobId)) {
-      activeDownloadJobs.set(jobId, {
-        ...activeDownloadJobs.get(jobId)!,
-        status: 'canceled',
-        message: 'Canceled',
-        endTime: Date.now(),
-      });
-    } else {
+    if (res.data.status === 'already_downloaded') {
       activeDownloadJobs.set(jobId, {
         ...activeDownloadJobs.get(jobId)!,
         status: 'completed',
-        message: 'Download finished',
+        message: 'Model already downloaded',
         progress: 100,
         endTime: Date.now(),
       });
+      return;
     }
-  } catch (err: any) {
-    if (fs.existsSync(destPath)) {
-      fs.unlinkSync(destPath);
+
+    const lmsJobId = res.data.job_id;
+    if (!lmsJobId) {
+      throw new InternalServerError(
+        'LM Studio download API did not return a job_id'
+      );
     }
+
     activeDownloadJobs.set(jobId, {
       ...activeDownloadJobs.get(jobId)!,
-      status: 'failed',
-      message: 'Download failed',
-      error: err.message,
-      endTime: Date.now(),
+      status: 'downloading',
+      message: 'Downloading...',
+      totalBytes: res.data.total_size_bytes,
     });
-  } finally {
-    downloadJobCancellationFlags.delete(jobId);
+
+    await pollLmsDownloadStatus(jobId, lmsJobId, baseUrl);
+  } catch (err: any) {
+    const existing = activeDownloadJobs.get(jobId);
+    if (
+      existing &&
+      existing.status !== 'canceling' &&
+      existing.status !== 'canceled'
+    ) {
+      activeDownloadJobs.set(jobId, {
+        ...existing,
+        status: 'failed',
+        message: 'Download failed',
+        error: err.message,
+        endTime: Date.now(),
+      });
+    }
+    throw err;
   }
 }
 
+async function pollLmsDownloadStatus(
+  jobId: string,
+  lmsJobId: string,
+  baseUrl: string
+): Promise<void> {
+  const deadline = Date.now() + 30 * 60 * 1000; // 30 min cap
+
+  while (Date.now() <= deadline) {
+    const current = activeDownloadJobs.get(jobId);
+    if (current?.status === 'canceling') {
+      activeDownloadJobs.set(jobId, {
+        ...current,
+        status: 'canceled',
+        message: 'Download canceled',
+        endTime: Date.now(),
+      });
+      return;
+    }
+
+    try {
+      const res = await axios.get<LmsDownloadStatusResponse>(
+        `${baseUrl}/api/v1/models/download/status/${lmsJobId}`,
+        { timeout: 5000 }
+      );
+      const data = res.data;
+      const progress =
+        data.total_size_bytes && data.downloaded_bytes
+          ? Math.round((data.downloaded_bytes / data.total_size_bytes) * 100)
+          : undefined;
+
+      if (data.status === 'completed') {
+        activeDownloadJobs.set(jobId, {
+          ...activeDownloadJobs.get(jobId)!,
+          status: 'completed',
+          message: 'Download complete',
+          progress: 100,
+          completedBytes: data.downloaded_bytes,
+          totalBytes: data.total_size_bytes,
+          endTime: Date.now(),
+        });
+        return;
+      }
+
+      if (data.status === 'failed') {
+        activeDownloadJobs.set(jobId, {
+          ...activeDownloadJobs.get(jobId)!,
+          status: 'failed',
+          message: 'Download failed',
+          error: 'LM Studio reported download failure',
+          endTime: Date.now(),
+        });
+        return;
+      }
+
+      activeDownloadJobs.set(jobId, {
+        ...activeDownloadJobs.get(jobId)!,
+        status: 'downloading',
+        message: `Downloading... ${progress ?? 0}%`,
+        progress,
+        completedBytes: data.downloaded_bytes,
+        totalBytes: data.total_size_bytes,
+      });
+    } catch (err: any) {
+      console.warn(
+        `[LlmService] Failed to poll LM Studio download status: ${err.message}`
+      );
+    }
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 3000));
+  }
+
+  activeDownloadJobs.set(jobId, {
+    ...activeDownloadJobs.get(jobId)!,
+    status: 'failed',
+    message: 'Download timed out',
+    error: 'Polling timed out after 30 minutes',
+    endTime: Date.now(),
+  });
+}
 export const getDownloadModelJobStatus = (
   jobId: string
 ): ModelDownloadJobStatus | null => {
@@ -394,7 +491,8 @@ export const cancelDownloadModelJob = (jobId: string): boolean => {
   ) {
     return false;
   }
-  downloadJobCancellationFlags.set(jobId, true);
+  // LM Studio REST API does not expose a cancel endpoint; mark as canceling
+  // and the polling loop will pick it up.
   activeDownloadJobs.set(jobId, {
     ...job,
     status: 'canceling',
@@ -407,16 +505,131 @@ export const deleteLlmModel = async (modelPath: string): Promise<string> => {
   return await runtime.deleteModel(modelPath);
 };
 
+/**
+ * Load a model via the LM Studio REST API.
+ * Ensures the daemon/server are running first, unloads any currently loaded
+ * LLM instances, then loads the requested model key with the configured
+ * context size and GPU settings.
+ */
 export const loadLlmModel = async (modelPath: string): Promise<void> => {
+  // Ensure the LM Studio daemon and server are running
   await runtime.restartWithModel(modelPath);
+
+  const baseUrl = config.llm.baseURL;
+  const contextSize = getConfiguredContextSize();
+  const numGpuLayers = getConfiguredNumGpuLayers();
+
+  // Unload all currently loaded LLM model instances
+  try {
+    const modelsRes = await axios.get<{ models: LmsModelRecord[] }>(
+      `${baseUrl}/api/v1/models`,
+      { timeout: 5000 }
+    );
+    const loadedInstances = modelsRes.data.models
+      .filter((m) => m.type === 'llm')
+      .flatMap((m) => m.loaded_instances);
+
+    for (const instance of loadedInstances) {
+      try {
+        await axios.post(
+          `${baseUrl}/api/v1/models/unload`,
+          { instance_id: instance.id },
+          { timeout: 30000 }
+        );
+        console.log(`[LlmService] Unloaded instance: ${instance.id}`);
+      } catch (err: any) {
+        console.warn(
+          `[LlmService] Failed to unload ${instance.id}: ${err.message}`
+        );
+      }
+    }
+  } catch (err: any) {
+    console.warn(
+      `[LlmService] Could not enumerate loaded models before load: ${err.message}`
+    );
+  }
+
+  // Build load request for the LM Studio API
+  const loadPayload: Record<string, unknown> = {
+    model: modelPath,
+    echo_load_config: true,
+    // Enable flash attention for better performance where supported
+    flash_attention: true,
+  };
+
+  if (contextSize !== null && contextSize > 0) {
+    loadPayload.context_length = contextSize;
+  }
+
+  // numGpuLayers=0 means CPU-only; otherwise allow LM Studio to use GPU
+  loadPayload.offload_kv_cache_to_gpu = numGpuLayers !== 0;
+
+  console.log(`[LlmService] Loading model via LM Studio API: ${modelPath}`);
+  try {
+    const loadRes = await axios.post(
+      `${baseUrl}/api/v1/models/load`,
+      loadPayload,
+      { timeout: 120000 }
+    );
+    console.log(
+      `[LlmService] Model loaded. Instance: ${loadRes.data.instance_id}, ` +
+        `load time: ${loadRes.data.load_time_seconds?.toFixed(2)}s`
+    );
+  } catch (err: any) {
+    const detail = err.response?.data
+      ? JSON.stringify(err.response.data)
+      : err.message;
+    throw new InternalServerError(
+      `Failed to load model '${modelPath}' via LM Studio API: ${detail}`
+    );
+  }
 };
 
 export const unloadActiveModel = async (): Promise<string> => {
+  const baseUrl = config.llm.baseURL;
+  let unloadedCount = 0;
+
+  try {
+    const modelsRes = await axios.get<{ models: LmsModelRecord[] }>(
+      `${baseUrl}/api/v1/models`,
+      { timeout: 5000 }
+    );
+    const loadedInstances = modelsRes.data.models
+      .filter((m) => m.type === 'llm')
+      .flatMap((m) => m.loaded_instances);
+
+    for (const instance of loadedInstances) {
+      try {
+        await axios.post(
+          `${baseUrl}/api/v1/models/unload`,
+          { instance_id: instance.id },
+          { timeout: 30000 }
+        );
+        console.log(`[LlmService] Unloaded instance: ${instance.id}`);
+        unloadedCount++;
+      } catch (err: any) {
+        console.warn(
+          `[LlmService] Failed to unload ${instance.id}: ${err.message}`
+        );
+      }
+    }
+  } catch (err: any) {
+    console.warn(
+      `[LlmService] Could not fetch loaded models for unload: ${err.message}`
+    );
+  }
+
+  if (unloadedCount > 0) {
+    return `${unloadedCount} model instance(s) unloaded successfully.`;
+  }
+
+  // Fallback: stop the server via runtime
   if (runtime.stop) {
     await runtime.stop();
-    return 'Model unloaded successfully.';
+    return 'LM Studio server stopped (no models were loaded).';
   }
-  return 'No model to unload.';
+
+  return 'No models were loaded.';
 };
 
 export const checkModelStatus = async (
@@ -425,7 +638,9 @@ export const checkModelStatus = async (
   const isUp = await checkLlmApiHealth();
   if (!isUp) return null;
   const models = await listModels();
-  return models.find((m) => m.name === path.basename(modelPath)) ?? null;
+  return (
+    models.find((m) => m.name === modelPath || m.digest === modelPath) ?? null
+  );
 };
 
 export const streamChatResponse = async function* (

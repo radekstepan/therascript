@@ -7,11 +7,13 @@ services:
       dockerfile: Dockerfile.gpu
     container_name: therascript_llama_server
     ports:
-      - "8080:8080"
+      - "1234:1234"
     volumes:
-      - ./models:/models
-    command: >
-      --host 0.0.0.0 --port 8080 --model /models/default.gguf --ctx-size 8192 --n-gpu-layers 99 --flash-attn
+      # Models directory mounted into LM Studio's model path inside the container.
+      # Place your GGUF model files (or LM Studio model folders) here.
+      - ./models:/root/.lmstudio/models
+    environment:
+      - LMS_PORT=1234
     deploy:
       resources:
         reservations:

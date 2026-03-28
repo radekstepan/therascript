@@ -1,27 +1,21 @@
-# Base image with CUDA
-FROM nvidia/cuda:12.4.1-devel-ubuntu22.04 AS builder
-
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    cmake \
-    git \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /app
-RUN git clone https://github.com/ggml-org/llama.cpp.git .
-
-# Build with CUDA support
-RUN mkdir build && cd build && \
-    cmake .. -DGGML_CUDA=ON -DLLAMA_NATIVE=ON && \
-    cmake --build . --config Release --target llama-server -j $(nproc)
-
-# Runtime image
+# CUDA runtime base for GPU (NVIDIA) acceleration
 FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
 
+ENV DEBIAN_FRONTEND=noninteractive
+
 RUN apt-get update && apt-get install -y \
-    libgomp1 \
+    curl \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /app/build/bin/llama-server /usr/bin/llama-server
+# Install llmster (LM Studio headless inference engine with CUDA support)
+RUN curl -fsSL https://lmstudio.ai/install.sh | bash
 
-ENTRYPOINT ["llama-server"]
+ENV PATH="/root/.lmstudio/bin:${PATH}"
+
+EXPOSE 1234
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]

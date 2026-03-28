@@ -109,9 +109,10 @@ const config = {
     port: parseIntEnvVar('REDIS_PORT', 6379),
   },
   llm: {
-    baseURL: getEnvVar('LLM_BASE_URL', 'http://localhost:8080'),
-    modelPath: getEnvVar('LLM_MODEL_PATH', './models/default.gguf'),
-    // Resolve modelsDir to absolute path relative to packages/llama directory
+    baseURL: getEnvVar('LLM_BASE_URL', 'http://localhost:1234'),
+    // LM Studio model key (e.g. "publisher/model-name") or "default" to use whatever is loaded
+    modelPath: getEnvVar('LLM_MODEL_PATH', 'default'),
+    // Resolve modelsDir to absolute path; for Docker this is packages/llama/models (bind-mounted)
     modelsDir: path.resolve(
       projectRoot,
       'packages/llama',
