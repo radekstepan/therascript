@@ -7,7 +7,7 @@ const http = require('node:http'); // For the shutdown service
 const execPromise = util.promisify(exec);
 
 // Docker Container Names (must match your docker-compose files)
-const OLLAMA_CONTAINER_NAME = 'ollama_server_managed';
+const LLAMA_CONTAINER_NAME = 'therascript_llama_server';
 const WHISPER_CONTAINER_NAME = 'therascript_whisper_service';
 const ELASTICSEARCH_CONTAINER_NAME = 'therascript_elasticsearch_service';
 const REDIS_CONTAINER_NAME = 'therascript_redis_service';
@@ -86,7 +86,7 @@ async function stopAndRemoveContainer(containerName) {
 async function cleanupDocker() {
   console.log('[RunProd Cleanup] Running Docker container cleanup...');
   await Promise.allSettled([
-    stopAndRemoveContainer(OLLAMA_CONTAINER_NAME),
+    stopAndRemoveContainer(LLAMA_CONTAINER_NAME),
     stopAndRemoveContainer(WHISPER_CONTAINER_NAME),
     stopAndRemoveContainer(ELASTICSEARCH_CONTAINER_NAME),
     stopAndRemoveContainer(REDIS_CONTAINER_NAME),

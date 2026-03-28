@@ -313,3 +313,5 @@ cython_debug/
 .pypirc
 
 *.tar.gz
+
+.turbo/

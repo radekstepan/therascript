@@ -25,14 +25,14 @@ import {
 } from '@radix-ui/react-icons';
 import {
   fetchAvailableModels,
-  setOllamaModel,
-  unloadOllamaModel,
+  setLlmModel,
+  unloadLlmModel,
   estimateModelVram,
   fetchGpuStats,
 } from '../../../api/api';
 import type {
-  OllamaModelInfo,
-  OllamaStatus,
+  LlmModelInfo,
+  LlmStatus,
   VramEstimateResponse,
 } from '../../../types';
 import prettyBytes from 'pretty-bytes';
@@ -44,7 +44,7 @@ interface SelectActiveModelModalProps {
   currentActiveModelName?: string | null;
   currentConfiguredContextSize?: number | null;
   activeTranscriptTokens?: number | null;
-  ollamaStatus?: OllamaStatus;
+  llmStatus?: LlmStatus;
 }
 
 export function SelectActiveModelModal({
@@ -54,7 +54,7 @@ export function SelectActiveModelModal({
   currentActiveModelName,
   currentConfiguredContextSize,
   activeTranscriptTokens,
-  ollamaStatus,
+  llmStatus,
 }: SelectActiveModelModalProps) {
   const queryClient = useQueryClient();
   const prevIsOpenRef = useRef(false);
@@ -68,7 +68,7 @@ export function SelectActiveModelModal({
   const [temperature, setTemperature] = useState(0.7);
   const [topP, setTopP] = useState(0.9);
   const [repeatPenalty, setRepeatPenalty] = useState(1.1);
-  // undefined = Auto (let Ollama decide); 0 = CPU only; N = N layers on GPU
+  // undefined = Auto (let Llm decide); 0 = CPU only; N = N layers on GPU
   const [numGpuLayers, setNumGpuLayers] = useState<number | undefined>(
     undefined
   );
@@ -87,7 +87,7 @@ export function SelectActiveModelModal({
   } | null>(null);
 
   const { data: availableModelsData, isLoading: isLoadingModels } = useQuery({
-    queryKey: ['availableOllamaModels'],
+    queryKey: ['availableLlmModels'],
     queryFn: fetchAvailableModels,
     enabled: isOpen,
     staleTime: 60 * 1000,
@@ -109,7 +109,7 @@ export function SelectActiveModelModal({
       repeatPenalty?: number;
       numGpuLayers?: number | null;
     }) =>
-      setOllamaModel(
+      setLlmModel(
         variables.modelName,
         variables.contextSize,
         variables.temperature,
@@ -119,7 +119,7 @@ export function SelectActiveModelModal({
       ),
     onSuccess: () => {
       onModelSuccessfullySet();
-      queryClient.invalidateQueries({ queryKey: ['ollamaStatus'] });
+      queryClient.invalidateQueries({ queryKey: ['llmStatus'] });
       onOpenChange(false);
     },
     onError: (err: Error) => {
@@ -128,9 +128,9 @@ export function SelectActiveModelModal({
   });
 
   const unloadMutation = useMutation({
-    mutationFn: unloadOllamaModel,
+    mutationFn: unloadLlmModel,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['ollamaStatus'] });
+      queryClient.invalidateQueries({ queryKey: ['llmStatus'] });
     },
     onError: (err: Error) => {
       setError(`Failed to unload model: ${err.message}`);
@@ -138,7 +138,7 @@ export function SelectActiveModelModal({
   });
 
   // Fix flickering bug: only initialize form once when modal opens
-  // Decouple from ollamaStatus polling by using ref-based guard
+  // Decouple from llmStatus polling by using ref-based guard
   useEffect(() => {
     if (isOpen && !prevIsOpenRef.current) {
       // Modal just opened — snapshot current backend state into local form
@@ -150,18 +150,18 @@ export function SelectActiveModelModal({
         setContextSizeInput('');
         setUserTouchedContext(false);
       }
-      setTemperature(ollamaStatus?.configuredTemperature ?? 0.7);
-      setTopP(ollamaStatus?.configuredTopP ?? 0.9);
-      setRepeatPenalty(ollamaStatus?.configuredRepeatPenalty ?? 1.1);
+      setTemperature(llmStatus?.configuredTemperature ?? 0.7);
+      setTopP(llmStatus?.configuredTopP ?? 0.9);
+      setRepeatPenalty(llmStatus?.configuredRepeatPenalty ?? 1.1);
       setNumGpuLayers(
-        ollamaStatus?.configuredNumGpuLayers != null
-          ? ollamaStatus.configuredNumGpuLayers
+        llmStatus?.configuredNumGpuLayers != null
+          ? llmStatus.configuredNumGpuLayers
           : undefined
       );
       setError(null);
     }
     prevIsOpenRef.current = isOpen;
-  }, [isOpen]); // ← ollamaStatus properties intentionally excluded
+  }, [isOpen]); // ← llmStatus properties intentionally excluded
 
   const handleSave = () => {
     setError(null);
@@ -187,7 +187,7 @@ export function SelectActiveModelModal({
   };
 
   const isSaving = setModelMutation.isPending;
-  const isModelLoaded = ollamaStatus?.loaded === true;
+  const isModelLoaded = llmStatus?.loaded === true;
   const models = availableModelsData?.models || [];
   const selectedModelDetails = models.find((m) => m.name === selectedModel);
   const effectiveContextSize =
@@ -292,7 +292,7 @@ export function SelectActiveModelModal({
                 <InfoCircledIcon />
               </Callout.Icon>
               <Callout.Text>
-                Model <Strong>{ollamaStatus?.activeModel}</Strong> is currently
+                Model <Strong>{llmStatus?.activeModel}</Strong> is currently
                 loaded in memory. Unload it to change settings.
               </Callout.Text>
             </Callout.Root>
@@ -395,7 +395,7 @@ export function SelectActiveModelModal({
                     onValueChange={([value]) => {
                       const max =
                         selectedModelDetails.architecture!.num_layers!;
-                      // Treat max as "auto" (undefined = let Ollama decide)
+                      // Treat max as "auto" (undefined = let Llm decide)
                       setNumGpuLayers(value >= max ? undefined : value);
                     }}
                     min={0}

@@ -68,7 +68,7 @@ function determineExecutionProvider(
     }
     return 'gpu';
   }
-  if (config.ollama.runtime === 'native' && process.platform === 'darwin') {
+  if (config.llm.runtime === 'native' && process.platform === 'darwin') {
     return 'metal';
   }
   return 'cpu';

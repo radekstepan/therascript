@@ -4,7 +4,7 @@ import {
   messageRepository,
   usageRepository,
 } from '@therascript/data';
-import { streamChatResponse } from '../services/ollamaService.js';
+import { streamChatResponse } from '../services/llamaCppService.js';
 import {
   NotFoundError,
   InternalServerError,
@@ -15,7 +15,6 @@ import type {
   BackendChatMessage,
   ChatMetadata,
   BackendChatSession,
-  BackendSession,
 } from '@therascript/domain';
 import { TransformStream } from 'node:stream/web';
 import { TextEncoder } from 'node:util';
@@ -27,9 +26,7 @@ import {
   bulkIndexDocuments,
 } from '@therascript/elasticsearch-client';
 import config from '@therascript/config';
-// ============================= FIX START ==============================
 import { cleanLlmOutput } from '@therascript/services';
-// ============================== FIX END ===============================
 import {
   computeContextUsageForChat,
   recommendContextSize,
@@ -121,11 +118,9 @@ export const getStandaloneChatDetails = ({
   set,
 }: ElysiaHandlerContext): FullStandaloneChatApiResponse => {
   if (!chatData) {
-    // This should ideally be caught by a derive hook if chatData is expected
     throw new NotFoundError(`Standalone chat not found in context.`);
   }
   if (chatData.sessionId !== null) {
-    // Defensive check, should also be handled by how chatData is derived/fetched
     console.error(
       `[API Error] getStandaloneChatDetails: Chat ${chatData.id} has sessionId ${chatData.sessionId}, expected null.`
     );
@@ -164,14 +159,11 @@ export const addStandaloneChatMessage = async ({
   }
 
   try {
-    // ============================= FIX START ==============================
-    // Fix the history concatenation bug by only saving the new message text.
     userMessage = messageRepository.addMessage(
       chatData.id,
       'user',
       trimmedText
     );
-    // ============================== FIX END ===============================
 
     // Index user message into Elasticsearch
     await indexDocument(esClient, MESSAGES_INDEX, String(userMessage.id), {
@@ -205,14 +197,15 @@ export const addStandaloneChatMessage = async ({
       transcriptTokens: 0,
       modelDefaultMax: null, // stream layer may still cap to model internally
     });
+    // Effective context size for truncation detection
+    const effectiveContextSize = configured ?? recommendedContext ?? 8192;
 
-    const ollamaStream = await streamChatResponse(
-      null,
+    const llmStream = await streamChatResponse(
       currentMessages,
       configured == null && recommendedContext != null
-        ? { contextSize: recommendedContext, signal: request.signal }
-        : { signal: request.signal }
-    ); // Pass null for transcript context
+        ? { contextSize: recommendedContext, abortSignal: request.signal }
+        : { abortSignal: request.signal }
+    );
 
     const headers = new Headers({
       'Content-Type': 'text/event-stream; charset=utf-8',
@@ -241,8 +234,9 @@ export const addStandaloneChatMessage = async ({
       let fullAiText = '';
       let finalPromptTokens: number | undefined;
       let finalCompletionTokens: number | undefined;
+      let finalThinkingTokens: number | undefined;
       let isTruncated = false;
-      let ollamaStreamError: Error | null = null;
+      let llmStreamError: Error | null = null;
       let llmStartTime = 0;
       let llmDuration = 0;
       let expectedPromptTokens = 0;
@@ -251,10 +245,10 @@ export const addStandaloneChatMessage = async ({
 
       try {
         console.log(
-          `[API ProcessStream ${chatData.id}] Starting Ollama stream processing...`
+          `[API ProcessStream ${chatData.id}] Starting LLM stream processing...`
         );
         await writeSseEvent({ status: 'thinking' });
-        // Emit early usage estimate for UI meter (LM Studio–style)
+
         try {
           const usage = await computeContextUsageForChat({
             isStandalone: true,
@@ -268,10 +262,16 @@ export const addStandaloneChatMessage = async ({
             usageErr
           );
         }
+
         llmStartTime = Date.now();
-        for await (const chunk of ollamaStream) {
-          if (chunk.message?.thinking) {
-            const thinkingChunk = chunk.message.thinking;
+
+        // Manually iterate to capture the returned final result properly
+        let iterResult = await (llmStream as AsyncGenerator<any, any>).next();
+
+        while (!iterResult.done) {
+          const chunk = iterResult.value;
+          if (typeof chunk.thinking === 'string') {
+            const thinkingChunk = chunk.thinking;
             if (!hasOpenThinkingBlock) {
               fullAiText += '<think>';
               hasOpenThinkingBlock = true;
@@ -279,7 +279,7 @@ export const addStandaloneChatMessage = async ({
             fullAiText += thinkingChunk;
             await writeSseEvent({ thinkingChunk });
           }
-          if (chunk.message?.content) {
+          if (typeof chunk.content === 'string') {
             if (!hasSentRespondingStatus) {
               hasSentRespondingStatus = true;
               await writeSseEvent({ status: 'responding' });
@@ -288,49 +288,57 @@ export const addStandaloneChatMessage = async ({
               fullAiText += '</think>';
               hasOpenThinkingBlock = false;
             }
-            const textChunk = chunk.message.content;
+            const textChunk = chunk.content;
             fullAiText += textChunk;
             await writeSseEvent({ chunk: textChunk });
           }
-          if (chunk.done) {
-            if (hasOpenThinkingBlock) {
-              fullAiText += '</think>';
-              hasOpenThinkingBlock = false;
-            }
-            finalPromptTokens = chunk.prompt_eval_count;
-            finalCompletionTokens = chunk.eval_count;
-            llmDuration = Date.now() - llmStartTime;
+          iterResult = await (llmStream as AsyncGenerator<any, any>).next();
+        }
 
-            if (finalPromptTokens && expectedPromptTokens) {
-              // Allow a 5% margin for tokenizer discrepancies. If difference is larger, it was truncated.
-              if (finalPromptTokens < expectedPromptTokens * 0.95) {
-                isTruncated = true;
-              }
-            }
+        // Iteration complete - process returned stream metadata
+        const streamResult = iterResult.value;
+        if (hasOpenThinkingBlock) {
+          fullAiText += '</think>';
+          hasOpenThinkingBlock = false;
+        }
+        finalPromptTokens = streamResult?.promptTokens;
+        finalCompletionTokens = streamResult?.completionTokens;
+        finalThinkingTokens = streamResult?.thinkingTokens;
+        llmDuration = Date.now() - llmStartTime;
 
-            console.log(
-              `[API ProcessStream ${chatData.id}] Ollama stream 'done'. Tokens: C=${finalCompletionTokens}, P=${finalPromptTokens}, Duration: ${llmDuration}ms, isTruncated: ${isTruncated}`
-            );
-            await writeSseEvent({
-              done: true,
-              promptTokens: finalPromptTokens,
-              completionTokens: finalCompletionTokens,
-              duration: llmDuration,
-              isTruncated,
-            });
+        // More conservative truncation detection:
+        // Only flag truncation when:
+        // 1. Expected prompt is >80% of context (meaningful context pressure)
+        // 2. AND actual tokens are significantly lower (>500 token difference)
+        // This avoids false positives from tokenizer differences on small prompts
+        if (finalPromptTokens && expectedPromptTokens) {
+          const contextPressureRatio =
+            expectedPromptTokens / effectiveContextSize;
+          const tokenDifference = expectedPromptTokens - finalPromptTokens;
+          if (contextPressureRatio > 0.8 && tokenDifference > 500) {
+            isTruncated = true;
           }
         }
+
         console.log(
-          `[API ProcessStream ${chatData.id}] Finished iterating Ollama stream successfully.`
+          `[API ProcessStream ${chatData.id}] LLM stream 'done'. Tokens: C=${finalCompletionTokens}, P=${finalPromptTokens}, Duration: ${llmDuration}ms, isTruncated: ${isTruncated}`
         );
+        await writeSseEvent({
+          done: true,
+          promptTokens: finalPromptTokens,
+          completionTokens: finalCompletionTokens,
+          thinkingTokens: finalThinkingTokens,
+          duration: llmDuration,
+          isTruncated,
+        });
       } catch (streamError) {
-        ollamaStreamError =
+        llmStreamError =
           streamError instanceof Error
             ? streamError
             : new Error(String(streamError));
         console.error(
-          `[API ProcessStream ${chatData.id}] Error DURING Ollama stream iteration:`,
-          ollamaStreamError
+          `[API ProcessStream ${chatData.id}] Error DURING LLM stream iteration:`,
+          llmStreamError
         );
         try {
           await writeSseEvent({
@@ -339,15 +347,13 @@ export const addStandaloneChatMessage = async ({
         } catch {}
       } finally {
         console.log(
-          `[API ProcessStream Finally ${chatData.id}] Cleaning up. Ollama stream errored: ${!!ollamaStreamError}`
+          `[API ProcessStream Finally ${chatData.id}] Cleaning up. LLM stream errored: ${!!llmStreamError}`
         );
         if (hasOpenThinkingBlock) {
           fullAiText += '</think>';
         }
         if (fullAiText.trim()) {
           try {
-            // ============================= FIX START ==============================
-            // Clean the final AI response before saving to database.
             const cleanedAiText = cleanLlmOutput(fullAiText);
             const aiMessage = messageRepository.addMessage(
               chatData.id,
@@ -355,12 +361,10 @@ export const addStandaloneChatMessage = async ({
               cleanedAiText,
               finalPromptTokens,
               finalCompletionTokens,
-              ollamaStreamError ? null : llmDuration,
+              llmStreamError ? null : llmDuration,
               isTruncated
             );
-            // ============================== FIX END ===============================
 
-            // Index AI message into Elasticsearch
             await indexDocument(
               esClient,
               MESSAGES_INDEX,
@@ -408,8 +412,8 @@ export const addStandaloneChatMessage = async ({
               `[API ProcessStream Finally ${chatData.id}] CRITICAL: Failed to save AI message to DB:`,
               dbError
             );
-            ollamaStreamError =
-              ollamaStreamError ||
+            llmStreamError =
+              llmStreamError ||
               new InternalServerError(
                 'Failed to save AI response to database.',
                 dbError instanceof Error ? dbError : undefined
@@ -424,11 +428,25 @@ export const addStandaloneChatMessage = async ({
           console.warn(
             `[API ProcessStream Finally ${chatData.id}] No AI text generated or saved.`
           );
+          // Send a done event with an error so the client can clean up
+          try {
+            await writeSseEvent({
+              error:
+                'The model returned an empty response. Try again or reduce the context size.',
+            });
+            await writeSseEvent({
+              done: true,
+              promptTokens: finalPromptTokens,
+              completionTokens: 0,
+              duration: llmDuration,
+              isTruncated,
+            });
+          } catch {}
         }
 
-        if (ollamaStreamError) {
+        if (llmStreamError) {
           await writer
-            .abort(ollamaStreamError)
+            .abort(llmStreamError)
             .catch((e) =>
               console.warn(
                 `[API ProcessStream Finally ${chatData.id}] Error aborting writer:`,

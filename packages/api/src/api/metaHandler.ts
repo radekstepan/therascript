@@ -6,14 +6,14 @@ import {
   getElasticsearchClient,
   checkEsHealth,
 } from '@therascript/elasticsearch-client';
-import { checkOllamaApiHealth } from '../services/ollamaService.js';
+import { checkLlmApiHealth } from '../services/llamaCppService.js';
 import { checkWhisperApiHealth } from '../services/transcriptionService.js';
 import config from '@therascript/config';
 
 interface ServiceStatus {
   database: 'connected' | 'disconnected';
   elasticsearch: 'connected' | 'disconnected';
-  ollama: 'connected' | 'disconnected';
+  llm: 'connected' | 'disconnected';
   whisper: 'connected' | 'disconnected';
 }
 
@@ -25,7 +25,7 @@ export const getReadinessStatus = async ({ set }: MetaHandlerContext) => {
   const statuses: ServiceStatus = {
     database: 'disconnected',
     elasticsearch: 'disconnected',
-    ollama: 'disconnected',
+    llm: 'disconnected',
     whisper: 'disconnected',
   };
 
@@ -50,8 +50,8 @@ export const getReadinessStatus = async ({ set }: MetaHandlerContext) => {
       }
     })(),
     (async () => {
-      if (await checkOllamaApiHealth()) {
-        statuses.ollama = 'connected';
+      if (await checkLlmApiHealth()) {
+        statuses.llm = 'connected';
       }
     })(),
     (async () => {

@@ -294,7 +294,7 @@ Worker                    Redis                       API                      U
 | **LLM** | Ollama (Llama, Mistral, Gemma) |
 | **Transcription** | WhisperX + pyannote (PyTorch/CUDA or CPU int8) |
 | **Containerization** | Docker, Docker Compose |
-| **Monorepo** | Lerna, Yarn Workspaces |
+| **Monorepo** | Turborepo, Yarn Workspaces |
 
 ## Related Documentation
 

@@ -226,7 +226,7 @@ async function ensureServiceReady(config: ServiceConfig): Promise<void> {
 function findProjectRoot(startDir: string): string {
   let currentDir = startDir;
   while (true) {
-    if (fs.existsSync(path.join(currentDir, 'lerna.json'))) return currentDir;
+    if (fs.existsSync(path.join(currentDir, 'turbo.json'))) return currentDir;
     const parentDir = path.dirname(currentDir);
     if (parentDir === currentDir)
       throw new Error('Could not find project root.');

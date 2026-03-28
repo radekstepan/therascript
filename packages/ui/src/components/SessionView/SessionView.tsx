@@ -18,14 +18,14 @@ import {
   fetchTranscript,
   startSessionChat,
   fetchSessionChatDetails,
-  fetchOllamaStatus,
+  fetchLlmStatus,
 } from '../../api/api';
 import type {
   Session,
   SessionMetadata,
   ChatSession,
   StructuredTranscript,
-  OllamaStatus,
+  LlmStatus,
 } from '../../types';
 import {
   activeSessionIdAtom,
@@ -129,12 +129,12 @@ export function SessionView() {
   });
 
   const {
-    data: ollamaStatus,
-    isLoading: isLoadingOllamaStatus,
-    error: ollamaError,
-  } = useQuery<OllamaStatus, Error>({
-    queryKey: ['ollamaStatus'],
-    queryFn: () => fetchOllamaStatus(), // Fetch status for the currently active model
+    data: llmStatus,
+    isLoading: isLoadingLlmStatus,
+    error: llmError,
+  } = useQuery<LlmStatus, Error>({
+    queryKey: ['llmStatus'],
+    queryFn: () => fetchLlmStatus(), // Fetch status for the currently active model
     staleTime: 60 * 1000,
     refetchOnWindowFocus: true,
     refetchInterval: 5000,
@@ -278,7 +278,7 @@ export function SessionView() {
       </Flex>
     );
   }
-  if (ollamaError) console.error('Ollama status check failed:', ollamaError);
+  if (llmError) console.error('LLM status check failed:', llmError);
 
   const displayTitle = sessionMetadata.sessionName || sessionMetadata.fileName;
   const hasChats = sessionMetadata.chats && sessionMetadata.chats.length > 0;
@@ -288,8 +288,8 @@ export function SessionView() {
 
   const transcriptTokenCount = sessionMetadata.transcriptTokenCount;
   const activeModelDefaultContextSize =
-    ollamaStatus?.details?.name === ollamaStatus?.activeModel
-      ? ollamaStatus?.details?.defaultContextSize
+    llmStatus?.details?.name === llmStatus?.activeModel
+      ? llmStatus?.details?.defaultContextSize
       : null;
 
   return (
@@ -379,8 +379,8 @@ export function SessionView() {
               sessionMetaError={sessionMetaError}
               isLoadingTranscript={isLoadingTranscript}
               transcriptError={transcriptError}
-              ollamaStatus={ollamaStatus}
-              isLoadingOllamaStatus={isLoadingOllamaStatus}
+              llmStatus={llmStatus}
+              isLoadingLlmStatus={isLoadingLlmStatus}
               onOpenLlmModal={handleOpenConfigureLlmModal}
               transcriptTokenCount={transcriptTokenCount}
               activeModelDefaultContextSize={activeModelDefaultContextSize}
@@ -392,10 +392,10 @@ export function SessionView() {
         isOpen={isSelectModelModalOpen}
         onOpenChange={setIsSelectModelModalOpen}
         onModelSuccessfullySet={handleModelSuccessfullySet}
-        currentActiveModelName={ollamaStatus?.activeModel}
-        currentConfiguredContextSize={ollamaStatus?.configuredContextSize}
+        currentActiveModelName={llmStatus?.activeModel}
+        currentConfiguredContextSize={llmStatus?.configuredContextSize}
         activeTranscriptTokens={transcriptTokenCount}
-        ollamaStatus={ollamaStatus}
+        llmStatus={llmStatus}
       />
     </>
   );

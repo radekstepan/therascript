@@ -92,8 +92,7 @@ export function DockerStatusModal({
       <Dialog.Content style={{ maxWidth: 650 }}>
         <Dialog.Title>Docker Container Status</Dialog.Title>
         <Dialog.Description size="2" mb="4" color="gray">
-          Status of relevant Docker containers (Whisper, Ollama) for this
-          project.
+          Status of relevant Docker containers (Whisper, Llm) for this project.
         </Dialog.Description>
         <ScrollArea
           type="auto"

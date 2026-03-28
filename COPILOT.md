@@ -3,7 +3,7 @@
 Use this as a fast-loading, minimal context file. It links to deeper docs.
 
 ## What this repo is
-- Monorepo (Yarn workspaces, Lerna) for a therapy session analyzer.
+- Monorepo (Yarn workspaces, Turborepo) for a therapy session analyzer.
 - Services: API (Elysia), Worker (BullMQ), UI (React), Whisper (Express+Python), Ollama manager, Elasticsearch client, DB (SQLite), Docker utils, GPU utils.
 
 ## Core paths

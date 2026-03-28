@@ -8,7 +8,7 @@ vi.mock('./activeModelService.js', () => ({
   getActiveModel: () => 'test-model',
   getConfiguredContextSize: () => null,
 }));
-vi.mock('./ollamaService.js', () => ({
+vi.mock('./llamaCppService.js', () => ({
   listModels: async () => [{ name: 'test-model', defaultContextSize: 8192 }],
 }));
 vi.mock('@therascript/data', () => ({

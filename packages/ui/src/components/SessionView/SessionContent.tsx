@@ -1,7 +1,7 @@
 // Path: packages/ui/src/components/SessionView/SessionContent.tsx
 import React, { useState, useCallback } from 'react';
 import { Box, Flex, Text, Tabs, ScrollArea } from '@radix-ui/themes';
-import type { Session, StructuredTranscript, OllamaStatus } from '../../types'; // Add OllamaStatus
+import type { Session, StructuredTranscript, LlmStatus } from '../../types'; // Add LlmStatus
 import { Transcription } from './Transcription/Transcription';
 import { ChatInterface } from './Chat/ChatInterface';
 import { StartChatPrompt } from './Chat/StartChatPrompt';
@@ -17,8 +17,8 @@ interface SessionContentProps {
   sessionMetaError: Error | null;
   isLoadingTranscript: boolean;
   transcriptError?: Error | null;
-  ollamaStatus: OllamaStatus | undefined;
-  isLoadingOllamaStatus: boolean;
+  llmStatus: LlmStatus | undefined;
+  isLoadingLlmStatus: boolean;
   onOpenLlmModal: () => void;
   transcriptTokenCount?: number | null; // <-- ADDED
   activeModelDefaultContextSize?: number | null; // <-- ADDED
@@ -34,8 +34,8 @@ export function SessionContent({
   sessionMetaError,
   isLoadingTranscript,
   transcriptError,
-  ollamaStatus,
-  isLoadingOllamaStatus,
+  llmStatus,
+  isLoadingLlmStatus,
   onOpenLlmModal,
   transcriptTokenCount, // <-- DESTRUCTURED
   activeModelDefaultContextSize, // <-- DESTRUCTURED
@@ -79,8 +79,8 @@ export function SessionContent({
               activeChatId={activeChatId}
               isStandalone={false}
               isLoadingSessionMeta={isLoadingSessionMeta}
-              ollamaStatus={ollamaStatus}
-              isLoadingOllamaStatus={isLoadingOllamaStatus}
+              llmStatus={llmStatus}
+              isLoadingLlmStatus={isLoadingLlmStatus}
               onOpenLlmModal={onOpenLlmModal}
               transcriptTokenCount={transcriptTokenCount} // <-- PASS PROP
               activeModelDefaultContextSize={activeModelDefaultContextSize} // <-- PASS PROP
@@ -202,8 +202,8 @@ export function SessionContent({
                   activeChatId={activeChatId}
                   isStandalone={false}
                   isLoadingSessionMeta={isLoadingSessionMeta}
-                  ollamaStatus={ollamaStatus}
-                  isLoadingOllamaStatus={isLoadingOllamaStatus}
+                  llmStatus={llmStatus}
+                  isLoadingLlmStatus={isLoadingLlmStatus}
                   onOpenLlmModal={onOpenLlmModal}
                   isTabActive={activeTab === 'chat'}
                   transcriptTokenCount={transcriptTokenCount} // <-- PASS PROP

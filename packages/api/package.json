@@ -13,7 +13,6 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "keywords": [
-    "ollama",
     "typescript",
     "elysiajs",
     "nlp",
@@ -29,12 +28,12 @@
     "@sinclair/typebox": "^0.34.0",
     "@therascript/config": "*",
     "@therascript/data": "*",
-    "@therascript/domain": "*",
-    "@therascript/services": "*",
     "@therascript/db": "*",
+    "@therascript/domain": "*",
     "@therascript/elasticsearch-client": "*",
     "@therascript/gpu-utils": "*",
     "@therascript/queue": "*",
+    "@therascript/services": "*",
     "axios": "^1.8.4",
     "bullmq": "^5.10.3",
     "dockerode": "^4.0.6",
@@ -42,7 +41,6 @@
     "form-data": "^4.0.0",
     "ioredis": "^5.4.1",
     "multer": "^1.4.5-lts.1",
-    "ollama": "^0.6.0",
     "tar-stream": "^3.1.7",
     "zod": "^3.23.8"
   },

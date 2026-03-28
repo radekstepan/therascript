@@ -151,7 +151,7 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
           model: jobRecord?.model_name || undefined,
           contextSize: jobRecord?.context_size || undefined,
           abortSignal: abortController.signal,
-          ollamaBaseUrl: config.ollama.baseURL,
+          llamaCppBaseUrl: config.llm.baseURL,
           maxCompletionTokens: 500,
         });
         let iterResult = await mapGenerator.next();
@@ -354,7 +354,7 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
       model: jobRecord?.model_name || undefined,
       contextSize: jobRecord?.context_size || undefined,
       abortSignal: reduceAbortController.signal,
-      ollamaBaseUrl: config.ollama.baseURL,
+      llamaCppBaseUrl: config.llm.baseURL,
     });
     let reduceIterResult = await reduceGenerator.next();
     while (!reduceIterResult.done) {

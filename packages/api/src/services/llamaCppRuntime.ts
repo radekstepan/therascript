@@ -37,42 +37,52 @@ type StartAttemptOutcome = {
   message?: string;
 };
 
-export type OllamaRuntimeType = 'docker' | 'native';
+export type LlmRuntimeType = 'docker' | 'native';
 
-export interface OllamaRuntime {
-  readonly type: OllamaRuntimeType;
+export interface LlmRuntime {
+  readonly type: LlmRuntimeType;
   ensureReady(timeoutMs?: number): Promise<void>;
-  deleteModel(modelName: string): Promise<string>;
+  deleteModel(modelPath: string): Promise<string>;
+  restartWithModel(modelPath: string): Promise<void>;
   stop?(): Promise<void>;
 }
 
-let cachedRuntime: OllamaRuntime | null = null;
+let cachedRuntime: LlmRuntime | null = null;
 
-export const getOllamaRuntime = (): OllamaRuntime => {
+export const getLlmRuntime = (): LlmRuntime => {
   if (cachedRuntime) {
     return cachedRuntime;
   }
-  if (config.ollama.runtime === 'native') {
-    cachedRuntime = new NativeOllamaRuntime();
+
+  // On macOS, default to native but allow fallback to docker if native binary is missing
+  if (config.llm.runtime === 'native') {
+    try {
+      cachedRuntime = new NativeLlmRuntime();
+    } catch (e) {
+      console.warn(
+        `[LlmRuntime] Native runtime selected but llama-server binary missing. Falling back to docker.`
+      );
+      cachedRuntime = new DockerLlmRuntime();
+    }
   } else {
-    cachedRuntime = new DockerOllamaRuntime();
+    cachedRuntime = new DockerLlmRuntime();
   }
-  return cachedRuntime;
+  return cachedRuntime as LlmRuntime;
 };
 
-class DockerOllamaRuntime implements OllamaRuntime {
-  readonly type: OllamaRuntimeType = 'docker';
+class DockerLlmRuntime implements LlmRuntime {
+  readonly type: LlmRuntimeType = 'docker';
 
   private readonly composeFilePath: string;
-  private readonly serviceName = 'ollama';
-  private readonly containerName = 'ollama_server_managed';
+  private readonly serviceName = 'llama-server';
+  private readonly containerName = 'therascript_llama_server';
   private readonly composeDir: string;
 
   constructor() {
     const packageDir = path.resolve(
       fileURLToPath(import.meta.url),
       '../../../..',
-      'ollama'
+      'llama'
     );
     this.composeFilePath = path.join(packageDir, 'docker-compose.yml');
     this.composeDir = path.dirname(this.composeFilePath);
@@ -81,17 +91,13 @@ class DockerOllamaRuntime implements OllamaRuntime {
   private ensureComposeFileExists(): void {
     if (!fs.existsSync(this.composeFilePath)) {
       throw new InternalServerError(
-        `Ollama docker-compose.yml not found at ${this.composeFilePath}`
+        `LLM docker-compose.yml not found at ${this.composeFilePath}`
       );
     }
   }
 
   private resolveComposeCommand(command: string): string {
     const extraCompose = process.env.DOCKER_COMPOSE_EXTRA;
-    const packageNoGpuOverride = path.join(
-      this.composeDir,
-      'docker-compose.no-gpu.yml'
-    );
     const packageGpuOverride = path.join(
       this.composeDir,
       'docker-compose.gpu.yml'
@@ -104,18 +110,14 @@ class DockerOllamaRuntime implements OllamaRuntime {
         chosenExtra = extraCompose;
       } else {
         console.log(
-          `[OllamaRuntime:docker] Ignoring DOCKER_COMPOSE_EXTRA ${extraCompose} because it is not in ${this.composeDir}.`
+          `[LlmRuntime:docker] Ignoring DOCKER_COMPOSE_EXTRA ${extraCompose} because it is not in ${this.composeDir}.`
         );
       }
     } else {
       const onLinux = process.platform === 'linux' || isWSL();
-      if (onLinux && !process.env.OLLAMA_DISABLE_GPU) {
+      if (onLinux && !process.env.LLM_DISABLE_GPU) {
         if (fs.existsSync(packageGpuOverride)) {
           chosenExtra = packageGpuOverride;
-        }
-      } else if (process.platform === 'darwin') {
-        if (fs.existsSync(packageNoGpuOverride)) {
-          chosenExtra = packageNoGpuOverride;
         }
       }
     }
@@ -124,19 +126,24 @@ class DockerOllamaRuntime implements OllamaRuntime {
     return `docker compose -f "${this.composeFilePath}"${extraFlag} ${command}`;
   }
 
-  private async runCompose(command: string): Promise<string> {
+  private async runCompose(
+    command: string,
+    env?: Record<string, string>
+  ): Promise<string> {
     this.ensureComposeFileExists();
     const composeCommand = this.resolveComposeCommand(command);
-    console.log(`[OllamaRuntime:docker] Running: ${composeCommand}`);
+    console.log(`[LlmRuntime:docker] Running: ${composeCommand}`);
     try {
-      const { stdout, stderr } = await execAsync(composeCommand);
+      const { stdout, stderr } = await execAsync(composeCommand, {
+        env: { ...process.env, ...env },
+      });
       if (stderr && !stderr.toLowerCase().includes('warn')) {
-        console.warn(`[OllamaRuntime:docker] stderr: ${stderr}`);
+        console.warn(`[LlmRuntime:docker] stderr: ${stderr}`);
       }
       return stdout.trim();
     } catch (error: any) {
       console.error(
-        `[OllamaRuntime:docker] Command failed: ${composeCommand}`,
+        `[LlmRuntime:docker] Command failed: ${composeCommand}`,
         error.stderr || error.message
       );
       throw new InternalServerError(
@@ -151,7 +158,7 @@ class DockerOllamaRuntime implements OllamaRuntime {
       return containerId.trim().length > 0;
     } catch (error) {
       console.warn(
-        '[OllamaRuntime:docker] Failed to determine container status. Assuming not running.'
+        '[LlmRuntime:docker] Failed to determine container status. Assuming not running.'
       );
       return false;
     }
@@ -159,7 +166,7 @@ class DockerOllamaRuntime implements OllamaRuntime {
 
   private async isApiResponsive(): Promise<boolean> {
     try {
-      await axios.get(config.ollama.baseURL, { timeout: 3000 });
+      await axios.get(`${config.llm.baseURL}/health`, { timeout: 3000 });
       return true;
     } catch {
       return false;
@@ -167,25 +174,25 @@ class DockerOllamaRuntime implements OllamaRuntime {
   }
 
   async ensureReady(timeoutMs = 30000): Promise<void> {
-    console.log('[OllamaRuntime:docker] Ensuring service availability...');
+    console.log('[LlmRuntime:docker] Ensuring service availability...');
 
     const containerRunning = await this.isContainerRunning();
     if (containerRunning && (await this.isApiResponsive())) {
       console.log(
-        '[OllamaRuntime:docker] Container is running and API is responsive.'
+        '[LlmRuntime:docker] Container is running and API is responsive.'
       );
       return;
     }
 
     if (!containerRunning) {
       console.log(
-        '[OllamaRuntime:docker] Container not running. Attempting to start...'
+        '[LlmRuntime:docker] Container not running. Attempting to start...'
       );
       try {
         await this.runCompose(`up -d ${this.serviceName}`);
       } catch (error: any) {
         throw new InternalServerError(
-          'Failed to start Ollama Docker service.',
+          'Failed to start LLM Docker service.',
           error instanceof Error ? error : undefined
         );
       }
@@ -194,33 +201,92 @@ class DockerOllamaRuntime implements OllamaRuntime {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() <= deadline) {
       if (await this.isApiResponsive()) {
-        console.log('[OllamaRuntime:docker] API is now responsive.');
+        console.log('[LlmRuntime:docker] API is now responsive.');
         return;
       }
-      console.log('[OllamaRuntime:docker] Waiting for API to respond...');
+      console.log('[LlmRuntime:docker] Waiting for API to respond...');
       await delay(3000);
     }
 
     throw new InternalServerError(
-      `Ollama Docker service did not become responsive within ${timeoutMs}ms.`
+      `LLM Docker service did not become responsive within ${timeoutMs}ms.`
     );
   }
 
-  async deleteModel(modelName: string): Promise<string> {
-    if (!modelName.trim()) {
-      throw new InternalServerError('Model name required for deletion.');
+  async deleteModel(modelPath: string): Promise<string> {
+    if (!modelPath || !modelPath.trim()) {
+      throw new InternalServerError('Model path required for deletion.');
     }
-    return this.runCompose(
-      `exec -T ${this.serviceName} ollama rm ${modelName}`
+    const fullPath = path.resolve(config.llm.modelsDir, modelPath);
+    if (fs.existsSync(fullPath)) {
+      fs.unlinkSync(fullPath);
+      return `Deleted ${modelPath}`;
+    }
+    throw new NotFoundError(`Model file ${modelPath} not found`);
+  }
+
+  async restartWithModel(modelPath: string): Promise<void> {
+    console.log(
+      `[LlmRuntime:docker] Restarting server with model ${modelPath}`
     );
+    try {
+      await this.runCompose(`down ${this.serviceName}`);
+      // Pass model path via environment variable to docker-compose
+      // The path should be relative to the container (/models/)
+      const containerModelPath = `/models/${path.basename(modelPath)}`;
+      await this.runCompose(`up -d ${this.serviceName}`, {
+        LLAMA_MODEL_PATH: containerModelPath,
+      });
+      await this.ensureReady(60000);
+    } catch (err: any) {
+      throw new InternalServerError(
+        `Failed to restart docker with new model: ${err.message}`
+      );
+    }
+  }
+
+  async stop(): Promise<void> {
+    try {
+      await this.runCompose(`stop ${this.serviceName}`);
+    } catch (err: any) {
+      console.warn(
+        `[LlmRuntime:docker] Failed to stop service: ${err.message}`
+      );
+    }
   }
 }
 
-class NativeOllamaRuntime implements OllamaRuntime {
-  readonly type: OllamaRuntimeType = 'native';
+class NativeLlmRuntime implements LlmRuntime {
+  readonly type: LlmRuntimeType = 'native';
 
   private resolvedBinary: string | null = null;
   private serveProcess: ChildProcess | null = null;
+
+  constructor() {
+    this.resolveBinarySync();
+  }
+
+  private resolveBinarySync(): string {
+    if (this.resolvedBinary) {
+      return this.resolvedBinary;
+    }
+
+    const candidates: Array<string | null | undefined> = [
+      process.env.LLAMA_SERVER_BINARY_PATH,
+      // Check common paths directly to avoid async locateCommand in constructor
+      '/usr/local/bin/llama-server',
+      '/opt/homebrew/bin/llama-server',
+    ];
+
+    for (const candidate of candidates) {
+      if (candidate && fs.existsSync(candidate)) {
+        this.resolvedBinary = candidate;
+        return candidate;
+      }
+    }
+
+    throw new Error('llama-server binary not found.');
+  }
 
   private async locateCommand(command: string): Promise<string | null> {
     try {
@@ -233,34 +299,12 @@ class NativeOllamaRuntime implements OllamaRuntime {
   }
 
   private async resolveBinary(): Promise<string> {
-    if (this.resolvedBinary) {
-      return this.resolvedBinary;
-    }
-
-    const candidates: Array<string | null | undefined> = [
-      process.env.OLLAMA_BINARY_PATH,
-      await this.locateCommand('ollama'),
-      '/usr/local/bin/ollama',
-      '/opt/homebrew/bin/ollama',
-      '/Applications/Ollama.app/Contents/MacOS/Ollama',
-    ];
-
-    for (const candidate of candidates) {
-      if (!candidate) continue;
-      if (fs.existsSync(candidate)) {
-        this.resolvedBinary = candidate;
-        return candidate;
-      }
-    }
-
-    throw new InternalServerError(
-      'Ollama binary not found. Install Ollama locally or set OLLAMA_BINARY_PATH.'
-    );
+    return this.resolveBinarySync();
   }
 
   private async isApiResponsive(): Promise<boolean> {
     try {
-      await axios.get(config.ollama.baseURL, { timeout: 2500 });
+      await axios.get(`${config.llm.baseURL}/health`, { timeout: 2500 });
       return true;
     } catch {
       return false;
@@ -294,53 +338,9 @@ class NativeOllamaRuntime implements OllamaRuntime {
     return 'Unknown error';
   }
 
-  private async attemptStartViaBrew(): Promise<StartAttemptOutcome> {
-    const brewPath = await this.locateCommand('brew');
-    if (!brewPath) {
-      return {
-        executed: false,
-        success: false,
-        message: 'brew not found',
-      };
-    }
-    try {
-      await execFileAsync(brewPath, ['services', 'start', 'ollama']);
-      console.log('[OllamaRuntime:native] Started via brew services.');
-      return { executed: true, success: true };
-    } catch (error) {
-      const message = this.formatErrorOutput(error);
-      console.warn(
-        `[OllamaRuntime:native] brew services start failed: ${message}`
-      );
-      return { executed: true, success: false, message };
-    }
-  }
-
-  private async attemptStartViaLaunchctl(): Promise<StartAttemptOutcome> {
-    const launchctlPath = await this.locateCommand('launchctl');
-    if (!launchctlPath || process.platform !== 'darwin') {
-      return {
-        executed: false,
-        success: false,
-        message: 'launchctl unavailable',
-      };
-    }
-    const uid = typeof process.getuid === 'function' ? process.getuid() : 0;
-    const serviceName = `gui/${uid}/com.ollama`;
-    try {
-      await execFileAsync(launchctlPath, ['kickstart', '-k', serviceName]);
-      console.log('[OllamaRuntime:native] launchctl kickstart issued.');
-      return { executed: true, success: true };
-    } catch (error) {
-      const message = this.formatErrorOutput(error);
-      console.warn(
-        `[OllamaRuntime:native] launchctl kickstart failed: ${message}`
-      );
-      return { executed: true, success: false, message };
-    }
-  }
-
-  private async attemptStartViaServe(): Promise<StartAttemptOutcome> {
+  private async attemptStartViaServe(
+    modelPath: string
+  ): Promise<StartAttemptOutcome> {
     if (this.serveProcess && !this.serveProcess.killed) {
       return {
         executed: true,
@@ -350,11 +350,32 @@ class NativeOllamaRuntime implements OllamaRuntime {
     }
 
     const binary = await this.resolveBinary();
+    const port = new URL(config.llm.baseURL).port || '8080';
+
+    // Resolve absolute path to models
+    const resolvedModelPath = path.resolve(
+      config.llm.modelsDir,
+      path.basename(modelPath)
+    );
+
     try {
-      const child = spawn(binary, ['serve'], {
-        detached: true,
-        stdio: 'ignore',
-      });
+      const child = spawn(
+        binary,
+        [
+          '--host',
+          '0.0.0.0',
+          '--port',
+          port,
+          '--model',
+          resolvedModelPath,
+          '--ctx-size',
+          config.llm.contextSize.toString(),
+        ],
+        {
+          detached: true,
+          stdio: 'ignore',
+        }
+      );
       child.unref();
       this.serveProcess = child;
       child.on('exit', () => {
@@ -364,38 +385,42 @@ class NativeOllamaRuntime implements OllamaRuntime {
       });
       child.on('error', (err) => {
         console.warn(
-          `[OllamaRuntime:native] Detached serve process error: ${err.message}`
+          `[LlmRuntime:native] Detached serve process error: ${err.message}`
         );
       });
-      console.log('[OllamaRuntime:native] Started detached `ollama serve`.');
+      console.log(
+        `[LlmRuntime:native] Started detached llama-server with model ${resolvedModelPath}.`
+      );
       return { executed: true, success: true };
     } catch (error) {
       const message = this.formatErrorOutput(error);
       console.error(
-        `[OllamaRuntime:native] Failed to spawn ollama serve: ${message}`
+        `[LlmRuntime:native] Failed to spawn llama-server: ${message}`
       );
       return { executed: true, success: false, message };
     }
   }
 
   async ensureReady(timeoutMs = 30000): Promise<void> {
-    console.log('[OllamaRuntime:native] Ensuring service availability...');
+    console.log('[LlmRuntime:native] Ensuring service availability...');
 
     if (await this.isApiResponsive()) {
-      console.log('[OllamaRuntime:native] API already responsive.');
+      console.log('[LlmRuntime:native] API already responsive.');
       return;
     }
+
+    const { activeModelName } = await import('./activeModelService.js').then(
+      (m) => ({ activeModelName: m.getActiveModel() })
+    );
 
     const attempts: Array<{
       name: string;
       fn: () => Promise<StartAttemptOutcome>;
     }> = [
-      { name: 'brew services', fn: () => this.attemptStartViaBrew() },
       {
-        name: 'launchctl kickstart',
-        fn: () => this.attemptStartViaLaunchctl(),
+        name: 'detached serve',
+        fn: () => this.attemptStartViaServe(activeModelName),
       },
-      { name: 'detached serve', fn: () => this.attemptStartViaServe() },
     ];
 
     const messages: string[] = [];
@@ -416,7 +441,7 @@ class NativeOllamaRuntime implements OllamaRuntime {
         const ready = await this.waitForReady(remaining);
         if (ready) {
           console.log(
-            `[OllamaRuntime:native] Service responsive after ${attempt.name}.`
+            `[LlmRuntime:native] Service responsive after ${attempt.name}.`
           );
           return;
         }
@@ -432,40 +457,54 @@ class NativeOllamaRuntime implements OllamaRuntime {
 
     const detail = messages.length ? ` Attempts: ${messages.join('; ')}.` : '';
     throw new InternalServerError(
-      `Failed to start native Ollama service within ${timeoutMs}ms.${detail}`
+      `Failed to start native LLM service within ${timeoutMs}ms.${detail}`
     );
   }
 
-  async deleteModel(modelName: string): Promise<string> {
-    if (!modelName.trim()) {
-      throw new InternalServerError('Model name required for deletion.');
+  async deleteModel(modelPath: string): Promise<string> {
+    if (!modelPath || !modelPath.trim()) {
+      throw new InternalServerError('Model path required for deletion.');
     }
-    const binary = await this.resolveBinary();
-    try {
-      const { stdout, stderr } = await execFileAsync(binary, ['rm', modelName]);
-      return `${stdout ?? ''}${stderr ?? ''}`.trim();
-    } catch (error: any) {
-      const combined = this.formatErrorOutput(error).toLowerCase();
-      if (combined.includes('not found')) {
-        throw new NotFoundError(`Model '${modelName}' not found locally.`);
-      }
-      throw new InternalServerError(
-        `Failed to delete model '${modelName}' via native runtime.`,
-        error instanceof Error ? error : undefined
-      );
+    const fullPath = path.resolve(config.llm.modelsDir, modelPath);
+    if (fs.existsSync(fullPath)) {
+      fs.unlinkSync(fullPath);
+      return `Deleted ${modelPath}`;
     }
+    throw new NotFoundError(`Model file ${modelPath} not found`);
+  }
+
+  async restartWithModel(modelPath: string): Promise<void> {
+    console.log(
+      `[LlmRuntime:native] Restarting server with model ${modelPath}`
+    );
+    await this.stop();
+    await delay(1000); // Give it a moment to release the port
+    await this.ensureReady(-1); // This will attempt start
   }
 
   async stop(): Promise<void> {
     if (this.serveProcess && !this.serveProcess.killed) {
       try {
         process.kill(this.serveProcess.pid ?? 0, 'SIGTERM');
+        console.log(
+          `[LlmRuntime:native] Terminated serve process PID ${this.serveProcess.pid}`
+        );
       } catch (error) {
         console.warn(
-          `[OllamaRuntime:native] Failed to stop serve process: ${(error as Error).message}`
+          `[LlmRuntime:native] Failed to stop serve process: ${(error as Error).message}`
         );
       } finally {
         this.serveProcess = null;
+      }
+    } else {
+      // Find by name
+      try {
+        await execAsync('pkill -f llama-server');
+        console.log(
+          `[LlmRuntime:native] Terminated any running llama-server processes`
+        );
+      } catch (e) {
+        // ignore
       }
     }
   }

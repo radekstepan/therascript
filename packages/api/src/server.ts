@@ -42,7 +42,7 @@ import { sessionRoutes } from './routes/sessionRoutes.js';
 import { chatRoutes } from './routes/chatRoutes.js';
 import { standaloneChatRoutes } from './routes/standaloneChatRoutes.js';
 import { templateRoutes } from './routes/templateRoutes.js';
-import { ollamaRoutes } from './routes/ollamaRoutes.js';
+import { llmRoutes } from './routes/llmRoutes.js';
 import { dockerRoutes } from './routes/dockerRoutes.js';
 import { metaRoutes } from './routes/metaRoutes.js';
 import { systemRoutes } from './routes/systemRoutes.js';
@@ -63,6 +63,7 @@ import {
   getActiveModel,
   getConfiguredContextSize,
 } from './services/activeModelService.js';
+import { getLlmRuntime } from './services/llamaCppRuntime.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -301,7 +302,7 @@ const app = new Elysia()
     };
   })
   .use(metaRoutes)
-  .use(ollamaRoutes)
+  .use(llmRoutes)
   .use(dockerRoutes)
   .use(systemRoutes)
   .use(adminRoutes)
@@ -437,7 +438,7 @@ initializeServices()
       console.log(`   Mode: ${config.server.nodeEnv}`);
       console.log(`   CORS Origin Allowed: ${config.server.corsOrigin}`);
       console.log(`   DB Path: ${config.db.sqlitePath}`);
-      console.log(`   Ollama URL: ${config.ollama.baseURL}`);
+      console.log(`   LLM URL: ${config.llm.baseURL}`);
       console.log(`   Ollama Model: ${getActiveModel()} (Active)`);
       console.log(
         `   Configured Context: ${getConfiguredContextSize() ?? 'default'}`
@@ -474,6 +475,16 @@ async function shutdown(signal: string) {
         resolve(null);
       });
     });
+    // Stop the LLM runtime (docker container or native process)
+    try {
+      const runtime = getLlmRuntime();
+      if (runtime.stop) {
+        await runtime.stop();
+        console.log('[Server] LLM runtime stopped.');
+      }
+    } catch (err) {
+      console.warn('[Server] Error stopping LLM runtime:', err);
+    }
     await closeQueues();
     closeDb();
     await closeElasticsearchClient();

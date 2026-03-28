@@ -42,23 +42,23 @@ const parseIntEnvVar = (
 const nodeEnv = process.env.NODE_ENV || 'development';
 const isProduction = nodeEnv === 'production';
 
-const determineDefaultOllamaRuntime = (): 'docker' | 'native' => {
+const determineDefaultLlmRuntime = (): 'docker' | 'native' => {
   if (process.platform === 'darwin') {
     return 'native';
   }
   return 'docker';
 };
 
-const ollamaRuntimeRaw = getEnvVar(
-  'OLLAMA_RUNTIME',
-  determineDefaultOllamaRuntime()
+const llmRuntimeRaw = getEnvVar(
+  'LLM_RUNTIME',
+  determineDefaultLlmRuntime()
 ).toLowerCase();
-if (!['docker', 'native'].includes(ollamaRuntimeRaw)) {
+if (!['docker', 'native'].includes(llmRuntimeRaw)) {
   throw new Error(
-    `Invalid OLLAMA_RUNTIME value: ${ollamaRuntimeRaw}. Expected 'docker' or 'native'.`
+    `Invalid LLM_RUNTIME value: ${llmRuntimeRaw}. Expected 'docker' or 'native'.`
   );
 }
-const ollamaRuntime = ollamaRuntimeRaw as 'docker' | 'native';
+const llmRuntime = llmRuntimeRaw as 'docker' | 'native';
 
 const allowedAudioMimeTypes = [
   'audio/mpeg',
@@ -108,12 +108,19 @@ const config = {
     host: getEnvVar('REDIS_HOST', 'localhost'),
     port: parseIntEnvVar('REDIS_PORT', 6379),
   },
-  ollama: {
-    baseURL: getEnvVar('OLLAMA_BASE_URL', 'http://localhost:11434'),
-    model: getEnvVar('OLLAMA_MODEL', 'llama3'),
-    keepAlive: getEnvVar('OLLAMA_CHAT_KEEP_ALIVE', '5m'),
-    timeoutMs: parseIntEnvVar('OLLAMA_TIMEOUT_MS', 600000), // Default to 10 minutes
-    runtime: ollamaRuntime,
+  llm: {
+    baseURL: getEnvVar('LLM_BASE_URL', 'http://localhost:8080'),
+    modelPath: getEnvVar('LLM_MODEL_PATH', './models/default.gguf'),
+    // Resolve modelsDir to absolute path relative to packages/llama directory
+    modelsDir: path.resolve(
+      projectRoot,
+      'packages/llama',
+      getEnvVar('LLM_MODELS_DIR', 'models')
+    ),
+    contextSize: parseIntEnvVar('LLM_CONTEXT_SIZE', 8192),
+    nGpuLayers: parseIntEnvVar('LLM_N_GPU_LAYERS', 99),
+    timeoutMs: parseIntEnvVar('LLM_TIMEOUT_MS', 600000), // Default to 10 minutes
+    runtime: llmRuntime,
   },
   whisper: {
     apiUrl: getEnvVar('WHISPER_API_URL', 'http://localhost:8000'),

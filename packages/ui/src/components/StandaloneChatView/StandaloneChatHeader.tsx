@@ -33,7 +33,7 @@ import { EditStandaloneChatModal } from './EditStandaloneChatModal';
 import { fetchStandaloneChats, deleteStandaloneChat } from '../../api/api';
 import type {
   StandaloneChatListItem,
-  OllamaStatus,
+  LlmStatus,
   UIContextUsageResponse,
 } from '../../types';
 import { toastMessageAtom } from '../../store';
@@ -44,8 +44,8 @@ import prettyBytes from 'pretty-bytes'; // Added for VRAM usage display
 
 interface StandaloneChatHeaderProps {
   activeChatId: number | null;
-  ollamaStatus: OllamaStatus | undefined;
-  isLoadingOllamaStatus: boolean;
+  llmStatus: LlmStatus | undefined;
+  isLoadingLlmStatus: boolean;
   onOpenLlmModal: () => void;
   latestPromptTokens?: number | null;
   latestCompletionTokens?: number | null;
@@ -53,8 +53,8 @@ interface StandaloneChatHeaderProps {
 
 export function StandaloneChatHeader({
   activeChatId,
-  ollamaStatus,
-  isLoadingOllamaStatus,
+  llmStatus,
+  isLoadingLlmStatus,
   onOpenLlmModal,
   latestPromptTokens,
   latestCompletionTokens,
@@ -117,22 +117,22 @@ export function StandaloneChatHeader({
     }
   };
 
-  const modelName = ollamaStatus?.activeModel ?? 'No Model Selected';
-  const isLoaded = ollamaStatus?.loaded ?? false;
+  const modelName = llmStatus?.activeModel ?? 'No Model Selected';
+  const isLoaded = llmStatus?.loaded ?? false;
   const isActiveModelLoaded =
-    isLoaded && ollamaStatus?.modelChecked === ollamaStatus?.activeModel;
-  const configuredContextSize = ollamaStatus?.configuredContextSize;
+    isLoaded && llmStatus?.modelChecked === llmStatus?.activeModel;
+  const configuredContextSize = llmStatus?.configuredContextSize;
   const activeModelDefaultContextSize =
-    ollamaStatus?.details?.name === ollamaStatus?.activeModel
-      ? ollamaStatus?.details?.defaultContextSize
+    llmStatus?.details?.name === llmStatus?.activeModel
+      ? llmStatus?.details?.defaultContextSize
       : null;
 
   // --- CALCULATE VRAM USAGE STRING ---
   let vramUsageString = '';
-  if (isActiveModelLoaded && ollamaStatus?.details) {
-    const sizeVram = ollamaStatus.details.size_vram || 0;
+  if (isActiveModelLoaded && llmStatus?.details) {
+    const sizeVram = llmStatus.details.size_vram || 0;
     vramUsageString = ` | VRAM: ${prettyBytes(sizeVram)}`;
-    const totalSize = ollamaStatus.details.size;
+    const totalSize = llmStatus.details.size;
     if (totalSize > 0) {
       const pct = Math.round((sizeVram / totalSize) * 100);
       if (pct < 100) {
@@ -231,8 +231,8 @@ export function StandaloneChatHeader({
   })();
 
   const renderStatusBadge = () => {
-    if (isLoadingOllamaStatus) return <Spinner size="1" />;
-    if (!ollamaStatus?.activeModel)
+    if (isLoadingLlmStatus) return <Spinner size="1" />;
+    if (!llmStatus?.activeModel)
       return <SymbolIcon className="text-yellow-500" width="14" height="14" />;
     if (isActiveModelLoaded)
       return (
@@ -242,8 +242,8 @@ export function StandaloneChatHeader({
   };
 
   let statusTooltipContent = 'Loading status...';
-  if (!isLoadingOllamaStatus) {
-    if (!ollamaStatus?.activeModel) {
+  if (!isLoadingLlmStatus) {
+    if (!llmStatus?.activeModel) {
       statusTooltipContent =
         'No AI model selected. Click "Configure Model" to choose one.';
     } else if (isActiveModelLoaded) {
@@ -256,7 +256,7 @@ export function StandaloneChatHeader({
   const totalTokens = (latestPromptTokens ?? 0) + (latestCompletionTokens ?? 0);
 
   const isLoadingAny =
-    isLoadingChats || deleteChatMutation.isPending || isLoadingOllamaStatus;
+    isLoadingChats || deleteChatMutation.isPending || isLoadingLlmStatus;
 
   return (
     <>
@@ -316,7 +316,7 @@ export function StandaloneChatHeader({
                 {renderStatusBadge()}
               </Flex>
             </Tooltip>
-            {ollamaStatus?.activeModel && (
+            {llmStatus?.activeModel && (
               <Tooltip
                 content={
                   `Configured Context: ${configuredContextSize ? configuredContextSize.toLocaleString() : 'Default'}` +
@@ -329,14 +329,14 @@ export function StandaloneChatHeader({
                   variant="soft"
                   color={configuredContextSize ? 'blue' : 'gray'}
                   size="1"
-                  className={cn(isLoadingOllamaStatus ? 'opacity-50' : '')}
+                  className={cn(isLoadingLlmStatus ? 'opacity-50' : '')}
                 >
                   <LightningBoltIcon
                     width="14"
                     height="14"
                     style={{ marginRight: '2px' }}
                   />
-                  {isLoadingOllamaStatus
+                  {isLoadingLlmStatus
                     ? '...'
                     : configuredContextSize
                       ? configuredContextSize.toLocaleString()

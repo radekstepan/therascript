@@ -23,14 +23,14 @@ import {
   LightningBoltIcon,
   DesktopIcon,
 } from '@radix-ui/react-icons';
-import type { GpuStats, GpuDeviceStats, OllamaStatus } from '../../types';
+import type { GpuStats, GpuDeviceStats, LlmStatus } from '../../types';
 import prettyBytes from 'pretty-bytes';
 
 interface GpuStatusModalProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   gpuStats: GpuStats | undefined;
-  ollamaStatus: OllamaStatus | undefined;
+  llmStatus: LlmStatus | undefined;
   isLoading: boolean;
   error: Error | null;
 }
@@ -189,7 +189,7 @@ const GpuDeviceCard: React.FC<{ device: GpuDeviceStats }> = ({ device }) => {
   );
 };
 
-const ActiveModelCard: React.FC<{ status: OllamaStatus }> = ({ status }) => {
+const ActiveModelCard: React.FC<{ status: LlmStatus }> = ({ status }) => {
   if (!status.activeModel || !status.loaded || !status.details) return null;
 
   const details = status.details;
@@ -294,7 +294,7 @@ export function GpuStatusModal({
   isOpen,
   onOpenChange,
   gpuStats,
-  ollamaStatus,
+  llmStatus,
   isLoading,
   error,
 }: GpuStatusModalProps) {
@@ -354,14 +354,12 @@ export function GpuStatusModal({
               </Callout.Root>
             ) : (
               <Flex direction="column" gap="4">
-                {ollamaStatus &&
-                  ollamaStatus.loaded &&
-                  ollamaStatus.details && (
-                    <>
-                      <ActiveModelCard status={ollamaStatus} />
-                      <Separator size="4" />
-                    </>
-                  )}
+                {llmStatus && llmStatus.loaded && llmStatus.details && (
+                  <>
+                    <ActiveModelCard status={llmStatus} />
+                    <Separator size="4" />
+                  </>
+                )}
 
                 {!isUnifiedMemory && gpuStats?.systemMemory && (
                   <>

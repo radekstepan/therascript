@@ -20,7 +20,7 @@ export {
   LlmChatChunk,
   StreamLlmChatOptions,
   StreamResult,
-  OllamaConnectionError,
-  OllamaModelNotFoundError,
-  OllamaTimeoutError,
-} from './ollamaClient.js';
+  LlmConnectionError,
+  LlmModelNotFoundError,
+  LlmTimeoutError,
+} from './llamaCppClient.js';

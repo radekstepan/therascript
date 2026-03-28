@@ -240,7 +240,14 @@ export function ChatMessageBubble({
           <Text size="1">
             {isCurrentlyStreaming && displayTokensPerSecond !== null
               ? `~${(tokensPerSecond ?? 0).toFixed(1)} tokens/s`
-              : `${message.completionTokens} tokens (${displayTokensPerSecond!.toFixed(1)} tokens/s)`}
+              : (() => {
+                  const thinking = message.thinkingTokens ?? 0;
+                  const response = message.completionTokens ?? 0;
+                  if (thinking > 0) {
+                    return `${thinking} thinking + ${response} response tokens (${displayTokensPerSecond!.toFixed(1)} tokens/s)`;
+                  }
+                  return `${response} tokens (${displayTokensPerSecond!.toFixed(1)} tokens/s)`;
+                })()}
           </Text>
         </Flex>
       )}

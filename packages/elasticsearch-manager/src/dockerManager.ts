@@ -9,14 +9,14 @@ function findProjectRoot(startDir: string): string {
   let currentDir = startDir;
   while (true) {
     const packageJsonPath = path.join(currentDir, 'package.json');
-    const lernaJsonPath = path.join(currentDir, 'lerna.json');
-    if (fs.existsSync(packageJsonPath) && fs.existsSync(lernaJsonPath)) {
+    const turboJsonPath = path.join(currentDir, 'turbo.json');
+    if (fs.existsSync(packageJsonPath) && fs.existsSync(turboJsonPath)) {
       return currentDir; // Found root
     }
     const parentDir = path.dirname(currentDir);
     if (parentDir === currentDir) {
       throw new Error(
-        'Could not find project root containing package.json and lerna.json.'
+        'Could not find project root containing package.json and turbo.json.'
       );
     }
     currentDir = parentDir;

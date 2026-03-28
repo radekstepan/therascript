@@ -20,7 +20,7 @@ import {
 } from '@radix-ui/react-icons';
 import type {
   Session,
-  OllamaStatus,
+  LlmStatus,
   UIContextUsageResponse,
 } from '../../../types';
 import { cn } from '../../../utils';
@@ -31,8 +31,8 @@ import { fetchSessionContextUsage } from '../../../api/chat';
 interface ChatPanelHeaderProps {
   session: Session | null;
   activeChatId: number | null;
-  ollamaStatus: OllamaStatus | undefined;
-  isLoadingOllamaStatus: boolean;
+  llmStatus: LlmStatus | undefined;
+  isLoadingLlmStatus: boolean;
   onOpenLlmModal: () => void;
   latestPromptTokens?: number | null;
   latestCompletionTokens?: number | null;
@@ -43,28 +43,28 @@ interface ChatPanelHeaderProps {
 export function ChatPanelHeader({
   session,
   activeChatId,
-  ollamaStatus,
-  isLoadingOllamaStatus,
+  llmStatus,
+  isLoadingLlmStatus,
   onOpenLlmModal,
   latestPromptTokens,
   latestCompletionTokens,
   transcriptTokenCount,
   activeModelDefaultContextSize,
 }: ChatPanelHeaderProps) {
-  const modelName = ollamaStatus?.activeModel ?? 'No Model Selected';
-  const isLoaded = ollamaStatus?.loaded ?? false;
+  const modelName = llmStatus?.activeModel ?? 'No Model Selected';
+  const isLoaded = llmStatus?.loaded ?? false;
   const isActiveModelLoaded =
-    isLoaded && ollamaStatus?.modelChecked === ollamaStatus?.activeModel;
-  const configuredContextSize = ollamaStatus?.configuredContextSize;
+    isLoaded && llmStatus?.modelChecked === llmStatus?.activeModel;
+  const configuredContextSize = llmStatus?.configuredContextSize;
 
   const totalTokens = (latestPromptTokens ?? 0) + (latestCompletionTokens ?? 0);
 
   // --- CALCULATE VRAM USAGE STRING ---
   let vramUsageString = '';
-  if (isActiveModelLoaded && ollamaStatus?.details) {
-    const sizeVram = ollamaStatus.details.size_vram || 0;
+  if (isActiveModelLoaded && llmStatus?.details) {
+    const sizeVram = llmStatus.details.size_vram || 0;
     vramUsageString = ` | VRAM: ${prettyBytes(sizeVram)}`;
-    const totalSize = ollamaStatus.details.size;
+    const totalSize = llmStatus.details.size;
     if (totalSize > 0) {
       const pct = Math.round((sizeVram / totalSize) * 100);
       if (pct < 100) {
@@ -171,8 +171,8 @@ export function ChatPanelHeader({
   // --- END WARNING LOGIC ---
 
   let statusTooltipContent = 'Loading status...';
-  if (!isLoadingOllamaStatus) {
-    if (!ollamaStatus?.activeModel) {
+  if (!isLoadingLlmStatus) {
+    if (!llmStatus?.activeModel) {
       statusTooltipContent =
         'No AI model selected. Click "Configure Model" to choose one.';
     } else if (isActiveModelLoaded) {
@@ -183,8 +183,8 @@ export function ChatPanelHeader({
   }
 
   const renderStatusBadge = () => {
-    if (isLoadingOllamaStatus) return <Spinner size="1" />;
-    if (!ollamaStatus?.activeModel)
+    if (isLoadingLlmStatus) return <Spinner size="1" />;
+    if (!llmStatus?.activeModel)
       return <SymbolIcon className="text-yellow-500" width="14" height="14" />;
     if (isActiveModelLoaded)
       return (
@@ -208,7 +208,7 @@ export function ChatPanelHeader({
             </Flex>
           </Tooltip>
 
-          {ollamaStatus?.activeModel && (
+          {llmStatus?.activeModel && (
             <Tooltip
               content={
                 `Configured Context: ${configuredContextSize ? configuredContextSize.toLocaleString() : 'Default'}` +
@@ -223,14 +223,14 @@ export function ChatPanelHeader({
                 variant="soft"
                 color={configuredContextSize ? 'blue' : 'gray'}
                 size="1"
-                className={cn(isLoadingOllamaStatus ? 'opacity-50' : '')}
+                className={cn(isLoadingLlmStatus ? 'opacity-50' : '')}
               >
                 <LightningBoltIcon
                   width="14"
                   height="14"
                   style={{ marginRight: '2px' }}
                 />
-                {isLoadingOllamaStatus
+                {isLoadingLlmStatus
                   ? '...'
                   : configuredContextSize
                     ? configuredContextSize.toLocaleString()
@@ -323,7 +323,7 @@ export function ChatPanelHeader({
           size="1"
           onClick={onOpenLlmModal}
           title="Configure AI Model"
-          disabled={isLoadingOllamaStatus}
+          disabled={isLoadingLlmStatus}
         >
           <MixerVerticalIcon width="14" height="14" />
         </Button>

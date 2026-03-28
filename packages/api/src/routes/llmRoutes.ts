@@ -13,15 +13,15 @@ import {
 import {
   checkModelStatus,
   listModels,
-  loadOllamaModel,
-  startPullModelJob,
-  getPullModelJobStatus,
-  cancelPullModelJob,
-  deleteOllamaModel as deleteOllamaModelService,
+  loadLlmModel,
+  startDownloadModelJob,
+  getDownloadModelJobStatus,
+  cancelDownloadModelJob,
+  deleteLlmModel as deleteLlmModelService,
   unloadActiveModel,
   estimateVramUsage,
   getVramPerToken,
-} from '../services/ollamaService.js';
+} from '../services/llamaCppService.js';
 import {
   setActiveModelAndContextAndParams,
   getActiveModel,
@@ -32,38 +32,38 @@ import {
   getConfiguredNumGpuLayers,
 } from '../services/activeModelService.js';
 import type {
-  OllamaModelInfo,
-  OllamaPullJobStatus,
-  OllamaPullJobStatusState,
+  LlmModelInfo,
+  ModelDownloadJobStatus,
+  ModelDownloadJobStatusState,
 } from '@therascript/domain';
 
-// --- Ollama Response/Request Schemas ---
-const OllamaModelDetailSchema = t.Object({
+// --- LLM Response/Request Schemas ---
+const LlmModelDetailSchema = t.Object({
   format: t.String(),
   family: t.String(),
   families: t.Union([t.Array(t.String()), t.Null()]),
   parameter_size: t.String(),
   quantization_level: t.String(),
 });
-const OllamaModelInfoSchema = t.Object({
+const LlmModelInfoSchema = t.Object({
   name: t.String(),
   modified_at: t.String(),
   size: t.Number(),
   digest: t.String(),
-  details: OllamaModelDetailSchema,
+  details: LlmModelDetailSchema,
   defaultContextSize: t.Optional(t.Union([t.Number(), t.Null()])),
   size_vram: t.Optional(t.Number()),
   expires_at: t.Optional(t.String()),
 });
 const AvailableModelsResponseSchema = t.Object({
-  models: t.Array(OllamaModelInfoSchema),
+  models: t.Array(LlmModelInfoSchema),
 });
-const OllamaStatusResponseSchema = t.Object({
+const LlmStatusResponseSchema = t.Object({
   status: t.Union([t.Literal('available'), t.Literal('unavailable')]),
   activeModel: t.String(),
   modelChecked: t.String(),
   loaded: t.Boolean(),
-  details: t.Optional(OllamaModelInfoSchema),
+  details: t.Optional(LlmModelInfoSchema),
   configuredContextSize: t.Optional(t.Union([t.Number(), t.Null()])),
   configuredTemperature: t.Optional(t.Number()),
   configuredTopP: t.Optional(t.Number()),
@@ -87,7 +87,7 @@ const SetModelBodySchema = t.Object({
   numGpuLayers: t.Optional(t.Union([t.Number({ minimum: 0 }), t.Null()])),
 });
 const PullModelBodySchema = t.Object({
-  modelName: t.String({ minLength: 1, error: 'Model name is required.' }),
+  modelUrl: t.String({ minLength: 1, error: 'Model URL is required.' }),
 });
 const StartPullResponseSchema = t.Object({
   jobId: t.String(),
@@ -105,7 +105,7 @@ const PullStatusResponseSchema = t.Object({
     failed: 'failed',
     canceling: 'canceling',
     canceled: 'canceled',
-  } satisfies Record<OllamaPullJobStatusState, OllamaPullJobStatusState>),
+  } satisfies Record<ModelDownloadJobStatusState, ModelDownloadJobStatusState>),
   message: t.String(),
   progress: t.Optional(t.Number()),
   completedBytes: t.Optional(t.Number()),
@@ -141,13 +141,13 @@ const EstimateVramResponseSchema = t.Object({
   error: t.Optional(t.String()),
 });
 
-export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
+export const llmRoutes = new Elysia({ prefix: '/api/llm' })
   .model({
     setModelBody: SetModelBodySchema,
     pullModelBody: PullModelBodySchema,
-    ollamaModelInfo: OllamaModelInfoSchema,
+    llmModelInfo: LlmModelInfoSchema,
     availableModelsResponse: AvailableModelsResponseSchema,
-    ollamaStatusResponse: OllamaStatusResponseSchema,
+    llmStatusResponse: LlmStatusResponseSchema,
     startPullResponse: StartPullResponseSchema,
     pullStatusResponse: PullStatusResponseSchema,
     jobIdParam: JobIdParamSchema,
@@ -156,7 +156,7 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
     deleteModelResponse: DeleteModelResponseSchema,
     estimateVramResponse: EstimateVramResponseSchema,
   })
-  .group('', { detail: { tags: ['Ollama'] } }, (app) =>
+  .group('', { detail: { tags: ['LLM'] } }, (app) =>
     app
       .get(
         '/available-models',
@@ -179,14 +179,14 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
             );
             if (error instanceof InternalServerError) throw error;
             throw new InternalServerError(
-              `Failed to fetch available models from Ollama.`,
+              `Failed to fetch available models.`,
               error
             );
           }
         },
         {
           response: { 200: 'availableModelsResponse', 500: t.Any() },
-          detail: { summary: 'List locally available Ollama models' },
+          detail: { summary: 'List locally available LLM models (GGUF files)' },
         }
       )
       .post(
@@ -218,7 +218,7 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
               repeatPenalty,
               numGpuLayers
             );
-            await loadOllamaModel(modelName);
+            await loadLlmModel(modelName);
             set.status = 200;
             return {
               message: `Active model set to ${modelName} (context: ${getConfiguredContextSize() ?? 'default'}). Load initiated. Check status.`,
@@ -244,7 +244,7 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
           },
           detail: {
             summary:
-              'Set the active Ollama model and context size, trigger load',
+              'Set the active LLM model and context size, trigger server restart with new model',
           },
         }
       )
@@ -280,32 +280,32 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
           },
           detail: {
             summary:
-              'Request Ollama to unload the currently active model from memory',
+              'Stop the LLM server, unloading the currently active model from memory',
           },
         }
       )
       .post(
         '/pull-model',
         ({ body, set }) => {
-          const { modelName } = body;
+          const { modelUrl } = body;
           console.log(
-            `[API PullModel] Received request to START pull model job: ${modelName}`
+            `[API PullModel] Received request to START pull model job: ${modelUrl}`
           );
           try {
-            const jobId = startPullModelJob(modelName);
+            const jobId = startDownloadModelJob(modelUrl);
             set.status = 202;
             return {
               jobId,
-              message: `Pull job started for ${modelName}. Check status using job ID.`,
+              message: `Download job started. Check status using job ID.`,
             };
           } catch (error: any) {
             console.error(
-              `[API PullModel] Error initiating pull job for model ${modelName}:`,
+              `[API PullModel] Error initiating pull job for model ${modelUrl}:`,
               error
             );
             if (error instanceof ApiError) throw error;
             throw new InternalServerError(
-              `Failed to initiate pull job for model ${modelName}.`,
+              `Failed to initiate pull job for model ${modelUrl}.`,
               error
             );
           }
@@ -314,7 +314,7 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
           body: 'pullModelBody',
           response: { 202: 'startPullResponse', 400: t.Any(), 500: t.Any() },
           detail: {
-            summary: 'Initiate downloading a new Ollama model (poll status)',
+            summary: 'Initiate downloading a new GGUF model file (poll status)',
           },
         }
       )
@@ -326,8 +326,8 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
             `[API PullStatus] Received status request for job: ${jobId}`
           );
           try {
-            const status: OllamaPullJobStatus | null =
-              getPullModelJobStatus(jobId);
+            const status: ModelDownloadJobStatus | null =
+              getDownloadModelJobStatus(jobId);
             if (!status) {
               throw new NotFoundError(`Pull job with ID ${jobId} not found.`);
             }
@@ -361,7 +361,7 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
           response: { 200: 'pullStatusResponse', 404: t.Any(), 500: t.Any() },
           detail: {
             summary:
-              'Get the status and progress of an ongoing Ollama model pull job',
+              'Get the status and progress of an ongoing model download job',
           },
         }
       )
@@ -373,10 +373,10 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
             `[API CancelPull] Received cancel request for job: ${jobId}`
           );
           try {
-            const cancelled = cancelPullModelJob(jobId);
+            const cancelled = cancelDownloadModelJob(jobId);
             if (!cancelled) {
-              const jobStatus: OllamaPullJobStatus | null =
-                getPullModelJobStatus(jobId);
+              const jobStatus: ModelDownloadJobStatus | null =
+                getDownloadModelJobStatus(jobId);
               if (!jobStatus) {
                 throw new NotFoundError(`Pull job with ID ${jobId} not found.`);
               } else {
@@ -408,7 +408,7 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
             500: t.Any(),
           },
           detail: {
-            summary: 'Attempt to cancel an ongoing Ollama model pull job',
+            summary: 'Attempt to cancel an ongoing model download job',
           },
         }
       )
@@ -420,7 +420,7 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
             `[API DeleteModel] Received request to delete model: ${modelName}`
           );
           try {
-            const resultMessage = await deleteOllamaModelService(modelName);
+            const resultMessage = await deleteLlmModelService(modelName);
             set.status = 200;
             return { message: resultMessage };
           } catch (error: any) {
@@ -444,7 +444,7 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
             409: t.Any(),
             500: t.Any(),
           },
-          detail: { summary: 'Delete a locally downloaded Ollama model' },
+          detail: { summary: 'Delete a locally downloaded GGUF model file' },
         }
       )
       .get(
@@ -481,8 +481,7 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
                 configuredNumGpuLayers: currentConfiguredNumGpuLayers,
               };
             } else {
-              const loadedModelInfo =
-                loadedModelResult as OllamaModelInfo | null;
+              const loadedModelInfo = loadedModelResult as LlmModelInfo | null;
               const detailsResponse = loadedModelInfo
                 ? {
                     ...loadedModelInfo,
@@ -517,7 +516,7 @@ export const ollamaRoutes = new Elysia({ prefix: '/api/ollama' })
         },
         {
           query: t.Optional(t.Object({ modelName: t.Optional(t.String()) })),
-          response: { 200: 'ollamaStatusResponse', 500: t.Any() },
+          response: { 200: 'llmStatusResponse', 500: t.Any() },
           detail: {
             summary:
               'Check loaded status & configured/default context sizes for active/specific model',

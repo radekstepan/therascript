@@ -91,6 +91,7 @@ export interface ChatMessage {
   timestamp: number;
   promptTokens?: number | null;
   completionTokens?: number | null;
+  thinkingTokens?: number | null;
   duration?: number | null;
   isTruncated?: boolean | null;
 }
@@ -143,11 +144,12 @@ export interface BackendChatMessage {
   timestamp: number;
   promptTokens?: number | null;
   completionTokens?: number | null;
+  thinkingTokens?: number | null;
   duration?: number | null;
   isTruncated?: boolean | null;
 }
 
-export interface OllamaModelInfo {
+export interface LlmModelInfo {
   name: string;
   modified_at: string; // ISO string
   size: number; // in bytes
@@ -170,20 +172,20 @@ export interface OllamaModelInfo {
     precision?: number;
   } | null;
 }
-export interface OllamaStatus {
+export interface LlmStatus {
   activeModel: string;
   modelChecked: string; // The model whose details are provided below
   loaded: boolean;
-  details?: OllamaModelInfo | null; // Contains details of modelChecked, including defaultContextSize
+  details?: LlmModelInfo | null; // Contains details of modelChecked, including defaultContextSize
   configuredContextSize?: number | null; // The num_ctx the backend is currently using for the activeModel
   configuredTemperature?: number;
   configuredTopP?: number;
   configuredRepeatPenalty?: number;
-  /** Number of GPU layers configured; null = auto (Ollama decides) */
+  /** Number of GPU layers configured; null = auto (Llm decides) */
   configuredNumGpuLayers?: number | null;
 }
 export interface AvailableModelsResponse {
-  models: OllamaModelInfo[];
+  models: LlmModelInfo[];
 }
 
 export interface VramEstimateResponse {
@@ -202,7 +204,7 @@ export interface VramEstimateResponse {
   };
   error?: string;
 }
-export type UIPullJobStatusState =
+export type UIDownloadJobStatusState =
   /* ... as before ... */
   | 'queued'
   | 'parsing'
@@ -212,10 +214,10 @@ export type UIPullJobStatusState =
   | 'failed'
   | 'canceling'
   | 'canceled';
-export interface UIPullJobStatus {
+export interface UIDownloadJobStatus {
   /* ... as before ... */ jobId: string;
   modelName: string;
-  status: UIPullJobStatusState;
+  status: UIDownloadJobStatusState;
   message: string;
   progress?: number | null;
   error?: string | null;
@@ -289,7 +291,7 @@ export interface ReadinessStatus {
   services: {
     database: 'connected' | 'disconnected';
     elasticsearch: 'connected' | 'disconnected';
-    ollama: 'connected' | 'disconnected';
+    llm: 'connected' | 'disconnected';
     whisper: 'connected' | 'disconnected';
   };
   timestamp: string;

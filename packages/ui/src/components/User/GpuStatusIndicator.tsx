@@ -3,8 +3,8 @@ import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Flex, Text, Tooltip, Progress, Box } from '@radix-ui/themes';
 import { Cpu } from 'lucide-react';
-import { fetchGpuStats, fetchOllamaStatus } from '../../api/api';
-import type { GpuStats, OllamaStatus } from '../../types';
+import { fetchGpuStats, fetchLlmStatus } from '../../api/api';
+import type { GpuStats, LlmStatus } from '../../types';
 import { GpuStatusModal } from './GpuStatusModal';
 import { cn } from '../../utils';
 import prettyBytes from 'pretty-bytes';
@@ -28,15 +28,15 @@ export function GpuStatusIndicator({
     staleTime: 1000,
   });
 
-  const { data: ollamaStatus } = useQuery<OllamaStatus, Error>({
-    queryKey: ['ollamaStatus'],
-    queryFn: () => fetchOllamaStatus(),
+  const { data: llmStatus } = useQuery<LlmStatus, Error>({
+    queryKey: ['llmStatus'],
+    queryFn: () => fetchLlmStatus(),
     refetchInterval: 5000,
     staleTime: 4000,
   });
 
   const handleOpenModal = () => {
-    if (gpuStats || ollamaStatus) {
+    if (gpuStats || llmStatus) {
       setIsModalOpen(true);
     }
   };
@@ -179,7 +179,7 @@ export function GpuStatusIndicator({
         isOpen={isModalOpen}
         onOpenChange={setIsModalOpen}
         gpuStats={gpuStats}
-        ollamaStatus={ollamaStatus}
+        llmStatus={llmStatus}
         isLoading={isLoadingGpu}
         error={error}
       />

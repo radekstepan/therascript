@@ -34,7 +34,7 @@ import {
   fetchAvailableModels,
   fetchTemplates,
 } from '../../api/api';
-import type { Session, OllamaModelInfo, Template } from '../../types';
+import type { Session, LlmModelInfo, Template } from '../../types';
 import { toastMessageAtom } from '../../store';
 import { cn } from '../../utils';
 import { formatIsoDateToYMD } from '../../helpers';
@@ -169,7 +169,7 @@ export function CreateAnalysisJobModal({
   const [useAdvancedStrategy, setUseAdvancedStrategy] = useState(true); // Default to true
 
   const { data: availableModelsData, isLoading: isLoadingModels } = useQuery({
-    queryKey: ['availableOllamaModels'],
+    queryKey: ['availableLlmModels'],
     queryFn: fetchAvailableModels,
     enabled: isOpen,
   });

@@ -34,21 +34,21 @@ import {
   TrashIcon,
 } from '@radix-ui/react-icons';
 import {
-  fetchOllamaStatus,
+  fetchLlmStatus,
   fetchAvailableModels,
-  unloadOllamaModel,
-  startPullOllamaModel,
-  fetchPullOllamaModelStatus,
-  cancelPullOllamaModel,
-  deleteOllamaModel,
+  unloadLlmModel,
+  startDownloadLlmModel,
+  fetchDownloadLlmModelStatus,
+  cancelDownloadLlmModel,
+  deleteLlmModel,
 } from '../../../api/api';
 import { toastMessageAtom } from '../../../store';
 import { useSetAtom } from 'jotai';
 import type {
-  OllamaModelInfo,
-  OllamaStatus,
-  UIPullJobStatus,
-  UIPullJobStatusState,
+  LlmModelInfo,
+  LlmStatus,
+  UIDownloadJobStatus,
+  UIDownloadJobStatusState,
 } from '../../../types';
 import { cn } from '../../../utils';
 import prettyBytes from 'pretty-bytes';
@@ -65,10 +65,10 @@ export function LlmManagementModal({
   const queryClient = useQueryClient();
   const setToast = useSetAtom(toastMessageAtom);
   const [isWaitingForUnload, setIsWaitingForUnload] = useState(false);
-  const [modelToPull, setModelToPull] = useState<string>('');
+  const [modelUrlToDownload, setModelUrlToDownload] = useState<string>('');
 
   // Ref for auto-focus
-  const pullInputRef = useRef<HTMLInputElement>(null);
+  const downloadUrlInputRef = useRef<HTMLInputElement>(null);
 
   // State for Polling
   const [pullJobId, setPullJobId] = useState<string | null>(null);
@@ -76,9 +76,7 @@ export function LlmManagementModal({
 
   // State for Delete Confirmation
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
-  const [modelToDelete, setModelToDelete] = useState<OllamaModelInfo | null>(
-    null
-  );
+  const [modelToDelete, setModelToDelete] = useState<LlmModelInfo | null>(null);
   // Ref for delete confirm button focus
   const deleteConfirmButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -87,7 +85,7 @@ export function LlmManagementModal({
     if (isOpen && !pullJobId) {
       // Only focus pull input if not currently pulling
       const timer = setTimeout(() => {
-        pullInputRef.current?.focus();
+        downloadUrlInputRef.current?.focus();
       }, 50); // Small delay ensures element is ready
       return () => clearTimeout(timer);
     }
@@ -105,12 +103,12 @@ export function LlmManagementModal({
 
   // --- Queries and Mutations (Unchanged logic, only ref updates) ---
   const {
-    data: ollamaStatus,
+    data: llmStatus,
     isLoading: isLoadingStatus,
     error: statusError,
   } = useQuery({
-    queryKey: ['ollamaStatus'],
-    queryFn: () => fetchOllamaStatus(),
+    queryKey: ['llmStatus'],
+    queryFn: () => fetchLlmStatus(),
     enabled: isOpen,
     staleTime: 0,
     gcTime: 1000,
@@ -125,7 +123,7 @@ export function LlmManagementModal({
     error: availableError,
     refetch: refetchAvailableModels,
   } = useQuery({
-    queryKey: ['availableOllamaModels'],
+    queryKey: ['availableLlmModels'],
     queryFn: fetchAvailableModels,
     enabled: isOpen,
     staleTime: 10 * 1000,
@@ -133,13 +131,13 @@ export function LlmManagementModal({
   });
 
   const unloadMutation = useMutation({
-    mutationFn: unloadOllamaModel,
+    mutationFn: unloadLlmModel,
     onMutate: () => {
       setIsWaitingForUnload(true);
     },
     onSuccess: (data) => {
       setToast(`✅ ${data.message}`);
-      queryClient.invalidateQueries({ queryKey: ['ollamaStatus'] });
+      queryClient.invalidateQueries({ queryKey: ['llmStatus'] });
     },
     onError: (error: Error) => {
       console.error('Unload request failed:', error);
@@ -151,36 +149,36 @@ export function LlmManagementModal({
   });
 
   const startPullMutation = useMutation({
-    mutationFn: startPullOllamaModel,
-    onMutate: (modelName: string) => {
+    mutationFn: startDownloadLlmModel,
+    onMutate: (modelUrl: string) => {
       resetPullState(true);
-      setPullingModelName(modelName);
-      console.log(`[LlmModal Mutate] Starting pull for ${modelName}`);
+      setPullingModelName(modelUrl);
+      console.log(`[LlmModal Mutate] Starting download from ${modelUrl}`);
     },
-    onSuccess: (data, modelName: string) => {
+    onSuccess: (data, modelUrl: string) => {
       console.log(
-        `[LlmModal Success] Pull job started successfully. Job ID: ${data.jobId} for Model: ${modelName}`
+        `[LlmModal Success] Download job started successfully. Job ID: ${data.jobId} from URL: ${modelUrl}`
       );
       setPullJobId(data.jobId);
-      setModelToPull('');
+      setModelUrlToDownload('');
     },
-    onError: (error: Error, modelName: string) => {
-      console.error(`Error starting pull job for ${modelName}:`, error);
+    onError: (error: Error, modelUrl: string) => {
+      console.error(`Error starting download from ${modelUrl}:`, error);
       setToast(`❌ Failed to start download: ${error.message}`);
       resetPullState(false);
     },
   });
 
   const { data: pullStatus, error: pullStatusError } = useQuery<
-    UIPullJobStatus,
+    UIDownloadJobStatus,
     Error
   >({
-    queryKey: ['ollamaPullStatus', pullJobId],
+    queryKey: ['llmPullStatus', pullJobId],
     queryFn: () => {
       if (!pullJobId) {
         throw new Error('No Job ID to poll');
       }
-      return fetchPullOllamaModelStatus(pullJobId);
+      return fetchDownloadLlmModelStatus(pullJobId);
     },
     enabled: !!pullJobId,
     refetchInterval: (query) => {
@@ -197,7 +195,7 @@ export function LlmManagementModal({
           setToast(`✅ Pull complete for ${statusData.modelName}.`);
           setTimeout(() => {
             queryClient.invalidateQueries({
-              queryKey: ['availableOllamaModels'],
+              queryKey: ['availableLlmModels'],
             });
             resetPullState(false);
           }, 1500);
@@ -231,14 +229,14 @@ export function LlmManagementModal({
   });
 
   const cancelPullMutation = useMutation({
-    mutationFn: cancelPullOllamaModel,
+    mutationFn: cancelDownloadLlmModel,
     onMutate: (jobIdToCancel) => {
       console.log(
         `[LlmModal Mutate] Sending cancel request for job ${jobIdToCancel}...`
       );
-      queryClient.setQueryData<UIPullJobStatus>(
-        ['ollamaPullStatus', jobIdToCancel],
-        (oldData) =>
+      queryClient.setQueryData<UIDownloadJobStatus>(
+        ['llmPullStatus', jobIdToCancel],
+        (oldData: UIDownloadJobStatus | undefined) =>
           oldData
             ? {
                 ...oldData,
@@ -255,13 +253,13 @@ export function LlmManagementModal({
       console.error(`Error cancelling pull job ${jobIdCancelled}:`, error);
       setToast(`❌ Failed to cancel download: ${error.message}`);
       queryClient.invalidateQueries({
-        queryKey: ['ollamaPullStatus', jobIdCancelled],
+        queryKey: ['llmPullStatus', jobIdCancelled],
       });
     },
   });
 
   const deleteModelMutation = useMutation({
-    mutationFn: deleteOllamaModel,
+    mutationFn: deleteLlmModel,
     onMutate: (modelName: string) => {
       console.log(
         `[LlmModal Mutate] Sending delete request for ${modelName}...`
@@ -269,8 +267,8 @@ export function LlmManagementModal({
     },
     onSuccess: (data, modelName) => {
       setToast(`✅ ${data.message || `Model ${modelName} deleted.`}`);
-      queryClient.invalidateQueries({ queryKey: ['availableOllamaModels'] });
-      queryClient.invalidateQueries({ queryKey: ['ollamaStatus'] });
+      queryClient.invalidateQueries({ queryKey: ['availableLlmModels'] });
+      queryClient.invalidateQueries({ queryKey: ['llmStatus'] });
       closeDeleteConfirm();
     },
     onError: (error: Error, modelName) => {
@@ -290,22 +288,22 @@ export function LlmManagementModal({
         `[LlmModal] Resetting pull state and removing poll query for job ${currentJobId}.`
       );
       queryClient.removeQueries({
-        queryKey: ['ollamaPullStatus', currentJobId],
+        queryKey: ['llmPullStatus', currentJobId],
       });
     }
     startPullMutation.reset();
     cancelPullMutation.reset();
   };
   const handlePullClick = () => {
-    const modelName = modelToPull.trim();
+    const modelUrl = modelUrlToDownload.trim();
     if (
-      !modelName ||
+      !modelUrl ||
       startPullMutation.isPending ||
       !!pullJobId ||
       isAnyLoadingProcessActive
     )
       return;
-    startPullMutation.mutate(modelName);
+    startPullMutation.mutate(modelUrl);
   };
   const handleCancelPullClick = () => {
     if (pullJobId && !cancelPullMutation.isPending) {
@@ -325,15 +323,15 @@ export function LlmManagementModal({
 
   // Effects for unload confirmation (Unchanged)
   useEffect(() => {
-    if (isWaitingForUnload && ollamaStatus) {
+    if (isWaitingForUnload && llmStatus) {
       if (
-        ollamaStatus.modelChecked === ollamaStatus.activeModel &&
-        !ollamaStatus.loaded
+        llmStatus.modelChecked === llmStatus.activeModel &&
+        !llmStatus.loaded
       ) {
         setIsWaitingForUnload(false);
       }
     }
-  }, [isWaitingForUnload, ollamaStatus]);
+  }, [isWaitingForUnload, llmStatus]);
 
   // Event Handlers (Unload) (Unchanged)
   const handleUnloadClick = () => {
@@ -342,7 +340,7 @@ export function LlmManagementModal({
   };
 
   // Handlers for Modals (Unchanged)
-  const openDeleteConfirm = (model: OllamaModelInfo) => {
+  const openDeleteConfirm = (model: LlmModelInfo) => {
     setModelToDelete(model);
     setIsDeleteConfirmOpen(true);
   };
@@ -372,7 +370,7 @@ export function LlmManagementModal({
     onOpenChange(open);
     if (!open) {
       setIsWaitingForUnload(false);
-      setModelToPull('');
+      setModelUrlToDownload('');
       unloadMutation.reset();
       deleteModelMutation.reset();
       resetPullState(true);
@@ -412,13 +410,13 @@ export function LlmManagementModal({
     deleteModelMutation.error?.message;
 
   // UI Display Values (Unchanged)
-  const activeModelName = ollamaStatus?.activeModel ?? 'N/A';
-  const isAnyModelLoaded = ollamaStatus?.loaded ?? false;
-  const loadedModelFullName = ollamaStatus?.details?.name;
-  const activeConfiguredContextSize = ollamaStatus?.configuredContextSize;
+  const activeModelName = llmStatus?.activeModel ?? 'N/A';
+  const isAnyModelLoaded = llmStatus?.loaded ?? false;
+  const loadedModelFullName = llmStatus?.details?.name;
+  const activeConfiguredContextSize = llmStatus?.configuredContextSize;
 
   // Render list item function (Changed)
-  const renderModelListItem = (model: OllamaModelInfo) => {
+  const renderModelListItem = (model: LlmModelInfo) => {
     const isCurrentlyLoadingThis = isDeletingSelectedModel;
     const isCurrentlyActiveAndLoaded =
       isAnyModelLoaded && loadedModelFullName === model.name;
@@ -585,7 +583,7 @@ export function LlmManagementModal({
             </Text>
             <Flex align="center" justify="between" gap="3">
               <Flex align="center" gap="2" style={{ minWidth: 0 }}>
-                {(isLoadingStatus && !ollamaStatus) || isWaitingForUnload ? (
+                {(isLoadingStatus && !llmStatus) || isWaitingForUnload ? (
                   <Spinner size="2" />
                 ) : isAnyModelLoaded ? (
                   <CheckCircledIcon
@@ -744,7 +742,7 @@ export function LlmManagementModal({
           <Separator my="3" size="4" />
           <Box mb="4">
             <Text as="div" size="1" weight="medium" color="gray" mb="2">
-              Download New Model
+              Download Model from URL
             </Text>
             {(isStartingPull || isPulling || isCancelingPull || pullStatus) &&
               displayPullModelName && (
@@ -790,12 +788,12 @@ export function LlmManagementModal({
               )}
             <Flex gap="2">
               <TextField.Root
-                ref={pullInputRef} // Attach ref for focus
+                ref={downloadUrlInputRef} // Attach ref for focus
                 style={{ flexGrow: 1 }}
                 size="2"
-                placeholder="Enter model name (e.g., llama3:latest, mistral:7b)"
-                value={modelToPull}
-                onChange={(e) => setModelToPull(e.target.value)}
+                placeholder="Enter GGUF model URL (e.g., https://huggingface.co/.../model.gguf)"
+                value={modelUrlToDownload}
+                onChange={(e) => setModelUrlToDownload(e.target.value)}
                 disabled={isAnyOperationActive}
                 onKeyDown={handlePullInputKeyDown} // Add keydown handler
               />
@@ -829,10 +827,10 @@ export function LlmManagementModal({
               ) : (
                 <Button
                   onClick={handlePullClick}
-                  disabled={!modelToPull.trim() || isAnyOperationActive}
+                  disabled={!modelUrlToDownload.trim() || isAnyOperationActive}
                   title={
-                    !modelToPull.trim()
-                      ? 'Enter a model name'
+                    !modelUrlToDownload.trim()
+                      ? 'Enter a model URL'
                       : 'Download model'
                   }
                 >

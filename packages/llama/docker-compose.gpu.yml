@@ -1,0 +1,22 @@
+name: therascript
+
+services:
+  llama-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu
+    container_name: therascript_llama_server
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./models:/models
+    command: >
+      --host 0.0.0.0 --port 8080 --model /models/default.gguf --ctx-size 8192 --n-gpu-layers 99 --flash-attn
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [ gpu ]
+    restart: unless-stopped

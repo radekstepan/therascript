@@ -34,10 +34,10 @@ import {
 } from '../../../store';
 import type {
   ChatMessage,
-  OllamaStatus,
+  LlmStatus,
   UIContextUsageResponse,
 } from '../../../types';
-import { fetchOllamaStatus, setOllamaModel } from '../../../api/api';
+import { fetchLlmStatus, setLlmModel } from '../../../api/api';
 import { SelectActiveModelModal } from '../Modals/SelectActiveModelModal';
 import {
   fetchSessionContextUsage,
@@ -87,14 +87,16 @@ export function ChatInput({
   // const [showInlineLoadPrompt, setShowInlineLoadPrompt] = useState(false);
   // const [isInlineLoadingModel, setIsInlineLoadingModel] = useState(false);
 
-  const { data: ollamaStatus, isLoading: isLoadingOllamaStatusForInput } =
-    useQuery<OllamaStatus, Error>({
-      queryKey: ['ollamaStatus'],
-      queryFn: () => fetchOllamaStatus(),
-      staleTime: 5000,
-      refetchOnWindowFocus: true,
-      enabled: !disabled,
-    });
+  const { data: llmStatus, isLoading: isLoadingLlmStatusForInput } = useQuery<
+    LlmStatus,
+    Error
+  >({
+    queryKey: ['llmStatus'],
+    queryFn: () => fetchLlmStatus(),
+    staleTime: 5000,
+    refetchOnWindowFocus: true,
+    enabled: !disabled,
+  });
 
   // No longer need setModelAndLoadMutation as SelectActiveModelModal handles setting/loading
   // const setModelAndLoadMutation = useMutation(...);
@@ -104,7 +106,7 @@ export function ChatInput({
     isAiResponding ||
     !activeChatId ||
     isSelectModelModalOpen ||
-    isLoadingOllamaStatusForInput;
+    isLoadingLlmStatusForInput;
 
   useEffect(() => {
     if (activeChatId !== null && !isEffectivelyDisabled) {
@@ -119,14 +121,14 @@ export function ChatInput({
     }
   }, [currentQuery, inputError, addMessageMutation]);
 
-  // Effect to send pending message after model is confirmed loaded via ollamaStatus
+  // Effect to send pending message after model is confirmed loaded via llmStatus
   // This is now primarily triggered after SelectActiveModelModal succeeds
   useEffect(() => {
     if (
       pendingMessage &&
-      ollamaStatus?.activeModel &&
-      ollamaStatus.modelChecked === ollamaStatus.activeModel &&
-      ollamaStatus.loaded
+      llmStatus?.activeModel &&
+      llmStatus.modelChecked === llmStatus.activeModel &&
+      llmStatus.loaded
     ) {
       console.log(
         '[ChatInput] Model confirmed loaded. Sending pending message:',
@@ -138,7 +140,7 @@ export function ChatInput({
       });
       setPendingMessage(null);
     }
-  }, [ollamaStatus, pendingMessage, addMessageMutation]);
+  }, [llmStatus, pendingMessage, addMessageMutation]);
 
   const handleSelectTemplate = (text: string) => {
     setCurrentQuery((prev) => (prev ? `${prev} ${text}` : text));
@@ -162,17 +164,13 @@ export function ChatInput({
     setInputError('');
     const queryToSend = currentQuery;
 
-    if (!ollamaStatus) {
+    if (!llmStatus) {
       setToastMessageAtom('Waiting for AI model status...');
-      queryClient.refetchQueries({ queryKey: ['ollamaStatus'] });
+      queryClient.refetchQueries({ queryKey: ['llmStatus'] });
       return false;
     }
 
-    const {
-      activeModel: currentActiveModel,
-      modelChecked,
-      loaded,
-    } = ollamaStatus;
+    const { activeModel: currentActiveModel, modelChecked, loaded } = llmStatus;
 
     if (
       !currentActiveModel ||
@@ -198,7 +196,7 @@ export function ChatInput({
 
   const handleModelSuccessfullySet = () => {
     setIsSelectModelModalOpen(false);
-    // The useEffect watching ollamaStatus and pendingMessage will now handle sending
+    // The useEffect watching llmStatus and pendingMessage will now handle sending
     // once the status updates to reflect the model is loaded.
     // We don't immediately send here, we wait for confirmation of load.
     console.log(
@@ -332,7 +330,7 @@ export function ChatInput({
             placeholder={
               isAiResponding
                 ? 'AI is responding...'
-                : // : isInlineLoadingModel ? `Loading ${ollamaStatus?.activeModel || 'model'}...` // Removed
+                : // : isInlineLoadingModel ? `Loading ${llmStatus?.activeModel || 'model'}...` // Removed
                   placeholderText
             }
             value={currentQuery}
@@ -395,10 +393,10 @@ export function ChatInput({
         isOpen={isSelectModelModalOpen}
         onOpenChange={setIsSelectModelModalOpen}
         onModelSuccessfullySet={handleModelSuccessfullySet}
-        currentActiveModelName={ollamaStatus?.activeModel}
-        currentConfiguredContextSize={ollamaStatus?.configuredContextSize}
+        currentActiveModelName={llmStatus?.activeModel}
+        currentConfiguredContextSize={llmStatus?.configuredContextSize}
         activeTranscriptTokens={transcriptTokenCount}
-        ollamaStatus={ollamaStatus}
+        llmStatus={llmStatus}
       />
     </>
   );

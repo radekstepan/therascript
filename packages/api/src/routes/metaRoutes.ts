@@ -20,7 +20,7 @@ const ReadinessStatusResponseSchema = t.Object({
   services: t.Object({
     database: t.String(),
     elasticsearch: t.String(),
-    ollama: t.String(),
+    llm: t.String(),
     whisper: t.String(),
   }),
   timestamp: t.String(),

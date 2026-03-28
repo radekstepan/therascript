@@ -4,7 +4,7 @@ import type { WhisperJobStatus } from '@therascript/domain';
 import axios from 'axios';
 import { ApiError, InternalServerError, NotFoundError } from '../errors.js';
 import { addTranscriptionJob } from './jobQueueService.js';
-import { unloadActiveModel } from './ollamaService.js';
+import { unloadActiveModel } from './llamaCppService.js';
 
 console.log('[Real Service] Using Real Transcription Service');
 

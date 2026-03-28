@@ -7,7 +7,7 @@ import {
 } from '@therascript/data';
 import { SYSTEM_PROMPT_TEMPLATES } from '@therascript/db/dist/sqliteService.js';
 import { processAnalysisJob } from '../services/analysisJobService.js';
-import { listModels, streamChatResponse } from '../services/ollamaService.js';
+import { listModels, streamChatResponse } from '../services/llamaCppService.js';
 import { calculateTokenCount } from '@therascript/services';
 import {
   InternalServerError,
@@ -23,7 +23,6 @@ import type {
   AnalysisStrategy,
 } from '@therascript/domain';
 import { cleanLlmOutput } from '@therascript/services';
-import type { ChatResponse } from 'ollama';
 import { createJobSubscriber } from '../services/streamSubscriber.js';
 import {
   type AnalysisRequest,
@@ -40,18 +39,18 @@ interface AnalysisHandlerContext {
 
 // This helper is also in analysisJobService.ts. Consider moving to a shared util.
 async function accumulateStreamResponse(
-  stream: AsyncIterable<ChatResponse>
+  stream: AsyncGenerator<any, any>
 ): Promise<{ text: string; promptTokens?: number; completionTokens?: number }> {
   let fullText = '';
   let promptTokens: number | undefined;
   let completionTokens: number | undefined;
   for await (const chunk of stream) {
-    if (chunk.message?.content) {
-      fullText += chunk.message.content;
+    if (chunk.content) {
+      fullText += chunk.content;
     }
-    if (chunk.done) {
-      promptTokens = chunk.prompt_eval_count;
-      completionTokens = chunk.eval_count;
+    if (chunk.promptTokens !== undefined) {
+      promptTokens = chunk.promptTokens;
+      completionTokens = chunk.completionTokens;
     }
   }
   return { text: cleanLlmOutput(fullText), promptTokens, completionTokens };
@@ -89,7 +88,6 @@ const generateShortPromptInBackground = async (
 
     const startTime = Date.now();
     const stream = await streamChatResponse(
-      null,
       [
         {
           id: 0,
@@ -165,7 +163,6 @@ const generateStrategyAndUpdateJob = async (
 
     const startTime = Date.now();
     const stream = await streamChatResponse(
-      null,
       [
         {
           id: 0,

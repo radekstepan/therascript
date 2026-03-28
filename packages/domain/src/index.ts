@@ -151,7 +151,7 @@ export interface ApiErrorResponse {
   validationErrors?: any;
 }
 
-export interface OllamaModelInfo {
+export interface LlmModelInfo {
   name: string;
   modified_at: Date;
   size: number;
@@ -177,7 +177,7 @@ export interface OllamaModelInfo {
   } | null;
 }
 
-export type OllamaPullJobStatusState =
+export type ModelDownloadJobStatusState =
   | 'queued'
   | 'parsing'
   | 'downloading'
@@ -187,10 +187,10 @@ export type OllamaPullJobStatusState =
   | 'canceling'
   | 'canceled';
 
-export interface OllamaPullJobStatus {
+export interface ModelDownloadJobStatus {
   jobId: string;
   modelName: string;
-  status: OllamaPullJobStatusState;
+  status: ModelDownloadJobStatusState;
   message: string;
   progress?: number;
   completedBytes?: number;

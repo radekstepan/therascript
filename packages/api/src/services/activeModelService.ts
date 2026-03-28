@@ -2,13 +2,13 @@
 import config from '@therascript/config';
 
 // Initialize with the value from the config file (.env)
-let activeModelName: string = config.ollama.model;
-// Store the configured context size (null means use Ollama default)
+let activeModelName: string = config.llm.modelPath;
+// Store the configured context size (null means use LLM default)
 let configuredContextSize: number | null = null;
 let configuredTemperature: number = 0.7;
 let configuredTopP: number = 0.9;
 let configuredRepeatPenalty: number = 1.1;
-// null = let Ollama/llama.cpp decide automatically; >= 0 = explicit layer count
+// null = let llama.cpp decide automatically; >= 0 = explicit layer count
 let configuredNumGpuLayers: number | null = null;
 
 export const getActiveModel = (): string => {
@@ -182,7 +182,7 @@ export const setActiveModelAndContextAndParams = (
     Number.isInteger(newNumGpuLayers) &&
     newNumGpuLayers >= 0
       ? newNumGpuLayers
-      : null; // null = let Ollama decide automatically
+      : null; // null = let LLM decide automatically
 
   if (validNumGpuLayers !== configuredNumGpuLayers) {
     console.log(
@@ -214,5 +214,5 @@ export const setActiveModelAndContextAndParams = (
 
 // Function to get the original model from config (might be useful)
 export const getConfiguredModel = (): string => {
-  return config.ollama.model;
+  return config.llm.modelPath;
 };

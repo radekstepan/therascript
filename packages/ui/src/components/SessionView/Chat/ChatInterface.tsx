@@ -22,7 +22,7 @@ import type {
   ChatSession,
   Session,
   ChatMessage,
-  OllamaStatus,
+  LlmStatus,
 } from '../../../types';
 import {
   currentQueryAtom,
@@ -37,8 +37,8 @@ interface ChatInterfaceProps {
   activeChatId: number | null;
   isStandalone: boolean;
   isLoadingSessionMeta?: boolean; // Optional for standalone
-  ollamaStatus: OllamaStatus | undefined;
-  isLoadingOllamaStatus: boolean;
+  llmStatus: LlmStatus | undefined;
+  isLoadingLlmStatus: boolean;
   onOpenLlmModal: () => void;
   isTabActive?: boolean; // For tabbed layout on small screens
   transcriptTokenCount?: number | null; // <-- ADDED
@@ -53,8 +53,8 @@ export function ChatInterface({
   activeChatId,
   isStandalone,
   isLoadingSessionMeta,
-  ollamaStatus,
-  isLoadingOllamaStatus,
+  llmStatus,
+  isLoadingLlmStatus,
   onOpenLlmModal,
   isTabActive,
   transcriptTokenCount, // <-- DESTRUCTURED
@@ -345,6 +345,7 @@ export function ChatInterface({
                 }
                 const completionTokens =
                   data.completionTokens ?? localTokenCount;
+                const thinkingTokens = data.thinkingTokens ?? 0;
                 const duration = data.duration ?? null;
                 const isTruncated = data.isTruncated ?? false;
                 const tokensPerSecond =
@@ -363,6 +364,7 @@ export function ChatInterface({
                           ? {
                               ...msg,
                               completionTokens,
+                              thinkingTokens,
                               duration,
                               isTruncated,
                             }
@@ -371,6 +373,37 @@ export function ChatInterface({
                     };
                   }
                 );
+                // If the stream completed but produced no visible response,
+                // remove the empty AI bubble and notify the user
+                if (streamErrored || completionTokens === 0) {
+                  queryClient.setQueryData<ChatSession>(
+                    currentChatQueryKey,
+                    (oldData) => {
+                      if (!oldData) return oldData;
+                      const currentMessages = oldData.messages ?? [];
+                      const aiMsg = currentMessages.find(
+                        (msg) => msg.id === tempAiMessageId
+                      );
+                      const hasVisibleContent =
+                        aiMsg?.text &&
+                        aiMsg.text
+                          .replace(/<think>[\s\S]*?(<\/think>|$)/g, '')
+                          .trim().length > 0;
+                      if (hasVisibleContent) return oldData;
+                      return {
+                        ...oldData,
+                        messages: currentMessages.filter(
+                          (msg) => msg.id !== tempAiMessageId
+                        ),
+                      };
+                    }
+                  );
+                  if (!streamErrored) {
+                    setToastMessage(
+                      'The model returned an empty response. Try again or reduce the context size.'
+                    );
+                  }
+                }
                 setStreamingAiMessageId(null);
                 setStreamPhase(null);
                 setStreamingStartTime(null);
@@ -390,6 +423,9 @@ export function ChatInterface({
                 );
                 setToastMessage(`Chat Error: ${data.error}`);
                 streamErrored = true;
+                // Break out of the stream loop on error so we clean up immediately
+                reader.cancel().catch(() => {});
+                break;
               }
             } catch (e) {
               console.error('SSE parse error', e);
@@ -403,6 +439,7 @@ export function ChatInterface({
       if (!isAbort) {
         console.error('Error reading stream:', error);
         streamErrored = true;
+        setToastMessage(`Stream error: ${error.message}`);
       }
     } finally {
       if (hasOpenThinkingBlock) {
@@ -417,6 +454,34 @@ export function ChatInterface({
                 msg.id === tempAiMessageId
                   ? { ...msg, text: msg.text + '</think>' }
                   : msg
+              ),
+            };
+          }
+        );
+      }
+      // If the stream ended with an error or produced no visible content,
+      // remove the empty AI bubble so the user isn't left staring at nothing.
+      if (streamErrored) {
+        queryClient.setQueryData<ChatSession>(
+          currentChatQueryKey,
+          (oldData) => {
+            if (!oldData) return oldData;
+            const currentMessages = oldData.messages ?? [];
+            const aiMsg = currentMessages.find(
+              (msg) => msg.id === tempAiMessageId
+            );
+            const hasVisibleContent =
+              aiMsg?.text &&
+              aiMsg.text.replace(/<think>[\s\S]*?(<\/think>|$)/g, '').trim()
+                .length > 0;
+            if (hasVisibleContent) return oldData;
+            // Remove empty AI bubble and the optimistic user message if it was never confirmed
+            return {
+              ...oldData,
+              messages: currentMessages.filter(
+                (msg) =>
+                  msg.id !== tempAiMessageId &&
+                  (msg.id !== tempUserMsgId || actualUserMessageId !== -1)
               ),
             };
           }
@@ -563,7 +628,12 @@ export function ChatInterface({
         );
         setStreamingAiMessageId(null);
         setStreamPhase(null);
-        throw streamError; // Rethrow to be caught by mutation's onError
+        setToastMessage(`Stream error: ${streamError.message}`);
+        if (activeChatId) {
+          setActiveLlmJobs((prev) =>
+            prev.filter((j) => j.chatId !== activeChatId)
+          );
+        }
       });
     },
     onError: (error, newMessageText, context) => {
@@ -593,7 +663,7 @@ export function ChatInterface({
     },
     onSettled: () => {
       setCurrentQuery('');
-      queryClient.invalidateQueries({ queryKey: ['ollamaStatus'] });
+      queryClient.invalidateQueries({ queryKey: ['llmStatus'] });
     },
   });
 
@@ -603,11 +673,6 @@ export function ChatInterface({
 
   const isAiResponding =
     addMessageMutation.isPending || streamingAiMessageId !== null;
-
-  const handleSendMessage = (text: string) => {
-    const tempAiMessageId = createTemporaryId();
-    addMessageMutation.mutate({ text, tempAiMessageId });
-  };
 
   return (
     <Flex
@@ -625,8 +690,8 @@ export function ChatInterface({
         <ChatPanelHeader // Fixed height
           session={session}
           activeChatId={activeChatId}
-          ollamaStatus={ollamaStatus}
-          isLoadingOllamaStatus={isLoadingOllamaStatus}
+          llmStatus={llmStatus}
+          isLoadingLlmStatus={isLoadingLlmStatus}
           latestPromptTokens={latestPromptTokens}
           latestCompletionTokens={latestCompletionTokens}
           onOpenLlmModal={onOpenLlmModal}

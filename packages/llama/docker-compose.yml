@@ -1,0 +1,20 @@
+name: therascript
+
+services:
+  llama-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: therascript_llama_server
+    ports:
+      - '8080:8080'
+    volumes:
+      - ./models:/models
+    environment:
+      - LLAMA_MODEL_PATH=${LLAMA_MODEL_PATH:-/models/default.gguf}
+    command: >
+      --host 0.0.0.0
+      --port 8080
+      --model ${LLAMA_MODEL_PATH:-/models/default.gguf}
+      --ctx-size 8192
+    restart: unless-stopped

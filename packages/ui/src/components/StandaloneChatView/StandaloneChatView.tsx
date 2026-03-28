@@ -13,8 +13,8 @@ import { Flex, Box, Text, Spinner } from '@radix-ui/themes';
 import { ChatInterface } from '../SessionView/Chat/ChatInterface';
 import { SelectActiveModelModal } from '../SessionView/Modals/SelectActiveModelModal';
 import { StandaloneChatHeader } from './StandaloneChatHeader';
-import { fetchOllamaStatus, fetchStandaloneChatDetails } from '../../api/api'; // Added fetchStandaloneChatDetails
-import type { OllamaStatus, ChatSession } from '../../types'; // Added ChatSession
+import { fetchLlmStatus, fetchStandaloneChatDetails } from '../../api/api'; // Added fetchStandaloneChatDetails
+import type { LlmStatus, ChatSession } from '../../types'; // Added ChatSession
 import { activeChatIdAtom, toastMessageAtom } from '../../store';
 import { cn } from '../../utils';
 
@@ -31,12 +31,12 @@ export function StandaloneChatView() {
   const chatIdNum = chatIdParam ? parseInt(chatIdParam, 10) : null;
 
   const {
-    data: ollamaStatus,
-    isLoading: isLoadingOllamaStatus,
-    error: ollamaError,
-  } = useQuery<OllamaStatus, Error>({
-    queryKey: ['ollamaStatus'],
-    queryFn: () => fetchOllamaStatus(),
+    data: llmStatus,
+    isLoading: isLoadingLlmStatus,
+    error: llmError,
+  } = useQuery<LlmStatus, Error>({
+    queryKey: ['llmStatus'],
+    queryFn: () => fetchLlmStatus(),
     staleTime: 60 * 1000,
     refetchOnWindowFocus: true,
     refetchInterval: 5000,
@@ -105,8 +105,8 @@ export function StandaloneChatView() {
     >
       <StandaloneChatHeader
         activeChatId={currentActiveChatId}
-        ollamaStatus={ollamaStatus}
-        isLoadingOllamaStatus={isLoadingOllamaStatus}
+        llmStatus={llmStatus}
+        isLoadingLlmStatus={isLoadingLlmStatus}
         onOpenLlmModal={handleOpenConfigureLlmModal}
         latestPromptTokens={latestPromptTokens} // <-- PASS PROP
         latestCompletionTokens={latestCompletionTokens} // <-- PASS PROP
@@ -129,8 +129,8 @@ export function StandaloneChatView() {
           <ChatInterface
             activeChatId={currentActiveChatId}
             isStandalone={true}
-            ollamaStatus={ollamaStatus}
-            isLoadingOllamaStatus={isLoadingOllamaStatus}
+            llmStatus={llmStatus}
+            isLoadingLlmStatus={isLoadingLlmStatus}
             onOpenLlmModal={handleOpenConfigureLlmModal}
             // No transcriptTokenCount or activeModelDefaultContextSize for standalone
             // latestPromptTokens and latestCompletionTokens are managed internally by ChatInterface or its children for *its own* header
@@ -147,9 +147,9 @@ export function StandaloneChatView() {
         isOpen={isSelectModelModalOpen}
         onOpenChange={setIsSelectModelModalOpen}
         onModelSuccessfullySet={handleModelSuccessfullySet}
-        currentActiveModelName={ollamaStatus?.activeModel}
-        currentConfiguredContextSize={ollamaStatus?.configuredContextSize}
-        ollamaStatus={ollamaStatus}
+        currentActiveModelName={llmStatus?.activeModel}
+        currentConfiguredContextSize={llmStatus?.configuredContextSize}
+        llmStatus={llmStatus}
       />
     </Flex>
   );

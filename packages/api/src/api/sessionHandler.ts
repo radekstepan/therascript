@@ -10,7 +10,7 @@ import {
   saveUploadedAudio,
 } from '@therascript/services';
 import { getStructuredTranscriptionResult } from '../services/transcriptionService.js';
-import { reloadActiveModelContext } from '../services/ollamaService.js';
+
 import type {
   BackendSession,
   StructuredTranscript,
@@ -423,17 +423,7 @@ export const updateTranscriptParagraph = async ({
     console.log(
       `[API updateTranscriptParagraph] Updated paragraph ${paragraphIndex} for session ${sessionId}. New token count: ${tokenCount ?? 'N/A'}`
     );
-    try {
-      await reloadActiveModelContext();
-      console.log(
-        `[API updateTranscriptParagraph] Ollama model context reload triggered successfully.`
-      );
-    } catch (reloadError) {
-      console.error(
-        `[API updateTranscriptParagraph] WARNING: Failed to trigger Ollama model context reload:`,
-        reloadError
-      );
-    }
+
     set.status = 200;
     return updatedTranscriptFromDb;
   } catch (error) {
@@ -503,14 +493,6 @@ export const deleteTranscriptParagraph = async ({
     console.log(
       `[API] Deleted paragraph ${paragraphIndex} for session ${sessionId}. New token count: ${tokenCount ?? 'N/A'}`
     );
-
-    // Trigger Ollama context reload in the background, don't wait for it
-    reloadActiveModelContext().catch((reloadError) => {
-      console.error(
-        `[API deleteTranscriptParagraph] WARNING: Failed to trigger Ollama model context reload:`,
-        reloadError
-      );
-    });
 
     set.status = 200;
     return updatedTranscript;

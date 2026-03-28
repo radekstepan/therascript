@@ -206,7 +206,7 @@ DEFAULT_MODEL = os.environ.get("WHISPER_MODEL", "tiny")
 MODEL_IDLE_TIMEOUT = int(os.environ.get("WHISPER_MODEL_IDLE_TIMEOUT", "300"))
 TRANSCRIBE_CONCURRENCY = int(os.environ.get("WHISPER_MAX_CONCURRENCY", "1"))
 JOB_RETENTION_SECONDS = int(os.environ.get("WHISPER_JOB_RETENTION", "3600"))
-OLLAMA_API_URL = os.environ.get("OLLAMA_API_URL", "http://ollama:11434")
+LLM_UNLOAD_URL = os.environ.get("LLM_UNLOAD_URL", "http://host.docker.internal:3001/api/llm/unload")
 HF_TOKEN = os.environ.get("HF_TOKEN")
 DEFAULT_NUM_SPEAKERS = int(os.environ.get("WHISPER_NUM_SPEAKERS", "2"))
 
@@ -281,7 +281,7 @@ class WhisperModelManager:
                 await self._unload_unsafe()
 
             if self._asr_model is None:
-                await ensure_ollama_unloaded()
+                await ensure_llm_unloaded()
 
                 print(f"[WhisperManager] Loading model '{model_name}'...")
                 start = datetime.now()
@@ -391,23 +391,17 @@ class WhisperModelManager:
         )
 
 
-async def ensure_ollama_unloaded() -> None:
-    """Unload any Ollama model before loading Whisper to free VRAM."""
+async def ensure_llm_unloaded() -> None:
+    """Unload any LLM model before loading Whisper to free VRAM."""
     try:
-        print("[WhisperManager] Requesting Ollama model unload before Whisper load...")
+        print("[WhisperManager] Requesting LLM model unload before Whisper load...")
         async with httpx.AsyncClient(timeout=10.0) as client:
-            # Setting keep_alive to 0 tells Ollama to unload the model immediately
-            response = await client.post(
-                f"{OLLAMA_API_URL}/api/generate",
-                json={"model": "", "keep_alive": 0}
-            )
-            print(f"[WhisperManager] Ollama unload response: {response.status_code}")
+            response = await client.post(LLM_UNLOAD_URL)
+            print(f"[WhisperManager] LLM unload response: {response.status_code}")
     except httpx.ConnectError:
-        # Ollama not running - that's fine, no model to unload
-        print("[WhisperManager] Ollama not reachable, skipping unload")
+        print("[WhisperManager] LLM API not reachable, skipping unload")
     except Exception as e:
-        # Don't fail transcription if Ollama unload fails
-        print(f"[WhisperManager] Could not unload Ollama model: {e}")
+        print(f"[WhisperManager] Could not unload LLM model: {e}")
 
 
 model_manager = WhisperModelManager()

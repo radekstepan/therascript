@@ -55,7 +55,7 @@ Therascript is a comprehensive application designed to assist therapists by stre
 *   **Search Service:** Elasticsearch
 *   **Database:** SQLite
 *   **Containerization:** Docker, Docker Compose
-*   **Monorepo Management:** Lerna, Yarn Workspaces
+*   **Monorepo Management:** Turborepo, Yarn Workspaces
 
 ## Project Structure
 
@@ -65,6 +65,7 @@ Therascript is a monorepo organized into several packages:
 *   `packages/worker`: A separate Node.js process that consumes jobs from the Redis queue (e.g., transcription, analysis).
 *   `packages/ui`: The React-based frontend application that users interact with.
 *   `packages/ollama`: Contains Docker configuration and management scripts for the Ollama service.
+*   `packages/llama`: High-performance `llama.cpp` server with native build support for Mac and Linux/CUDA.
 *   `packages/whisper`: Contains the Python service for Whisper, its Dockerfile, and management scripts.
 *   `packages/gpu-utils`: A shared utility for querying NVIDIA GPU stats via `nvidia-smi`.
 *   `packages/elasticsearch-client`: A shared client for interacting with Elasticsearch.

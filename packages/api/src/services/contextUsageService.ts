@@ -5,7 +5,7 @@ import {
   getActiveModel,
   getConfiguredContextSize,
 } from './activeModelService.js';
-import { listModels } from './ollamaService.js';
+import { listModels } from './llamaCppService.js';
 import { templateRepository } from '@therascript/data';
 import { SYSTEM_PROMPT_TEMPLATES } from '@therascript/db/dist/sqliteService.js';
 import type { BackendChatMessage, BackendSession } from '@therascript/domain';
