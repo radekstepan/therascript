@@ -7,7 +7,11 @@ import {
 } from '@therascript/data';
 import { SYSTEM_PROMPT_TEMPLATES } from '@therascript/db/dist/sqliteService.js';
 import { processAnalysisJob } from '../services/analysisJobService.js';
-import { listModels, streamChatResponse } from '../services/llamaCppService.js';
+import {
+  listModels,
+  streamChatResponse,
+  ensureModelLoaded,
+} from '../services/llamaCppService.js';
 import { calculateTokenCount } from '@therascript/services';
 import {
   InternalServerError,
@@ -151,10 +155,45 @@ const generateShortPromptInBackground = async (
 const generateStrategyAndUpdateJob = async (
   jobId: number,
   originalPrompt: string,
-  modelName?: string | null
+  modelName?: string | null,
+  contextSize?: number | null
 ) => {
   try {
     console.log(`[Analysis BG ${jobId}] Generating advanced strategy...`);
+
+    // Ensure model is loaded before streaming (LM Studio requires explicit load).
+    // Use ensureModelLoaded (idempotent) instead of loadLlmModel to avoid an
+    // unnecessary unload+reload when the model is already warm, which would
+    // race with the concurrent generateShortPromptInBackground chat request
+    // and cause LM Studio to spin up a second instance.
+    if (modelName && modelName !== 'default') {
+      try {
+        console.log(
+          `[Analysis BG ${jobId}] Ensuring model is loaded: ${modelName}`
+        );
+        await ensureModelLoaded(modelName, contextSize);
+        console.log(`[Analysis BG ${jobId}] Model ready.`);
+      } catch (loadError: any) {
+        console.error(
+          `[Analysis BG ${jobId}] Failed to load model:`,
+          loadError
+        );
+        analysisRepository.updateJobStatus(
+          jobId,
+          'failed',
+          null,
+          `Failed to ensure model '${modelName}' is loaded: ${loadError.message}`
+        );
+        return;
+      }
+    }
+
+    // Generate the short prompt now, while the model is confirmed loaded.
+    // This must run before the strategy stream starts so we don't have two
+    // concurrent requests to the LLM — the second concurrent request would
+    // cause LM Studio to auto-load a second instance.
+    await generateShortPromptInBackground(jobId, originalPrompt, modelName);
+
     const promptTemplate = getSystemPrompt('system_analysis_strategist');
     const strategistSystemPrompt = promptTemplate.replace(
       '{{USER_PROMPT}}',
@@ -300,7 +339,15 @@ export const createAnalysisJobHandler = async ({
         null,
         'generating_strategy'
       );
-      void generateStrategyAndUpdateJob(newJob.id, prompt, modelName);
+      // Short prompt generation is handled inside generateStrategyAndUpdateJob
+      // (after model load, before strategy stream) to avoid a concurrent
+      // LLM request that would cause LM Studio to spin up a second instance.
+      void generateStrategyAndUpdateJob(
+        newJob.id,
+        prompt,
+        modelName,
+        calculatedContextSize
+      );
     } else {
       newJob = analysisRepository.createJob(
         prompt,
@@ -312,9 +359,8 @@ export const createAnalysisJobHandler = async ({
         'pending'
       );
       void processAnalysisJob(newJob.id);
+      void generateShortPromptInBackground(newJob.id, prompt, modelName);
     }
-
-    void generateShortPromptInBackground(newJob.id, prompt, modelName);
 
     set.status = 202;
     return { jobId: newJob.id };

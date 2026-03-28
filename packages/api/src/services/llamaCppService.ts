@@ -627,7 +627,10 @@ export const deleteLlmModel = async (modelPath: string): Promise<string> => {
  * LLM instances, then loads the requested model key with the configured
  * context size and GPU settings.
  */
-export const loadLlmModel = async (modelPath: string): Promise<void> => {
+export const loadLlmModel = async (
+  modelPath: string,
+  contextSizeOverride?: number | null
+): Promise<void> => {
   // Clear any stale VRAM estimate from a previous model
   setActiveModelVramEstimateBytes(null);
   // Reset estimation dedup flag since we're loading a new model
@@ -636,7 +639,7 @@ export const loadLlmModel = async (modelPath: string): Promise<void> => {
   await runtime.restartWithModel(modelPath);
 
   const baseUrl = config.llm.baseURL;
-  const contextSize = getConfiguredContextSize();
+  const contextSize = contextSizeOverride ?? getConfiguredContextSize();
   const numGpuLayers = getConfiguredNumGpuLayers();
 
   // Unload all currently loaded LLM model instances
@@ -711,6 +714,53 @@ export const loadLlmModel = async (modelPath: string): Promise<void> => {
       `Failed to load model '${modelPath}' via LM Studio API: ${detail}`
     );
   }
+};
+
+/**
+ * Ensure a specific model is loaded with sufficient context.
+ * Unlike loadLlmModel, this is idempotent: if the model is already loaded
+ * with a context >= requiredContextSize, it returns immediately without
+ * unloading and reloading. Use this for programmatic/background load checks.
+ */
+export const ensureModelLoaded = async (
+  modelPath: string,
+  requiredContextSize?: number | null
+): Promise<void> => {
+  const baseUrl = config.llm.baseURL;
+  try {
+    const res = await axios.get<{ models: LmsModelRecord[] }>(
+      `${baseUrl}/api/v1/models`,
+      { timeout: 5000 }
+    );
+    const loadedMatch = res.data.models.find(
+      (m) =>
+        m.type === 'llm' &&
+        m.loaded_instances.length > 0 &&
+        (m.key === modelPath || `${m.publisher}/${m.key}` === modelPath)
+    );
+    if (loadedMatch) {
+      const loadedContext =
+        loadedMatch.loaded_instances[0]?.config?.context_length;
+      if (
+        !requiredContextSize ||
+        !loadedContext ||
+        loadedContext >= requiredContextSize
+      ) {
+        console.log(
+          `[LlmService] Model '${modelPath}' already loaded (context: ${loadedContext ?? 'default'}), skipping reload.`
+        );
+        return;
+      }
+      console.log(
+        `[LlmService] Model '${modelPath}' loaded but context ${loadedContext} < required ${requiredContextSize}. Reloading.`
+      );
+    }
+  } catch (err: any) {
+    console.warn(
+      `[LlmService] Could not check loaded model status before load: ${err.message}`
+    );
+  }
+  await loadLlmModel(modelPath, requiredContextSize);
 };
 
 export const unloadActiveModel = async (): Promise<string> => {

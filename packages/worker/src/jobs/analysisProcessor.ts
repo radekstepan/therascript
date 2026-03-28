@@ -22,6 +22,121 @@ import {
 import config from '@therascript/config';
 import { publishStreamEvent } from '../services/streamPublisher.js';
 
+/**
+ * Load a model in LM Studio via its REST API.
+ * This is required because LM Studio doesn't auto-load models on first request like Ollama.
+ */
+async function loadLlmModelForWorker(
+  modelKey: string,
+  contextSize?: number | null
+): Promise<void> {
+  const baseUrl = config.llm.baseURL;
+
+  // Check if the specific model is already loaded with sufficient context.
+  // We compare model keys explicitly to avoid accepting a different model that
+  // happens to be loaded (e.g. from a previous session chat).
+  try {
+    const res = await fetch(`${baseUrl}/api/v1/models`);
+    if (res.ok) {
+      const data = (await res.json()) as {
+        models: Array<{
+          type: string;
+          key: string;
+          publisher?: string;
+          loaded_instances: Array<{
+            id: string;
+            config?: { context_length?: number };
+          }>;
+        }>;
+      };
+      const loadedMatch = data.models.find(
+        (m) =>
+          m.type === 'llm' &&
+          m.loaded_instances.length > 0 &&
+          (m.key === modelKey || `${m.publisher}/${m.key}` === modelKey)
+      );
+      if (loadedMatch) {
+        const loadedContext =
+          loadedMatch.loaded_instances[0]?.config?.context_length;
+        if (!contextSize || !loadedContext || loadedContext >= contextSize) {
+          console.log(
+            `[Analysis Worker] Model '${modelKey}' already loaded (context: ${loadedContext ?? 'default'}), skipping load.`
+          );
+          return;
+        }
+        console.log(
+          `[Analysis Worker] Model '${modelKey}' loaded but context ${loadedContext} < required ${contextSize}. Reloading.`
+        );
+      }
+    }
+  } catch (e) {
+    console.warn(`[Analysis Worker] Could not check loaded models:`, e);
+  }
+
+  // Unload any currently loaded instances first
+  try {
+    const res = await fetch(`${baseUrl}/api/v1/models`);
+    if (res.ok) {
+      const data = (await res.json()) as {
+        models: Array<{
+          type: string;
+          loaded_instances: Array<{ id: string }>;
+        }>;
+      };
+      const loadedInstances = data.models
+        .filter((m) => m.type === 'llm')
+        .flatMap((m) => m.loaded_instances);
+
+      for (const instance of loadedInstances) {
+        try {
+          await fetch(`${baseUrl}/api/v1/models/unload`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ instance_id: instance.id }),
+          });
+          console.log(`[Analysis Worker] Unloaded instance: ${instance.id}`);
+        } catch (e) {
+          console.warn(
+            `[Analysis Worker] Failed to unload instance ${instance.id}:`,
+            e
+          );
+        }
+      }
+    }
+  } catch (e) {
+    console.warn(`[Analysis Worker] Could not enumerate loaded models:`, e);
+  }
+
+  // Load the requested model
+  const loadPayload: Record<string, unknown> = {
+    model: modelKey,
+    echo_load_config: true,
+    flash_attention: true,
+  };
+  if (contextSize && contextSize > 0) {
+    loadPayload.context_length = contextSize;
+  }
+
+  console.log(`[Analysis Worker] Loading model: ${modelKey}`);
+  const loadRes = await fetch(`${baseUrl}/api/v1/models/load`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(loadPayload),
+  });
+
+  if (!loadRes.ok) {
+    const errText = await loadRes.text().catch(() => 'Unknown error');
+    throw new Error(
+      `Failed to load model '${modelKey}': ${loadRes.status} ${loadRes.statusText} - ${errText}`
+    );
+  }
+
+  const loadData = await loadRes.json();
+  console.log(
+    `[Analysis Worker] Model loaded. Instance: ${loadData.instance_id}, load time: ${loadData.load_time_seconds?.toFixed(2)}s`
+  );
+}
+
 export default async function (job: Job<AnalysisJobData, any, string>) {
   const validationResult = safeValidateAnalysisJob(job.data);
   if (!validationResult.success) {
@@ -55,6 +170,37 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
         strategy = JSON.parse(jobRecord.strategy_json);
       } catch (e) {
         console.error(`[Analysis Worker ${jobId}] Invalid strategy JSON.`);
+      }
+    }
+
+    // --- LOAD MODEL ---
+    // LM Studio requires explicit model loading before streaming (unlike Ollama)
+    if (jobRecord.model_name && jobRecord.model_name !== 'default') {
+      try {
+        console.log(`[Analysis Worker ${jobId}] Ensuring model is loaded...`);
+        await loadLlmModelForWorker(
+          jobRecord.model_name,
+          jobRecord.context_size
+        );
+        console.log(`[Analysis Worker ${jobId}] Model ready.`);
+      } catch (loadError: any) {
+        console.error(
+          `[Analysis Worker ${jobId}] Failed to load model:`,
+          loadError
+        );
+        analysisRepository.updateJobStatus(
+          jobId,
+          'failed',
+          null,
+          `Failed to load model: ${loadError.message}`
+        );
+        publishStreamEvent(jobId, {
+          phase: 'status',
+          type: 'error',
+          status: 'failed',
+          message: `Failed to load model: ${loadError.message}`,
+        });
+        throw loadError;
       }
     }
 
@@ -294,12 +440,7 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
 
     const intermediateSummariesText = enrichedSummaries
       .map(({ summary, session }) => {
-        const transcriptText = transcriptRepository.getTranscriptTextForSession(
-          summary.session_id,
-          session.showSpeakers !== 0
-        );
-
-        return `--- Analysis from Session "${session.sessionName || session.fileName}" ---\nSOURCE TRANSCRIPT:\n"""${transcriptText}"""\n\nINTERMEDIATE SUMMARY:\n${summary.summary_text}`;
+        return `--- Analysis from Session "${session.sessionName || session.fileName}" ---\n${summary.summary_text}`;
       })
       .join('\n\n');
 
@@ -350,46 +491,65 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
     let reduceStreamResult: StreamResult = {};
 
     const reduceStartTime = Date.now();
-    const reduceGenerator = streamLlmChat(reduceMessages, {
-      model: jobRecord?.model_name || undefined,
-      contextSize: jobRecord?.context_size || undefined,
-      abortSignal: reduceAbortController.signal,
-      llamaCppBaseUrl: config.llm.baseURL,
-    });
-    let reduceIterResult = await reduceGenerator.next();
-    while (!reduceIterResult.done) {
-      const chunk = reduceIterResult.value;
-      finalResult += chunk;
-      reduceBuffer += chunk;
 
-      if (Date.now() - lastReducePublish > 100) {
-        publishStreamEvent(jobId, {
-          phase: 'reduce',
-          type: 'token',
-          delta: reduceBuffer,
-        });
-        reduceBuffer = '';
-        lastReducePublish = Date.now();
-      }
+    try {
+      const reduceGenerator = streamLlmChat(reduceMessages, {
+        model: jobRecord?.model_name || undefined,
+        contextSize: jobRecord?.context_size || undefined,
+        abortSignal: reduceAbortController.signal,
+        llamaCppBaseUrl: config.llm.baseURL,
+        maxCompletionTokens: 2000,
+      });
 
-      if (Date.now() - lastReduceCancelCheck > 500) {
-        lastReduceCancelCheck = Date.now();
-        const freshJob = analysisRepository.getJobById(jobId);
-        if (freshJob?.status === 'canceling') {
-          reduceAbortController.abort();
-          publishStreamEvent(jobId, {
-            phase: 'status',
-            type: 'status',
-            status: 'canceled',
-          });
-          analysisRepository.updateJobStatus(jobId, 'canceled');
-          return;
+      console.log(`[Analysis Worker ${jobId}] Starting reduce phase stream...`);
+      let reduceIterResult = await reduceGenerator.next();
+
+      while (!reduceIterResult.done) {
+        const chunk = reduceIterResult.value;
+        if (chunk) {
+          finalResult += chunk;
+          reduceBuffer += chunk;
         }
+
+        if (Date.now() - lastReducePublish > 100 && reduceBuffer) {
+          publishStreamEvent(jobId, {
+            phase: 'reduce',
+            type: 'token',
+            delta: reduceBuffer,
+          });
+          reduceBuffer = '';
+          lastReducePublish = Date.now();
+        }
+
+        if (Date.now() - lastReduceCancelCheck > 500) {
+          lastReduceCancelCheck = Date.now();
+          const freshJob = analysisRepository.getJobById(jobId);
+          if (freshJob?.status === 'canceling') {
+            reduceAbortController.abort();
+            publishStreamEvent(jobId, {
+              phase: 'status',
+              type: 'status',
+              status: 'canceled',
+            });
+            analysisRepository.updateJobStatus(jobId, 'canceled');
+            return;
+          }
+        }
+
+        reduceIterResult = await reduceGenerator.next();
       }
 
-      reduceIterResult = await reduceGenerator.next();
+      reduceStreamResult = reduceIterResult.value as StreamResult;
+      console.log(
+        `[Analysis Worker ${jobId}] Reduce stream complete. Result tokens: P=${reduceStreamResult.promptTokens}, C=${reduceStreamResult.completionTokens}`
+      );
+    } catch (streamError: any) {
+      console.error(
+        `[Analysis Worker ${jobId}] Error during reduce stream:`,
+        streamError
+      );
+      throw new Error(`Reduce phase stream failed: ${streamError.message}`);
     }
-    reduceStreamResult = reduceIterResult.value as StreamResult;
     const reduceDuration = Date.now() - reduceStartTime;
 
     if (reduceBuffer) {
