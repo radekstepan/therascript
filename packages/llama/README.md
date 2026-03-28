@@ -1,41 +1,26 @@
 # LM Studio Service (llmster)
 
-This package contains the configuration to run **llmster** — LM Studio's headless inference engine — as the LLM backend for Therascript.  
-llmster replaces the previous llama.cpp build with a zero-build-time, production-ready runtime that supports both CUDA (Linux) and Metal (macOS).
+This package contains configuration and setup notes for **llmster** — LM Studio's headless inference engine — which is the LLM backend for Therascript.
 
-## Quick Start
+**lms (LM Studio CLI) must be installed natively on all platforms** (macOS, Linux, Windows). There is no Docker image for this service.
 
-### 🍎 macOS (Apple Silicon / Metal)
-
-Install llmster natively — Docker cannot access Metal GPU on macOS:
+## Installation
 
 ```bash
 curl -fsSL https://lmstudio.ai/install.sh | bash
 ```
 
+This installs the `lms` CLI to `~/.lmstudio/bin/lms` and the llmster daemon.
+
 > [!IMPORTANT]
 > **Daemon vs. Server:** The `lms` CLI manages two different processes. `lms daemon up` starts the background engine, but **`lms server start`** is required to enable the HTTP API that Therascript uses.
-> 
+>
 > If the API reports a connection error on port 1234 while models appear in `lms ls`, ensure the server is active:
 > ```bash
 > lms server start --port 1234
 > ```
 
 The Therascript API will automatically attempt to start both the daemon and server on port **1234** when it first receives an LLM request.
-
-### 🐧 Linux (NVIDIA GPU / CUDA)
-
-Run llmster inside a Docker container with CUDA pass-through:
-
-```bash
-docker compose -f packages/llama/docker-compose.gpu.yml up -d --build
-```
-
-### 🐧 Linux (CPU only)
-
-```bash
-docker compose -f packages/llama/docker-compose.yml up -d --build
-```
 
 ## Models
 
@@ -45,9 +30,6 @@ LM Studio identifies models by their **model key**, e.g.:
 lmstudio-community/meta-llama-3.1-8b-instruct-gguf
 ```
 
-### Placing models
-
-**Native (macOS/Linux):**  
 Models are managed by LM Studio and stored in `~/.lmstudio/models/`. You can use the Therascript UI (via the "Download Model" button) or the `lms` CLI:
 
 ```bash
@@ -65,9 +47,6 @@ curl -X POST http://localhost:1234/api/v1/models/download \
   -d '{"model": "https://huggingface.co/mlx-community/Llama-3.2-3B-Instruct-4bit"}'
 ```
 
-**Docker (Linux):**  
-Place model files into `packages/llama/models/`. This directory is bind-mounted to `/root/.lmstudio/models/` inside the container.
-
 ### Setting the active model
 
 Set `LLM_MODEL_PATH` to the LM Studio model key in your `.env`:
@@ -84,13 +63,9 @@ Or load a model at runtime via the Therascript API `/api/llm/set-model`.
 |---|---|---|
 | `LLM_BASE_URL` | `http://localhost:1234` | LM Studio server URL |
 | `LLM_MODEL_PATH` | `default` | LM Studio model key or `default` |
-| `LLM_RUNTIME` | `native` (macOS) / `docker` (Linux) | `native` or `docker` |
 | `LMS_BINARY_PATH` | auto-detected | Path to the `lms` binary |
-| `LMS_PORT` | `1234` | Port for the LM Studio server (Docker) |
 
 ## How It Works
-
-### Native runtime (Mac / Linux bare-metal)
 
 The `LmStudioRuntime` in `packages/api/src/services/llamaCppRuntime.ts`:
 1. Locates the `lms` binary (`~/.lmstudio/bin/lms` or `$PATH`)
@@ -108,7 +83,7 @@ All model management goes through the LM Studio REST API:
 
 ### Chat / streaming
 
-Uses the OpenAI-compatible endpoint: `POST /v1/chat/completions` — no changes required to the streaming layer.
+Uses the OpenAI-compatible endpoint: `POST /v1/chat/completions`.
 
 ### GPU acceleration
 
@@ -118,21 +93,9 @@ Uses the OpenAI-compatible endpoint: `POST /v1/chat/completions` — no changes 
 | Linux (NVIDIA) | CUDA (automatic) | LM Studio auto-detects via CUDA runtime |
 | CPU-only | None | Set `numGpuLayers=0` in the UI or API |
 
-Setting `numGpuLayers=0` disables GPU KV-cache offloading (`offload_kv_cache_to_gpu: false`). All other values let LM Studio choose the optimal GPU configuration automatically.
-
-## GPU Monitoring (Linux)
-
-Ensure the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) is installed before using the GPU Docker image.
-
 ## Stopping the Service
 
-**Native:**
 ```bash
 lms server stop        # stop HTTP server only
 lms daemon down        # also stop the background daemon
-```
-
-**Docker:**
-```bash
-docker compose -f packages/llama/docker-compose.gpu.yml stop
 ```

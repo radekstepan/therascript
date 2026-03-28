@@ -11,7 +11,6 @@ const http = require('node:http'); // For the shutdown service
 const execPromise = util.promisify(exec);
 
 // --- Configuration: Docker Container Names ---
-const LLAMA_CONTAINER_NAME = 'therascript_llama_server';
 const WHISPER_CONTAINER_NAME = 'therascript_whisper_service';
 const ELASTICSEARCH_CONTAINER_NAME = 'therascript_elasticsearch_service';
 const REDIS_CONTAINER_NAME = 'therascript_redis_service';
@@ -143,7 +142,6 @@ async function cleanupLmsDaemon() {
 
 async function cleanupDocker() {
   await Promise.allSettled([
-    stopAndRemoveContainer(LLAMA_CONTAINER_NAME),
     stopAndRemoveContainer(WHISPER_CONTAINER_NAME),
     stopAndRemoveContainer(ELASTICSEARCH_CONTAINER_NAME),
     stopAndRemoveContainer(REDIS_CONTAINER_NAME),

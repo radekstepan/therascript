@@ -65,7 +65,7 @@ Therascript is a monorepo organized into several packages:
 *   `packages/worker`: A separate Node.js process that consumes jobs from the Redis queue (e.g., transcription, analysis).
 *   `packages/ui`: The React-based frontend application that users interact with.
 *   `packages/ollama`: Contains Docker configuration and management scripts for the Ollama service.
-*   `packages/llama`: High-performance `llama.cpp` server with native build support for Mac and Linux/CUDA.
+*   `packages/llama`: LM Studio native inference backend setup and configuration (requires `lms` CLI).
 *   `packages/whisper`: Contains the Python service for Whisper, its Dockerfile, and management scripts.
 *   `packages/gpu-utils`: A shared utility for querying NVIDIA GPU stats via `nvidia-smi`.
 *   `packages/elasticsearch-client`: A shared client for interacting with Elasticsearch.
@@ -94,21 +94,23 @@ Before you begin, ensure you have the following installed:
         nvm use
         ```
     *   Yarn (Classic v1.x) is used as the package manager.
-2.  **Docker and Docker Compose:**
+2.  **LM Studio CLI (`lms`) — required on all platforms:**
+    ```bash
+    curl -fsSL https://lmstudio.ai/install.sh | bash
+    ```
+    Installs the `lms` binary to `~/.lmstudio/bin/lms`. The Therascript API will automatically start the daemon and server on first use.
+3.  **Docker and Docker Compose:**
+    *   Required for Whisper, Elasticsearch, Redis, and Ollama services.
     *   Docker Desktop for Windows/macOS or Docker Engine + Docker Compose plugin for Linux.
     *   Ensure the Docker daemon is running.
     *   Make sure current user is in the Docker group:
         ```bash
         sudo usermod -aG docker $USER
         ```
-3.  **Configure Docker to use NVIDIA runtime**
-        ```bash
-        sudo nvidia-ctk runtime configure --runtime=docker
-        sudo systemctl restart docker
-        ```
-4.  **NVIDIA GPU with CUDA (Recommended for AI Services):**
-    *   For optimal performance, an NVIDIA GPU with CUDA drivers and the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) is highly recommended. The GPU monitoring feature specifically requires `nvidia-smi` to be available on the host.
-    *   Ollama and Whisper *can* run on CPU, but performance will be significantly slower.
+4.  **NVIDIA GPU with CUDA (Recommended for Whisper on Linux):**
+    *   For optimal Whisper performance, an NVIDIA GPU with CUDA drivers and the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) is recommended.
+    *   LM Studio auto-detects Metal on macOS and CUDA on Linux natively.
+    *   Whisper *can* run on CPU, but performance will be significantly slower.
 
 ## Setup and Installation
 

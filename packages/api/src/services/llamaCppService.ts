@@ -295,14 +295,7 @@ async function nativeLMStudioEstimate(
         output = `${shellResult.stdout ?? ''}${shellResult.stderr ?? ''}`;
       }
     } else {
-      // Docker runtime: Use 'docker exec' to run lms inside the container
-      const containerName = 'therascript_llama_server';
-      const contextFlag =
-        contextSize !== undefined ? `--context-length ${contextSize}` : '';
-      const gpuFlag = gpu ? `--gpu ${gpu}` : '';
-      const cmd = `docker exec ${containerName} lms load --estimate-only "${modelKey}" ${contextFlag} ${gpuFlag}`;
-      const result = await execAsync(cmd);
-      output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
+      return null;
     }
 
     return parseLMStudioEstimateOutput(output);

@@ -42,4 +42,4 @@ Use this as a fast-loading, minimal context file. It links to deeper docs.
 ## Gotchas
 - Ensure API and Worker point to the same SQLite file in dev
 - Elasticsearch indices initialized by API on startup
-- Whisper and Ollama run in Docker; run `yarn dev` or `docker compose up -d` for services
+- Whisper and Ollama run in Docker; LM Studio (`lms`) runs natively. Run `yarn dev` or `docker compose up -d` for Docker services, ensure `lms` is installed natively.

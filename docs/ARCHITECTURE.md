@@ -76,6 +76,7 @@ packages/
 │   └── gpu-utils/              # NVIDIA GPU monitoring
 │
 └── External Service Wrappers
+     ├── llama/                  # LM Studio native inference backend setup (lms CLI required)
      ├── ollama/                 # Ollama Docker management
      ├── whisper/                # Python FastAPI WhisperX service
      └── elasticsearch-manager/  # ES container management
@@ -102,6 +103,7 @@ packages/
 
 | Package | Technology | Purpose |
 |---------|------------|---------|
+| `packages/llama` | lms CLI (native) | LM Studio headless engine — native on all platforms (macOS/Linux/Windows) |
 | `packages/ollama` | Docker Compose | Ollama container config and lifecycle management |
 | `packages/whisper` | Python/FastAPI | Audio transcription + diarization service (WhisperX + pyannote) |
 | `packages/elasticsearch-manager` | dockerode | ES container health and management |

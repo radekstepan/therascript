@@ -2,7 +2,6 @@
 import os from 'os';
 import { getGpuStats, getSystemMemoryStats } from '@therascript/gpu-utils';
 import type { GpuStats } from '@therascript/gpu-utils';
-import config from '@therascript/config';
 
 type RuntimeAwareGpuStats = GpuStats & {
   executionProvider: 'gpu' | 'cpu' | 'metal';
@@ -68,7 +67,7 @@ function determineExecutionProvider(
     }
     return 'gpu';
   }
-  if (config.llm.runtime === 'native' && process.platform === 'darwin') {
+  if (process.platform === 'darwin') {
     return 'metal';
   }
   return 'cpu';

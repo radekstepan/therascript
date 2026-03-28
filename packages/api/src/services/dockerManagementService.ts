@@ -8,7 +8,6 @@ import type { DockerContainerStatus } from '@therascript/domain'; // Type defini
 // --- Project Specific Containers ---
 // These names MUST match the `container_name` specified in the relevant docker-compose files.
 export const PROJECT_CONTAINER_NAMES = [
-  'therascript_llama_server', // From packages/llama/docker-compose.yml
   'therascript_whisper_service', // From the root docker-compose.yml
   'therascript_elasticsearch_service', // From the root docker-compose.yml
 ];
