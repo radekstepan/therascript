@@ -1,5 +1,12 @@
 import axios from 'axios';
 import crypto from 'node:crypto';
+import * as util from 'node:util';
+import * as path from 'node:path';
+import * as os from 'node:os';
+import {
+  exec as callbackExec,
+  execFile as callbackExecFile,
+} from 'node:child_process';
 
 import config from '@therascript/config';
 import {
@@ -16,7 +23,10 @@ import {
 } from '../errors.js';
 
 import {
+  setActiveModelAndContextAndParams,
   getActiveModel,
+  setActiveModelName,
+  setConfiguredContextSize,
   getConfiguredContextSize,
   getConfiguredTemperature,
   getConfiguredTopP,
@@ -35,6 +45,9 @@ import {
   LlmModelNotFoundError,
   LlmTimeoutError,
 } from '@therascript/services';
+
+const execAsync = util.promisify(callbackExec);
+const execFileAsync = util.promisify(callbackExecFile);
 
 const runtime = getLlmRuntime();
 
@@ -148,6 +161,8 @@ export function estimateVramUsage(
   numGpuLayers?: number | null
 ): VramEstimate | null {
   if (!model.size || !model.architecture || !contextSize) {
+    // Logic replaced by nativeLMStudioEstimate for 'native' runtime.
+    // This manual calculation is kept for 'docker' (linux) fallbacks.
     return null;
   }
 
@@ -210,6 +225,86 @@ export function getVramPerToken(model: LlmModelInfo): number | null {
   const head_dim = explicit_head_dim ?? hidden_size / num_attention_heads;
 
   return 2 * num_layers * kv_heads * head_dim * precision;
+}
+
+async function nativeLMStudioEstimate(
+  modelKey: string,
+  contextSize: number,
+  gpu?: string
+): Promise<VramEstimate | null> {
+  try {
+    let stdout: string;
+
+    if (runtime.type === 'native') {
+      const binary = path.join(os.homedir(), '.lmstudio', 'bin', 'lms');
+      const args = [
+        'load',
+        '--estimate-only',
+        modelKey,
+        '--context-length',
+        String(contextSize),
+      ];
+      if (gpu) args.push('--gpu', gpu);
+
+      const result = await execFileAsync(binary, args);
+      stdout = result.stdout;
+    } else {
+      // Docker runtime: Use 'docker exec' to run lms inside the container
+      const containerName = 'therascript_llama_server';
+      const gpuFlag = gpu ? `--gpu ${gpu}` : '';
+      const cmd = `docker exec ${containerName} lms load --estimate-only "${modelKey}" --context-length ${contextSize} ${gpuFlag}`;
+      const result = await execAsync(cmd);
+      stdout = result.stdout;
+    }
+
+    // Parsing output like:
+    // Estimated GPU Memory:   7.16 GiB
+    // Estimated Total Memory: 7.16 GiB
+    const gpuMatch = stdout.match(/Estimated GPU Memory:\s+([\d.]+)\s+(\w+)/i);
+    const totalMatch = stdout.match(
+      /Estimated Total Memory:\s+([\d.]+)\s+(\w+)/i
+    );
+
+    if (!gpuMatch || !totalMatch) return null;
+
+    const parseBytes = (val: string, unit: string) => {
+      const num = parseFloat(val);
+      const u = unit.toLowerCase();
+      if (u === 'gib' || u === 'gb')
+        return Math.round(num * 1024 * 1024 * 1024);
+      if (u === 'mib' || u === 'mb') return Math.round(num * 1024 * 1024);
+      return Math.round(num);
+    };
+
+    const vram_bytes = parseBytes(gpuMatch[1], gpuMatch[2]);
+    const total_bytes = parseBytes(totalMatch[1], totalMatch[2]);
+
+    return {
+      vram_bytes,
+      ram_bytes: Math.max(0, total_bytes - vram_bytes),
+      weights_bytes: 0, // Not explicitly provided separately
+      kv_cache_bytes: 0,
+      overhead_bytes: 0,
+    };
+  } catch (err) {
+    console.warn(`[LlmService] Failed to get native memory estimate:`, err);
+    return null;
+  }
+}
+
+export async function fetchVramUsage(
+  model: LlmModelInfo,
+  contextSize: number,
+  numGpuLayers?: number | null
+): Promise<VramEstimate | null> {
+  const gpuFlag =
+    numGpuLayers === 0 ? 'off' : numGpuLayers === 99 ? 'max' : undefined;
+
+  const est = await nativeLMStudioEstimate(model.name, contextSize, gpuFlag);
+  if (est) return est;
+
+  // Fallback to manual calculation if lms estimation fails or is not available
+  return estimateVramUsage(model, contextSize, numGpuLayers);
 }
 
 async function isLlmApiResponsive(): Promise<boolean> {
@@ -598,20 +693,25 @@ export const unloadActiveModel = async (): Promise<string> => {
       .filter((m) => m.type === 'llm')
       .flatMap((m) => m.loaded_instances);
 
-    for (const instance of loadedInstances) {
-      try {
-        await axios.post(
-          `${baseUrl}/api/v1/models/unload`,
-          { instance_id: instance.id },
-          { timeout: 30000 }
-        );
-        console.log(`[LlmService] Unloaded instance: ${instance.id}`);
-        unloadedCount++;
-      } catch (err: any) {
-        console.warn(
-          `[LlmService] Failed to unload ${instance.id}: ${err.message}`
-        );
-      }
+    if (loadedInstances.length > 0) {
+      // Unload all model instances in parallel for faster turnaround
+      await Promise.all(
+        loadedInstances.map(async (instance) => {
+          try {
+            await axios.post(
+              `${baseUrl}/api/v1/models/unload`,
+              { instance_id: instance.id },
+              { timeout: 15000 }
+            );
+            console.log(`[LlmService] Unloaded instance: ${instance.id}`);
+            unloadedCount++;
+          } catch (err: any) {
+            console.warn(
+              `[LlmService] Failed to unload ${instance.id}: ${err.message}`
+            );
+          }
+        })
+      );
     }
   } catch (err: any) {
     console.warn(
@@ -637,10 +737,69 @@ export const checkModelStatus = async (
 ): Promise<LlmModelInfo | null> => {
   const isUp = await checkLlmApiHealth();
   if (!isUp) return null;
-  const models = await listModels();
-  return (
-    models.find((m) => m.name === modelPath || m.digest === modelPath) ?? null
-  );
+
+  try {
+    const res = await axios.get<{ models: LmsModelRecord[] }>(
+      `${config.llm.baseURL}/api/v1/models`,
+      { timeout: 5000 }
+    );
+
+    // Find the currently LOADED model instance
+    const loadedModel = res.data.models.find(
+      (m) => m.type === 'llm' && m.loaded_instances.length > 0
+    );
+
+    // SYNC: Update the active model name to match reality if the server
+    // thinks something else is loaded. This fix ensures the UI shows
+    // the correct model state.
+    if (loadedModel) {
+      if (getActiveModel() !== loadedModel.key) {
+        console.log(
+          `[LlmService] Syncing active model: ${getActiveModel()} -> ${loadedModel.key}`
+        );
+        setActiveModelName(loadedModel.key);
+      }
+
+      // Sync Context Size: LM Studio instance config shows actual context length
+      const firstInstance = loadedModel.loaded_instances[0];
+      const actualContext = firstInstance?.config?.context_length;
+      if (actualContext && getConfiguredContextSize() !== actualContext) {
+        console.log(
+          `[LlmService] Syncing context size: ${getConfiguredContextSize() ?? 'default'} -> ${actualContext}`
+        );
+        setConfiguredContextSize(actualContext);
+      }
+    } else if (getActiveModel() !== 'default') {
+      // If nothing is loaded but we thought there was a model, reset to 'default'
+      console.log(`[LlmService] Clear active model (no instances found)`);
+      setActiveModelName('default');
+    }
+
+    // Now check if OUR requested model is the one loaded
+    const target = res.data.models.find(
+      (m) => m.key === modelPath || m.publisher + '/' + m.key === modelPath
+    );
+
+    if (!target) return null;
+
+    return {
+      name: target.key,
+      modified_at: new Date(),
+      size: target.size_bytes,
+      digest: target.key,
+      details: {
+        format: target.format || 'gguf',
+        family: target.architecture || 'unknown',
+        families: null,
+        parameter_size: target.params_string || 'unknown',
+        quantization_level: target.quantization?.name || 'unknown',
+      },
+      defaultContextSize: target.max_context_length || null,
+      architecture: null,
+    };
+  } catch (err) {
+    return null;
+  }
 };
 
 export const streamChatResponse = async function* (

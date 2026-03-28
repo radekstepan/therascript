@@ -19,7 +19,7 @@ import {
   cancelDownloadModelJob,
   deleteLlmModel as deleteLlmModelService,
   unloadActiveModel,
-  estimateVramUsage,
+  fetchVramUsage,
   getVramPerToken,
 } from '../services/llamaCppService.js';
 import {
@@ -468,6 +468,10 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
           );
           try {
             const loadedModelResult = await checkModelStatus(modelNameToCheck);
+            // Re-fetch since sync might have happened inside checkModelStatus
+            const latestActiveModel = getActiveModel();
+            const latestContextSize = getConfiguredContextSize();
+
             set.status = 200;
             if (
               loadedModelResult &&
@@ -476,11 +480,11 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
             ) {
               return {
                 status: 'unavailable',
-                activeModel: currentActiveModel,
+                activeModel: latestActiveModel,
                 modelChecked: modelNameToCheck,
                 loaded: false,
                 details: undefined,
-                configuredContextSize: currentConfiguredContext,
+                configuredContextSize: latestContextSize,
                 configuredTemperature: currentConfiguredTemperature,
                 configuredTopP: currentConfiguredTopP,
                 configuredRepeatPenalty: currentConfiguredRepeatPenalty,
@@ -500,11 +504,11 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
                 : undefined;
               return {
                 status: 'available',
-                activeModel: currentActiveModel,
+                activeModel: latestActiveModel,
                 modelChecked: modelNameToCheck,
                 loaded: !!loadedModelInfo,
                 details: detailsResponse,
-                configuredContextSize: currentConfiguredContext,
+                configuredContextSize: latestContextSize,
                 configuredTemperature: currentConfiguredTemperature,
                 configuredTopP: currentConfiguredTopP,
                 configuredRepeatPenalty: currentConfiguredRepeatPenalty,
@@ -551,7 +555,11 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
             throw new NotFoundError(`Model '${modelName}' not found`);
           }
 
-          const estimate = estimateVramUsage(model, contextSize, numGpuLayers);
+          const estimate = await fetchVramUsage(
+            model,
+            contextSize,
+            numGpuLayers
+          );
 
           if (estimate === null) {
             return {

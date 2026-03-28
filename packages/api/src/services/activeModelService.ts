@@ -3,8 +3,16 @@ import config from '@therascript/config';
 
 // Initialize with the value from the config file (.env)
 let activeModelName: string = config.llm.modelPath;
+
+export const setActiveModelName = (name: string): void => {
+  activeModelName = name;
+};
+
 // Store the configured context size (null means use LLM default)
 let configuredContextSize: number | null = null;
+export const setConfiguredContextSize = (size: number | null): void => {
+  configuredContextSize = size;
+};
 let configuredTemperature: number = 0.7;
 let configuredTopP: number = 0.9;
 let configuredRepeatPenalty: number = 1.1;
