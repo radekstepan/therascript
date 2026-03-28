@@ -358,24 +358,41 @@ class NativeLlmRuntime implements LlmRuntime {
       path.basename(modelPath)
     );
 
+    const {
+      getConfiguredThinkingBudget,
+      getConfiguredNumGpuLayers,
+      getConfiguredContextSize,
+    } = await import('./activeModelService.js');
+    const thinkingBudget = getConfiguredThinkingBudget();
+    const numGpuLayers = getConfiguredNumGpuLayers();
+    const contextSize = getConfiguredContextSize();
+
+    const spawnArgs = [
+      '--host',
+      '0.0.0.0',
+      '--port',
+      port,
+      '--model',
+      resolvedModelPath,
+      '--ctx-size',
+      (contextSize ?? config.llm.contextSize).toString(),
+    ];
+
+    if (thinkingBudget !== null && thinkingBudget !== undefined) {
+      spawnArgs.push('--reasoning-budget', thinkingBudget.toString());
+    }
+
+    if (numGpuLayers !== null && numGpuLayers !== undefined) {
+      // Typically macOS users use binary which is either cpu only or metal;
+      // but let's pass it anyway if explicitly set (metal will use offloading)
+      spawnArgs.push('--n-gpu-layers', numGpuLayers.toString());
+    }
+
     try {
-      const child = spawn(
-        binary,
-        [
-          '--host',
-          '0.0.0.0',
-          '--port',
-          port,
-          '--model',
-          resolvedModelPath,
-          '--ctx-size',
-          config.llm.contextSize.toString(),
-        ],
-        {
-          detached: true,
-          stdio: 'ignore',
-        }
-      );
+      const child = spawn(binary, spawnArgs, {
+        detached: true,
+        stdio: 'ignore',
+      });
       child.unref();
       this.serveProcess = child;
       child.on('exit', () => {

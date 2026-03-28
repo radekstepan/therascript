@@ -33,6 +33,7 @@ export interface StreamLlmChatOptions {
   /** Number of model layers to offload to GPU. not used directly per-request in llama.cpp */
   numGpuLayers?: number | null;
   think?: boolean | 'high' | 'medium' | 'low';
+  thinkingBudget?: number | null;
 }
 
 export interface StreamResult {
@@ -146,6 +147,11 @@ export async function* streamLlmChatDetailed(
       bodyPayload.max_tokens = options.maxCompletionTokens;
     if (options?.repeatPenalty !== undefined)
       bodyPayload.presence_penalty = options.repeatPenalty;
+    if (
+      options?.thinkingBudget !== undefined &&
+      options?.thinkingBudget !== null
+    )
+      bodyPayload.reasoning_budget = options.thinkingBudget;
 
     const response = await fetch(`${baseUrl}/v1/chat/completions`, {
       method: 'POST',

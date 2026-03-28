@@ -29,6 +29,7 @@ import {
   getConfiguredTopP,
   getConfiguredRepeatPenalty,
   getConfiguredNumGpuLayers,
+  getConfiguredThinkingBudget,
 } from './activeModelService.js';
 
 import { templateRepository } from '@therascript/data';
@@ -434,8 +435,14 @@ export const streamChatResponse = async function* (
   LlmChatChunk,
   { promptTokens: number; completionTokens: number }
 > {
-  return yield* streamLlmChatDetailed(messages, {
-    ...options,
+  const finalOptions = {
+    temperature: getConfiguredTemperature(),
+    topP: getConfiguredTopP(),
+    repeatPenalty: getConfiguredRepeatPenalty(),
+    numGpuLayers: getConfiguredNumGpuLayers(),
+    thinkingBudget: getConfiguredThinkingBudget(),
+    ...options, // allow overriding defaults
     llamaCppBaseUrl: config.llm.baseURL,
-  }) as any;
+  };
+  return yield* streamLlmChatDetailed(messages, finalOptions) as any;
 };

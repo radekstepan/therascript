@@ -72,6 +72,8 @@ export function SelectActiveModelModal({
   const [numGpuLayers, setNumGpuLayers] = useState<number | undefined>(
     undefined
   );
+  // -1 = Unrestricted (default), 0 = Disabled, >0 = Token budget
+  const [thinkingBudget, setThinkingBudget] = useState<number>(-1);
   const [vramEstimate, setVramEstimate] = useState<{
     estimated_vram_bytes: number | null;
     estimated_ram_bytes: number | null;
@@ -108,6 +110,7 @@ export function SelectActiveModelModal({
       topP?: number;
       repeatPenalty?: number;
       numGpuLayers?: number | null;
+      thinkingBudget?: number | null;
     }) =>
       setLlmModel(
         variables.modelName,
@@ -115,7 +118,8 @@ export function SelectActiveModelModal({
         variables.temperature,
         variables.topP,
         variables.repeatPenalty,
-        variables.numGpuLayers
+        variables.numGpuLayers,
+        variables.thinkingBudget
       ),
     onSuccess: () => {
       onModelSuccessfullySet();
@@ -158,6 +162,7 @@ export function SelectActiveModelModal({
           ? llmStatus.configuredNumGpuLayers
           : undefined
       );
+      setThinkingBudget(llmStatus?.configuredThinkingBudget ?? -1);
       setError(null);
     }
     prevIsOpenRef.current = isOpen;
@@ -183,6 +188,7 @@ export function SelectActiveModelModal({
       topP,
       repeatPenalty,
       numGpuLayers: numGpuLayers ?? null,
+      thinkingBudget: thinkingBudget,
     });
   };
 
@@ -208,6 +214,7 @@ export function SelectActiveModelModal({
       setTemperature(0.7);
       setTopP(0.9);
       setRepeatPenalty(1.1);
+      setThinkingBudget(-1);
     }
   }, [selectedModel]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -478,6 +485,33 @@ export function SelectActiveModelModal({
                   step={0.1}
                   disabled={isModelLoaded}
                 />
+              </Box>
+
+              <Box>
+                <Flex align="center" justify="between" mb="2">
+                  <Text size="1">Thinking Budget</Text>
+                  <Badge variant="outline" size="1">
+                    {thinkingBudget === -1
+                      ? 'Unrestricted (-1)'
+                      : thinkingBudget === 0
+                        ? 'Disabled (0)'
+                        : thinkingBudget}
+                  </Badge>
+                </Flex>
+                <Slider
+                  value={[thinkingBudget === -1 ? 8192 : thinkingBudget]} // Max slider value visually if unrestricted
+                  onValueChange={([value]) =>
+                    setThinkingBudget(value >= 8192 ? -1 : value)
+                  }
+                  min={0}
+                  max={8192}
+                  step={128}
+                  disabled={isModelLoaded}
+                />
+                <Text size="1" color="gray" mt="1">
+                  Control reasoning tokens. Drag fully right for -1
+                  (unrestricted). Only has an effect if the model supports it.
+                </Text>
               </Box>
             </Box>
           </Box>

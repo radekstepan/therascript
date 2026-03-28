@@ -183,6 +183,8 @@ export interface LlmStatus {
   configuredRepeatPenalty?: number;
   /** Number of GPU layers configured; null = auto (Llm decides) */
   configuredNumGpuLayers?: number | null;
+  /** Budget for reasoning tokens (-1 = unrestricted, 0 = disabled, >0 = limit) */
+  configuredThinkingBudget?: number | null;
 }
 export interface AvailableModelsResponse {
   models: LlmModelInfo[];

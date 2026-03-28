@@ -67,7 +67,8 @@ export const setLlmModel = async (
   temperature?: number,
   topP?: number,
   repeatPenalty?: number,
-  numGpuLayers?: number | null
+  numGpuLayers?: number | null,
+  thinkingBudget?: number | null
 ): Promise<{ message: string }> => {
   // Prepare payload, ensuring contextSize is null if invalid or not provided
   const payload = {
@@ -78,6 +79,7 @@ export const setLlmModel = async (
     topP,
     repeatPenalty,
     numGpuLayers: numGpuLayers ?? null,
+    thinkingBudget: thinkingBudget ?? null,
   };
   const response = await axios.post('/api/llm/set-model', payload);
   return response.data;

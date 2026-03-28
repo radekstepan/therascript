@@ -10,6 +10,7 @@ let configuredTopP: number = 0.9;
 let configuredRepeatPenalty: number = 1.1;
 // null = let llama.cpp decide automatically; >= 0 = explicit layer count
 let configuredNumGpuLayers: number | null = null;
+let configuredThinkingBudget: number | null = null; // null/-1 = unrestricted
 
 export const getActiveModel = (): string => {
   return activeModelName;
@@ -27,6 +28,8 @@ export const getConfiguredTopP = (): number => configuredTopP;
 export const getConfiguredRepeatPenalty = (): number => configuredRepeatPenalty;
 export const getConfiguredNumGpuLayers = (): number | null =>
   configuredNumGpuLayers;
+export const getConfiguredThinkingBudget = (): number | null =>
+  configuredThinkingBudget;
 // --- End New Getters ---
 
 // --- Modified Setter to include context size ---
@@ -85,7 +88,8 @@ export const setActiveModelAndContextAndParams = (
   newTemperature?: number,
   newTopP?: number,
   newRepeatPenalty?: number,
-  newNumGpuLayers?: number | null
+  newNumGpuLayers?: number | null,
+  newThinkingBudget?: number | null
 ): void => {
   if (!newModelName || typeof newModelName !== 'string') {
     console.error(
@@ -101,6 +105,7 @@ export const setActiveModelAndContextAndParams = (
   let topPChanged = false;
   let repeatPenaltyChanged = false;
   let numGpuLayersChanged = false;
+  let thinkingBudgetChanged = false;
 
   if (newModelName !== activeModelName) {
     console.log(
@@ -192,13 +197,30 @@ export const setActiveModelAndContextAndParams = (
     numGpuLayersChanged = true;
   }
 
+  // Validate and update thinking budget
+  const validThinkingBudget =
+    newThinkingBudget !== undefined &&
+    newThinkingBudget !== null &&
+    Number.isInteger(newThinkingBudget)
+      ? newThinkingBudget
+      : null; // null/-1 = unrestricted
+
+  if (validThinkingBudget !== configuredThinkingBudget) {
+    console.log(
+      `[ActiveModelService] Changing thinking budget from '${configuredThinkingBudget ?? 'unrestricted'}' to '${validThinkingBudget ?? 'unrestricted'}'`
+    );
+    configuredThinkingBudget = validThinkingBudget;
+    thinkingBudgetChanged = true;
+  }
+
   if (
     !modelChanged &&
     !contextChanged &&
     !temperatureChanged &&
     !topPChanged &&
     !repeatPenaltyChanged &&
-    !numGpuLayersChanged
+    !numGpuLayersChanged &&
+    !thinkingBudgetChanged
   ) {
     console.log(
       `[ActiveModelService] Model and all parameters are already active.`

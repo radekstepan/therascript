@@ -30,6 +30,7 @@ import {
   getConfiguredTopP,
   getConfiguredRepeatPenalty,
   getConfiguredNumGpuLayers,
+  getConfiguredThinkingBudget,
 } from '../services/activeModelService.js';
 import type {
   LlmModelInfo,
@@ -69,6 +70,7 @@ const LlmStatusResponseSchema = t.Object({
   configuredTopP: t.Optional(t.Number()),
   configuredRepeatPenalty: t.Optional(t.Number()),
   configuredNumGpuLayers: t.Optional(t.Union([t.Number(), t.Null()])),
+  configuredThinkingBudget: t.Optional(t.Union([t.Number(), t.Null()])),
 });
 const SetModelBodySchema = t.Object({
   modelName: t.String({ minLength: 1, error: 'Model name is required.' }),
@@ -85,6 +87,7 @@ const SetModelBodySchema = t.Object({
   topP: t.Optional(t.Number({ minimum: 0, maximum: 1 })),
   repeatPenalty: t.Optional(t.Number({ minimum: 0.5, maximum: 2 })),
   numGpuLayers: t.Optional(t.Union([t.Number({ minimum: 0 }), t.Null()])),
+  thinkingBudget: t.Optional(t.Union([t.Number(), t.Null()])),
 });
 const PullModelBodySchema = t.Object({
   modelUrl: t.String({ minLength: 1, error: 'Model URL is required.' }),
@@ -199,6 +202,7 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
             topP,
             repeatPenalty,
             numGpuLayers,
+            thinkingBudget,
           } = body;
           const sizeLog =
             contextSize === undefined
@@ -207,7 +211,7 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
                 ? 'explicit default'
                 : contextSize;
           console.log(
-            `[API SetModel] Request: Set active model=${modelName}, contextSize=${sizeLog}, temperature=${temperature}, topP=${topP}, repeatPenalty=${repeatPenalty}, numGpuLayers=${numGpuLayers ?? 'auto'}`
+            `[API SetModel] Request: Set active model=${modelName}, contextSize=${sizeLog}, temperature=${temperature}, topP=${topP}, repeatPenalty=${repeatPenalty}, numGpuLayers=${numGpuLayers ?? 'auto'}, thinkingBudget=${thinkingBudget ?? 'unrestricted'}`
           );
           try {
             setActiveModelAndContextAndParams(
@@ -216,7 +220,8 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
               temperature,
               topP,
               repeatPenalty,
-              numGpuLayers
+              numGpuLayers,
+              thinkingBudget
             );
             await loadLlmModel(modelName);
             set.status = 200;
@@ -456,9 +461,10 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
           const currentConfiguredTopP = getConfiguredTopP();
           const currentConfiguredRepeatPenalty = getConfiguredRepeatPenalty();
           const currentConfiguredNumGpuLayers = getConfiguredNumGpuLayers();
+          const currentConfiguredThinkingBudget = getConfiguredThinkingBudget();
           const modelNameToCheck = query.modelName ?? currentActiveModel;
           console.log(
-            `[API Status] Checking status for model: ${modelNameToCheck} (Current Active: ${currentActiveModel}, Configured Context: ${currentConfiguredContext ?? 'default'}, Temperature: ${currentConfiguredTemperature}, TopP: ${currentConfiguredTopP}, RepeatPenalty: ${currentConfiguredRepeatPenalty}, NumGpuLayers: ${currentConfiguredNumGpuLayers ?? 'auto'})`
+            `[API Status] Checking status for model: ${modelNameToCheck} (Current Active: ${currentActiveModel}, Configured Context: ${currentConfiguredContext ?? 'default'}, Temperature: ${currentConfiguredTemperature}, TopP: ${currentConfiguredTopP}, RepeatPenalty: ${currentConfiguredRepeatPenalty}, NumGpuLayers: ${currentConfiguredNumGpuLayers ?? 'auto'}, ThinkingBudget: ${currentConfiguredThinkingBudget ?? 'unrestricted'})`
           );
           try {
             const loadedModelResult = await checkModelStatus(modelNameToCheck);
@@ -479,6 +485,7 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
                 configuredTopP: currentConfiguredTopP,
                 configuredRepeatPenalty: currentConfiguredRepeatPenalty,
                 configuredNumGpuLayers: currentConfiguredNumGpuLayers,
+                configuredThinkingBudget: currentConfiguredThinkingBudget,
               };
             } else {
               const loadedModelInfo = loadedModelResult as LlmModelInfo | null;
@@ -502,6 +509,7 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
                 configuredTopP: currentConfiguredTopP,
                 configuredRepeatPenalty: currentConfiguredRepeatPenalty,
                 configuredNumGpuLayers: currentConfiguredNumGpuLayers,
+                configuredThinkingBudget: currentConfiguredThinkingBudget,
               };
             }
           } catch (error: any) {
