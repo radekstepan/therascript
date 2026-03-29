@@ -372,6 +372,7 @@ const getSystemPrompt = (
 // For now, we return basic mock architecture if it's not possible to parse easily.
 export const listModels = async (): Promise<LlmModelInfo[]> => {
   try {
+    await ensureLlmReady();
     const res = await axios.get<{ models: LmsModelRecord[] }>(
       `${config.llm.baseURL}/api/v1/models`,
       { timeout: 5000 }
