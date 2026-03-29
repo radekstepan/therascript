@@ -234,6 +234,29 @@ export function ChatMessageBubble({
         </Box>
       )}
 
+      {/* Warning for thinking-only response: model thought but produced no actual reply */}
+      {!isUser &&
+        !isCurrentlyStreaming &&
+        thinkingText !== null &&
+        visibleText.trim() === '' && (
+          <Box
+            mt="2"
+            width="100%"
+            className="max-w-[90%] md:max-w-[85%] lg:max-w-[75%]"
+          >
+            <Callout.Root color="orange" size="1">
+              <Callout.Icon>
+                <ExclamationTriangleIcon />
+              </Callout.Icon>
+              <Callout.Text>
+                The model finished thinking but produced no response. It may
+                have exhausted its output budget during reasoning. Try a shorter
+                prompt, reduce the thinking budget, or use a different model.
+              </Callout.Text>
+            </Callout.Root>
+          </Box>
+        )}
+
       {/* Warning for 0 completion tokens when model exhausts context on thinking */}
       {!isUser && !isCurrentlyStreaming && message.completionTokens === 0 && (
         <Box
