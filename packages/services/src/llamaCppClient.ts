@@ -283,7 +283,14 @@ export async function* streamLlmChatDetailed(
             completionTokens = chunk.usage.completion_tokens;
           }
         } catch (e) {
-          // ignore invalid json from incomplete chunks
+          // Re-throw application errors — only swallow JSON parse failures
+          // from incomplete/partial SSE chunks
+          if (
+            e instanceof LlmConnectionError ||
+            e instanceof LlmModelNotFoundError
+          ) {
+            throw e;
+          }
         }
       }
       if (isDone) break;

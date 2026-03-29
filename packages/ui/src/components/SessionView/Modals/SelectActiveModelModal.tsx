@@ -302,7 +302,7 @@ export function SelectActiveModelModal({
           Select the active model and optionally override its context size.
         </Dialog.Description>
         <Flex direction="column" gap="4">
-          {isModelLoaded && (
+          {isModelLoaded && llmStatus?.activeModel !== 'default' && (
             <Callout.Root color="blue" size="1">
               <Callout.Icon>
                 <InfoCircledIcon />

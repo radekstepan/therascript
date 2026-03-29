@@ -169,7 +169,18 @@ export const addSessionChatMessage = async ({
       timestamp: Date.now(),
     };
 
-    const previousHistory = currentMessages.slice(0, -1).map((msg) => {
+    // Drop any leading AI messages — strict-template models (e.g. Gemma) require
+    // the conversation to start with a user turn after the system message.
+    // The initial AI welcome message created at transcription time causes
+    // [system, ai, user] which breaks those templates.
+    const historyBeforeLatest = currentMessages.slice(0, -1);
+    const firstUserIdx = historyBeforeLatest.findIndex(
+      (m) => m.sender === 'user'
+    );
+    const trimmedHistory =
+      firstUserIdx >= 0 ? historyBeforeLatest.slice(firstUserIdx) : [];
+
+    const previousHistory = trimmedHistory.map((msg) => {
       if (!showSpeakers && msg.sender === 'ai') {
         const cleanedText = msg.text.replace(
           /((?:SPEAKER_\d+)|(?:[A-Z][A-Za-z]+)):\s/g,
