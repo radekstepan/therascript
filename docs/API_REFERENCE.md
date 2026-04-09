@@ -92,20 +92,20 @@ Full-text search across transcripts and chat messages via Elasticsearch.
 
 ---
 
-## Ollama (`ollamaRoutes.ts`)
+## LLM (`llmRoutes.ts`)
 
 Model listing, pulling, loading, and unloading.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `GET` | `/api/ollama/available-models` | List locally available Ollama models |
-| `POST` | `/api/ollama/set-model` | Set active model and context size, trigger load |
-| `POST` | `/api/ollama/unload` | Unload the currently active model from memory |
-| `POST` | `/api/ollama/pull-model` | Initiate downloading a new Ollama model |
-| `GET` | `/api/ollama/pull-status/:jobId` | Get status/progress of an ongoing model pull job |
-| `POST` | `/api/ollama/cancel-pull/:jobId` | Attempt to cancel an ongoing model pull job |
-| `POST` | `/api/ollama/delete-model` | Delete a locally downloaded Ollama model |
-| `GET` | `/api/ollama/status` | Check loaded status and context sizes for active/specific model |
+| `GET` | `/api/llm/available-models` | List locally available LLM models |
+| `POST` | `/api/llm/set-model` | Set active model and context size, trigger load |
+| `POST` | `/api/llm/unload` | Unload the currently active model from memory |
+| `POST` | `/api/llm/pull-model` | Initiate downloading a new LLM model |
+| `GET` | `/api/llm/pull-status/:jobId` | Get status/progress of an ongoing model pull job |
+| `POST` | `/api/llm/cancel-pull/:jobId` | Attempt to cancel an ongoing model pull job |
+| `POST` | `/api/llm/delete-model` | Delete a locally downloaded LLM model |
+| `GET` | `/api/llm/status` | Check loaded status and context sizes for active/specific model |
 
 ---
 

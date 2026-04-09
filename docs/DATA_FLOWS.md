@@ -59,12 +59,12 @@ This document details the step-by-step data flows for the core operations of the
     *   Chat history fetched from SQLite.
     *   **Context Calculation:** `contextUsageService.ts` checks if content fits the model's window.
 
-3.  **LLM Inference (API -> Ollama)**
-    *   API streams the assembled context (System Prompt + Transcript + History + User Msg) to Ollama.
-    *   **File:** `packages/api/src/services/ollamaService.ts` -> `streamChatResponse`.
+3.  **LLM Inference (API -> LM Studio)**
+    *   API streams the assembled context (System Prompt + Transcript + History + User Msg) to LM Studio.
+    *   **File:** `packages/api/src/services/llamaCppService.ts` -> `streamChatResponse`.
 
 4.  **Response Streaming (API -> UI)**
-    *   API pipes Ollama's SSE stream back to the UI.
+    *   API pipes LM Studio's SSE stream back to the UI.
     *   UI updates the message bubble in real-time (`useMessageStream.ts`).
 
 5.  **Finalization**

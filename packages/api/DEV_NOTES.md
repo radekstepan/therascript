@@ -20,8 +20,6 @@ Purpose: ElysiaJS HTTP API server for sessions, chat, search, jobs, and service 
 - `DB_PATH`, `DB_UPLOADS_DIR`
 - `ELASTICSEARCH_URL` (default http://localhost:9200)
 - `REDIS_HOST`, `REDIS_PORT`
-- `OLLAMA_BASE_URL` (default http://localhost:11434)
-- `OLLAMA_MODEL`, `OLLAMA_CHAT_KEEP_ALIVE`
 - `WHISPER_API_URL` (default http://localhost:8000)
 - `WHISPER_MODEL`
 

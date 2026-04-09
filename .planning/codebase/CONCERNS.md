@@ -2,53 +2,6 @@
 
 ## Technical Debt
 
-### 1. Mixed LLM Runtime (Ollama → LM Studio Migration)
-
-**Severity:** Medium  
-**Location:** `packages/api/src/services/llamaCppRuntime.ts`, `packages/llama/`
-
-**Issue:**
-
-- Codebase appears to be migrating from Ollama to LM Studio
-- References to Ollama still exist in documentation and some code
-- `packages/ollama/` directory still present
-- Docker compose still mentions Ollama management
-
-**Impact:**
-
-- Confusion about which LLM provider is active
-- Potential dead code paths
-- Documentation inconsistency
-
-**Recommendation:**
-
-- Complete migration by removing Ollama references
-- Update all documentation to reflect LM Studio
-- Remove `packages/ollama/` if no longer needed
-
-### 2. Synchronous SQLite in Async Context
-
-**Severity:** Low-Medium  
-**Location:** `packages/db/src/sqliteService.ts`
-
-**Issue:**
-
-- Using `better-sqlite3` (synchronous) in Node.js async environment
-- Long-running queries will block the event loop
-- Not suitable for high-concurrency scenarios
-
-**Impact:**
-
-- Acceptable for single-user therapy app
-- Would become bottleneck with multiple concurrent users
-- Transcription indexing could block other requests
-
-**Recommendation:**
-
-- Monitor performance as usage grows
-- Consider migrating to `sqlite3` (async) if concurrency increases
-- Add query timeout protection
-
 ### 3. No Database Migration System
 
 **Severity:** Medium  

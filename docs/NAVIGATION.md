@@ -18,7 +18,7 @@
 | `analysisRoutes.ts` | Multi-session analysis jobs |
 | `transcriptionRoutes.ts` | Transcription status, polling |
 | `searchRoutes.ts` | Elasticsearch search endpoints |
-| `ollamaRoutes.ts` | Model management (list, load, unload) |
+| `llmRoutes.ts` | Model management (list, load, unload) |
 | `templateRoutes.ts` | Prompt template CRUD |
 | `systemRoutes.ts` | System prompts management |
 | `jobsRoutes.ts` | Background job status + transcription queue reset |
@@ -42,10 +42,9 @@
 ### Services (`/services/*.ts`) — External integrations & utilities
 | File | Purpose |
 |------|---------|
-| `ollamaService.ts` | LLM inference (facade for mock/real) |
-| `ollamaService.real.ts` | Actual Ollama API client |
-| `ollamaService.mock.ts` | Mock for testing |
-| `ollamaRuntime.ts` | Model lifecycle management |
+| `llamaCppService.test.ts` | Tests for inference service |
+| `llamaCppService.ts` | Actual LM Studio API client |
+| `llamaCppRuntime.ts` | Model lifecycle management |
 | `activeModelService.ts` | Track currently loaded model |
 | `transcriptionService.ts` | Whisper integration + diarization readiness/prefetch checks |
 | `transcriptionService.real.ts` | Actual Whisper API client |
@@ -146,7 +145,7 @@
 | `chat.ts` | Chat API calls |
 | `analysis.ts` | Analysis job API calls |
 | `search.ts` | Search API calls |
-| `ollama.ts` | Model management API |
+| `llm.ts` | Model management API |
 | `transcription.ts` | Transcription API |
 | `templates.ts` | Templates API |
 | `system.ts` | System prompts API |

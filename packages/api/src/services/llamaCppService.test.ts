@@ -478,6 +478,7 @@ describe('llamaCppService', () => {
 
     it('filters out non-LLM models', async () => {
       mockAxiosGet.mockResolvedValue({
+        status: 200,
         data: {
           models: [
             {
@@ -536,6 +537,7 @@ describe('llamaCppService', () => {
       };
 
       mockAxiosGet.mockResolvedValue({
+        status: 200,
         data: { models: [mockModel] },
       });
 

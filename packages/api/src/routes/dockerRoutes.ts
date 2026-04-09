@@ -59,7 +59,7 @@ export const dockerRoutes = new Elysia({ prefix: '/api/docker' })
     app
       /**
        * GET /api/docker/status
-       * Retrieves the status of project-related Docker containers (e.g., Whisper, Ollama).
+       * Retrieves the status of project-related Docker containers (e.g., Whisper).
        * Calls the `dockerManagementService` to interact with the Docker daemon.
        */
       .get(

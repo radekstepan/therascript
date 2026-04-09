@@ -9,7 +9,7 @@ This document provides a detailed breakdown of the monorepo's package structure,
 
 ### Responsibilities
 - **REST API:** Exposes endpoints for the UI to manage sessions, chats, and analysis jobs.
-- **Orchestration:** Coordinators interactions between the Database, Search Engine, Redis Queue, and AI Services (Ollama, Whisper).
+- **Orchestration:** Coordinators interactions between the Database, Search Engine, Redis Queue, and AI Services (LM Studio, Whisper).
 - **Transcription Gating:** Verifies Whisper diarization readiness (`/diarization/check`) before upload/job enqueue and can trigger prefetch (`/diarization/prefetch`).
 - **Transcript Speaker Operations:** Supports session-level speaker label rename and propagates updates to SQLite and Elasticsearch.
 - **Context Management:** Calculates token usage and manages LLM context windows (`src/services/contextUsageService.ts`).
@@ -32,12 +32,12 @@ This document provides a detailed breakdown of the monorepo's package structure,
 ### Responsibilities
 - **Job Consumption:** Consumes jobs from Redis queues (`transcription-jobs`, `analysis-jobs`).
 - **Transcription Processing:** Coordinates file handling and status polling with WhisperX, validates diarization readiness, and enforces speaker-labeled output (`src/jobs/transcriptionProcessor.ts`).
-- **Analysis Execution:** Executes MapReduce strategies using Ollama to analyze multiple sessions (`src/jobs/analysisProcessor.ts`).
+- **Analysis Execution:** Executes MapReduce strategies using LM Studio to analyze multiple sessions (`src/jobs/analysisProcessor.ts`).
 - **Data Indexing:** Pushes processed transcripts (including `speaker`) and analysis results to Elasticsearch.
 
 ### Key Libraries
 - **`bullmq`**: For defining and processing job workers.
-- **`axios`**: For communicating with the Whisper and Ollama HTTP APIs.
+- **`axios`**: For communicating with the Whisper and LM Studio HTTP APIs.
 - **`ioredis`**: Low-level Redis client used by BullMQ.
 
 ## 3. Frontend UI (`packages/ui`)
@@ -101,16 +101,10 @@ This document provides a detailed breakdown of the monorepo's package structure,
 - **Role:** Manages the Elasticsearch Docker container lifecycle (start, stop, health checks).
 - **Entry Point:** `src/index.ts`
 
-## 6. Ollama Service (`packages/ollama`)
-**Type:** Docker Container + Node.js Manager
-**Location:** `packages/ollama`
+## 6. LM Studio Service (`packages/llama`)
+**Type:** External Service Wrapper
+**Location:** `packages/llama`
 
 ### Responsibilities
-- **LLM Hosting:** Runs local language models (Llama 3, Mistral, Gemma, etc.) via Ollama.
-- **Model Management:** Pull, load, unload, and delete models.
-- **Container Orchestration:** Multiple Docker Compose variants for GPU/non-GPU setups.
-
-### Configuration
-- `docker-compose.yml`: Default GPU configuration
-- `docker-compose.gpu.yml`: Explicit GPU passthrough
-- `docker-compose.no-gpu.yml`: CPU-only fallback
+- **LLM Hosting:** Uses local language models (Llama 3, Mistral, Gemma, etc.) via LM Studio.
+- **Model Management:** Load and unload models and parse instances locally using the headless lms engine.

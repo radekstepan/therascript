@@ -8,15 +8,15 @@ This package contains the backend API server for the Therascript application, bu
 *   Handles audio file uploads for new sessions.
 *   Stores session data, chat history, and transcript paragraphs in an SQLite database (`better-sqlite3`).
 *   Interacts with the `whisper` service (via its FastAPI endpoint) to initiate and monitor audio transcription jobs.
-*   Interacts with the `ollama` service (via its REST API) to:
+*   Interacts with **LM Studio** (via its API) to:
     *   Generate AI responses for chat interactions (both session-based and standalone).
-    *   Manage LLMs (list, pull, delete, set active model, unload).
+    *   Manage LLM context lifecycle.
 *   Provides Full-Text Search (FTS5) capabilities across chat messages and transcript paragraphs.
 *   Exposes a RESTful API for the `ui` frontend.
 *   Includes API endpoints for managing Docker container status (`docker` service).
 *   Uses a structured error handling approach (`ApiError` subclasses).
 *   Provides API documentation via Swagger UI (`@elysiajs/swagger`).
-*   Supports a "mock" mode (`APP_MODE=mock` in `.env`) for frontend development without running real Ollama/Whisper services.
+*   Supports a "mock" mode (`APP_MODE=mock` in `.env`) for frontend development without running real LM Studio/Whisper services.
 
 ## Key Technologies
 
@@ -39,9 +39,8 @@ This package contains the backend API server for the Therascript application, bu
         *   `NODE_ENV`: `development` or `production`.
         *   `APP_MODE`: `development`, `production`, or `mock`.
         *   `CORS_ORIGIN`: Allowed frontend origin URL.
-        *   `OLLAMA_BASE_URL`: URL of the Ollama service.
-        *   `OLLAMA_MODEL`: Default/active Ollama model.
-        *   `OLLAMA_CHAT_KEEP_ALIVE`: Keep-alive duration for Ollama models.
+        *   `LM_STUDIO_BASE_URL`: URL of the LM Studio service (if updated).
+        *   `LM_STUDIO_MODEL`: Default/active LM Studio model.
         *   `WHISPER_API_URL`: URL of the Whisper service.
         *   `WHISPER_MODEL`: Whisper model to use.
         *   `DB_PATH`: Path *relative to this package directory* for the SQLite database file.
@@ -61,7 +60,7 @@ This package contains the backend API server for the Therascript application, bu
     ```
 *   **Mock Mode (via root `yarn dev:mock`):**
     *   Builds the API and runs the server using `.env.api.mock`.
-    *   Uses mock implementations for Ollama and Whisper services.
+    *   Uses mock implementations for LM Studio and Whisper services.
     ```bash
     # Run from project root
     yarn dev:mock
@@ -95,9 +94,6 @@ Once the server is running, API documentation is available via Swagger UI at: `h
 *   `POST /api/chats`: Create a new standalone chat.
 *   `POST /api/chats/:chatId/messages`: Send standalone chat message, get streaming AI response.
 *   `GET /api/search?q={query}`: Perform full-text search.
-*   `GET /api/ollama/available-models`: List local Ollama models.
-*   `POST /api/ollama/pull-model`: Start downloading an Ollama model.
-*   `GET /api/ollama/pull-status/:jobId`: Check download status.
 *   `GET /api/docker/status`: Get status of project Docker containers.
 
 Refer to the Swagger UI for a complete and detailed list of endpoints, parameters, and schemas.

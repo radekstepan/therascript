@@ -9,16 +9,14 @@ Therascript is a comprehensive application designed to assist therapists by stre
 *   **Session Management:** Upload audio files, manage session metadata (client details, date, type, therapy modality), and view a history of all sessions.
 *   **Audio Transcription & Diarization:** Utilizes **WhisperX** (transcription + forced alignment + speaker diarization) to accurately transcribe session audio and automatically identify multiple speakers (e.g. `SPEAKER_00`, `SPEAKER_01`).
 *   **AI-Powered Chat Analysis:**
-    *   Interact with an AI (powered by local LLMs via Ollama) to ask questions about specific session transcripts.
+    *   Interact with an AI (powered by local LLMs via LM Studio) to ask questions about specific session transcripts.
     *   Engage in standalone AI chat sessions not tied to a specific therapy session.
     *   **Message Templates:** Save useful prompts as templates for quick reuse.
 *   **Multi-Session Analysis:** Select multiple sessions and run a single high-level query across all of them. The system performs a MapReduce-style analysis to generate a synthesized answer.
 *   **Full-Text Search:** Search across all chat messages and transcript paragraphs to quickly find relevant information using Elasticsearch.
 *   **LLM Management:**
-    *   View locally available Ollama models.
-    *   Pull new models from the Ollama library.
-    *   Set the active model and context size for analysis.
-    *   Delete locally stored models.
+    *   View locally available LM Studio models.
+    *   Change the active model for analysis.
     *   Unload models from memory to free up resources.
 *   **System Monitoring:**
     *   **GPU Monitoring:** A sidebar indicator shows real-time GPU and VRAM utilization. A detailed modal provides in-depth statistics for NVIDIA GPUs, including temperature, power draw, and per-process VRAM usage.
@@ -28,7 +26,7 @@ Therascript is a comprehensive application designed to assist therapists by stre
     *   **Re-index:** Rebuild the Elasticsearch search index from the database.
     *   **Full Reset:** A "danger zone" function to wipe all application data.
 *   **User Interface:** A modern, responsive web UI built with React and Radix UI Themes for intuitive interaction.
-*   **Dockerized Services:** Ollama, Whisper, Elasticsearch, and Redis are containerized for easy setup and management.
+*   **Dockerized Services:** Whisper, Elasticsearch, and Redis are containerized for easy setup and management.
 *   **Customizable Experience:** Includes theme selection (light, dark, system), customizable UI accent color, and options for rendering AI responses (Markdown or plain text).
 
 ## Technology Stack
@@ -50,7 +48,7 @@ Therascript is a comprehensive application designed to assist therapists by stre
     *   **BullMQ & Redis:** For background job queuing.
     *   `@dqbd/tiktoken` (Token counting)
 *   **AI Services:**
-    *   **Ollama:** For running local Large Language Models (LLMs).
+    *   **LM Studio:** For running local Large Language Models (LLMs) natively.
     *   **Whisper (OpenAI):** For audio transcription (via a Python FastAPI service).
 *   **Search Service:** Elasticsearch
 *   **Database:** SQLite
@@ -64,7 +62,6 @@ Therascript is a monorepo organized into several packages:
 *   `packages/api`: The backend ElysiaJS server. Handles business logic, database interactions, and communication with other services.
 *   `packages/worker`: A separate Node.js process that consumes jobs from the Redis queue (e.g., transcription, analysis).
 *   `packages/ui`: The React-based frontend application that users interact with.
-*   `packages/ollama`: Contains Docker configuration and management scripts for the Ollama service.
 *   `packages/llama`: LM Studio native inference backend setup and configuration (requires `lms` CLI).
 *   `packages/whisper`: Contains the Python service for Whisper, its Dockerfile, and management scripts.
 *   `packages/gpu-utils`: A shared utility for querying NVIDIA GPU stats via `nvidia-smi`.
@@ -100,7 +97,7 @@ Before you begin, ensure you have the following installed:
     ```
     Installs the `lms` binary to `~/.lmstudio/bin/lms`. The Therascript API will automatically start the daemon and server on first use.
 3.  **Docker and Docker Compose:**
-    *   Required for Whisper, Elasticsearch, Redis, and Ollama services.
+    *   Required for Whisper, Elasticsearch, and Redis services.
     *   Docker Desktop for Windows/macOS or Docker Engine + Docker Compose plugin for Linux.
     *   Ensure the Docker daemon is running.
     *   Make sure current user is in the Docker group:
@@ -129,7 +126,7 @@ Before you begin, ensure you have the following installed:
         *   `.env.api.dev` (for the API in development)
         *   `.env.worker.dev` (for the background worker in development)
         *   And optionally `.env.api.mock`, `.env.api.prod`.
-    *   Adjust the variables as needed for your setup (e.g., `OLLAMA_MODEL`, `DB_PATH`).
+    *   Adjust the variables as needed for your setup (e.g., `LM_STUDIO_BASE_URL`, `DB_PATH`).
 
 4.  **Build All Packages:**
     This compiles TypeScript code for all packages.
@@ -191,7 +188,7 @@ This mode starts the API, the background worker, the UI (with hot-reloading), an
     > **Note:** When using `yarn dev`, the platform is automatically detected and the correct compose files are used. Linux with NVIDIA GPU will automatically use GPU mode.
 
 2.  **Start the Development Environment:**
-    The `yarn dev` script orchestrates all the Node.js processes and the Ollama Docker container.
+    The `yarn dev` script orchestrates all the Node.js processes.
     ```bash
     # Run from project root
     yarn dev
@@ -200,7 +197,7 @@ This mode starts the API, the background worker, the UI (with hot-reloading), an
     *   Start the **API** server.
     *   Start the **UI** development server (usually at `http://localhost:3002`).
     *   Start the background **Worker** process.
-    *   Ensure the **Whisper**, **Elasticsearch**, and **Ollama** Docker containers are running and healthy.
+    *   Ensure the **Whisper** and **Elasticsearch** Docker containers are running and healthy.
 
 3.  **Access the Application:**
     Open your browser and navigate to `http://localhost:3002`.

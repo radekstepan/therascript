@@ -44,8 +44,8 @@ Therascript is a **monorepo** containing 10 packages that work together to provi
 │                                                                   │             │
 │   ┌────────────────────────────┐                                  │             │
 │   │                            │◄─────────────────────────────────┘             │
-│   │      Ollama (LLM)          │  HTTP Streaming                                │
-│   │       (port 11434)         │                                                │
+│   │     LM Studio (LLM)        │  HTTP Streaming                                │
+│   │       (port 1234)          │                                                │
 │   └────────────────────────────┘                                                │
 │                                                                                 │
 │   ┌────────────────────────────┐    ┌─────────────────────────────────────────┐ │
@@ -77,7 +77,7 @@ packages/
 │
 └── External Service Wrappers
      ├── llama/                  # LM Studio native inference backend setup (lms CLI required)
-     ├── ollama/                 # Ollama Docker management
+
      ├── whisper/                # Python FastAPI WhisperX service
      └── elasticsearch-manager/  # ES container management
 ```
@@ -104,7 +104,7 @@ packages/
 | Package | Technology | Purpose |
 |---------|------------|---------|
 | `packages/llama` | lms CLI (native) | LM Studio headless engine — native on all platforms (macOS/Linux/Windows) |
-| `packages/ollama` | Docker Compose | Ollama container config and lifecycle management |
+
 | `packages/whisper` | Python/FastAPI | Audio transcription + diarization service (WhisperX + pyannote) |
 | `packages/elasticsearch-manager` | dockerode | ES container health and management |
 
@@ -147,8 +147,8 @@ packages/
 ┌─────────────────────────────────────────────────────────────────────┐
 │                      AI SERVICES (Docker)                           │
 ├──────────────────────────────────┬──────────────────────────────────┤
-│          Ollama                  │           Whisper                │
-│        (port 11434)              │         (port 8000)              │
+│         LM Studio                │           Whisper                │
+│        (port 1234)               │         (port 8000)              │
 ├──────────────────────────────────┼──────────────────────────────────┤
 │ • LLM inference                  │ • ASR + alignment + diarization  │
 │ • Model management               │ • WhisperX + pyannote pipeline   │
@@ -208,10 +208,10 @@ API / Worker                         Whisper Service
 │◄── { status: "completed", result } ─── │
 ```
 
-### 4. API/Worker ↔ Ollama: HTTP Streaming
+### 4. API/Worker ↔ LM Studio: HTTP Streaming
 
 ```
-API/Worker                          Ollama Service
+API/Worker                          LM Studio Service
 │                                        │
 │─── POST /api/chat (stream: true) ────► │
 │◄═══ chunked response (tokens) ═══════  │  (streaming)
@@ -245,7 +245,7 @@ Worker                    Redis                       API                      U
 
 ```
 ┌──────┐    ┌─────┐    ┌────────┐    ┌────────┐    ┌──────┐
-│  UI  │◄══►│ API │───►│ SQLite │    │ Ollama │◄───│ API  │
+│  UI  │◄══►│ API │───►│ SQLite │    │LM Studio│◄───│ API  │
 └──────┘SSE └─────┘    └────────┘    └────────┘    └──────┘
                             │                         │
                    1. Fetch context          2. Stream inference
@@ -255,7 +255,7 @@ Worker                    Redis                       API                      U
 
 ```
 ┌──────┐    ┌─────┐    ┌───────┐    ┌────────┐    ┌────────┐    ┌────────┐
-│  UI  │───►│ API │───►│ Redis │───►│ Worker │───►│ Ollama │───►│ SQLite │
+│  UI  │───►│ API │───►│ Redis │───►│ Worker │───►│LM Studio│───►│ SQLite │
 └──────┘    └─────┘    └───────┘    └────────┘    └────────┘    └────────┘
               │                          │              │
          1. Generate              2. Map Phase    3. Reduce Phase
@@ -281,7 +281,7 @@ Worker                    Redis                       API                      U
 | Redis | 6379 | BullMQ job queues + Pub/Sub |
 | Elasticsearch | 9200 | Full-text search API |
 | Kibana | 5601 | ES data exploration (dev only) |
-| Ollama | 11434 | LLM inference API |
+| LM Studio | 1234 | LLM inference API |
 | Whisper | 8000 | Transcription API |
 
 ## Technology Stack Summary
@@ -293,7 +293,7 @@ Worker                    Redis                       API                      U
 | **Database** | SQLite (better-sqlite3) |
 | **Search** | Elasticsearch 8.x |
 | **Job Queue** | Redis + BullMQ |
-| **LLM** | Ollama (Llama, Mistral, Gemma) |
+| **LLM** | LM Studio (Llama, Mistral, Gemma) |
 | **Transcription** | WhisperX + pyannote (PyTorch/CUDA or CPU int8) |
 | **Containerization** | Docker, Docker Compose |
 | **Monorepo** | Turborepo, Yarn Workspaces |

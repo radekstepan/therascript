@@ -162,7 +162,7 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
     }
 
     // --- LOAD MODEL ---
-    // LM Studio requires explicit model loading before streaming (unlike Ollama)
+    // LM Studio requires explicit model loading before streaming
     if (jobRecord.model_name && jobRecord.model_name !== 'default') {
       try {
         console.log(`[Analysis Worker ${jobId}] Ensuring model is loaded...`);

@@ -3,8 +3,6 @@
 # Usage:
 #   GPU (Linux with NVIDIA):  docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
 #   CPU (Mac or no GPU):      docker compose up -d --build
-#
-# Ollama is managed by a separate compose file in `packages/ollama/docker-compose.yml`.
 
 services:
   # Whisper Transcription Service (CPU mode - default)

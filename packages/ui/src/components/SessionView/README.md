@@ -16,7 +16,7 @@ This folder contains all the React components necessary to render the detailed v
 Contains components related to the AI chat interface for the session.
 
 *   **`ChatInterface.tsx`**: Manages the overall chat area, fetching chat messages (via Tanstack Query), displaying the header (`ChatPanelHeader`), the message list (`ChatMessages`), and the input field (`ChatInput`). Handles scrolling behavior and displays loading/error states for messages.
-*   **`ChatPanelHeader.tsx`**: Displays information about the currently active Ollama model, its loaded status, configured context size, token usage from the last interaction, and provides a button to open the `LlmManagementModal`. Fetches Ollama status via Tanstack Query.
+*   **`ChatPanelHeader.tsx`**: Displays information about the currently active LM Studio model, its loaded status, configured context size, token usage from the last interaction, and provides a button to open the `LlmManagementModal`. Fetches LLM status via Tanstack Query.
 *   **`ChatInput.tsx`**: The text input field for sending messages to the AI. Includes functionality for using starred templates, handling message submission (via Tanstack Mutation), displaying errors, and showing loading/cancel states during AI response generation.
 *   **`ChatMessages.tsx`**: Renders the list of messages (user and AI) within the active chat. Handles starring/unstarring messages (via Tanstack Mutation) and includes the logic for the modal to name starred templates. Displays the "Thinking..." indicator and streaming text updates.
 *   **`StarredTemplatesList.tsx`**: (Used by `ChatInput`) A popover component listing saved (starred) user messages fetched via Tanstack Query that can be quickly inserted into the `ChatInput`.
@@ -41,11 +41,11 @@ Contains components related to displaying and editing the session's transcriptio
 Contains modal dialog components used within the `SessionView`.
 
 *   **`EditDetailsModal.tsx`**: A dialog allowing the user to edit the core metadata of the session (Client Name, Session Name, Date, Type, Therapy). It handles form state, validation, and triggers a Tanstack Mutation upon saving.
-*   **`LlmManagementModal.tsx`**: A dialog for managing the Ollama service. Allows viewing available/active models, setting the active model/context size, pulling new models, canceling downloads, and deleting local models. Uses Tanstack Query/Mutation extensively.
+*   **`LlmManagementModal.tsx`**: A dialog for managing the LM Studio models. Allows viewing available/active models, setting the active model/context size, and checking status. Uses Tanstack Query/Mutation extensively.
 
 ## State Management
 
-*   **Tanstack Query (`@tanstack/react-query`)**: Used extensively for fetching, caching, and mutating server state (sessions, transcripts, chat messages, Ollama status/models). Manages loading, error, and fetching states for server data.
+*   **Tanstack Query (`@tanstack/react-query`)**: Used extensively for fetching, caching, and mutating server state (sessions, transcripts, chat messages, LLM status/models). Manages loading, error, and fetching states for server data.
 *   **Jotai**: Used for client-side UI state:
     *   `activeSessionIdAtom`, `activeChatIdAtom`: Track the *currently viewed* session/chat ID based on the URL.
     *   `sidebarWidthAtom`, `clampedSidebarWidthAtom`: Manage the resizable sidebar width.

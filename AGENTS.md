@@ -73,7 +73,7 @@ These operate in real-time via the API (`packages/api`) to facilitate user inter
 
 ### Session Chat Agent
 *   **Type:** RAG / Context-Aware Chatbot
-*   **Source:** `packages/api/src/api/sessionChatHandler.ts` & `packages/api/src/services/ollamaService.ts`
+*   **Source:** `packages/api/src/api/sessionChatHandler.ts` & active model manager.
 *   **Prompt Template:** `system_prompt`
 *   **Context:**
     *   Full transcript of the specific session (up to context window limit).
@@ -95,8 +95,8 @@ These operate in real-time via the API (`packages/api`) to facilitate user inter
 *   **Role:** Audio-to-Text inference engine.
 *   **Tech:** OpenAI Whisper (running on PyTorch/CUDA).
 
-### Ollama Service
-*   **Location:** `packages/ollama` (Docker)
+### LM Studio Service
+*   **Location:** Native System (`lms` process)
 *   **Role:** LLM Inference Provider.
 *   **Models:** Llama 3, Mistral, Gemma (configurable).
-*   **API:** `packages/api/src/services/ollamaService.ts` manages the lifecycle (loading/unloading/pulling) of these models.
+*   **API:** `packages/api/src/services/llamaCppService.ts` or related active model services manage the context lifecycle.

@@ -12,7 +12,7 @@ This package contains the React-based frontend application for Therascript. It p
     *   AI chat interface for asking questions about the transcript.
 *   Provide an interface for standalone AI chat sessions.
 *   Implement a search interface to query across transcripts and messages.
-*   Offer modals for managing Ollama models (viewing status, pulling, deleting, setting active model) and Docker container status.
+*   Offer modals for managing LM Studio models (viewing status, changing active model) and Docker container status.
 *   Allow users to configure UI settings (e.g., theme, Markdown rendering).
 *   Provide system controls (e.g., triggering PC shutdown via the API).
 
@@ -33,7 +33,7 @@ This package contains the React-based frontend application for Therascript. It p
 
 *   **`public/`:** Contains the base `index.html` file and static assets (like favicons).
 *   **`src/`:** Contains the main application source code.
-    *   **`api/`:** Typed functions for making requests to the backend API endpoints using Axios and Fetch (for streaming). Organised by feature (chat, session, ollama, etc.).
+    *   **`api/`:** Typed functions for making requests to the backend API endpoints using Axios and Fetch (for streaming). Organised by feature (chat, session, llm, etc.).
     *   **`components/`:** Reusable React components, organized by feature/view (e.g., `LandingPage`, `SessionView`, `StandaloneChatView`, `UploadModal`, `User`, `Search`).
     *   **`hooks/`:** Custom React hooks (e.g., `useMessageStream` for handling Server-Sent Events).
     *   **`store/`:** Jotai atom definitions for global UI state management. See `src/store/README.md` for details.
