@@ -52,7 +52,7 @@ export async function cancelJob(
 export async function submitTranscriptionJob(
   inputPath: string,
   modelName: string,
-  numSpeakers: number = 2,
+  numSpeakers: number = 0,
   maxRetries: number = 3
 ): Promise<string> {
   let lastError: Error | null = null;

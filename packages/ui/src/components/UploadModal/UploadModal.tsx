@@ -101,7 +101,7 @@ export function UploadModal({ isOpen }: UploadModalProps) {
     SESSION_TYPES.find((t) => t === 'Individual') || SESSION_TYPES[0]
   );
   const [therapyInput, setTherapyInput] = useState(THERAPY_TYPES[0]);
-  const [numSpeakersInput, setNumSpeakersInput] = useState(2);
+  const [numSpeakersInput, setNumSpeakersInput] = useState(0);
   const [formError, setFormError] = useState<string | null>(null);
 
   const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
@@ -138,7 +138,7 @@ export function UploadModal({ isOpen }: UploadModalProps) {
     setSessionNameInput('');
     setSessionTypeInput(SESSION_TYPES[0]);
     setTherapyInput(THERAPY_TYPES[0]);
-    setNumSpeakersInput(2);
+    setNumSpeakersInput(0);
     setDragActive(false);
     setFormError(null);
     setShowLogs(false);
@@ -690,23 +690,29 @@ export function UploadModal({ isOpen }: UploadModalProps) {
                 <Text as="div" size="2" mb="1" weight="medium">
                   Number of Speakers
                 </Text>
-                <TextField.Root
-                  size="2"
-                  type="number"
-                  min="1"
-                  max="10"
+                <Select.Root
                   value={String(numSpeakersInput)}
-                  onChange={(e) => {
-                    const v = parseInt(e.target.value, 10);
-                    if (!isNaN(v) && v >= 1 && v <= 10) setNumSpeakersInput(v);
-                  }}
+                  onValueChange={(v) => setNumSpeakersInput(parseInt(v, 10))}
                   disabled={overallIsLoading}
-                />
+                  size="2"
+                >
+                  <Select.Trigger style={{ width: '100%' }} />
+                  <Select.Content>
+                    <Select.Item value="0">
+                      Off (no speaker detection)
+                    </Select.Item>
+                    {[2, 3, 4, 5].map((n) => (
+                      <Select.Item key={n} value={String(n)}>
+                        {n} speakers
+                      </Select.Item>
+                    ))}
+                  </Select.Content>
+                </Select.Root>
               </label>
               <Flex align="end" pb="1">
                 <Text size="1" color="gray">
-                  Typically 2 (therapist + patient). Used for speaker
-                  diarization.
+                  Select the expected number of speakers, or Off to skip speaker
+                  detection.
                 </Text>
               </Flex>
             </Box>

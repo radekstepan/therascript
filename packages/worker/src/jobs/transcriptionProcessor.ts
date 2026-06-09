@@ -42,6 +42,16 @@ type WhisperDiarizationCheck = {
   error?: string;
 };
 
+async function assertWhisperReady(): Promise<void> {
+  try {
+    await axios.get(`${config.whisper.apiUrl}/health`, { timeout: 5000 });
+  } catch (error: any) {
+    throw new Error(
+      `Whisper service is not reachable at ${config.whisper.apiUrl}: ${error.message}`
+    );
+  }
+}
+
 async function assertWhisperDiarizationReady(): Promise<void> {
   let response;
   try {
@@ -242,22 +252,38 @@ export default async function (job: Job<TranscriptionJobData, any, string>) {
     await job.updateProgress(5);
     sessionRepository.updateMetadata(sessionId, { status: 'transcribing' });
 
-    await assertWhisperDiarizationReady();
+    const numSpeakers = validationResult.data.numSpeakers;
+    // Treat 0 or 1 as "no diarization": 1 speaker is nonsensical for speaker separation.
+    const diarize = numSpeakers >= 2;
+    const effectiveNumSpeakers = diarize ? numSpeakers : 0;
 
-    const whisperJobId = await startWhisperJob(
-      audioPath,
-      validationResult.data.numSpeakers ?? config.whisper.numSpeakers
-    );
+    if (diarize) {
+      await assertWhisperDiarizationReady();
+    } else {
+      // Still verify Whisper is reachable even when diarization is off.
+      await assertWhisperReady();
+    }
+
+    const whisperJobId = await startWhisperJob(audioPath, effectiveNumSpeakers);
     sessionRepository.updateMetadata(sessionId, { whisperJobId });
     await job.updateProgress(10);
 
     const finalStatus = await pollWhisperStatus(whisperJobId);
     if (finalStatus.status !== 'completed' || !finalStatus.result?.segments) {
+      const errorMsg = String(finalStatus.error ?? '');
+      if (errorMsg.includes('WHISPER_BUSY')) {
+        throw new Error(
+          'Transcription server is busy with another job. Please try again in a minute.'
+        );
+      }
       throw new Error(
         `Whisper job ${whisperJobId} failed or returned no segments. Status: ${finalStatus.status}. Error: ${finalStatus.error || 'Unknown error'}`
       );
     }
-    if (!finalStatus.result.segments.some((s) => s.speaker != null)) {
+    if (
+      diarize &&
+      !finalStatus.result.segments.some((s) => s.speaker != null)
+    ) {
       throw new Error(
         `Whisper job ${whisperJobId} completed without diarization — all speaker labels are null. ` +
           `This usually means pyannote model files are not cached or HF_TOKEN lacks accepted access ` +

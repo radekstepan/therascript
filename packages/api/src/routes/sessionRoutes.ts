@@ -195,35 +195,36 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
             numSpeakers,
             ...metadata
           } = body as Static<typeof UploadBodySchema>;
+          // Clamp to [0,10]. 0 and 1 both disable diarization (1 speaker is nonsensical).
           const resolvedNumSpeakers = Math.max(
-            1,
-            Math.min(10, Math.round(numSpeakers ?? 2))
+            0,
+            Math.min(10, Math.round(numSpeakers ?? 0))
           );
           let newSess: BackendSession | null = null;
           try {
             // ── Step 0: Pre-upload diarization readiness gate ──────────────────
-            // Whisper service readiness is the source of truth for diarization.
-            // Always check it here so API/worker env differences do not bypass this gate.
-            let diarCheck;
-            try {
-              diarCheck = await checkDiarizationReadiness();
-            } catch (checkErr: any) {
-              throw new ApiError(
-                503,
-                `Could not reach Whisper service to verify diarization readiness: ${checkErr.message}`
-              );
-            }
+            // Only check diarization readiness when speaker detection is enabled
+            // (numSpeakers > 0). When numSpeakers === 0, skip diarization entirely.
+            if (resolvedNumSpeakers >= 2) {
+              let diarCheck;
+              try {
+                diarCheck = await checkDiarizationReadiness();
+              } catch (checkErr: any) {
+                throw new ApiError(
+                  503,
+                  `Could not reach Whisper service to verify diarization readiness: ${checkErr.message}`
+                );
+              }
 
-            if (!diarCheck.ready) {
-              // Fire-and-forget: kick off the background download so the
-              // user can retry in a few minutes.
-              triggerDiarizationPrefetch().catch(() => {});
-              throw new ApiError(
-                503,
-                'Diarization is not ready in the Whisper service. ' +
-                  'A background download may have been started — please retry in a few minutes. ' +
-                  (diarCheck.error ? `Detail: ${diarCheck.error}` : '')
-              );
+              if (!diarCheck.ready) {
+                triggerDiarizationPrefetch().catch(() => {});
+                throw new ApiError(
+                  503,
+                  'Diarization is not ready in the Whisper service. ' +
+                    'A background download may have been started — please retry in a few minutes. ' +
+                    (diarCheck.error ? `Detail: ${diarCheck.error}` : '')
+                );
+              }
             }
             // ── End diarization gate ────────────────────────────────────────
 

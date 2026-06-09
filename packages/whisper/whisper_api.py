@@ -208,7 +208,6 @@ TRANSCRIBE_CONCURRENCY = int(os.environ.get("WHISPER_MAX_CONCURRENCY", "1"))
 JOB_RETENTION_SECONDS = int(os.environ.get("WHISPER_JOB_RETENTION", "3600"))
 LLM_UNLOAD_URL = os.environ.get("LLM_UNLOAD_URL", "http://host.docker.internal:3001/api/llm/unload")
 HF_TOKEN = os.environ.get("HF_TOKEN")
-DEFAULT_NUM_SPEAKERS = int(os.environ.get("WHISPER_NUM_SPEAKERS", "2"))
 
 
 class JobStatusState(str, Enum):
@@ -272,25 +271,26 @@ class WhisperModelManager:
     def last_used(self) -> float:
         return self._last_used
 
-    async def acquire_model(self, model_name: str):
+    async def acquire_model(self, model_name: str, needs_diarization: bool = False):
         async with self._lock:
+            # Full reload only when the ASR model name changed.
             if self._asr_model is not None and self._model_name != model_name:
                 if self._active_jobs > 0:
                     raise RuntimeError(f"Cannot switch models while {self._active_jobs} jobs active")
-                print(f"[WhisperManager] Switching from {self._model_name} to {model_name}")
+                print(f"[WhisperManager] Switching ASR model from {self._model_name} to {model_name}")
                 await self._unload_unsafe()
 
             if self._asr_model is None:
                 await ensure_llm_unloaded()
 
-                print(f"[WhisperManager] Loading model '{model_name}'...")
+                print(f"[WhisperManager] Loading ASR model '{model_name}'...")
                 start = datetime.now()
 
                 device = "cuda" if torch.cuda.is_available() else "cpu"
                 compute_type = "float16" if device == "cuda" else "int8"
                 self._device = device
 
-                # Load ASR model
+                # Load ASR model.
                 # Use Silero VAD to avoid pyannote.audio 3.3.2 API incompatibility:
                 # latest whisperx passes token= to pyannote VoiceActivityDetection
                 # but 3.3.2's Inference class does not accept that kwarg.
@@ -298,17 +298,37 @@ class WhisperModelManager:
                     model_name, device, compute_type=compute_type, vad_method="silero"
                 )
                 self._model_name = model_name
-
-                # Load diarization pipeline (required — fails hard without HF_TOKEN)
-                if not HF_TOKEN:
-                    raise RuntimeError("HF_TOKEN is not set — diarization pipeline cannot be loaded. Set HF_TOKEN and restart.")
-                print(f"[WhisperManager] Loading diarization pipeline...")
-                self._diarize_model = _DiarizationPipeline(
-                    token=HF_TOKEN, device=device
-                )
+                self._diarize_model = None
 
                 elapsed = (datetime.now() - start).total_seconds()
-                print(f"[WhisperManager] Model '{model_name}' loaded in {elapsed:.2f}s")
+                print(f"[WhisperManager] ASR model '{model_name}' loaded in {elapsed:.2f}s")
+
+            # Lazily attach the diarization pipeline when a job needs it.
+            # This avoids a full ASR reload when the first diarize=True job arrives
+            # after a diarize=False job has already warmed up the ASR model.
+            # Guard: do not load pyannote while other jobs are active — the pipeline
+            # constructor can take seconds and contend for GPU/CPU memory.
+            # NOTE: With the default WHISPER_MAX_CONCURRENCY=1 this branch is unreachable
+            # because jobs serialise. It only fires if concurrency is bumped AND the very
+            # first diarize=True job arrives while a diarize=False job is still running.
+            # In that scenario the client receives a retriable failure; the operator
+            # should either keep concurrency=1 or pre-warm pyannote at startup.
+            if needs_diarization and self._diarize_model is None:
+                if self._active_jobs > 0:
+                    raise RuntimeError(
+                        f"WHISPER_BUSY: Cannot load diarization pipeline while {self._active_jobs} job(s) are active. "
+                        "Retry once the active job completes."
+                    )
+                if not HF_TOKEN:
+                    raise RuntimeError(
+                        "HF_TOKEN is not set — cannot load diarization pipeline. "
+                        "Set HF_TOKEN and restart, or submit with num_speakers=0."
+                    )
+                print(f"[WhisperManager] Loading diarization pipeline lazily...")
+                self._diarize_model = _DiarizationPipeline(
+                    token=HF_TOKEN, device=self._device
+                )
+                print(f"[WhisperManager] Diarization pipeline loaded.")
 
             self._active_jobs += 1
             self._last_used = datetime.now().timestamp()
@@ -440,7 +460,7 @@ async def cleanup_old_jobs():
             print(f"[Whisper] Cleaned up old job {job_id}")
 
 
-async def run_transcription(job_id: str, input_path: str, model_name: str, num_speakers: int):
+async def run_transcription(job_id: str, input_path: str, model_name: str, num_speakers: int, diarize: bool = False):
     job = jobs.get(job_id)
     if not job:
         return
@@ -463,7 +483,7 @@ async def run_transcription(job_id: str, input_path: str, model_name: str, num_s
                 raise ValueError("Could not determine audio duration")
             job.duration = duration
 
-            manager = await model_manager.acquire_model(model_name)
+            manager = await model_manager.acquire_model(model_name, needs_diarization=diarize)
 
             if cancel_flags.get(job_id):
                 job.status = JobStatusState.canceled
@@ -479,6 +499,22 @@ async def run_transcription(job_id: str, input_path: str, model_name: str, num_s
             align_progress = [0.0]  # 0.0..1.0, updated per batch during alignment
             align_total_segs = [0]   # total segment count, set before batching starts
             diarize_progress = [0.0]  # 0.0..1.0, updated via pyannote hook
+
+            # Progress ranges depend on whether diarization is enabled
+            if diarize:
+                stage_progress_range = {
+                    "transcribing":  (1.0,  55.0),
+                    "loading_align": (55.0, 62.0),
+                    "aligning":      (62.0, 72.0),
+                    "diarizing":     (72.0, 88.0),
+                    "assigning":     (88.0, 95.0),
+                }
+            else:
+                stage_progress_range = {
+                    "transcribing":  (1.0,  60.0),
+                    "loading_align": (60.0, 68.0),
+                    "aligning":      (68.0, 95.0),
+                }
 
             def transcribe_sync():
                 # Step 1: Transcribe
@@ -530,52 +566,55 @@ async def run_transcription(job_id: str, input_path: str, model_name: str, num_s
                 if manager._device == "cuda":
                     torch.cuda.empty_cache()
 
-                # Step 3: Diarize (required — fails hard if model is not loaded)
-                if manager._diarize_model is None:
-                    raise RuntimeError("Diarization model is not loaded — cannot proceed without speaker diarization.")
+                # Step 3: Diarize (optional — only runs when diarize=True)
+                if diarize:
+                    if manager._diarize_model is None:
+                        raise RuntimeError("Diarization model is not loaded — cannot proceed without speaker diarization.")
 
-                last_stage[0] = "diarizing"
-                stage_start_time[0] = datetime.now().timestamp()
-                diarize_progress[0] = 0.0
-                print(f"[Whisper] Job {job_id}: Step 3/4 - Diarizing with {num_speakers} speakers...", flush=True)
+                    last_stage[0] = "diarizing"
+                    stage_start_time[0] = datetime.now().timestamp()
+                    diarize_progress[0] = 0.0
+                    print(f"[Whisper] Job {job_id}: Step 3/4 - Diarizing with {num_speakers} speakers...", flush=True)
 
-                # pyannote hook: maps sub-step names → fractional progress
-                # Steps (approximate): segmentation ~30%, embedding ~80%, clustering ~95%
-                _DIARIZE_STEP_FRACTIONS = {
-                    "segmentation": 0.30,
-                    "speaker embedding": 0.75,
-                    "embeddings": 0.75,
-                    "clustering": 0.90,
-                    "discrete diarization": 0.92,
-                    "diarization": 0.97,
-                }
-                def _diarize_hook(step_name=None, *args, **kwargs):
-                    if step_name is None and args:
-                        step_name = args[0]
-                    name = str(step_name).lower() if step_name else ""
-                    for key, frac in _DIARIZE_STEP_FRACTIONS.items():
-                        if key in name:
-                            diarize_progress[0] = frac
-                            print(f"[Whisper] Job {job_id}: diarize hook '{name}' → {frac*100:.0f}%", flush=True)
-                            break
+                    # pyannote hook: maps sub-step names → fractional progress
+                    # Steps (approximate): segmentation ~30%, embedding ~80%, clustering ~95%
+                    _DIARIZE_STEP_FRACTIONS = {
+                        "segmentation": 0.30,
+                        "speaker embedding": 0.75,
+                        "embeddings": 0.75,
+                        "clustering": 0.90,
+                        "discrete diarization": 0.92,
+                        "diarization": 0.97,
+                    }
+                    def _diarize_hook(step_name=None, *args, **kwargs):
+                        if step_name is None and args:
+                            step_name = args[0]
+                        name = str(step_name).lower() if step_name else ""
+                        for key, frac in _DIARIZE_STEP_FRACTIONS.items():
+                            if key in name:
+                                diarize_progress[0] = frac
+                                print(f"[Whisper] Job {job_id}: diarize hook '{name}' → {frac*100:.0f}%", flush=True)
+                                break
 
-                diarize_segments = manager._diarize_model(
-                    audio,
-                    min_speakers=num_speakers,
-                    max_speakers=num_speakers,
-                    hook=_diarize_hook,
-                )
-                # Step 4: Assign speakers to segments
-                last_stage[0] = "assigning"
-                stage_start_time[0] = datetime.now().timestamp()
-                print(f"[Whisper] Job {job_id}: Step 4/4 - Assigning speakers...", flush=True)
-                result = whisperx.assign_word_speakers(diarize_segments, result)
-                # Log each final segment with speaker label
-                final_segs = result.get("segments", [])
-                print(f"[Whisper] Job {job_id}: Speaker assignment done - {len(final_segs)} segments", flush=True)
-                for i, seg in enumerate(final_segs):
-                    speaker_tag = f"[{seg.get('speaker', 'UNKNOWN')}] "
-                    print(f"[Whisper] Job {job_id}:   seg {i+1:03d} [{seg.get('start',0):.2f}s-{seg.get('end',0):.2f}s] {speaker_tag}{seg.get('text','').strip()}", flush=True)
+                    diarize_segments = manager._diarize_model(
+                        audio,
+                        min_speakers=num_speakers,
+                        max_speakers=num_speakers,
+                        hook=_diarize_hook,
+                    )
+                    # Step 4: Assign speakers to segments
+                    last_stage[0] = "assigning"
+                    stage_start_time[0] = datetime.now().timestamp()
+                    print(f"[Whisper] Job {job_id}: Step 4/4 - Assigning speakers...", flush=True)
+                    result = whisperx.assign_word_speakers(diarize_segments, result)
+                    # Log each final segment with speaker label
+                    final_segs = result.get("segments", [])
+                    print(f"[Whisper] Job {job_id}: Speaker assignment done - {len(final_segs)} segments", flush=True)
+                    for i, seg in enumerate(final_segs):
+                        speaker_tag = f"[{seg.get('speaker', 'UNKNOWN')}] "
+                        print(f"[Whisper] Job {job_id}:   seg {i+1:03d} [{seg.get('start',0):.2f}s-{seg.get('end',0):.2f}s] {speaker_tag}{seg.get('text','').strip()}", flush=True)
+                else:
+                    print(f"[Whisper] Job {job_id}: Skipping diarization (diarize=False). Steps 3-4 omitted (Diarize + Assign).", flush=True)
 
                 segments_out = []
                 for seg in result.get("segments", []):
@@ -583,7 +622,7 @@ async def run_transcription(job_id: str, input_path: str, model_name: str, num_s
                         "start": seg.get("start", 0),
                         "end": seg.get("end", 0),
                         "text": seg.get("text", "").strip(),
-                        "speaker": seg.get("speaker"),
+                        "speaker": seg.get("speaker") if diarize else None,
                     })
 
                 return {
@@ -595,14 +634,6 @@ async def run_transcription(job_id: str, input_path: str, model_name: str, num_s
             loop = asyncio.get_event_loop()
             transcription_task = loop.run_in_executor(None, transcribe_sync)
 
-            # Progress ranges per stage
-            stage_progress_range = {
-                "transcribing":  (1.0,  55.0),
-                "loading_align": (55.0, 62.0),
-                "aligning":      (62.0, 72.0),
-                "diarizing":     (72.0, 88.0),
-                "assigning":     (88.0, 95.0),
-            }
             # Rough time budget per stage for interpolation (seconds)
             # Used as fallback when hook-based progress isn't available.
             # CPU pyannote diarization is typically 1–3× realtime.
@@ -732,9 +763,11 @@ async def transcribe(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     model_name: str = Form(DEFAULT_MODEL),
-    num_speakers: int = Form(DEFAULT_NUM_SPEAKERS),
+    # 0 disables diarization; >=2 enables it with that many speakers.
+    num_speakers: int = Form(0),
 ):
     job_id = str(uuid.uuid4())
+    diarize = num_speakers >= 2
 
     input_path = os.path.join(TEMP_INPUT_DIR, f"{job_id}_{file.filename}")
 
@@ -750,9 +783,9 @@ async def transcribe(
     jobs[job_id] = job
     cancel_flags[job_id] = False
 
-    background_tasks.add_task(run_transcription, job_id, input_path, model_name, num_speakers)
+    background_tasks.add_task(run_transcription, job_id, input_path, model_name, num_speakers, diarize)
 
-    print(f"[Whisper] Queued job {job_id} for {file.filename} with model '{model_name}', num_speakers={num_speakers}")
+    print(f"[Whisper] Queued job {job_id} for {file.filename} with model '{model_name}', num_speakers={num_speakers}, diarize={diarize}")
     return TranscribeResponse(job_id=job_id, message="Transcription job queued.")
 
 

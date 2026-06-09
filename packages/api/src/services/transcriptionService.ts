@@ -28,7 +28,8 @@ export async function getTranscriptionStatus(
 
 export async function startTranscriptionJob(
   sessionId: number,
-  numSpeakers: number = 2
+  // 0 (default) disables diarization. Previously defaulted to 2; changed intentionally.
+  numSpeakers: number = 0
 ): Promise<void> {
   console.log(
     `[TranscriptionService] Checking Whisper service availability before enqueuing...`
