@@ -7,6 +7,7 @@ interface CreateJobPayload {
   prompt: string;
   modelName?: string | null;
   useAdvancedStrategy?: boolean;
+  contextSize?: number;
 }
 
 /**

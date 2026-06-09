@@ -278,50 +278,67 @@ export const createAnalysisJobHandler = async ({
   set: { status?: number | string };
 }): Promise<{ jobId: number }> => {
   const validatedBody = analysisRequestSchema.parse(body);
-  const { sessionIds, prompt, modelName, useAdvancedStrategy } = validatedBody;
+  const {
+    sessionIds,
+    prompt,
+    modelName,
+    useAdvancedStrategy,
+    contextSize: requestedContextSize,
+  } = validatedBody;
 
   try {
-    // --- AUTOMATIC CONTEXT SIZE CALCULATION ---
-    const promptTokens = calculateTokenCount(prompt) || 0;
-    let maxTranscriptTokens = 0;
-    for (const sessionId of sessionIds) {
-      const session = sessionRepository.findById(sessionId);
-      if (session && session.transcriptTokenCount) {
-        if (session.transcriptTokenCount > maxTranscriptTokens) {
-          maxTranscriptTokens = session.transcriptTokenCount;
-        }
-      }
-    }
-
+    // --- CONTEXT SIZE CALCULATION ---
     const allModels = await listModels();
     const selectedModelInfo = allModels.find((m) => m.name === modelName);
-    const modelMaxContext = selectedModelInfo?.defaultContextSize || 8192; // Fallback to 8k if not found
+    const modelMaxContext = selectedModelInfo?.defaultContextSize || 8192;
 
-    const ANSWER_BUFFER = 4096; // Generous buffer for the answer
+    let contextSizeToUse: number;
 
-    let calculatedContextSize: number;
-    if (useAdvancedStrategy) {
-      const TARGET_SUMMARY_TOKENS = 500; // Aligned with maxCompletionTokens cap in analysisProcessor
-      const PER_SESSION_OVERHEAD = 30; // Headers, quotes, formatting per session
-      const FINAL_ANSWER_BUFFER = 4096;
-      const reducePhaseContext =
-        sessionIds.length * (TARGET_SUMMARY_TOKENS + PER_SESSION_OVERHEAD) +
-        FINAL_ANSWER_BUFFER;
-
-      // Use the maximum of map phase or reduce phase requirements
-      calculatedContextSize = Math.max(
-        promptTokens + maxTranscriptTokens + ANSWER_BUFFER,
-        reducePhaseContext
-      );
+    if (requestedContextSize) {
+      if (requestedContextSize > modelMaxContext) {
+        throw new BadRequestError(
+          `Requested context size of ${requestedContextSize.toLocaleString()} tokens exceeds model '${modelName}' maximum of ${modelMaxContext.toLocaleString()} tokens.`
+        );
+      }
+      contextSizeToUse = requestedContextSize;
     } else {
-      calculatedContextSize =
-        promptTokens + maxTranscriptTokens + ANSWER_BUFFER;
-    }
+      const promptTokens = calculateTokenCount(prompt) || 0;
+      let maxTranscriptTokens = 0;
+      for (const sessionId of sessionIds) {
+        const session = sessionRepository.findById(sessionId);
+        if (session && session.transcriptTokenCount) {
+          if (session.transcriptTokenCount > maxTranscriptTokens) {
+            maxTranscriptTokens = session.transcriptTokenCount;
+          }
+        }
+      }
 
-    if (calculatedContextSize > modelMaxContext) {
-      throw new BadRequestError(
-        `Analysis requires a context of ~${calculatedContextSize.toLocaleString()} tokens, but model '${modelName}' only supports up to ${modelMaxContext.toLocaleString()}. Please select a model with a larger context window.`
-      );
+      const ANSWER_BUFFER = 4096;
+
+      let calculatedContextSize: number;
+      if (useAdvancedStrategy) {
+        const TARGET_SUMMARY_TOKENS = 500;
+        const PER_SESSION_OVERHEAD = 30;
+        const FINAL_ANSWER_BUFFER = 4096;
+        const reducePhaseContext =
+          sessionIds.length * (TARGET_SUMMARY_TOKENS + PER_SESSION_OVERHEAD) +
+          FINAL_ANSWER_BUFFER;
+
+        calculatedContextSize = Math.max(
+          promptTokens + maxTranscriptTokens + ANSWER_BUFFER,
+          reducePhaseContext
+        );
+      } else {
+        calculatedContextSize =
+          promptTokens + maxTranscriptTokens + ANSWER_BUFFER;
+      }
+
+      if (calculatedContextSize > modelMaxContext) {
+        throw new BadRequestError(
+          `Analysis requires a context of ~${calculatedContextSize.toLocaleString()} tokens, but model '${modelName}' only supports up to ${modelMaxContext.toLocaleString()}. Please select a model with a larger context window.`
+        );
+      }
+      contextSizeToUse = calculatedContextSize;
     }
     // --- END CALCULATION ---
 
@@ -335,7 +352,7 @@ export const createAnalysisJobHandler = async ({
         placeholderShortPrompt,
         sessionIds,
         modelName || null,
-        calculatedContextSize,
+        contextSizeToUse,
         null,
         'generating_strategy'
       );
@@ -346,7 +363,7 @@ export const createAnalysisJobHandler = async ({
         newJob.id,
         prompt,
         modelName,
-        calculatedContextSize
+        contextSizeToUse
       );
     } else {
       newJob = analysisRepository.createJob(
@@ -354,7 +371,7 @@ export const createAnalysisJobHandler = async ({
         placeholderShortPrompt,
         sessionIds,
         modelName || null,
-        calculatedContextSize,
+        contextSizeToUse,
         null,
         'pending'
       );

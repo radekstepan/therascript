@@ -19,6 +19,7 @@ import {
   Tooltip,
   Table,
   Checkbox,
+  Strong,
 } from '@radix-ui/themes';
 import {
   InfoCircledIcon,
@@ -33,8 +34,15 @@ import {
   fetchSession,
   fetchAvailableModels,
   fetchTemplates,
+  estimateModelVram,
+  fetchGpuStats,
 } from '../../api/api';
-import type { Session, LlmModelInfo, Template } from '../../types';
+import type {
+  Session,
+  LlmModelInfo,
+  Template,
+  VramEstimateResponse,
+} from '../../types';
 import { toastMessageAtom } from '../../store';
 import { cn } from '../../utils';
 import { formatIsoDateToYMD } from '../../helpers';
@@ -167,12 +175,29 @@ export function CreateAnalysisJobModal({
   const [selectedModel, setSelectedModel] = useState<string>('');
   const [isTemplatePopoverOpen, setIsTemplatePopoverOpen] = useState(false);
   const [useAdvancedStrategy, setUseAdvancedStrategy] = useState(true); // Default to true
+  const [contextSizeInput, setContextSizeInput] = useState('');
+  const [userTouchedContext, setUserTouchedContext] = useState(false);
+  const [vramEstimate, setVramEstimate] = useState<VramEstimateResponse | null>(
+    null
+  );
 
   const { data: availableModelsData, isLoading: isLoadingModels } = useQuery({
     queryKey: ['availableLlmModels'],
     queryFn: fetchAvailableModels,
     enabled: isOpen,
   });
+
+  const { data: gpuStats } = useQuery({
+    queryKey: ['gpuStats'],
+    queryFn: fetchGpuStats,
+    enabled: isOpen,
+    refetchInterval: 10000,
+  });
+
+  const selectedModelDetails = useMemo(
+    () => availableModelsData?.models?.find((m) => m.name === selectedModel),
+    [availableModelsData, selectedModel]
+  );
 
   const sessionQueries = useQueries({
     queries: sessionIds.map((id) => ({
@@ -189,6 +214,16 @@ export function CreateAnalysisJobModal({
     [sessionQueries]
   );
 
+  const maxTranscriptTokens = useMemo(() => {
+    let max = 0;
+    for (const s of sessionData) {
+      if (s.transcriptTokenCount && s.transcriptTokenCount > max) {
+        max = s.transcriptTokenCount;
+      }
+    }
+    return max || null;
+  }, [sessionData]);
+
   useEffect(() => {
     if (
       isOpen &&
@@ -203,18 +238,88 @@ export function CreateAnalysisJobModal({
     }
   }, [isOpen, availableModelsData, selectedModel]);
 
+  const recommendedContextSize = useMemo(() => {
+    if (!maxTranscriptTokens) return undefined;
+    const modelMax = selectedModelDetails?.defaultContextSize ?? null;
+    const base = Math.max(4096, maxTranscriptTokens + 2048);
+    const rounded = Math.ceil(base / 256) * 256;
+    return modelMax != null ? Math.min(rounded, modelMax) : rounded;
+  }, [maxTranscriptTokens, selectedModelDetails?.defaultContextSize]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (userTouchedContext) return;
+    if (recommendedContextSize && recommendedContextSize > 0) {
+      setContextSizeInput(String(recommendedContextSize));
+    }
+  }, [isOpen, userTouchedContext, recommendedContextSize]);
+
   useEffect(() => {
     if (isOpen) {
       setPrompt('');
       setValidationError(null);
       setIsTemplatePopoverOpen(false);
       setUseAdvancedStrategy(true); // Reset to default
+      setContextSizeInput('');
+      setUserTouchedContext(false);
+      setVramEstimate(null);
       const timer = setTimeout(() => {
         textAreaRef.current?.focus();
       }, 100);
       return () => clearTimeout(timer);
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!selectedModel || !selectedModelDetails) {
+      setVramEstimate(null);
+      return;
+    }
+    const trimmedContextSize = contextSizeInput.trim();
+    const contextSize = trimmedContextSize
+      ? parseInt(trimmedContextSize, 10)
+      : null;
+    if (
+      trimmedContextSize &&
+      (isNaN(contextSize as number) || (contextSize as number) <= 0)
+    ) {
+      return;
+    }
+    estimateModelVram(selectedModel, contextSize)
+      .then(setVramEstimate)
+      .catch((err) => {
+        console.error('Failed to estimate VRAM:', err);
+        setVramEstimate({
+          model: selectedModel,
+          context_size: contextSize,
+          estimated_vram_bytes: null,
+          estimated_ram_bytes: null,
+          vram_per_token_bytes: null,
+          error: err.message,
+        });
+      });
+  }, [selectedModel, selectedModelDetails, contextSizeInput]);
+
+  const vramWarning = useMemo(() => {
+    if (!vramEstimate?.estimated_vram_bytes || !gpuStats?.available)
+      return null;
+    const totalGpuMemory = gpuStats.gpus[0]?.memory.totalMb * 1024 * 1024 || 0;
+    const estimate = vramEstimate.estimated_vram_bytes;
+    if (estimate > totalGpuMemory) {
+      return {
+        type: 'error' as const,
+        message: `Estimated VRAM (${prettyBytes(estimate)}) exceeds GPU capacity (${prettyBytes(totalGpuMemory)}). This will force CPU offloading and degrade performance.`,
+      };
+    }
+    const percentUsed = (estimate / totalGpuMemory) * 100;
+    if (percentUsed > 90) {
+      return {
+        type: 'warning' as const,
+        message: `Estimated VRAM (${prettyBytes(estimate)}) is very close to GPU capacity (${prettyBytes(totalGpuMemory)}). Consider reducing context size.`,
+      };
+    }
+    return null;
+  }, [vramEstimate, gpuStats]);
 
   const handleSelectTemplate = (templateText: string) => {
     setPrompt(templateText);
@@ -255,6 +360,9 @@ export function CreateAnalysisJobModal({
       prompt,
       modelName: selectedModel,
       useAdvancedStrategy,
+      ...(contextSizeInput
+        ? { contextSize: parseInt(contextSizeInput, 10) }
+        : {}),
     });
   };
 
@@ -427,7 +535,93 @@ export function CreateAnalysisJobModal({
                   </Select.Content>
                 </Select.Root>
               </Box>
+              <Box style={{ minWidth: 160 }}>
+                <Text as="div" size="1" color="gray" mb="1">
+                  Context Size (Optional)
+                </Text>
+                <TextField.Root
+                  type="number"
+                  min="1"
+                  step="1024"
+                  placeholder={`Default (${selectedModelDetails?.defaultContextSize?.toLocaleString() ?? 'auto'})`}
+                  value={contextSizeInput}
+                  onChange={(e) => {
+                    setContextSizeInput(e.target.value);
+                    setUserTouchedContext(true);
+                  }}
+                  disabled={isMutationPending}
+                  style={{ width: '100%' }}
+                />
+              </Box>
             </Flex>
+
+            {vramEstimate && (
+              <Callout.Root
+                size="1"
+                color={vramEstimate.error ? 'gray' : 'blue'}
+              >
+                <Callout.Icon>
+                  <LightningBoltIcon />
+                </Callout.Icon>
+                <Callout.Text>
+                  {vramEstimate.error ? (
+                    <>VRAM estimation unavailable: {vramEstimate.error}</>
+                  ) : vramEstimate.estimated_vram_bytes ? (
+                    <>
+                      VRAM:{' '}
+                      <Strong>
+                        {prettyBytes(vramEstimate.estimated_vram_bytes)}
+                      </Strong>
+                      {vramEstimate.context_size == null && (
+                        <> using model default context</>
+                      )}
+                      {vramEstimate.breakdown &&
+                        vramEstimate.breakdown.weights_vram_bytes +
+                          vramEstimate.breakdown.kv_cache_bytes +
+                          vramEstimate.breakdown.overhead_bytes >
+                          0 && (
+                          <>
+                            {' '}
+                            (
+                            {prettyBytes(
+                              vramEstimate.breakdown.weights_vram_bytes
+                            )}{' '}
+                            weights +{' '}
+                            {prettyBytes(vramEstimate.breakdown.kv_cache_bytes)}{' '}
+                            KV cache +{' '}
+                            {prettyBytes(vramEstimate.breakdown.overhead_bytes)}{' '}
+                            CUDA)
+                          </>
+                        )}
+                      {vramEstimate.estimated_ram_bytes != null &&
+                        vramEstimate.estimated_ram_bytes > 0 && (
+                          <>
+                            {' · '}RAM:{' '}
+                            <Strong>
+                              {prettyBytes(vramEstimate.estimated_ram_bytes)}
+                            </Strong>{' '}
+                            (CPU offload)
+                          </>
+                        )}
+                    </>
+                  ) : (
+                    <>VRAM data unavailable for this model</>
+                  )}
+                </Callout.Text>
+              </Callout.Root>
+            )}
+
+            {vramWarning && (
+              <Callout.Root
+                size="1"
+                color={vramWarning.type === 'error' ? 'red' : 'amber'}
+              >
+                <Callout.Icon>
+                  <InfoCircledIcon />
+                </Callout.Icon>
+                <Callout.Text>{vramWarning.message}</Callout.Text>
+              </Callout.Root>
+            )}
             <Text as="label" size="2">
               <Flex gap="2" align="center">
                 <Checkbox

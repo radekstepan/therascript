@@ -11,6 +11,7 @@ export const analysisRequestSchema = z.object({
     .max(5000, 'Prompt too long'),
   modelName: z.string().optional(),
   useAdvancedStrategy: z.boolean().optional(),
+  contextSize: z.number().int().positive().optional(),
 });
 
 export type AnalysisRequest = z.infer<typeof analysisRequestSchema>;

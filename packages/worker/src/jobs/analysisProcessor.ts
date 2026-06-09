@@ -15,9 +15,10 @@ import type {
   IntermediateSummary,
 } from '@therascript/domain';
 import {
-  streamLlmChat,
+  streamLlmChatDetailed,
   calculateTokenCount,
   type StreamResult,
+  type LlmChatChunk,
 } from '@therascript/services';
 import config from '@therascript/config';
 import { publishStreamEvent } from '../services/streamPublisher.js';
@@ -281,7 +282,7 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
         let mapStreamResult: StreamResult = {};
 
         const mapStartTime = Date.now();
-        const mapGenerator = streamLlmChat(mapMessages, {
+        const mapGenerator = streamLlmChatDetailed(mapMessages, {
           model: jobRecord?.model_name || undefined,
           contextSize: jobRecord?.context_size || undefined,
           abortSignal: abortController.signal,
@@ -290,9 +291,12 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
         });
         let iterResult = await mapGenerator.next();
         while (!iterResult.done) {
-          const chunk = iterResult.value;
-          summaryText += chunk;
-          chunkBuffer += chunk;
+          const chunk: LlmChatChunk = iterResult.value;
+          const contentChunk = chunk.content ?? '';
+          const thinkingChunk = chunk.thinking ?? '';
+          const visible = contentChunk || thinkingChunk;
+          summaryText += visible;
+          chunkBuffer += visible;
 
           if (Date.now() - lastPublish > 100) {
             publishStreamEvent(jobId, {
@@ -328,7 +332,11 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
           });
         }
 
-        if (!summaryText) throw new Error('LLM returned an empty summary.');
+        if (!summaryText.trim()) {
+          const detail = `LLM returned an empty summary for session ${summaryTask.session_id} (model=${jobRecord?.model_name ?? 'unknown'}, promptTokens=${mapStreamResult.promptTokens ?? 0}, completionTokens=${mapStreamResult.completionTokens ?? 0}, thinkingTokens=${mapStreamResult.thinkingTokens ?? 0}, durationMs=${mapDuration}).`;
+          console.error(`[Analysis Worker ${jobId}] ${detail}`);
+          throw new Error(detail);
+        }
 
         try {
           usageRepository.insertUsageLog({
@@ -481,7 +489,7 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
     const reduceStartTime = Date.now();
 
     try {
-      const reduceGenerator = streamLlmChat(reduceMessages, {
+      const reduceGenerator = streamLlmChatDetailed(reduceMessages, {
         model: jobRecord?.model_name || undefined,
         contextSize: jobRecord?.context_size || undefined,
         abortSignal: reduceAbortController.signal,
@@ -493,10 +501,11 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
       let reduceIterResult = await reduceGenerator.next();
 
       while (!reduceIterResult.done) {
-        const chunk = reduceIterResult.value;
-        if (chunk) {
-          finalResult += chunk;
-          reduceBuffer += chunk;
+        const chunk: LlmChatChunk = reduceIterResult.value;
+        const visible = (chunk.content ?? '') || (chunk.thinking ?? '');
+        if (visible) {
+          finalResult += visible;
+          reduceBuffer += visible;
         }
 
         if (Date.now() - lastReducePublish > 100 && reduceBuffer) {
@@ -529,7 +538,7 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
 
       reduceStreamResult = reduceIterResult.value as StreamResult;
       console.log(
-        `[Analysis Worker ${jobId}] Reduce stream complete. Result tokens: P=${reduceStreamResult.promptTokens}, C=${reduceStreamResult.completionTokens}`
+        `[Analysis Worker ${jobId}] Reduce stream complete. Result tokens: P=${reduceStreamResult.promptTokens}, C=${reduceStreamResult.completionTokens}, T=${reduceStreamResult.thinkingTokens ?? 0}`
       );
     } catch (streamError: any) {
       console.error(
@@ -548,7 +557,11 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
       });
     }
 
-    if (!finalResult) throw new Error('LLM returned an empty final result.');
+    if (!finalResult.trim()) {
+      const detail = `LLM returned an empty final result (model=${jobRecord?.model_name ?? 'unknown'}, promptTokens=${reduceStreamResult.promptTokens ?? 0}, completionTokens=${reduceStreamResult.completionTokens ?? 0}, thinkingTokens=${reduceStreamResult.thinkingTokens ?? 0}, durationMs=${reduceDuration}).`;
+      console.error(`[Analysis Worker ${jobId}] ${detail}`);
+      throw new Error(detail);
+    }
 
     try {
       usageRepository.insertUsageLog({

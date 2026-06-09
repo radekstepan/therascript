@@ -69,6 +69,7 @@ const CreateAnalysisJobBodySchema = t.Object({
   }),
   modelName: t.Optional(t.String()),
   useAdvancedStrategy: t.Optional(t.Boolean()),
+  contextSize: t.Optional(t.Number({ minimum: 1 })),
 });
 
 const JobIdParamSchema = t.Object({
