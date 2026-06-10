@@ -9,7 +9,14 @@ interface StreamEvent {
   jobId: number;
   timestamp: number;
   phase: 'map' | 'reduce' | 'strategy' | 'snapshot' | 'status';
-  type: 'start' | 'token' | 'end' | 'error' | 'status' | 'snapshot';
+  type:
+    | 'start'
+    | 'token'
+    | 'thinking'
+    | 'end'
+    | 'error'
+    | 'status'
+    | 'snapshot';
   sessionId?: number;
   summaryId?: number;
   delta?: string;
@@ -26,6 +33,10 @@ interface StreamEvent {
 export function useAnalysisStream(jobId: number | null) {
   const [mapLogs, setMapLogs] = useState<Record<number, string>>({});
   const [reduceLog, setReduceLog] = useState('');
+  const [mapThinkingLogs, setMapThinkingLogs] = useState<
+    Record<number, string>
+  >({});
+  const [reduceThinkingLog, setReduceThinkingLog] = useState('');
   const [isConnected, setIsConnected] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [mapPhaseStartTime, setMapPhaseStartTime] = useState<
@@ -65,6 +76,8 @@ export function useAnalysisStream(jobId: number | null) {
 
   const mapLogsRef = useRef<Record<number, string>>({});
   const reduceLogRef = useRef('');
+  const mapThinkingLogsRef = useRef<Record<number, string>>({});
+  const reduceThinkingLogRef = useRef('');
   const mapPhaseStartTimeRef = useRef<Record<number, number>>({});
   const reducePhaseStartTimeRef = useRef<number | null>(null);
   const mapPromptTokensRef = useRef<Record<number, number>>({});
@@ -74,6 +87,8 @@ export function useAnalysisStream(jobId: number | null) {
     if (!jobId) {
       setMapLogs({});
       setReduceLog('');
+      setMapThinkingLogs({});
+      setReduceThinkingLog('');
       setIsConnected(false);
       setStreamError(null);
       setMapPhaseStartTime({});
@@ -89,6 +104,8 @@ export function useAnalysisStream(jobId: number | null) {
       });
       mapLogsRef.current = {};
       reduceLogRef.current = '';
+      mapThinkingLogsRef.current = {};
+      reduceThinkingLogRef.current = '';
       mapPhaseStartTimeRef.current = {};
       reducePhaseStartTimeRef.current = null;
       mapPromptTokensRef.current = {};
@@ -99,6 +116,8 @@ export function useAnalysisStream(jobId: number | null) {
     // Reset logs on new job selection
     setMapLogs({});
     setReduceLog('');
+    setMapThinkingLogs({});
+    setReduceThinkingLog('');
     setStreamError(null);
     setMapPhaseStartTime({});
     setReducePhaseStartTime(null);
@@ -113,6 +132,8 @@ export function useAnalysisStream(jobId: number | null) {
     });
     mapLogsRef.current = {};
     reduceLogRef.current = '';
+    mapThinkingLogsRef.current = {};
+    reduceThinkingLogRef.current = '';
     mapPhaseStartTimeRef.current = {};
     reducePhaseStartTimeRef.current = null;
     mapPromptTokensRef.current = {};
@@ -187,6 +208,20 @@ export function useAnalysisStream(jobId: number | null) {
               duration: undefined,
               tokensPerSecond: undefined,
             });
+          }
+        } else if (data.type === 'thinking') {
+          if (data.phase === 'map' && data.summaryId && data.delta) {
+            const newText =
+              (mapThinkingLogsRef.current[data.summaryId!] || '') + data.delta;
+            mapThinkingLogsRef.current[data.summaryId!] = newText;
+            setMapThinkingLogs((prev) => ({
+              ...prev,
+              [data.summaryId!]: newText,
+            }));
+          } else if (data.phase === 'reduce' && data.delta) {
+            const newText = reduceThinkingLogRef.current + data.delta;
+            reduceThinkingLogRef.current = newText;
+            setReduceThinkingLog((prev) => prev + data.delta!);
           }
         } else if (data.type === 'token') {
           if (data.phase === 'map' && data.summaryId && data.delta) {
@@ -295,6 +330,8 @@ export function useAnalysisStream(jobId: number | null) {
       setIsConnected(false);
       mapLogsRef.current = {};
       reduceLogRef.current = '';
+      mapThinkingLogsRef.current = {};
+      reduceThinkingLogRef.current = '';
       mapPhaseStartTimeRef.current = {};
       reducePhaseStartTimeRef.current = null;
       mapPromptTokensRef.current = {};
@@ -305,6 +342,8 @@ export function useAnalysisStream(jobId: number | null) {
   return {
     mapLogs,
     reduceLog,
+    mapThinkingLogs,
+    reduceThinkingLog,
     mapMetrics,
     reduceMetrics,
     isConnected,

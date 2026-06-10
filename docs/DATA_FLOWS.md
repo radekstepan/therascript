@@ -77,23 +77,32 @@ This document details the step-by-step data flows for the core operations of the
     *   User selects sessions and provides a prompt in `CreateAnalysisJobModal.tsx`.
     *   `POST /api/analysis-jobs` creates a job record (`analysis_jobs` table).
     *   **Strategy Generation:** The API asks the LLM to generate a JSON strategy (Intermediate Question + Final Instructions).
+    *   **LLM Param Snapshot:** At job-creation time the API reads the current "Set Model" configuration (`temperature`, `top_p`, `repeat_penalty`, `num_gpu_layers`, `thinking_budget`) from `activeModelService` and persists them onto the `analysis_jobs` row. This is necessary because the worker runs as a separate process with its own empty in-memory state and cannot read the API's live config.
     *   **File:** `packages/api/src/api/analysisHandler.ts`.
 
 2.  **Map Phase (Worker)**
     *   Worker picks up the job (`analysisProcessor.ts`).
     *   Iterates through every selected session.
     *   **Input:** Session Transcript + Intermediate Question (from Strategy).
-    *   **Output:** Generates an `IntermediateSummary` using the LLM.
+    *   **Output:** Generates an `IntermediateSummary` using the LLM, honouring the snapshotted params from the job record.
+    *   **Completion Token Cap:** Capped at **25% of `context_size`** (e.g. 8,192 tokens on a 32k context). This gives thinking models enough headroom for their reasoning chain while preventing runaway generation across many sessions. Falls back to 25% of 8,192 if `context_size` is null.
     *   **Storage:** Saves summary to `intermediate_summaries` table.
 
 3.  **Reduce Phase (Worker)**
     *   Worker aggregates all successful intermediate summaries.
     *   **Input:** All Summaries + Final Synthesis Instructions (from Strategy).
     *   **Output:** Generates final answer using the LLM.
+    *   **Completion Token Cap:** Capped at **40% of `context_size`** — more headroom than Map since the synthesis answer is expected to be longer (e.g. 13,107 tokens on a 32k context).
     *   **Storage:** Updates `analysis_jobs` with `final_result` and `status: completed`.
 
-4.  **Real-time Updates (Redis Pub/Sub)**
-    *   Throughout Map and Reduce, the worker publishes token chunks to a Redis channel.
+4.  **Thinking Token Streaming**
+    *   Both Map and Reduce phases detect `thinking` chunks from the LLM (native `reasoning_content` field or inline `<think>…</think>` tags).
+    *   Thinking content is published to Redis as separate `type: 'thinking'` stream events, distinct from `type: 'token'` content events.
+    *   The UI hook `useAnalysisStream.ts` accumulates thinking tokens in `mapThinkingLogs` / `reduceThinkingLog` state, separate from the main text logs.
+    *   The `<think>…</think>` envelope is stripped before the emptiness guard so a thinking-only LLM output does not cause a false "empty result" error.
+
+5.  **Real-time Updates (Redis Pub/Sub)**
+    *   Throughout Map and Reduce, the worker publishes token and thinking chunks to a Redis channel.
     *   The UI listens via SSE (`/api/analysis-jobs/:id/stream`) to display live progress.
 
 ## 5. Transcription Queue Reset

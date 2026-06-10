@@ -335,6 +335,11 @@ export interface AnalysisJob {
   completed_at: number | null; // UNIX Milliseconds
   model_name: string | null;
   context_size: number | null;
+  thinking_budget: number | null;
+  temperature: number | null;
+  top_p: number | null;
+  repeat_penalty: number | null;
+  num_gpu_layers: number | null;
   summaries?: IntermediateSummaryWithSessionName[];
   strategy?: AnalysisStrategy | null; // Parsed strategy object from API
 }

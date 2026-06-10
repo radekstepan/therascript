@@ -260,6 +260,11 @@ export interface AnalysisJob {
   model_name: string | null;
   context_size: number | null;
   strategy_json: string | null;
+  thinking_budget: number | null;
+  temperature: number | null;
+  top_p: number | null;
+  repeat_penalty: number | null;
+  num_gpu_layers: number | null;
 }
 
 export interface IntermediateSummary {

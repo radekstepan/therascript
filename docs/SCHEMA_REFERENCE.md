@@ -6,7 +6,7 @@ This document outlines the data structures used in SQLite (primary storage) and 
 
 Defined in `src/sqliteService.ts`. Migrations are handled programmatically via `user_version` pragma.
 
-**Current Schema Version:** 12
+**Current Schema Version:** 15
 
 ### Core Tables
 
@@ -96,9 +96,16 @@ Tracks multi-session analysis requests.
 | `final_result` | TEXT | NULL | Synthesized output |
 | `error_message` | TEXT | NULL | Error details if failed |
 | `model_name` | TEXT | NULL | LLM model used |
-| `context_size` | INTEGER | NULL | Context window size |
+| `context_size` | INTEGER | NULL | Context window size used to load the model |
+| `thinking_budget` | INTEGER | NULL | Snapshotted `reasoning_budget` for thinking models (v15) |
+| `temperature` | REAL | NULL | Snapshotted sampling temperature (v15) |
+| `top_p` | REAL | NULL | Snapshotted nucleus sampling threshold (v15) |
+| `repeat_penalty` | REAL | NULL | Snapshotted repeat/presence penalty (v15) |
+| `num_gpu_layers` | INTEGER | NULL | Snapshotted GPU offload layer count (v15) |
 | `created_at` | INTEGER | NOT NULL | Creation timestamp |
 | `completed_at` | INTEGER | NULL | Completion timestamp |
+
+> **Why snapshot LLM params?** The worker is a separate process with its own empty in-memory state. Persisting these values at job-creation time (from `activeModelService` in the API process) ensures the worker honours the user's "Set Model" configuration for both the Map and Reduce phases. See `analysisHandler.ts` → `llmParams` and `DATA_FLOWS.md §4`.
 
 **Indices:** `idx_analysis_jobs_status`, `idx_analysis_jobs_created_at`
 

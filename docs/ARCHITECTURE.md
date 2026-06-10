@@ -261,16 +261,61 @@ Worker                    Redis                       API                      U
          1. Generate              2. Map Phase    3. Reduce Phase
             Strategy              (per session)   (aggregate)
               │                          │              │
-              ▼                          ▼              ▼
+              │                     token/thinking  token/thinking
+              ▼                       events          events
          ┌──────────────────────────────────────────────────┐
-         │           Redis Pub/Sub (progress updates)       │
+         │     Redis Pub/Sub (type: token | thinking)       │
          └──────────────────────────────────────────────────┘
                               │
                               ▼
                          ┌──────┐
-                         │  UI  │  (SSE streaming)
+                         │  UI  │  (SSE streaming — content + thinking displayed separately)
                          └──────┘
 ```
+
+#### LLM Parameter Snapshotting
+
+The API process and the worker process have **separate in-memory states**. When an analysis job is created, `analysisHandler.ts` reads the current "Set Model" configuration from `activeModelService` and persists it onto the `analysis_jobs` DB row:
+
+```
+activeModelService (API process)
+  temperature, top_p, repeat_penalty,
+  num_gpu_layers, thinking_budget
+          │
+          │  snapshotted at POST /api/analysis-jobs
+          ▼
+  analysis_jobs (SQLite)
+          │
+          │  read by worker at job start
+          ▼
+  analysisProcessor.ts → streamLlmChatDetailed()
+```
+
+This is the same pattern used for `model_name` and `context_size`, extended in schema migration **v15**.
+
+#### Completion Token Budget
+
+`max_tokens` (the per-request completion cap sent to LM Studio) is derived at runtime from the job's `context_size` — **not** hardcoded — so the budget scales correctly across all model sizes and thinking models:
+
+| Phase | Formula | Example (32k ctx) |
+|-------|---------|-------------------|
+| **Map** | `round(context_size × 0.25)` | 8,192 tokens |
+| **Reduce** | `round(context_size × 0.40)` | 13,107 tokens |
+
+Fallback when `context_size` is null: 8,192 is used as the base. The LLM backend additionally enforces an absolute ceiling of `context_size − prompt_tokens`.
+
+> **Relationship to `thinking_budget`:** `thinking_budget` maps to `reasoning_budget` in the LM Studio request and controls how many tokens a thinking model may spend on internal reasoning. `max_tokens` caps the **total** output (thinking + response combined). Always set `max_tokens` ≥ `thinking_budget` + expected answer length.
+
+#### Thinking Token Streaming
+
+Both phases detect thinking chunks (native `reasoning_content` field or inline `<think>…</think>` tags from the LLM) and publish them on a separate Redis event type:
+
+| Event `type` | Content | UI destination |
+|---|---|---|
+| `token` | Visible answer text | `mapLogs` / `reduceLog` |
+| `thinking` | Model reasoning text | `mapThinkingLogs` / `reduceThinkingLog` |
+
+The `<think>…</think>` envelope is stripped before the emptiness guard so a thinking-only response does not falsely trigger an "empty result" error.
 
 ## Port Reference
 

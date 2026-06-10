@@ -29,6 +29,13 @@ import type {
 import { cleanLlmOutput } from '@therascript/services';
 import { createJobSubscriber } from '../services/streamSubscriber.js';
 import {
+  getConfiguredTemperature,
+  getConfiguredTopP,
+  getConfiguredRepeatPenalty,
+  getConfiguredNumGpuLayers,
+  getConfiguredThinkingBudget,
+} from '../services/activeModelService.js';
+import {
   type AnalysisRequest,
   analysisRequestSchema,
 } from '@therascript/domain';
@@ -344,6 +351,17 @@ export const createAnalysisJobHandler = async ({
 
     const placeholderShortPrompt = `Analysis of "${prompt.substring(0, 30)}..." (summarizing)`;
 
+    // Snapshot the user's "Set Model" params at job-creation time so the worker
+    // (a separate process with its own empty in-memory state) can honor them
+    // when it streams the Map and Reduce phases.
+    const llmParams = {
+      thinkingBudget: getConfiguredThinkingBudget(),
+      temperature: getConfiguredTemperature(),
+      topP: getConfiguredTopP(),
+      repeatPenalty: getConfiguredRepeatPenalty(),
+      numGpuLayers: getConfiguredNumGpuLayers(),
+    };
+
     let newJob: AnalysisJob;
 
     if (useAdvancedStrategy) {
@@ -354,7 +372,8 @@ export const createAnalysisJobHandler = async ({
         modelName || null,
         contextSizeToUse,
         null,
-        'generating_strategy'
+        'generating_strategy',
+        llmParams
       );
       // Short prompt generation is handled inside generateStrategyAndUpdateJob
       // (after model load, before strategy stream) to avoid a concurrent
@@ -373,7 +392,8 @@ export const createAnalysisJobHandler = async ({
         modelName || null,
         contextSizeToUse,
         null,
-        'pending'
+        'pending',
+        llmParams
       );
       void processAnalysisJob(newJob.id);
       void generateShortPromptInBackground(newJob.id, prompt, modelName);

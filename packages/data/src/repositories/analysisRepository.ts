@@ -2,8 +2,8 @@ import { db, run, all, get } from '@therascript/db';
 import type { AnalysisJob, IntermediateSummary } from '@therascript/domain';
 
 const insertJobSql = `
-    INSERT INTO analysis_jobs (original_prompt, short_prompt, status, created_at, model_name, context_size, strategy_json) 
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO analysis_jobs (original_prompt, short_prompt, status, created_at, model_name, context_size, strategy_json, thinking_budget, temperature, top_p, repeat_penalty, num_gpu_layers)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `;
 const selectJobByIdSql = 'SELECT * FROM analysis_jobs WHERE id = ?';
 const selectAllJobsSql = 'SELECT * FROM analysis_jobs ORDER BY created_at DESC';
@@ -51,7 +51,14 @@ export const analysisRepository = {
     modelName: string | null,
     contextSize: number | null,
     strategyJson: string | null,
-    initialStatus: AnalysisJob['status'] = 'pending'
+    initialStatus: AnalysisJob['status'] = 'pending',
+    llmParams: {
+      thinkingBudget?: number | null;
+      temperature?: number | null;
+      topP?: number | null;
+      repeatPenalty?: number | null;
+      numGpuLayers?: number | null;
+    } = {}
   ): AnalysisJob => {
     try {
       const createdAt = Date.now();
@@ -64,7 +71,12 @@ export const analysisRepository = {
           createdAt,
           modelName,
           contextSize,
-          strategyJson
+          strategyJson,
+          llmParams.thinkingBudget ?? null,
+          llmParams.temperature ?? null,
+          llmParams.topP ?? null,
+          llmParams.repeatPenalty ?? null,
+          llmParams.numGpuLayers ?? null
         );
         const jobId = jobInfo.lastInsertRowid as number;
 

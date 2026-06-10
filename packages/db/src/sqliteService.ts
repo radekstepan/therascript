@@ -95,7 +95,7 @@ export const schema = `
 `;
 
 // --- NEW MIGRATION LOGIC ---
-export const LATEST_SCHEMA_VERSION = 14;
+export const LATEST_SCHEMA_VERSION = 15;
 
 // --- NEW SYSTEM PROMPTS ---
 export const SYSTEM_PROMPT_TEMPLATES = {
@@ -527,6 +527,48 @@ function runMigrations(dbInstance: DB) {
         dbInstance.pragma(`user_version = 14`);
         currentVersion = 14;
         console.log('[db Migrator] Version 14 applied.');
+      }
+
+      // NEW MIGRATION: Version 15 to add LLM sampling/loadout params to analysis_jobs
+      // so the worker (a separate process) can honor what the user configured in the
+      // "Set Model" panel of the API process. Mirrors how model_name and context_size
+      // are already persisted.
+      if (currentVersion < 15) {
+        console.log('[db Migrator] Applying version 15...');
+        const analysisJobColumns = dbInstance.pragma(
+          'table_info(analysis_jobs)'
+        ) as { name: string }[];
+        const addColumnIfMissing = (column: string, ddl: string) => {
+          if (!analysisJobColumns.some((col) => col.name === column)) {
+            console.log(
+              `[db Migrator V15] Adding "${column}" to analysis_jobs...`
+            );
+            dbInstance.exec(ddl);
+          }
+        };
+        addColumnIfMissing(
+          'thinking_budget',
+          'ALTER TABLE analysis_jobs ADD COLUMN thinking_budget INTEGER'
+        );
+        addColumnIfMissing(
+          'temperature',
+          'ALTER TABLE analysis_jobs ADD COLUMN temperature REAL'
+        );
+        addColumnIfMissing(
+          'top_p',
+          'ALTER TABLE analysis_jobs ADD COLUMN top_p REAL'
+        );
+        addColumnIfMissing(
+          'repeat_penalty',
+          'ALTER TABLE analysis_jobs ADD COLUMN repeat_penalty REAL'
+        );
+        addColumnIfMissing(
+          'num_gpu_layers',
+          'ALTER TABLE analysis_jobs ADD COLUMN num_gpu_layers INTEGER'
+        );
+        dbInstance.pragma(`user_version = 15`);
+        currentVersion = 15;
+        console.log('[db Migrator] Version 15 applied.');
       }
     })();
     console.log(

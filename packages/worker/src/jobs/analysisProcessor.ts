@@ -276,36 +276,75 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
 
         let summaryText = '';
         let chunkBuffer = '';
+        let thinkingBuffer = '';
+        let hasOpenThinkingBlock = false;
         let lastPublish = Date.now();
         let lastCancelCheck = Date.now();
         const abortController = new AbortController();
         let mapStreamResult: StreamResult = {};
 
         const mapStartTime = Date.now();
+        // Cap map-phase completions at 25% of context size (covers thinking
+        // overhead + a concise summary without allowing runaway generation).
+        const mapContextSize = jobRecord?.context_size ?? 8192;
+        const mapMaxCompletionTokens = Math.round(mapContextSize * 0.25);
         const mapGenerator = streamLlmChatDetailed(mapMessages, {
           model: jobRecord?.model_name || undefined,
           contextSize: jobRecord?.context_size || undefined,
           abortSignal: abortController.signal,
           llamaCppBaseUrl: config.llm.baseURL,
-          maxCompletionTokens: 500,
+          temperature: jobRecord?.temperature ?? undefined,
+          topP: jobRecord?.top_p ?? undefined,
+          repeatPenalty: jobRecord?.repeat_penalty ?? undefined,
+          numGpuLayers: jobRecord?.num_gpu_layers ?? undefined,
+          thinkingBudget: jobRecord?.thinking_budget ?? undefined,
+          maxCompletionTokens: mapMaxCompletionTokens,
         });
         let iterResult = await mapGenerator.next();
         while (!iterResult.done) {
           const chunk: LlmChatChunk = iterResult.value;
           const contentChunk = chunk.content ?? '';
           const thinkingChunk = chunk.thinking ?? '';
-          const visible = contentChunk || thinkingChunk;
-          summaryText += visible;
-          chunkBuffer += visible;
+
+          if (thinkingChunk) {
+            if (!hasOpenThinkingBlock) {
+              summaryText += '<think>';
+              chunkBuffer += '<think>';
+              hasOpenThinkingBlock = true;
+            }
+            summaryText += thinkingChunk;
+            thinkingBuffer += thinkingChunk;
+          }
+
+          if (contentChunk) {
+            if (hasOpenThinkingBlock) {
+              summaryText += '</think>';
+              chunkBuffer += '</think>';
+              hasOpenThinkingBlock = false;
+            }
+            summaryText += contentChunk;
+            chunkBuffer += contentChunk;
+          }
 
           if (Date.now() - lastPublish > 100) {
-            publishStreamEvent(jobId, {
-              phase: 'map',
-              type: 'token',
-              summaryId: summaryTask.id,
-              delta: chunkBuffer,
-            });
-            chunkBuffer = '';
+            if (chunkBuffer) {
+              publishStreamEvent(jobId, {
+                phase: 'map',
+                type: 'token',
+                summaryId: summaryTask.id,
+                delta: chunkBuffer,
+              });
+              chunkBuffer = '';
+            }
+            if (thinkingBuffer) {
+              publishStreamEvent(jobId, {
+                phase: 'map',
+                type: 'thinking',
+                summaryId: summaryTask.id,
+                delta: thinkingBuffer,
+              });
+              thinkingBuffer = '';
+            }
             lastPublish = Date.now();
           }
 
@@ -320,6 +359,11 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
 
           iterResult = await mapGenerator.next();
         }
+        if (hasOpenThinkingBlock) {
+          summaryText += '</think>';
+          chunkBuffer += '</think>';
+          hasOpenThinkingBlock = false;
+        }
         mapStreamResult = iterResult.value as StreamResult;
         const mapDuration = Date.now() - mapStartTime;
 
@@ -332,7 +376,23 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
           });
         }
 
-        if (!summaryText.trim()) {
+        if (thinkingBuffer) {
+          publishStreamEvent(jobId, {
+            phase: 'map',
+            type: 'thinking',
+            summaryId: summaryTask.id,
+            delta: thinkingBuffer,
+          });
+        }
+
+        // Strip the <think>…</think> envelope when checking for emptiness so a
+        // thinking-only output (model thought but produced no answer text)
+        // doesn't get rejected.
+        const strippedMap = summaryText.replace(
+          /<think>[\s\S]*?<\/think>/g,
+          ''
+        );
+        if (!strippedMap.trim()) {
           const detail = `LLM returned an empty summary for session ${summaryTask.session_id} (model=${jobRecord?.model_name ?? 'unknown'}, promptTokens=${mapStreamResult.promptTokens ?? 0}, completionTokens=${mapStreamResult.completionTokens ?? 0}, thinkingTokens=${mapStreamResult.thinkingTokens ?? 0}, durationMs=${mapDuration}).`;
           console.error(`[Analysis Worker ${jobId}] ${detail}`);
           throw new Error(detail);
@@ -481,6 +541,8 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
 
     let finalResult = '';
     let reduceBuffer = '';
+    let reduceThinkingBuffer = '';
+    let hasOpenReduceThinkingBlock = false;
     let lastReducePublish = Date.now();
     let lastReduceCancelCheck = Date.now();
     const reduceAbortController = new AbortController();
@@ -489,12 +551,21 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
     const reduceStartTime = Date.now();
 
     try {
+      // Cap reduce-phase completions at 40% of context size — more headroom
+      // than map since the synthesis answer is expected to be longer.
+      const reduceContextSize = jobRecord?.context_size ?? 8192;
+      const reduceMaxCompletionTokens = Math.round(reduceContextSize * 0.4);
       const reduceGenerator = streamLlmChatDetailed(reduceMessages, {
         model: jobRecord?.model_name || undefined,
         contextSize: jobRecord?.context_size || undefined,
         abortSignal: reduceAbortController.signal,
         llamaCppBaseUrl: config.llm.baseURL,
-        maxCompletionTokens: 2000,
+        temperature: jobRecord?.temperature ?? undefined,
+        topP: jobRecord?.top_p ?? undefined,
+        repeatPenalty: jobRecord?.repeat_penalty ?? undefined,
+        numGpuLayers: jobRecord?.num_gpu_layers ?? undefined,
+        thinkingBudget: jobRecord?.thinking_budget ?? undefined,
+        maxCompletionTokens: reduceMaxCompletionTokens,
       });
 
       console.log(`[Analysis Worker ${jobId}] Starting reduce phase stream...`);
@@ -502,19 +573,46 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
 
       while (!reduceIterResult.done) {
         const chunk: LlmChatChunk = reduceIterResult.value;
-        const visible = (chunk.content ?? '') || (chunk.thinking ?? '');
-        if (visible) {
-          finalResult += visible;
-          reduceBuffer += visible;
+        const contentChunk = chunk.content ?? '';
+        const thinkingChunk = chunk.thinking ?? '';
+
+        if (thinkingChunk) {
+          if (!hasOpenReduceThinkingBlock) {
+            finalResult += '<think>';
+            reduceBuffer += '<think>';
+            hasOpenReduceThinkingBlock = true;
+          }
+          finalResult += thinkingChunk;
+          reduceThinkingBuffer += thinkingChunk;
         }
 
-        if (Date.now() - lastReducePublish > 100 && reduceBuffer) {
-          publishStreamEvent(jobId, {
-            phase: 'reduce',
-            type: 'token',
-            delta: reduceBuffer,
-          });
-          reduceBuffer = '';
+        if (contentChunk) {
+          if (hasOpenReduceThinkingBlock) {
+            finalResult += '</think>';
+            reduceBuffer += '</think>';
+            hasOpenReduceThinkingBlock = false;
+          }
+          finalResult += contentChunk;
+          reduceBuffer += contentChunk;
+        }
+
+        if (Date.now() - lastReducePublish > 100) {
+          if (reduceBuffer) {
+            publishStreamEvent(jobId, {
+              phase: 'reduce',
+              type: 'token',
+              delta: reduceBuffer,
+            });
+            reduceBuffer = '';
+          }
+          if (reduceThinkingBuffer) {
+            publishStreamEvent(jobId, {
+              phase: 'reduce',
+              type: 'thinking',
+              delta: reduceThinkingBuffer,
+            });
+            reduceThinkingBuffer = '';
+          }
           lastReducePublish = Date.now();
         }
 
@@ -534,6 +632,12 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
         }
 
         reduceIterResult = await reduceGenerator.next();
+      }
+
+      if (hasOpenReduceThinkingBlock) {
+        finalResult += '</think>';
+        reduceBuffer += '</think>';
+        hasOpenReduceThinkingBlock = false;
       }
 
       reduceStreamResult = reduceIterResult.value as StreamResult;
@@ -557,7 +661,18 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
       });
     }
 
-    if (!finalResult.trim()) {
+    if (reduceThinkingBuffer) {
+      publishStreamEvent(jobId, {
+        phase: 'reduce',
+        type: 'thinking',
+        delta: reduceThinkingBuffer,
+      });
+    }
+
+    // Strip the <think>…</think> envelope when checking for emptiness so a
+    // thinking-only output doesn't get rejected.
+    const strippedReduce = finalResult.replace(/<think>[\s\S]*?<\/think>/g, '');
+    if (!strippedReduce.trim()) {
       const detail = `LLM returned an empty final result (model=${jobRecord?.model_name ?? 'unknown'}, promptTokens=${reduceStreamResult.promptTokens ?? 0}, completionTokens=${reduceStreamResult.completionTokens ?? 0}, thinkingTokens=${reduceStreamResult.thinkingTokens ?? 0}, durationMs=${reduceDuration}).`;
       console.error(`[Analysis Worker ${jobId}] ${detail}`);
       throw new Error(detail);

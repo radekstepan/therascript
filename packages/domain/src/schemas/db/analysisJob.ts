@@ -21,6 +21,11 @@ export const analysisJobSchema = z.object({
   model_name: z.string().nullable(),
   context_size: z.number().int().nonnegative().nullable(),
   strategy_json: z.string().nullable(),
+  thinking_budget: z.number().int().nullable(),
+  temperature: z.number().nullable(),
+  top_p: z.number().nullable(),
+  repeat_penalty: z.number().nullable(),
+  num_gpu_layers: z.number().int().nullable(),
 });
 
 export type AnalysisJobRow = z.infer<typeof analysisJobSchema>;

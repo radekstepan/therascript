@@ -320,6 +320,11 @@ describe('Database Entity Schemas', () => {
         model_name: 'llama3',
         context_size: 8192,
         strategy_json: null,
+        thinking_budget: 1024,
+        temperature: 0.7,
+        top_p: 0.9,
+        repeat_penalty: 1.1,
+        num_gpu_layers: null,
       });
       expect(result.success).toBe(true);
     });
@@ -348,6 +353,11 @@ describe('Database Entity Schemas', () => {
           model_name: null,
           context_size: null,
           strategy_json: null,
+          thinking_budget: null,
+          temperature: null,
+          top_p: null,
+          repeat_penalty: null,
+          num_gpu_layers: null,
         });
         expect(result.success).toBe(true);
       }
