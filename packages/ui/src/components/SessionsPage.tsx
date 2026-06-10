@@ -1,7 +1,7 @@
 // packages/ui/src/components/SessionsPage.tsx
 import React, { useMemo, useState } from 'react';
 import { SessionFilters } from './SessionsPage/SessionFilters';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -50,10 +50,17 @@ export function SessionsPage() {
   const [isAnalysisModalOpen, setIsAnalysisModalOpen] = useState(false);
   // --- END NEW STATE ---
 
-  // Filter state
-  const [filterClient, setFilterClient] = useState('');
-  const [filterType, setFilterType] = useState('');
-  const [filterTherapy, setFilterTherapy] = useState('');
+  // Filter state — backed by URL search params so it survives back-navigation.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const filterClient = searchParams.get('client') || '';
+  const filterType = searchParams.get('type') || '';
+  const filterTherapy = searchParams.get('therapy') || '';
+  const updateFilter = (key: string, value: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (value) next.set(key, value);
+    else next.delete(key);
+    setSearchParams(next, { replace: true });
+  };
 
   const {
     data: sessions,
@@ -256,9 +263,9 @@ export function SessionsPage() {
           filterClient={filterClient}
           filterType={filterType}
           filterTherapy={filterTherapy}
-          onClientChange={setFilterClient}
-          onTypeChange={setFilterType}
-          onTherapyChange={setFilterTherapy}
+          onClientChange={(v) => updateFilter('client', v)}
+          onTypeChange={(v) => updateFilter('type', v)}
+          onTherapyChange={(v) => updateFilter('therapy', v)}
         />
 
         {filteredSessions.length > 0 ? (

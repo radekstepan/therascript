@@ -57,19 +57,28 @@ import { cn } from '../../utils';
 export function LandingPage() {
   const setToast = useSetAtom(toastMessageAtom);
   const queryClient = useQueryClient();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const activeSearchQuery = searchParams.get('q') || '';
+  const clientFilter = searchParams.get('client') || '';
   const navigate = useNavigate();
   const activeChatId = useAtomValue(activeChatIdAtom);
 
-  const [clientFilter, setClientFilter] = useState('');
+  const setClientFilter = useCallback(
+    (value: string) => {
+      const next = new URLSearchParams(searchParams);
+      if (value) next.set('client', value);
+      else next.delete('client');
+      setSearchParams(next, { replace: true });
+    },
+    [searchParams, setSearchParams]
+  );
 
   // --- FIX: Reset client filter when search is cleared ---
   useEffect(() => {
-    if (!activeSearchQuery) {
+    if (!activeSearchQuery && clientFilter) {
       setClientFilter('');
     }
-  }, [activeSearchQuery]);
+  }, [activeSearchQuery, clientFilter, setClientFilter]);
   // --- END FIX ---
 
   // Session states
