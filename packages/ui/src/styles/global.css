@@ -426,3 +426,58 @@ button[class*='rt-IconButton']:not(:disabled):hover {
   white-space: nowrap;
 }
 /* --- End Chat Thinking States --- */
+
+/* --- Sticky Table (replaces Table.Root wrapper) --- */
+.rt-sticky-table {
+  /* Surface variant styles */
+  box-sizing: border-box;
+  width: 100%;
+  border-radius: var(--table-border-radius);
+  background-color: var(--color-panel);
+  backdrop-filter: var(--backdrop-filter-panel);
+  background-clip: padding-box;
+  position: relative;
+
+  /* Override Radix overflow:hidden so position:sticky works */
+  overflow: visible;
+}
+
+/* Size 1 (modals) */
+.rt-sticky-table.size-1 {
+  --table-border-radius: var(--radius-3);
+  --table-cell-padding: var(--space-2);
+  --table-cell-min-height: calc(36px * var(--scaling));
+  font-size: var(--font-size-2);
+  line-height: var(--line-height-2);
+}
+
+/* Size 2 (main tables) */
+.rt-sticky-table.size-2 {
+  --table-border-radius: var(--radius-4);
+  --table-cell-padding: var(--space-3);
+  --table-cell-min-height: calc(44px * var(--scaling));
+  font-size: var(--font-size-2);
+  line-height: var(--line-height-2);
+}
+
+/* Header row background (surface variant) */
+.rt-sticky-table .rt-TableHeader {
+  --table-row-background-color: var(--gray-a2);
+}
+
+/* Header cell borders — visible when sticky */
+.rt-sticky-table .rt-TableColumnHeaderCell {
+  border-top: 1px solid var(--gray-a5);
+}
+
+/* Use separate border model to prevent sticky header overlap artifacts */
+.rt-sticky-table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+/* Last row: no separator */
+.rt-sticky-table .rt-TableBody .rt-TableRow:last-child {
+  --table-row-box-shadow: none;
+}
+/* --- End Sticky Table --- */

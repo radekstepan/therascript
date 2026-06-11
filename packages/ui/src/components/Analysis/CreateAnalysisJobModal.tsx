@@ -399,8 +399,18 @@ export function CreateAnalysisJobModal({
                   </Text>
                 </Flex>
               ) : (
-                <Table.Root size="1" variant="surface">
-                  <Table.Header>
+                <table
+                  className="rt-TableRootTable rt-sticky-table size-1"
+                  style={{ width: '100%' }}
+                >
+                  <Table.Header
+                    style={{
+                      position: 'sticky',
+                      top: 0,
+                      zIndex: 1,
+                      background: 'var(--color-panel-solid)',
+                    }}
+                  >
                     <Table.Row>
                       <Table.ColumnHeaderCell>
                         Session Name
@@ -424,7 +434,7 @@ export function CreateAnalysisJobModal({
                       </Table.Row>
                     ))}
                   </Table.Body>
-                </Table.Root>
+                </table>
               )}
             </ScrollArea>
           </Box>

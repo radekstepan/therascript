@@ -609,147 +609,163 @@ const JobList: React.FC<{
   );
 
   return (
-    <Card>
-      <Table.Root variant="surface">
-        <Table.Header>
-          <Table.Row>
-            <Table.ColumnHeaderCell {...getHeaderCellProps('created_at')}>
-              <Flex align="center">Created {renderSortIcon('created_at')}</Flex>
-            </Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell {...getHeaderCellProps('status')}>
-              <Flex align="center">Status {renderSortIcon('status')}</Flex>
-            </Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell {...getHeaderCellProps('short_prompt')}>
-              <Flex align="center">
-                Prompt {renderSortIcon('short_prompt')}
-              </Flex>
-            </Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell {...getHeaderCellProps('model_name')}>
-              <Flex align="center">Model {renderSortIcon('model_name')}</Flex>
-            </Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell {...getHeaderCellProps('completed_at')}>
-              <Flex align="center">
-                Completed {renderSortIcon('completed_at')}
-              </Flex>
-            </Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell align="right">
-              Actions
-            </Table.ColumnHeaderCell>
-          </Table.Row>
-        </Table.Header>
-        <Table.Body>
-          {jobs.map((job) => {
-            const isCancellable =
-              job.status === 'pending' ||
-              job.status === 'generating_strategy' ||
-              job.status === 'mapping' ||
-              job.status === 'reducing';
-            const isTerminal = ['completed', 'failed', 'canceled'].includes(
-              job.status
-            );
-            const isStuckCanceling =
-              job.status === 'canceling' &&
-              Date.now() - job.created_at > 300000; // 5 minutes
-            const isDeletable = isTerminal || isStuckCanceling;
-            const isSummarizing = job.short_prompt.includes('(summarizing)');
+    <Card className="flex flex-col flex-grow overflow-hidden">
+      <div style={{ overflow: 'auto', flex: 1, width: '100%' }}>
+        <table className="rt-TableRootTable rt-sticky-table size-2">
+          <Table.Header
+            style={{
+              position: 'sticky',
+              top: 0,
+              zIndex: 1,
+              background: 'var(--color-panel-solid)',
+            }}
+          >
+            <Table.Row>
+              <Table.ColumnHeaderCell {...getHeaderCellProps('created_at')}>
+                <Flex align="center">
+                  Created {renderSortIcon('created_at')}
+                </Flex>
+              </Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell {...getHeaderCellProps('status')}>
+                <Flex align="center">Status {renderSortIcon('status')}</Flex>
+              </Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell {...getHeaderCellProps('short_prompt')}>
+                <Flex align="center">
+                  Prompt {renderSortIcon('short_prompt')}
+                </Flex>
+              </Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell {...getHeaderCellProps('model_name')}>
+                <Flex align="center">Model {renderSortIcon('model_name')}</Flex>
+              </Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell {...getHeaderCellProps('completed_at')}>
+                <Flex align="center">
+                  Completed {renderSortIcon('completed_at')}
+                </Flex>
+              </Table.ColumnHeaderCell>
+              <Table.ColumnHeaderCell align="right">
+                Actions
+              </Table.ColumnHeaderCell>
+            </Table.Row>
+          </Table.Header>
+          <Table.Body>
+            {jobs.map((job) => {
+              const isCancellable =
+                job.status === 'pending' ||
+                job.status === 'generating_strategy' ||
+                job.status === 'mapping' ||
+                job.status === 'reducing';
+              const isTerminal = ['completed', 'failed', 'canceled'].includes(
+                job.status
+              );
+              const isStuckCanceling =
+                job.status === 'canceling' &&
+                Date.now() - job.created_at > 300000; // 5 minutes
+              const isDeletable = isTerminal || isStuckCanceling;
+              const isSummarizing = job.short_prompt.includes('(summarizing)');
 
-            return (
-              <Table.Row
-                key={job.id}
-                onClick={() => navigate(`/analysis-jobs/${job.id}`)}
-                className={cn(
-                  'cursor-pointer hover:bg-[--gray-a3] transition-colors',
-                  job.status === 'canceling' &&
-                    'bg-[--orange-a2] hover:bg-[--orange-a4]'
-                )}
-              >
-                <Table.Cell>{formatTimestamp(job.created_at)}</Table.Cell>
-                <Table.Cell>
-                  {job.status === 'canceling' ? (
-                    <Tooltip content="Waiting for current step to finish before stopping.">
+              return (
+                <Table.Row
+                  key={job.id}
+                  onClick={() => navigate(`/analysis-jobs/${job.id}`)}
+                  className={cn(
+                    'cursor-pointer hover:bg-[--gray-a3] transition-colors',
+                    job.status === 'canceling' &&
+                      'bg-[--orange-a2] hover:bg-[--orange-a4]'
+                  )}
+                >
+                  <Table.Cell>{formatTimestamp(job.created_at)}</Table.Cell>
+                  <Table.Cell>
+                    {job.status === 'canceling' ? (
+                      <Tooltip content="Waiting for current step to finish before stopping.">
+                        <Badge
+                          color={getStatusBadgeColor(job.status)}
+                          variant="soft"
+                        >
+                          <LapTimerIcon width="12" height="12" />
+                          <Text ml="1">{job.status}</Text>
+                        </Badge>
+                      </Tooltip>
+                    ) : (
                       <Badge
                         color={getStatusBadgeColor(job.status)}
                         variant="soft"
                       >
-                        <LapTimerIcon width="12" height="12" />
+                        {job.status === 'pending' ||
+                        job.status === 'generating_strategy' ||
+                        job.status === 'mapping' ||
+                        job.status === 'reducing' ? (
+                          <LapTimerIcon width="12" height="12" />
+                        ) : job.status === 'completed' ? (
+                          <CheckCircledIcon width="12" height="12" />
+                        ) : (
+                          <CrossCircledIcon width="12" height="12" />
+                        )}
                         <Text ml="1">{job.status}</Text>
                       </Badge>
-                    </Tooltip>
-                  ) : (
-                    <Badge
-                      color={getStatusBadgeColor(job.status)}
-                      variant="soft"
-                    >
-                      {job.status === 'pending' ||
-                      job.status === 'generating_strategy' ||
-                      job.status === 'mapping' ||
-                      job.status === 'reducing' ? (
-                        <LapTimerIcon width="12" height="12" />
-                      ) : job.status === 'completed' ? (
-                        <CheckCircledIcon width="12" height="12" />
-                      ) : (
-                        <CrossCircledIcon width="12" height="12" />
-                      )}
-                      <Text ml="1">{job.status}</Text>
-                    </Badge>
-                  )}
-                </Table.Cell>
-                <Table.Cell style={{ maxWidth: 0 }}>
-                  <Flex align="center" gap="2" style={{ minWidth: 0 }}>
-                    {isSummarizing && (
-                      <Spinner size="1" className="flex-shrink-0" />
                     )}
-                    <Text truncate title={job.original_prompt}>
-                      {job.short_prompt}
+                  </Table.Cell>
+                  <Table.Cell style={{ maxWidth: 0 }}>
+                    <Flex align="center" gap="2" style={{ minWidth: 0 }}>
+                      {isSummarizing && (
+                        <Spinner size="1" className="flex-shrink-0" />
+                      )}
+                      <Text truncate title={job.original_prompt}>
+                        {job.short_prompt}
+                      </Text>
+                    </Flex>
+                  </Table.Cell>
+                  <Table.Cell>
+                    <Text color="gray" size="2">
+                      {job.model_name || 'Default'}
                     </Text>
-                  </Flex>
-                </Table.Cell>
-                <Table.Cell>
-                  <Text color="gray" size="2">
-                    {job.model_name || 'Default'}
-                  </Text>
-                </Table.Cell>
-                <Table.Cell>
-                  {job.completed_at ? formatTimestamp(job.completed_at) : 'N/A'}
-                </Table.Cell>
-                <Table.Cell align="right" onClick={(e) => e.stopPropagation()}>
-                  <DropdownMenu.Root>
-                    <DropdownMenu.Trigger>
-                      <IconButton
-                        variant="ghost"
-                        color="gray"
-                        size="1"
-                        aria-label="Job Actions"
-                      >
-                        <DotsHorizontalIcon />
-                      </IconButton>
-                    </DropdownMenu.Trigger>
-                    <DropdownMenu.Content align="end" size="1">
-                      <DropdownMenu.Item
-                        onSelect={() => onCancelRequest(job)}
-                        disabled={!isCancellable}
-                        color="orange"
-                      >
-                        <StopIcon width="14" height="14" className="mr-2" />{' '}
-                        Cancel Job
-                      </DropdownMenu.Item>
-                      <DropdownMenu.Separator />
-                      <DropdownMenu.Item
-                        onSelect={() => onDeleteRequest(job)}
-                        disabled={!isDeletable}
-                        color="red"
-                      >
-                        <TrashIcon width="14" height="14" className="mr-2" />{' '}
-                        {isStuckCanceling ? 'Force Delete' : 'Delete Job'}
-                      </DropdownMenu.Item>
-                    </DropdownMenu.Content>
-                  </DropdownMenu.Root>
-                </Table.Cell>
-              </Table.Row>
-            );
-          })}
-        </Table.Body>
-      </Table.Root>
+                  </Table.Cell>
+                  <Table.Cell>
+                    {job.completed_at
+                      ? formatTimestamp(job.completed_at)
+                      : 'N/A'}
+                  </Table.Cell>
+                  <Table.Cell
+                    align="right"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <DropdownMenu.Root>
+                      <DropdownMenu.Trigger>
+                        <IconButton
+                          variant="ghost"
+                          color="gray"
+                          size="1"
+                          aria-label="Job Actions"
+                        >
+                          <DotsHorizontalIcon />
+                        </IconButton>
+                      </DropdownMenu.Trigger>
+                      <DropdownMenu.Content align="end" size="1">
+                        <DropdownMenu.Item
+                          onSelect={() => onCancelRequest(job)}
+                          disabled={!isCancellable}
+                          color="orange"
+                        >
+                          <StopIcon width="14" height="14" className="mr-2" />{' '}
+                          Cancel Job
+                        </DropdownMenu.Item>
+                        <DropdownMenu.Separator />
+                        <DropdownMenu.Item
+                          onSelect={() => onDeleteRequest(job)}
+                          disabled={!isDeletable}
+                          color="red"
+                        >
+                          <TrashIcon width="14" height="14" className="mr-2" />{' '}
+                          {isStuckCanceling ? 'Force Delete' : 'Delete Job'}
+                        </DropdownMenu.Item>
+                      </DropdownMenu.Content>
+                    </DropdownMenu.Root>
+                  </Table.Cell>
+                </Table.Row>
+              );
+            })}
+          </Table.Body>
+        </table>
+      </div>
     </Card>
   );
 };
@@ -869,7 +885,11 @@ export function AnalysisJobsPage() {
 
   return (
     <>
-      <Box px={{ initial: '4', md: '6' }} py="6">
+      <Box
+        px={{ initial: '4', md: '6' }}
+        py="6"
+        className="flex flex-col flex-grow min-h-0"
+      >
         {!jobId && (
           <Heading as="h1" size="7" mb="6">
             Analysis

@@ -15,10 +15,10 @@ import {
   Flex,
   IconButton,
   DropdownMenu,
-  ScrollArea,
   Checkbox,
-  Tooltip, // Added Tooltip import
+  Tooltip,
 } from '@radix-ui/themes';
+import { TableVirtuoso } from 'react-virtuoso';
 import type { Session } from '../../types';
 import type { SessionSortCriteria, SortDirection } from '../../store';
 import { sessionColorMap, therapyColorMap } from '../../constants';
@@ -63,6 +63,181 @@ const getStatusBadgeColor = (
   }
 };
 
+const cellStyle: React.CSSProperties = { verticalAlign: 'middle' };
+
+interface SessionRowCellsProps {
+  session: Session;
+  isSelected: boolean;
+  onCheckboxChange: (sessionId: number, checked: boolean) => void;
+  onEditSession: (session: Session) => void;
+  onDeleteSessionRequest: (session: Session) => void;
+}
+
+const SessionRowCells = React.memo(function SessionRowCells({
+  session,
+  isSelected,
+  onCheckboxChange,
+  onEditSession,
+  onDeleteSessionRequest,
+}: SessionRowCellsProps) {
+  return (
+    <>
+      <Table.Cell onClick={(e) => e.stopPropagation()} style={cellStyle}>
+        <Flex align="center" justify="center">
+          <Checkbox
+            checked={isSelected}
+            onCheckedChange={(checked) =>
+              onCheckboxChange(session.id, checked === true)
+            }
+            aria-label={`Select session ${session.id}`}
+            className="cursor-pointer"
+          />
+        </Flex>
+      </Table.Cell>
+      <Table.RowHeaderCell
+        justify="start"
+        style={{ ...cellStyle, maxWidth: 0 }}
+      >
+        <Flex align="center" gap="3" style={{ minWidth: 0 }}>
+          <div
+            className={cn(
+              'p-1.5 rounded-md flex-shrink-0',
+              isSelected
+                ? 'bg-[var(--accent-a4)] text-[var(--accent-11)]'
+                : 'bg-[var(--gray-a3)] text-[var(--gray-11)]'
+            )}
+          >
+            <FileTextIcon width={16} height={16} />
+          </div>
+          <Flex direction="column" gap="0" style={{ minWidth: 0 }}>
+            <Text weight="medium" size="2" truncate>
+              {session.sessionName || session.fileName}
+            </Text>
+            {session.status !== 'completed' && (
+              <div className="mt-0.5">
+                <Tooltip
+                  content={
+                    session.status === 'failed'
+                      ? session.errorMessage ||
+                        'An error occurred during processing. Please try again or contact support.'
+                      : `Status: ${session.status}`
+                  }
+                >
+                  <Badge
+                    color={getStatusBadgeColor(session.status)}
+                    variant="soft"
+                    radius="full"
+                    size="1"
+                    className={
+                      session.status === 'failed' ? 'cursor-help' : undefined
+                    }
+                  >
+                    {session.status}
+                  </Badge>
+                </Tooltip>
+              </div>
+            )}
+          </Flex>
+        </Flex>
+      </Table.RowHeaderCell>
+      <Table.Cell style={cellStyle}>
+        {session.clientName ? (
+          <Text size="2">{session.clientName}</Text>
+        ) : (
+          <Text size="2" color="gray" style={{ fontStyle: 'italic' }}>
+            No Client
+          </Text>
+        )}
+      </Table.Cell>
+      <Table.Cell style={cellStyle}>
+        {session.sessionType ? (
+          <Badge
+            color={getBadgeColor(session.sessionType, 'session')}
+            variant="surface"
+            radius="full"
+          >
+            {session.sessionType}
+          </Badge>
+        ) : (
+          <Text color="gray" size="2">
+            -
+          </Text>
+        )}
+      </Table.Cell>
+      <Table.Cell style={cellStyle}>
+        {session.therapy ? (
+          <Badge
+            color={getBadgeColor(session.therapy, 'therapy')}
+            variant="outline"
+            radius="full"
+          >
+            {session.therapy}
+          </Badge>
+        ) : (
+          <Text color="gray" size="2">
+            -
+          </Text>
+        )}
+      </Table.Cell>
+      <Table.Cell style={cellStyle}>
+        <Text size="2" color="gray">
+          {formatIsoDateToYMD(session.date) || '-'}
+        </Text>
+      </Table.Cell>
+      <Table.Cell style={cellStyle}>
+        <Text size="2" color="gray">
+          {formatDuration(session.duration)}
+        </Text>
+      </Table.Cell>
+      <Table.Cell style={cellStyle}>
+        <Text size="2" color="gray">
+          {session.transcriptTokenCount?.toLocaleString() || '-'}
+        </Text>
+      </Table.Cell>
+      <Table.Cell
+        align="right"
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
+        style={cellStyle}
+      >
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger>
+            <IconButton
+              variant="ghost"
+              color="gray"
+              size="1"
+              className="transition-opacity data-[state=open]:opacity-100"
+              aria-label="Session options"
+              title="Session options"
+            >
+              <DotsHorizontalIcon />
+            </IconButton>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Content
+            align="end"
+            size="1"
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <DropdownMenu.Item onSelect={() => onEditSession(session)}>
+              <Pencil1Icon width="14" height="14" className="mr-2" /> Edit
+              Details
+            </DropdownMenu.Item>
+            <DropdownMenu.Separator />
+            <DropdownMenu.Item
+              color="red"
+              onSelect={() => onDeleteSessionRequest(session)}
+            >
+              <TrashIcon width="14" height="14" className="mr-2" /> Delete
+              Session
+            </DropdownMenu.Item>
+          </DropdownMenu.Content>
+        </DropdownMenu.Root>
+      </Table.Cell>
+    </>
+  );
+});
+
 export function SessionListTable({
   sessions,
   sortCriteria,
@@ -75,49 +250,55 @@ export function SessionListTable({
 }: SessionListTableProps) {
   const navigate = useNavigate();
 
-  const handleSessionClick = (
-    e: React.MouseEvent<HTMLTableRowElement>,
-    sessionId: number
-  ) => {
-    const target = e.target as HTMLElement;
-    if (target.closest('button, [role="menu"], [role="checkbox"]')) {
-      return;
-    }
-    navigate(`/sessions/${sessionId}`);
-  };
-
-  const handleKeyDown = (
-    e: React.KeyboardEvent<HTMLTableRowElement>,
-    sessionId: number
-  ) => {
-    if (
-      e.key === 'Enter' &&
-      !(e.target as HTMLElement).closest(
-        'button, [role="menu"], [role="checkbox"]'
-      )
-    ) {
+  const handleSessionClick = useCallback(
+    (e: React.MouseEvent<HTMLTableRowElement>, sessionId: number) => {
+      const target = e.target as HTMLElement;
+      if (target.closest('button, [role="menu"], [role="checkbox"]')) {
+        return;
+      }
       navigate(`/sessions/${sessionId}`);
-    }
-  };
+    },
+    [navigate]
+  );
 
-  const handleRowCheckboxChange = (sessionId: number, checked: boolean) => {
-    const newSelectedIds = new Set(selectedIds);
-    if (checked) {
-      newSelectedIds.add(sessionId);
-    } else {
-      newSelectedIds.delete(sessionId);
-    }
-    onSelectionChange(newSelectedIds);
-  };
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTableRowElement>, sessionId: number) => {
+      if (
+        e.key === 'Enter' &&
+        !(e.target as HTMLElement).closest(
+          'button, [role="menu"], [role="checkbox"]'
+        )
+      ) {
+        navigate(`/sessions/${sessionId}`);
+      }
+    },
+    [navigate]
+  );
 
-  const handleSelectAllChange = (checked: boolean) => {
-    if (checked) {
-      const allIds = new Set(sessions.map((s) => s.id));
-      onSelectionChange(allIds);
-    } else {
-      onSelectionChange(new Set());
-    }
-  };
+  const handleRowCheckboxChange = useCallback(
+    (sessionId: number, checked: boolean) => {
+      const newSet = new Set(selectedIds);
+      if (checked) {
+        newSet.add(sessionId);
+      } else {
+        newSet.delete(sessionId);
+      }
+      onSelectionChange(newSet);
+    },
+    [selectedIds, onSelectionChange]
+  );
+
+  const handleSelectAllChange = useCallback(
+    (checked: boolean) => {
+      if (checked) {
+        const allIds = new Set(sessions.map((s) => s.id));
+        onSelectionChange(allIds);
+      } else {
+        onSelectionChange(new Set());
+      }
+    },
+    [sessions, onSelectionChange]
+  );
 
   const allSelected =
     sessions.length > 0 && selectedIds.size === sessions.length;
@@ -159,308 +340,130 @@ export function SessionListTable({
     [sortCriteria, sortDirection, onSort]
   );
 
-  // Common cell style for vertical centering
-  const cellStyle: React.CSSProperties = { verticalAlign: 'middle' };
+  const renderHeaderRow = useCallback(
+    () => (
+      <Table.Row>
+        <Table.ColumnHeaderCell style={{ width: '1%', ...cellStyle }}>
+          <Flex align="center" justify="center">
+            <Checkbox
+              checked={
+                allSelected || someSelected
+                  ? someSelected
+                    ? 'indeterminate'
+                    : true
+                  : false
+              }
+              onCheckedChange={(checked) =>
+                handleSelectAllChange(checked === true)
+              }
+              aria-label="Select all sessions"
+              className="cursor-pointer"
+            />
+          </Flex>
+        </Table.ColumnHeaderCell>
+        {(
+          [
+            ['sessionName', 'Session / File'],
+            ['clientName', 'Client'],
+            ['sessionType', 'Type'],
+            ['therapy', 'Therapy'],
+            ['date', 'Date'],
+            ['duration', 'Length'],
+            ['transcriptTokenCount', 'Tokens'],
+          ] as const
+        ).map(([criteria, label]) => {
+          const headerProps = getHeaderCellProps(criteria);
+          return (
+            <Table.ColumnHeaderCell
+              key={criteria}
+              {...headerProps}
+              justify={criteria === 'sessionName' ? 'start' : undefined}
+              style={{ ...headerProps.style, ...cellStyle }}
+            >
+              <Flex align="center" className="group">
+                {label} {renderSortIcon(criteria)}
+              </Flex>
+            </Table.ColumnHeaderCell>
+          );
+        })}
+        <Table.ColumnHeaderCell
+          style={{ width: '1%', whiteSpace: 'nowrap', ...cellStyle }}
+          align="right"
+        >
+          Actions
+        </Table.ColumnHeaderCell>
+      </Table.Row>
+    ),
+    [
+      allSelected,
+      someSelected,
+      handleSelectAllChange,
+      getHeaderCellProps,
+      renderSortIcon,
+    ]
+  );
 
   return (
-    <ScrollArea
-      type="auto"
-      scrollbars="vertical"
+    <TableVirtuoso
       style={{ flexGrow: 1, minHeight: 0, borderRadius: 'var(--radius-3)' }}
-    >
-      <Table.Root variant="surface" size="2">
-        <Table.Header
-          style={{
-            backgroundColor: 'var(--gray-a2)',
-            position: 'sticky',
-            top: 0,
-            zIndex: 10,
-            // Removed manual box-shadow to fix double border issue.
-            // Radix table variants handle borders.
-          }}
-        >
-          <Table.Row>
-            <Table.ColumnHeaderCell style={{ width: '1%', ...cellStyle }}>
-              <Flex align="center" justify="center">
-                <Checkbox
-                  checked={
-                    allSelected || someSelected
-                      ? someSelected
-                        ? 'indeterminate'
-                        : true
-                      : false
-                  }
-                  onCheckedChange={(checked) =>
-                    handleSelectAllChange(checked === true)
-                  }
-                  aria-label="Select all sessions"
-                  className="cursor-pointer"
-                />
-              </Flex>
-            </Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell
-              {...getHeaderCellProps('sessionName')}
-              justify="start"
-              style={{
-                ...getHeaderCellProps('sessionName').style,
-                ...cellStyle,
-              }}
+      data={sessions}
+      computeItemKey={(_index, session) => session.id}
+      fixedHeaderContent={renderHeaderRow}
+      itemContent={(_index, session) => {
+        return (
+          <SessionRowCells
+            session={session}
+            isSelected={selectedIds.has(session.id)}
+            onCheckboxChange={handleRowCheckboxChange}
+            onEditSession={onEditSession}
+            onDeleteSessionRequest={onDeleteSessionRequest}
+          />
+        );
+      }}
+      components={{
+        Table: (props) => (
+          <table
+            {...props}
+            className="rt-TableRootTable rt-sticky-table size-2"
+          />
+        ),
+        TableHead: ({ style, ...props }) => (
+          <Table.Header
+            {...props}
+            style={{
+              position: 'sticky',
+              top: 0,
+              zIndex: 1,
+              background: 'var(--color-panel-solid)',
+              ...style,
+            }}
+          />
+        ),
+        TableBody: (props) => <Table.Body {...props} />,
+        TableRow: ({ children, ...props }) => {
+          const session = sessions[props['data-index']];
+          if (!session) return <tr {...props}>{children}</tr>;
+          return (
+            <tr
+              {...props}
+              onClick={(e) => handleSessionClick(e, session.id)}
+              onKeyDown={(e) => handleKeyDown(e, session.id)}
+              className={cn(
+                'cursor-pointer transition-colors duration-150 group',
+                selectedIds.has(session.id)
+                  ? 'bg-[var(--accent-a2)] hover:bg-[var(--accent-a3)]'
+                  : 'hover:bg-[var(--gray-a3)]',
+                session.status === 'failed' && 'bg-red-50 dark:bg-red-950/20'
+              )}
+              aria-label={`Load session: ${session.sessionName || session.fileName}`}
+              tabIndex={0}
+              style={cellStyle}
             >
-              <Flex align="center" className="group">
-                Session / File {renderSortIcon('sessionName')}
-              </Flex>
-            </Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell
-              {...getHeaderCellProps('clientName')}
-              style={{
-                ...getHeaderCellProps('clientName').style,
-                ...cellStyle,
-              }}
-            >
-              <Flex align="center" className="group">
-                Client {renderSortIcon('clientName')}
-              </Flex>
-            </Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell
-              {...getHeaderCellProps('sessionType')}
-              style={{
-                ...getHeaderCellProps('sessionType').style,
-                ...cellStyle,
-              }}
-            >
-              <Flex align="center" className="group">
-                Type {renderSortIcon('sessionType')}
-              </Flex>
-            </Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell
-              {...getHeaderCellProps('therapy')}
-              style={{ ...getHeaderCellProps('therapy').style, ...cellStyle }}
-            >
-              <Flex align="center" className="group">
-                Therapy {renderSortIcon('therapy')}
-              </Flex>
-            </Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell
-              {...getHeaderCellProps('date')}
-              style={{ ...getHeaderCellProps('date').style, ...cellStyle }}
-            >
-              <Flex align="center" className="group">
-                Date {renderSortIcon('date')}
-              </Flex>
-            </Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell
-              {...getHeaderCellProps('duration')}
-              style={{ ...getHeaderCellProps('duration').style, ...cellStyle }}
-            >
-              <Flex align="center" className="group">
-                Length {renderSortIcon('duration')}
-              </Flex>
-            </Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell
-              {...getHeaderCellProps('transcriptTokenCount')}
-              style={{
-                ...getHeaderCellProps('transcriptTokenCount').style,
-                ...cellStyle,
-              }}
-            >
-              <Flex align="center" className="group">
-                Tokens {renderSortIcon('transcriptTokenCount')}
-              </Flex>
-            </Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell
-              style={{ width: '1%', whiteSpace: 'nowrap', ...cellStyle }}
-              align="right"
-            >
-              Actions
-            </Table.ColumnHeaderCell>
-          </Table.Row>
-        </Table.Header>
-        <Table.Body>
-          {sessions.map((session: Session) => {
-            const isSelected = selectedIds.has(session.id);
-            return (
-              <Table.Row
-                key={session.id}
-                onClick={(e) => handleSessionClick(e, session.id)}
-                className={cn(
-                  'cursor-pointer transition-colors duration-150 group',
-                  isSelected
-                    ? 'bg-[var(--accent-a2)] hover:bg-[var(--accent-a3)]'
-                    : 'hover:bg-[var(--gray-a3)]',
-                  session.status === 'failed' && 'bg-red-50 dark:bg-red-950/20'
-                )}
-                aria-label={`Load session: ${
-                  session.sessionName || session.fileName
-                }`}
-                tabIndex={0}
-                onKeyDown={(e) => handleKeyDown(e, session.id)}
-                style={{ verticalAlign: 'middle' }} // Enforce vertical alignment on row
-              >
-                <Table.Cell
-                  onClick={(e) => e.stopPropagation()}
-                  style={cellStyle}
-                >
-                  <Flex align="center" justify="center">
-                    <Checkbox
-                      checked={isSelected}
-                      onCheckedChange={(checked) =>
-                        handleRowCheckboxChange(session.id, checked === true)
-                      }
-                      aria-label={`Select session ${session.id}`}
-                      className="cursor-pointer"
-                    />
-                  </Flex>
-                </Table.Cell>
-                <Table.RowHeaderCell
-                  justify="start"
-                  style={{ ...cellStyle, maxWidth: 0 }}
-                >
-                  <Flex align="center" gap="3" style={{ minWidth: 0 }}>
-                    <div
-                      className={cn(
-                        'p-1.5 rounded-md flex-shrink-0',
-                        isSelected
-                          ? 'bg-[var(--accent-a4)] text-[var(--accent-11)]'
-                          : 'bg-[var(--gray-a3)] text-[var(--gray-11)]'
-                      )}
-                    >
-                      <FileTextIcon width={16} height={16} />
-                    </div>
-                    <Flex direction="column" gap="0" style={{ minWidth: 0 }}>
-                      <Text weight="medium" size="2" truncate>
-                        {session.sessionName || session.fileName}
-                      </Text>
-                      {session.status !== 'completed' && (
-                        <div className="mt-0.5">
-                          <Tooltip
-                            content={
-                              session.status === 'failed'
-                                ? session.errorMessage ||
-                                  'An error occurred during processing. Please try again or contact support.'
-                                : `Status: ${session.status}`
-                            }
-                          >
-                            <Badge
-                              color={getStatusBadgeColor(session.status)}
-                              variant="soft"
-                              radius="full"
-                              size="1"
-                              className={
-                                session.status === 'failed'
-                                  ? 'cursor-help'
-                                  : undefined
-                              }
-                            >
-                              {session.status}
-                            </Badge>
-                          </Tooltip>
-                        </div>
-                      )}
-                    </Flex>
-                  </Flex>
-                </Table.RowHeaderCell>
-                <Table.Cell style={cellStyle}>
-                  {session.clientName ? (
-                    <Text size="2">{session.clientName}</Text>
-                  ) : (
-                    <Text size="2" color="gray" style={{ fontStyle: 'italic' }}>
-                      No Client
-                    </Text>
-                  )}
-                </Table.Cell>
-                <Table.Cell style={cellStyle}>
-                  {session.sessionType ? (
-                    <Badge
-                      color={getBadgeColor(session.sessionType, 'session')}
-                      variant="surface"
-                      radius="full"
-                    >
-                      {session.sessionType}
-                    </Badge>
-                  ) : (
-                    <Text color="gray" size="2">
-                      -
-                    </Text>
-                  )}
-                </Table.Cell>
-                <Table.Cell style={cellStyle}>
-                  {session.therapy ? (
-                    <Badge
-                      color={getBadgeColor(session.therapy, 'therapy')}
-                      variant="outline"
-                      radius="full"
-                    >
-                      {session.therapy}
-                    </Badge>
-                  ) : (
-                    <Text color="gray" size="2">
-                      -
-                    </Text>
-                  )}
-                </Table.Cell>
-                <Table.Cell style={cellStyle}>
-                  <Text size="2" color="gray">
-                    {formatIsoDateToYMD(session.date) || '-'}
-                  </Text>
-                </Table.Cell>
-                <Table.Cell style={cellStyle}>
-                  <Text size="2" color="gray">
-                    {formatDuration(session.duration)}
-                  </Text>
-                </Table.Cell>
-                <Table.Cell style={cellStyle}>
-                  <Text size="2" color="gray">
-                    {session.transcriptTokenCount?.toLocaleString() || '-'}
-                  </Text>
-                </Table.Cell>
-                <Table.Cell
-                  align="right"
-                  onClick={(e) => e.stopPropagation()}
-                  onKeyDown={(e) => e.stopPropagation()}
-                  style={cellStyle}
-                >
-                  <DropdownMenu.Root>
-                    <DropdownMenu.Trigger>
-                      <IconButton
-                        variant="ghost"
-                        color="gray"
-                        size="1"
-                        // Removed opacity-0 classes to keep actions always visible
-                        className="transition-opacity data-[state=open]:opacity-100"
-                        aria-label="Session options"
-                        title="Session options"
-                      >
-                        <DotsHorizontalIcon />
-                      </IconButton>
-                    </DropdownMenu.Trigger>
-                    <DropdownMenu.Content
-                      align="end"
-                      size="1"
-                      onClick={(e) => e.stopPropagation()}
-                      onMouseDown={(e) => e.stopPropagation()}
-                    >
-                      <DropdownMenu.Item
-                        onSelect={() => onEditSession(session)}
-                      >
-                        <Pencil1Icon width="14" height="14" className="mr-2" />{' '}
-                        Edit Details
-                      </DropdownMenu.Item>
-                      <DropdownMenu.Separator />
-                      <DropdownMenu.Item
-                        color="red"
-                        onSelect={() => onDeleteSessionRequest(session)}
-                      >
-                        <TrashIcon width="14" height="14" className="mr-2" />{' '}
-                        Delete Session
-                      </DropdownMenu.Item>
-                    </DropdownMenu.Content>
-                  </DropdownMenu.Root>
-                </Table.Cell>
-              </Table.Row>
-            );
-          })}
-        </Table.Body>
-      </Table.Root>
-    </ScrollArea>
+              {children}
+            </tr>
+          );
+        },
+      }}
+    />
   );
 }

@@ -1,5 +1,5 @@
 // packages/ui/src/components/SessionsPage.tsx
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import { SessionFilters } from './SessionsPage/SessionFilters';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -179,15 +179,15 @@ export function SessionsPage() {
     });
   }, [sortedSessions, filterClient, filterType, filterTherapy]);
 
-  const handleEditSession = (session: Session) => {
+  const handleEditSession = useCallback((session: Session) => {
     setSessionToEdit(session);
     setIsEditSessionModalOpen(true);
-  };
+  }, []);
 
-  const handleDeleteSessionRequest = (session: Session) => {
+  const handleDeleteSessionRequest = useCallback((session: Session) => {
     setSessionToDelete(session);
     setIsDeleteConfirmOpen(true);
-  };
+  }, []);
 
   const handleConfirmDeleteSession = () => {
     if (!sessionToDelete || deleteSessionMutation.isPending) return;
@@ -281,7 +281,7 @@ export function SessionsPage() {
                 sessions={filteredSessions}
                 sortCriteria={currentSortCriteria}
                 sortDirection={currentSortDirection}
-                onSort={(criteria) => setSort(criteria)}
+                onSort={setSort}
                 onEditSession={handleEditSession}
                 onDeleteSessionRequest={handleDeleteSessionRequest}
                 selectedIds={selectedSessionIds}

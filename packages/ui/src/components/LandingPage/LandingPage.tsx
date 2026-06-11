@@ -328,34 +328,41 @@ export function LandingPage() {
     currentStandaloneChatSortDirection,
   ]);
 
-  const handleSessionSort = (criteria: SessionSortCriteria) =>
-    setSessionSort(criteria);
-  const handleStandaloneChatSort = (criteria: StandaloneChatSortCriteria) =>
-    setStandaloneChatSort(criteria);
-  const handleEditSession = (session: Session) => {
+  const handleSessionSort = useCallback(
+    (criteria: SessionSortCriteria) => setSessionSort(criteria),
+    [setSessionSort]
+  );
+  const handleStandaloneChatSort = useCallback(
+    (criteria: StandaloneChatSortCriteria) => setStandaloneChatSort(criteria),
+    [setStandaloneChatSort]
+  );
+  const handleEditSession = useCallback((session: Session) => {
     setSessionToEdit(session);
     setIsEditSessionModalOpen(true);
-  };
-  const handleDeleteSessionRequest = (session: Session) => {
+  }, []);
+  const handleDeleteSessionRequest = useCallback((session: Session) => {
     setSessionToDelete(session);
     setIsDeleteSessionConfirmOpen(true);
-  };
-  const handleConfirmDeleteSession = () => {
+  }, []);
+  const handleConfirmDeleteSession = useCallback(() => {
     if (sessionToDelete) deleteSessionMutation.mutate(sessionToDelete.id);
-  };
-  const handleEditChatRequest = (chat: StandaloneChatListItem) => {
+  }, [sessionToDelete, deleteSessionMutation]);
+  const handleEditChatRequest = useCallback((chat: StandaloneChatListItem) => {
     setChatToEdit(chat);
     setIsEditChatModalOpen(true);
-  };
-  const handleDeleteChatRequest = (chat: StandaloneChatListItem) => {
-    setChatToDelete(chat);
-    setIsDeleteChatConfirmOpen(true);
-  };
-  const handleConfirmDeleteChat = () => {
+  }, []);
+  const handleDeleteChatRequest = useCallback(
+    (chat: StandaloneChatListItem) => {
+      setChatToDelete(chat);
+      setIsDeleteChatConfirmOpen(true);
+    },
+    []
+  );
+  const handleConfirmDeleteChat = useCallback(() => {
     if (chatToDelete) {
       deleteChatMutation.mutate(chatToDelete.id);
     }
-  };
+  }, [chatToDelete, deleteChatMutation]);
 
   const isLoadingAnyData =
     isLoadingSessions ||

@@ -158,8 +158,18 @@ const GpuDeviceCard: React.FC<{ device: GpuDeviceStats }> = ({ device }) => {
             <Text as="div" size="2" color="gray" mb="2">
               Processes
             </Text>
-            <Table.Root size="1" variant="surface">
-              <Table.Header>
+            <table
+              className="rt-TableRootTable rt-sticky-table size-1"
+              style={{ width: '100%' }}
+            >
+              <Table.Header
+                style={{
+                  position: 'sticky',
+                  top: 0,
+                  zIndex: 1,
+                  background: 'var(--color-panel-solid)',
+                }}
+              >
                 <Table.Row>
                   <Table.ColumnHeaderCell>PID</Table.ColumnHeaderCell>
                   <Table.ColumnHeaderCell>Process Name</Table.ColumnHeaderCell>
@@ -181,7 +191,7 @@ const GpuDeviceCard: React.FC<{ device: GpuDeviceStats }> = ({ device }) => {
                   </Table.Row>
                 ))}
               </Table.Body>
-            </Table.Root>
+            </table>
           </Box>
         )}
       </Flex>
