@@ -169,6 +169,7 @@ export function CreateAnalysisJobModal({
   const navigate = useNavigate();
   const setToast = useSetAtom(toastMessageAtom);
   const [prompt, setPrompt] = useState('');
+  const [mapPhaseSystemPrompt, setMapPhaseSystemPrompt] = useState('');
   const [validationError, setValidationError] = useState<string | null>(null);
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -257,6 +258,7 @@ export function CreateAnalysisJobModal({
   useEffect(() => {
     if (isOpen) {
       setPrompt('');
+      setMapPhaseSystemPrompt('');
       setValidationError(null);
       setIsTemplatePopoverOpen(false);
       setUseAdvancedStrategy(true); // Reset to default
@@ -362,6 +364,9 @@ export function CreateAnalysisJobModal({
       useAdvancedStrategy,
       ...(contextSizeInput
         ? { contextSize: parseInt(contextSizeInput, 10) }
+        : {}),
+      ...(mapPhaseSystemPrompt.trim().length > 0
+        ? { mapPhaseSystemPrompt: mapPhaseSystemPrompt.trim() }
         : {}),
     });
   };
@@ -484,6 +489,41 @@ export function CreateAnalysisJobModal({
                 />
               )}
             </Box>
+          </Box>
+
+          <Box>
+            <Flex align="center" gap="2" mb="1">
+              <Text
+                as="label"
+                size="2"
+                weight="medium"
+                htmlFor="mapPhaseSystemPrompt"
+              >
+                Map Phase System Prompt (Optional)
+              </Text>
+              <Tooltip content="Prepended as a system message to every per-session analysis call. Use for global instructions like reasoning style, output length, or analytical lens. Example: 'Keep your thinking brief. Focus only on explicit statements and avoid speculation.'">
+                <QuestionMarkCircledIcon className="text-[--gray-a10]" />
+              </Tooltip>
+            </Flex>
+            <TextArea
+              id="mapPhaseSystemPrompt"
+              placeholder="e.g., 'Keep your thinking brief (max 2 sentences). Focus on observable behaviors only.'"
+              value={mapPhaseSystemPrompt}
+              onChange={(e) => setMapPhaseSystemPrompt(e.target.value)}
+              disabled={isMutationPending}
+              rows={3}
+              maxLength={2000}
+              style={{ minHeight: 60, resize: 'vertical' }}
+            />
+            {mapPhaseSystemPrompt.length > 0 && (
+              <Text
+                size="1"
+                color={mapPhaseSystemPrompt.length > 2000 ? 'red' : 'gray'}
+                mt="1"
+              >
+                {mapPhaseSystemPrompt.length} / 2000
+              </Text>
+            )}
           </Box>
 
           <Flex direction="column" gap="3" mt="2">

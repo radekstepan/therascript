@@ -12,6 +12,10 @@ export const analysisRequestSchema = z.object({
   modelName: z.string().optional(),
   useAdvancedStrategy: z.boolean().optional(),
   contextSize: z.number().int().positive().optional(),
+  mapPhaseSystemPrompt: z
+    .string()
+    .max(2000, 'Map phase system prompt is too long')
+    .optional(),
 });
 
 export type AnalysisRequest = z.infer<typeof analysisRequestSchema>;

@@ -8,6 +8,7 @@ interface CreateJobPayload {
   modelName?: string | null;
   useAdvancedStrategy?: boolean;
   contextSize?: number;
+  mapPhaseSystemPrompt?: string;
 }
 
 /**

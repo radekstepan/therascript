@@ -265,6 +265,7 @@ export interface AnalysisJob {
   top_p: number | null;
   repeat_penalty: number | null;
   num_gpu_layers: number | null;
+  map_phase_system_prompt: string | null;
 }
 
 export interface IntermediateSummary {

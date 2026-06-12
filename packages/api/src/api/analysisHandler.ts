@@ -291,6 +291,7 @@ export const createAnalysisJobHandler = async ({
     modelName,
     useAdvancedStrategy,
     contextSize: requestedContextSize,
+    mapPhaseSystemPrompt,
   } = validatedBody;
 
   try {
@@ -310,6 +311,10 @@ export const createAnalysisJobHandler = async ({
       contextSizeToUse = requestedContextSize;
     } else {
       const promptTokens = calculateTokenCount(prompt) || 0;
+      const mapPhaseSystemPromptTokens =
+        mapPhaseSystemPrompt && mapPhaseSystemPrompt.trim().length > 0
+          ? calculateTokenCount(mapPhaseSystemPrompt) || 0
+          : 0;
       let maxTranscriptTokens = 0;
       for (const sessionId of sessionIds) {
         const session = sessionRepository.findById(sessionId);
@@ -321,6 +326,10 @@ export const createAnalysisJobHandler = async ({
       }
 
       const ANSWER_BUFFER = 4096;
+      // The map-phase system prompt is repeated on every Map call (once per
+      // session), so it doesn't change the per-session context size — but we
+      // still need to fit it in the model context.
+      const mapPhaseBuffer = mapPhaseSystemPromptTokens;
 
       let calculatedContextSize: number;
       if (useAdvancedStrategy) {
@@ -332,12 +341,12 @@ export const createAnalysisJobHandler = async ({
           FINAL_ANSWER_BUFFER;
 
         calculatedContextSize = Math.max(
-          promptTokens + maxTranscriptTokens + ANSWER_BUFFER,
+          promptTokens + maxTranscriptTokens + mapPhaseBuffer + ANSWER_BUFFER,
           reducePhaseContext
         );
       } else {
         calculatedContextSize =
-          promptTokens + maxTranscriptTokens + ANSWER_BUFFER;
+          promptTokens + maxTranscriptTokens + mapPhaseBuffer + ANSWER_BUFFER;
       }
 
       if (calculatedContextSize > modelMaxContext) {
@@ -373,7 +382,8 @@ export const createAnalysisJobHandler = async ({
         contextSizeToUse,
         null,
         'generating_strategy',
-        llmParams
+        llmParams,
+        mapPhaseSystemPrompt?.trim() ? mapPhaseSystemPrompt.trim() : null
       );
       // Short prompt generation is handled inside generateStrategyAndUpdateJob
       // (after model load, before strategy stream) to avoid a concurrent
@@ -393,7 +403,8 @@ export const createAnalysisJobHandler = async ({
         contextSizeToUse,
         null,
         'pending',
-        llmParams
+        llmParams,
+        mapPhaseSystemPrompt?.trim() ? mapPhaseSystemPrompt.trim() : null
       );
       void processAnalysisJob(newJob.id);
       void generateShortPromptInBackground(newJob.id, prompt, modelName);

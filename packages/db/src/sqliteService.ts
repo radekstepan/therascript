@@ -95,7 +95,7 @@ export const schema = `
 `;
 
 // --- NEW MIGRATION LOGIC ---
-export const LATEST_SCHEMA_VERSION = 15;
+export const LATEST_SCHEMA_VERSION = 16;
 
 // --- NEW SYSTEM PROMPTS ---
 export const SYSTEM_PROMPT_TEMPLATES = {
@@ -569,6 +569,31 @@ function runMigrations(dbInstance: DB) {
         dbInstance.pragma(`user_version = 15`);
         currentVersion = 15;
         console.log('[db Migrator] Version 15 applied.');
+      }
+
+      // NEW MIGRATION: Version 16 to add an optional job-level system prompt
+      // that is prepended to every Map-phase LLM call for this analysis job.
+      // Use cases: "keep thinking brief", "focus on observable behaviors", etc.
+      if (currentVersion < 16) {
+        console.log('[db Migrator] Applying version 16...');
+        const analysisJobColumns = dbInstance.pragma(
+          'table_info(analysis_jobs)'
+        ) as { name: string }[];
+        if (
+          !analysisJobColumns.some(
+            (col) => col.name === 'map_phase_system_prompt'
+          )
+        ) {
+          console.log(
+            '[db Migrator V16] Adding "map_phase_system_prompt" to analysis_jobs...'
+          );
+          dbInstance.exec(
+            'ALTER TABLE analysis_jobs ADD COLUMN map_phase_system_prompt TEXT NULL'
+          );
+        }
+        dbInstance.pragma(`user_version = 16`);
+        currentVersion = 16;
+        console.log('[db Migrator] Version 16 applied.');
       }
     })();
     console.log(

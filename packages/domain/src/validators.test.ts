@@ -51,8 +51,18 @@ describe('API Request Schemas', () => {
         prompt: 'Analyze for patterns',
         modelName: 'llama3',
         useAdvancedStrategy: true,
+        mapPhaseSystemPrompt: 'Keep thinking brief.',
       });
       expect(result.success).toBe(true);
+    });
+
+    it('rejects mapPhaseSystemPrompt that is too long', () => {
+      const result = safeValidateAnalysisRequest({
+        sessionIds: [1],
+        prompt: 'Analyze for patterns',
+        mapPhaseSystemPrompt: 'a'.repeat(2001),
+      });
+      expect(result.success).toBe(false);
     });
 
     it('rejects empty sessionIds', () => {
@@ -325,6 +335,7 @@ describe('Database Entity Schemas', () => {
         top_p: 0.9,
         repeat_penalty: 1.1,
         num_gpu_layers: null,
+        map_phase_system_prompt: 'Keep thinking brief.',
       });
       expect(result.success).toBe(true);
     });
@@ -358,6 +369,7 @@ describe('Database Entity Schemas', () => {
           top_p: null,
           repeat_penalty: null,
           num_gpu_layers: null,
+          map_phase_system_prompt: null,
         });
         expect(result.success).toBe(true);
       }

@@ -888,7 +888,7 @@ export function AnalysisJobsPage() {
       <Box
         px={{ initial: '4', md: '6' }}
         py="6"
-        className="flex flex-col flex-grow min-h-0"
+        className={cn('flex flex-col', !jobId && 'flex-grow min-h-0')}
       >
         {!jobId && (
           <Heading as="h1" size="7" mb="6">

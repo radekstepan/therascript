@@ -234,6 +234,11 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
         if (!transcriptText.trim()) throw new Error('Transcript is empty.');
 
         let mapMessages: BackendChatMessage[];
+        const userMapPhaseSystemPrompt =
+          jobRecord?.map_phase_system_prompt &&
+          jobRecord.map_phase_system_prompt.trim().length > 0
+            ? jobRecord.map_phase_system_prompt
+            : null;
         if (strategy) {
           mapMessages = [
             {
@@ -260,6 +265,22 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
               text: `USER'S QUESTION: "${jobRecord?.original_prompt}"\n\nTRANSCRIPT: """${transcriptText}"""\n\nYOUR TASK: Analyze the transcript and write a concise summary that directly answers the user's question *only for this specific session* (max 250 words).`,
               timestamp: Date.now(),
             },
+          ];
+        }
+
+        if (userMapPhaseSystemPrompt) {
+          // Prepend the user's optional system prompt as a NEW system message.
+          // The existing system message is preserved so the strategy /
+          // "follow the user's instructions" framing still applies.
+          mapMessages = [
+            {
+              id: 0,
+              chatId: 0,
+              sender: 'system',
+              text: userMapPhaseSystemPrompt,
+              timestamp: Date.now(),
+            },
+            ...mapMessages.map((m, i) => ({ ...m, id: i + 1 })),
           ];
         }
 
@@ -393,7 +414,29 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
           ''
         );
         if (!strippedMap.trim()) {
-          const detail = `LLM returned an empty summary for session ${summaryTask.session_id} (model=${jobRecord?.model_name ?? 'unknown'}, promptTokens=${mapStreamResult.promptTokens ?? 0}, completionTokens=${mapStreamResult.completionTokens ?? 0}, thinkingTokens=${mapStreamResult.thinkingTokens ?? 0}, durationMs=${mapDuration}).`;
+          const promptTk = mapStreamResult.promptTokens ?? 0;
+          const completionTk = mapStreamResult.completionTokens ?? 0;
+          const thinkingTk = mapStreamResult.thinkingTokens ?? 0;
+          const thinkingBudgetUsed = thinkingTk + completionTk;
+          const budgetExhaustedByThinking =
+            thinkingTk > 0 &&
+            thinkingBudgetUsed >= mapMaxCompletionTokens * 0.9;
+
+          let detail: string;
+          if (budgetExhaustedByThinking) {
+            detail =
+              `LLM thinking tokens exhausted the generation budget for session ${summaryTask.session_id} — ` +
+              `the model spent all available tokens reasoning (thinkingTokens=${thinkingTk}, ` +
+              `completionTokens=${completionTk}, budget=${mapMaxCompletionTokens}) and produced no summary content. ` +
+              `Fix: increase the context size setting (currently ${mapContextSize} tokens) so the ` +
+              `25% completion cap is large enough for both thinking and content.`;
+          } else {
+            detail =
+              `LLM returned an empty summary for session ${summaryTask.session_id} — ` +
+              `the model produced only thinking/reasoning with no answer text ` +
+              `(model=${jobRecord?.model_name ?? 'unknown'}, promptTokens=${promptTk}, ` +
+              `completionTokens=${completionTk}, thinkingTokens=${thinkingTk}, durationMs=${mapDuration}).`;
+          }
           console.error(`[Analysis Worker ${jobId}] ${detail}`);
           throw new Error(detail);
         }

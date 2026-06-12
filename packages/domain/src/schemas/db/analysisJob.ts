@@ -26,6 +26,7 @@ export const analysisJobSchema = z.object({
   top_p: z.number().nullable(),
   repeat_penalty: z.number().nullable(),
   num_gpu_layers: z.number().int().nullable(),
+  map_phase_system_prompt: z.string().nullable(),
 });
 
 export type AnalysisJobRow = z.infer<typeof analysisJobSchema>;

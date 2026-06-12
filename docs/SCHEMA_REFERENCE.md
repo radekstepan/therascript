@@ -6,7 +6,7 @@ This document outlines the data structures used in SQLite (primary storage) and 
 
 Defined in `src/sqliteService.ts`. Migrations are handled programmatically via `user_version` pragma.
 
-**Current Schema Version:** 15
+**Current Schema Version:** 16
 
 ### Core Tables
 
@@ -102,6 +102,7 @@ Tracks multi-session analysis requests.
 | `top_p` | REAL | NULL | Snapshotted nucleus sampling threshold (v15) |
 | `repeat_penalty` | REAL | NULL | Snapshotted repeat/presence penalty (v15) |
 | `num_gpu_layers` | INTEGER | NULL | Snapshotted GPU offload layer count (v15) |
+| `map_phase_system_prompt` | TEXT | NULL | Optional system prompt prepended to every Map-phase LLM call (v16) |
 | `created_at` | INTEGER | NOT NULL | Creation timestamp |
 | `completed_at` | INTEGER | NULL | Completion timestamp |
 

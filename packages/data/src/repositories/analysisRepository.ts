@@ -2,8 +2,8 @@ import { db, run, all, get } from '@therascript/db';
 import type { AnalysisJob, IntermediateSummary } from '@therascript/domain';
 
 const insertJobSql = `
-    INSERT INTO analysis_jobs (original_prompt, short_prompt, status, created_at, model_name, context_size, strategy_json, thinking_budget, temperature, top_p, repeat_penalty, num_gpu_layers)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO analysis_jobs (original_prompt, short_prompt, status, created_at, model_name, context_size, strategy_json, thinking_budget, temperature, top_p, repeat_penalty, num_gpu_layers, map_phase_system_prompt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `;
 const selectJobByIdSql = 'SELECT * FROM analysis_jobs WHERE id = ?';
 const selectAllJobsSql = 'SELECT * FROM analysis_jobs ORDER BY created_at DESC';
@@ -58,7 +58,8 @@ export const analysisRepository = {
       topP?: number | null;
       repeatPenalty?: number | null;
       numGpuLayers?: number | null;
-    } = {}
+    } = {},
+    mapPhaseSystemPrompt: string | null = null
   ): AnalysisJob => {
     try {
       const createdAt = Date.now();
@@ -76,7 +77,8 @@ export const analysisRepository = {
           llmParams.temperature ?? null,
           llmParams.topP ?? null,
           llmParams.repeatPenalty ?? null,
-          llmParams.numGpuLayers ?? null
+          llmParams.numGpuLayers ?? null,
+          mapPhaseSystemPrompt
         );
         const jobId = jobInfo.lastInsertRowid as number;
 
