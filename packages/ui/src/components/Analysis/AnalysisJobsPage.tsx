@@ -67,6 +67,28 @@ import { cn } from '../../utils';
 import { useAnalysisStream } from '../../hooks/useAnalysisStream';
 import { MapReduceVisualization } from './MapReduceVisualization';
 
+function stripThinkBlocks(text: string): string {
+  return text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+}
+
+const ThinkingTicker: React.FC<{ text: string }> = ({ text }) => (
+  <Box mb="2" className="thinking-inline-strip" aria-label="Model reasoning">
+    <Text size="1" className="thinking-inline-label">
+      Thinking
+    </Text>
+    <Box className="thinking-inline-marquee">
+      <Box className="thinking-inline-track">
+        <Text size="1" className="thinking-inline-copy">
+          {text}
+        </Text>
+        <Text size="1" className="thinking-inline-copy" aria-hidden="true">
+          {text}
+        </Text>
+      </Box>
+    </Box>
+  </Box>
+);
+
 // Helper function to get badge color based on status
 const getStatusBadgeColor = (
   status: AnalysisJob['status'] | IntermediateSummaryWithSessionName['status']
@@ -122,13 +144,14 @@ const StreamingBox: React.FC<{ text: string }> = ({ text }) => {
 const IntermediateSummaryItem: React.FC<{
   summary: IntermediateSummaryWithSessionName;
   liveLog?: string;
+  thinkingLog?: string;
   metrics?: {
     promptTokens?: number;
     completionTokens?: number;
     duration?: number;
     tokensPerSecond?: number | undefined;
   };
-}> = ({ summary, liveLog, metrics }) => {
+}> = ({ summary, liveLog, thinkingLog, metrics }) => {
   const [isOpen, setIsOpen] = useState(false);
 
   const isSuccess = summary.status === 'completed';
@@ -193,7 +216,8 @@ const IntermediateSummaryItem: React.FC<{
 
         {isOpen && isProcessing && liveLog && (
           <>
-            <StreamingBox text={liveLog} />
+            {thinkingLog && <ThinkingTicker text={thinkingLog} />}
+            <StreamingBox text={stripThinkBlocks(liveLog)} />
             {metrics && (
               <Flex mt="1" width="100%" justify="start">
                 <Text size="1" color="gray">
@@ -214,7 +238,9 @@ const IntermediateSummaryItem: React.FC<{
               }}
             >
               <div className="markdown-ai-message">
-                <ReactMarkdown>{summary.summary_text}</ReactMarkdown>
+                <ReactMarkdown>
+                  {stripThinkBlocks(summary.summary_text)}
+                </ReactMarkdown>
               </div>
             </Box>
             {metrics && metrics.completionTokens && metrics.tokensPerSecond && (
@@ -252,8 +278,15 @@ const JobDetailView: React.FC<{
   const queryClient = useQueryClient();
 
   // Use the stream hook
-  const { mapLogs, reduceLog, isConnected, mapMetrics, reduceMetrics } =
-    useAnalysisStream(jobId);
+  const {
+    mapLogs,
+    reduceLog,
+    mapThinkingLogs,
+    reduceThinkingLog,
+    isConnected,
+    mapMetrics,
+    reduceMetrics,
+  } = useAnalysisStream(jobId);
 
   const {
     data: job,
@@ -472,6 +505,7 @@ const JobDetailView: React.FC<{
                     key={summary.id}
                     summary={summary}
                     liveLog={mapLogs[summary.id]} // Pass live log
+                    thinkingLog={mapThinkingLogs[summary.id]} // Pass thinking log
                     metrics={mapMetrics[summary.id]}
                   />
                 ))}
@@ -485,7 +519,8 @@ const JobDetailView: React.FC<{
             <Heading as="h3" size="4" mb="2" color="blue">
               Synthesizing Final Answer...
             </Heading>
-            <StreamingBox text={reduceLog} />
+            {reduceThinkingLog && <ThinkingTicker text={reduceThinkingLog} />}
+            <StreamingBox text={stripThinkBlocks(reduceLog)} />
             {reduceMetrics && reduceMetrics.tokensPerSecond && (
               <Flex mt="1" width="100%" justify="start">
                 <Text size="1" color="gray">
@@ -511,7 +546,9 @@ const JobDetailView: React.FC<{
             >
               <div className="markdown-ai-message">
                 <ReactMarkdown>
-                  {job.final_result || 'No result was generated.'}
+                  {stripThinkBlocks(
+                    job.final_result || 'No result was generated.'
+                  )}
                 </ReactMarkdown>
               </div>
             </Box>
