@@ -68,7 +68,9 @@ import { useAnalysisStream } from '../../hooks/useAnalysisStream';
 import { MapReduceVisualization } from './MapReduceVisualization';
 
 function stripThinkBlocks(text: string): string {
-  return text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+  // Tolerant of unterminated <think> blocks (mid-stream). Mirrors the chat
+  // bubble's splitThinkingText regex.
+  return text.replace(/<think>[\s\S]*?(<\/think>|$)/g, '').trim();
 }
 
 const ThinkingTicker: React.FC<{ text: string }> = ({ text }) => (
@@ -87,6 +89,42 @@ const ThinkingTicker: React.FC<{ text: string }> = ({ text }) => (
       </Box>
     </Box>
   </Box>
+);
+
+// Spinner + cycling ticker shown while we're in a phase but no content has
+// streamed in yet. Reuses the chat bubble's .thinking-ticker CSS.
+const WaitingIndicator: React.FC<{ label: string }> = ({ label }) => (
+  <Flex
+    align="center"
+    gap="2"
+    mb="2"
+    className="text-[var(--gray-11)]"
+    aria-label={label}
+  >
+    <Spinner size="1" />
+    <Box className="thinking-ticker">
+      <Box className="thinking-ticker-track">
+        <Text size="1" style={{ fontStyle: 'italic' }}>
+          {label}
+        </Text>
+        <Text size="1" style={{ fontStyle: 'italic' }}>
+          Reviewing context
+        </Text>
+        <Text size="1" style={{ fontStyle: 'italic' }}>
+          Preparing response
+        </Text>
+        <Text size="1" style={{ fontStyle: 'italic' }}>
+          {label}
+        </Text>
+        <Text size="1" style={{ fontStyle: 'italic' }}>
+          Reviewing context
+        </Text>
+        <Text size="1" style={{ fontStyle: 'italic' }}>
+          Preparing response
+        </Text>
+      </Box>
+    </Box>
+  </Flex>
 );
 
 // Helper function to get badge color based on status
@@ -145,25 +183,32 @@ const IntermediateSummaryItem: React.FC<{
   summary: IntermediateSummaryWithSessionName;
   liveLog?: string;
   thinkingLog?: string;
+  streamPhase?: 'thinking' | 'responding';
   metrics?: {
     promptTokens?: number;
     completionTokens?: number;
     duration?: number;
     tokensPerSecond?: number | undefined;
   };
-}> = ({ summary, liveLog, thinkingLog, metrics }) => {
+}> = ({ summary, liveLog, thinkingLog, streamPhase, metrics }) => {
   const [isOpen, setIsOpen] = useState(false);
 
   const isSuccess = summary.status === 'completed';
   const isFailed = summary.status === 'failed';
   const isProcessing = summary.status === 'processing';
 
-  // Automatically open if processing and log is streaming
+  // Defensive: if the worker's status: 'thinking' event was missed (SSE
+  // snapshot/subscribe race), default to 'thinking' — the model is in
+  // thinking until the first response chunk tells us otherwise.
+  const effectivePhase: 'thinking' | 'responding' = streamPhase ?? 'thinking';
+
+  // Automatically open if processing and the stream has started (either a
+  // thinking chunk or a response token has arrived).
   useEffect(() => {
-    if (isProcessing && liveLog) {
+    if (isProcessing && (liveLog || thinkingLog)) {
       setIsOpen(true);
     }
-  }, [isProcessing, liveLog]);
+  }, [isProcessing, liveLog, thinkingLog]);
 
   return (
     <Card id={`summary-${summary.id}`} size="2" style={{ width: '100%' }}>
@@ -194,7 +239,7 @@ const IntermediateSummaryItem: React.FC<{
         </Flex>
 
         <Box mt="auto">
-          {(isSuccess || isFailed || (isProcessing && liveLog)) && (
+          {(isSuccess || isFailed || isProcessing) && (
             <Button
               variant="soft"
               size="1"
@@ -214,17 +259,26 @@ const IntermediateSummaryItem: React.FC<{
           )}
         </Box>
 
-        {isOpen && isProcessing && liveLog && (
+        {isOpen && isProcessing && (
           <>
-            {thinkingLog && <ThinkingTicker text={thinkingLog} />}
-            <StreamingBox text={stripThinkBlocks(liveLog)} />
-            {metrics && (
-              <Flex mt="1" width="100%" justify="start">
-                <Text size="1" color="gray">
-                  ~{(metrics.tokensPerSecond ?? 0).toFixed(1)} tokens/s
-                </Text>
-              </Flex>
+            {effectivePhase === 'thinking' && thinkingLog && (
+              <ThinkingTicker text={thinkingLog} />
             )}
+            {effectivePhase === 'thinking' && !thinkingLog && (
+              <WaitingIndicator label="Thinking" />
+            )}
+            {effectivePhase === 'responding' && liveLog && (
+              <StreamingBox text={stripThinkBlocks(liveLog)} />
+            )}
+            {effectivePhase === 'responding' && !liveLog && (
+              <WaitingIndicator label="Responding" />
+            )}
+            <Flex mt="1" width="100%" justify="start">
+              <Text size="1" color="gray">
+                {effectivePhase === 'responding' ? 'responding' : 'thinking'} ~
+                {(metrics?.tokensPerSecond ?? 0).toFixed(1)} tokens/s
+              </Text>
+            </Flex>
           </>
         )}
         {isOpen && isSuccess && summary.summary_text && !isProcessing && (
@@ -283,6 +337,8 @@ const JobDetailView: React.FC<{
     reduceLog,
     mapThinkingLogs,
     reduceThinkingLog,
+    mapPhase,
+    reducePhase,
     isConnected,
     mapMetrics,
     reduceMetrics,
@@ -506,6 +562,7 @@ const JobDetailView: React.FC<{
                     summary={summary}
                     liveLog={mapLogs[summary.id]} // Pass live log
                     thinkingLog={mapThinkingLogs[summary.id]} // Pass thinking log
+                    streamPhase={mapPhase[summary.id]}
                     metrics={mapMetrics[summary.id]}
                   />
                 ))}
@@ -514,20 +571,29 @@ const JobDetailView: React.FC<{
         )}
 
         {/* === FINAL ANSWER TERMINAL (When Reducing) === */}
-        {job.status === 'reducing' && reduceLog && (
+        {job.status === 'reducing' && (
           <Box>
             <Heading as="h3" size="4" mb="2" color="blue">
               Synthesizing Final Answer...
             </Heading>
-            {reduceThinkingLog && <ThinkingTicker text={reduceThinkingLog} />}
-            <StreamingBox text={stripThinkBlocks(reduceLog)} />
-            {reduceMetrics && reduceMetrics.tokensPerSecond && (
-              <Flex mt="1" width="100%" justify="start">
-                <Text size="1" color="gray">
-                  ~{reduceMetrics.tokensPerSecond.toFixed(1)} tokens/s
-                </Text>
-              </Flex>
+            {reducePhase !== 'responding' && reduceThinkingLog && (
+              <ThinkingTicker text={reduceThinkingLog} />
             )}
+            {reducePhase !== 'responding' && !reduceThinkingLog && (
+              <WaitingIndicator label="Thinking" />
+            )}
+            {reducePhase === 'responding' && reduceLog && (
+              <StreamingBox text={stripThinkBlocks(reduceLog)} />
+            )}
+            {reducePhase === 'responding' && !reduceLog && (
+              <WaitingIndicator label="Responding" />
+            )}
+            <Flex mt="1" width="100%" justify="start">
+              <Text size="1" color="gray">
+                {reducePhase === 'responding' ? 'responding' : 'thinking'} ~
+                {(reduceMetrics?.tokensPerSecond ?? 0).toFixed(1)} tokens/s
+              </Text>
+            </Flex>
           </Box>
         )}
 

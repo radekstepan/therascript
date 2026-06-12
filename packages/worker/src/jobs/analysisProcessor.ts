@@ -299,10 +299,22 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
         let chunkBuffer = '';
         let thinkingBuffer = '';
         let hasOpenThinkingBlock = false;
+        let hasSentMapThinkingStatus = false;
+        let hasSentMapRespondingStatus = false;
         let lastPublish = Date.now();
         let lastCancelCheck = Date.now();
         const abortController = new AbortController();
         let mapStreamResult: StreamResult = {};
+
+        // Signal the start of the thinking phase for this map summary so the
+        // UI can mirror the chat's streamPhase = 'thinking' behavior.
+        publishStreamEvent(jobId, {
+          phase: 'map',
+          type: 'status',
+          summaryId: summaryTask.id,
+          status: 'thinking',
+        });
+        hasSentMapThinkingStatus = true;
 
         const mapStartTime = Date.now();
         // Cap map-phase completions at 25% of context size (covers thinking
@@ -330,7 +342,8 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
           if (thinkingChunk) {
             if (!hasOpenThinkingBlock) {
               summaryText += '<think>';
-              chunkBuffer += '<think>';
+              // Tags belong only in the persisted text; the streamed `token`
+              // payload must be tag-free so the UI can render it directly.
               hasOpenThinkingBlock = true;
             }
             summaryText += thinkingChunk;
@@ -338,9 +351,17 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
           }
 
           if (contentChunk) {
+            if (!hasSentMapRespondingStatus) {
+              hasSentMapRespondingStatus = true;
+              publishStreamEvent(jobId, {
+                phase: 'map',
+                type: 'status',
+                summaryId: summaryTask.id,
+                status: 'responding',
+              });
+            }
             if (hasOpenThinkingBlock) {
               summaryText += '</think>';
-              chunkBuffer += '</think>';
               hasOpenThinkingBlock = false;
             }
             summaryText += contentChunk;
@@ -382,7 +403,6 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
         }
         if (hasOpenThinkingBlock) {
           summaryText += '</think>';
-          chunkBuffer += '</think>';
           hasOpenThinkingBlock = false;
         }
         mapStreamResult = iterResult.value as StreamResult;
@@ -586,12 +606,23 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
     let reduceBuffer = '';
     let reduceThinkingBuffer = '';
     let hasOpenReduceThinkingBlock = false;
+    let hasSentReduceThinkingStatus = false;
+    let hasSentReduceRespondingStatus = false;
     let lastReducePublish = Date.now();
     let lastReduceCancelCheck = Date.now();
     const reduceAbortController = new AbortController();
     let reduceStreamResult: StreamResult = {};
 
     const reduceStartTime = Date.now();
+
+    // Signal the start of the thinking phase for the reduce synthesis so the
+    // UI can mirror the chat's streamPhase = 'thinking' behavior.
+    publishStreamEvent(jobId, {
+      phase: 'reduce',
+      type: 'status',
+      status: 'thinking',
+    });
+    hasSentReduceThinkingStatus = true;
 
     try {
       // Cap reduce-phase completions at 40% of context size — more headroom
@@ -622,7 +653,8 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
         if (thinkingChunk) {
           if (!hasOpenReduceThinkingBlock) {
             finalResult += '<think>';
-            reduceBuffer += '<think>';
+            // Tags belong only in the persisted text; the streamed `token`
+            // payload must be tag-free so the UI can render it directly.
             hasOpenReduceThinkingBlock = true;
           }
           finalResult += thinkingChunk;
@@ -630,9 +662,16 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
         }
 
         if (contentChunk) {
+          if (!hasSentReduceRespondingStatus) {
+            hasSentReduceRespondingStatus = true;
+            publishStreamEvent(jobId, {
+              phase: 'reduce',
+              type: 'status',
+              status: 'responding',
+            });
+          }
           if (hasOpenReduceThinkingBlock) {
             finalResult += '</think>';
-            reduceBuffer += '</think>';
             hasOpenReduceThinkingBlock = false;
           }
           finalResult += contentChunk;
@@ -679,7 +718,6 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
 
       if (hasOpenReduceThinkingBlock) {
         finalResult += '</think>';
-        reduceBuffer += '</think>';
         hasOpenReduceThinkingBlock = false;
       }
 
