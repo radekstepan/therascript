@@ -4,7 +4,10 @@ import {
   messageRepository,
   usageRepository,
 } from '@therascript/data';
-import { streamChatResponse } from '../services/llamaCppService.js';
+import {
+  streamChatResponse,
+  unloadActiveModel,
+} from '../services/llamaCppService.js';
 import {
   NotFoundError,
   InternalServerError,
@@ -205,9 +208,41 @@ export const addStandaloneChatMessage = async ({
     // only this controller, which we abort manually on write failure, will stop
     // the underlying fetch to LM Studio and interrupt generation.
     const llmAbortController = new AbortController();
+
+    let modelUnloaded = false;
+    const triggerUnload = () => {
+      if (modelUnloaded) return;
+      modelUnloaded = true;
+      // Server-side safety net. Elysia 1.2.25's ReadableStream abort handler
+      // has an inverted condition (handler.mjs:262), so this normally does
+      // not fire from SSE disconnect. The UI calls /api/llm/unload directly;
+      // this path is kept so it activates automatically if Elysia is upgraded.
+      const MAX_ATTEMPTS = 15;
+      const RETRY_DELAY_MS = 500;
+      setTimeout(async () => {
+        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+          try {
+            const message = await unloadActiveModel();
+            if (message.includes('unloaded successfully')) {
+              console.log(
+                `[API SSE ${chatData.id}] Active model ${message} (attempt ${attempt}/${MAX_ATTEMPTS}).`
+              );
+              return;
+            }
+          } catch {}
+          if (attempt < MAX_ATTEMPTS) {
+            await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+          }
+        }
+      }, 1000);
+    };
+
     request.signal?.addEventListener(
       'abort',
-      () => llmAbortController.abort(),
+      () => {
+        llmAbortController.abort();
+        triggerUnload();
+      },
       { once: true }
     );
 
@@ -244,6 +279,7 @@ export const addStandaloneChatMessage = async ({
         );
         sseStreamClosed = true;
         llmAbortController.abort();
+        triggerUnload();
       },
     });
 

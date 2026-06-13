@@ -16,6 +16,7 @@ import {
   addSessionChatMessageStream,
   fetchStandaloneChatDetails,
   addStandaloneChatMessageStream,
+  unloadLlmModel,
 } from '../../../api/api';
 import { debounce } from '../../../helpers';
 import type {
@@ -148,6 +149,15 @@ export function ChatInterface({
         j.chatId === activeChatId ? { ...j, status: 'canceling' as const } : j
       )
     );
+    // Workaround: Elysia 1.2.25's ReadableStream abort handler has an inverted
+    // condition (handler.mjs:262: `!request.signal.aborted`), so the server's
+    // ReadableStream.cancel() never fires on SSE disconnect. Trigger the unload
+    // from the UI instead.
+    setTimeout(() => {
+      unloadLlmModel().catch((err: unknown) => {
+        console.warn('[UI] unloadLlmModel after STOP failed:', err);
+      });
+    }, 500);
   }, [activeChatId, setActiveLlmJobs, currentJob]);
 
   const lastAiMessageWithTokens = useMemo(() => {

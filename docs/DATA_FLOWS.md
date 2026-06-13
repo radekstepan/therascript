@@ -119,3 +119,34 @@ This document details the step-by-step data flows for the core operations of the
 3.  **Aftermath**
     *   Queued and active transcription jobs are removed.
     *   Sessions that were in-flight remain in pending/transcribing metadata state until manually re-queued.
+
+## 6. Chat Cancellation & Model Unload (UI-Triggered)
+**Goal:** Free the LM Studio model's VRAM/RAM as soon as the user clicks **STOP** mid-generation.
+
+1.  **User Clicks STOP (UI)**
+    *   `ChatInput.tsx` swaps the send button for a red `StopIcon` while `isAiResponding` is true.
+    *   Click invokes `handleCancelStream` in `ChatInterface.tsx`.
+    *   **File:** `packages/ui/src/components/SessionView/Chat/ChatInterface.tsx`.
+
+2.  **Abort the In-Flight Browser Fetch**
+    *   `currentJob.controller.abort()` — the AbortController was attached to the `fetch` signal in `addSessionChatMessageStream` / `addStandaloneChatMessageStream`.
+    *   The browser closes the SSE connection to the API. The local AI-message bubble is marked `canceling`.
+
+3.  **Trigger Model Unload from the UI**
+    *   **CRITICAL:** Because of a bug in Elysia 1.2.25's web-standard adapter (`node_modules/elysia/dist/adapter/web-standard/handler.mjs` line 262), the abort listener condition `!request?.signal?.aborted` is inverted. The listener never cancels the handler's `ReadableStream`, so the server-side `ReadableStream.cancel()` callback does **not** fire on SSE disconnect. Server-side abort hooks (in `sessionChatHandler.ts` / `standaloneChatHandler.ts`) therefore cannot detect the cancellation through the normal channel.
+    *   **Workaround:** 500ms after the abort, the UI calls `POST /api/llm/unload` directly via `unloadLlmModel()` from `packages/ui/src/api/llm.ts`. The 500ms gives the LM Studio compute thread time to release the model lock after the upstream TCP socket closes.
+    *   **File:** `packages/api/src/routes/llmRoutes.ts` — the existing `/api/llm/unload` endpoint.
+
+4.  **Server Unload**
+    *   `unloadActiveModel()` (`llamaCppService.ts`) lists loaded instances via `GET /api/v1/models`, then `POST`s to `/api/v1/models/unload` for each.
+    *   On success, the model is freed from LM Studio memory.
+
+### Server-Side Safety Net (currently inert)
+
+`sessionChatHandler.ts` and `standaloneChatHandler.ts` also wire three abort hooks that all call a guarded `triggerUnload()`:
+
+1.  `request.signal?.addEventListener('abort', …)`
+2.  `ReadableStream.cancel()` callback
+3.  `processStream` `finally` block (checks `llmAbortController.signal.aborted`)
+
+These do not fire under Elysia 1.2.25 (the bug above). They are kept so that if Elysia is upgraded to a fixed version, the unload starts working on the server side without further code changes. `triggerUnload` has a `modelUnloaded` guard, so the UI-driven call and any future server-side call are mutually safe.

@@ -80,6 +80,7 @@ These operate in real-time via the API (`packages/api`) to facilitate user inter
     *   Recent chat history.
 *   **Capabilities:** Can quote the patient/therapist, identify CBT techniques used in the specific text, and clarify transcript ambiguities.
 *   **Memory:** Context is re-injected on every turn; state is stored in SQLite (`messages` table).
+*   **Cancellation:** Model unload on STOP is triggered client-side due to an Elysia 1.2.25 bug; see `docs/DATA_FLOWS.md` §6.
 
 ### Standalone Chat Agent
 *   **Type:** General Purpose Assistant
@@ -87,6 +88,7 @@ These operate in real-time via the API (`packages/api`) to facilitate user inter
 *   **Prompt Template:** `system_standalone_prompt`
 *   **Context:** No transcript context. Pure chat history.
 *   **Capabilities:** General questions, brainstorming, or drafting emails/notes without specific session grounding.
+*   **Cancellation:** Model unload on STOP is triggered client-side due to an Elysia 1.2.25 bug; see `docs/DATA_FLOWS.md` §6.
 
 ## 4. Service Agents (External)
 

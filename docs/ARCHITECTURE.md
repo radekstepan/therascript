@@ -175,6 +175,8 @@ UI                                  API
 │◄═══ SSE: progress updates ════════ │  (Real-time analysis progress)
 ```
 
+> **SSE disconnect caveat (Elysia 1.2.25):** The server's `ReadableStream.cancel()` callback is not invoked on client disconnect because of an inverted-condition bug in Elysia's web-standard adapter (`handler.mjs:262`). Endpoints that need to react to client disconnects (e.g. cancelling the upstream LLM fetch and unloading the model) must be triggered from the client side. See `DATA_FLOWS.md` §6.
+
 ### 2. API ↔ Worker: BullMQ Job Queues
 
 ```
