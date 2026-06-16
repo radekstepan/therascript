@@ -176,10 +176,10 @@ server.keepAliveTimeout = 0; // Disable keep-alive timeout if needed
 
 initializeServices()
   .then(() => {
-    server.listen(config.server.port, () => {
+    server.listen(config.server.port, config.server.host, () => {
       console.log(`-------------------------------------------------------`);
       console.log(
-        `🚀 Therapy Analyzer Backend (Elysia/Node) listening on port ${config.server.port}`
+        `🚀 Therapy Analyzer Backend (Elysia/Node) listening on ${config.server.host}:${config.server.port}`
       );
       console.log(`   Version: ${appVersion}`);
       console.log(`   Mode: ${config.server.nodeEnv}`);

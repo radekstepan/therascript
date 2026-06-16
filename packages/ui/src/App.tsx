@@ -14,7 +14,6 @@ import {
 } from '@radix-ui/themes';
 import * as Toast from '@radix-ui/react-toast';
 import { Cross2Icon, ExclamationTriangleIcon } from '@radix-ui/react-icons';
-import axios from 'axios';
 import { useQuery } from '@tanstack/react-query';
 
 // Page Components
@@ -47,9 +46,6 @@ import { currentPageAtom } from './store/navigation/currentPageAtom';
 import { cn } from './utils';
 import type { ReadinessStatus } from './types';
 import { fetchReadinessStatus } from './api/meta';
-
-const API_BASE_URL = 'http://localhost:3001';
-axios.defaults.baseURL = API_BASE_URL;
 
 function ReadinessOverlay({
   status,

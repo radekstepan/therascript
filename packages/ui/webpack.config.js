@@ -75,9 +75,31 @@ module.exports = {
     },
     compress: true, // Enable gzip compression for served files
     port: 3002, // Port for the development server
+    // Bind on all interfaces so Tailscale/LAN peers can reach the UI.
+    // Override with UI_HOST=127.0.0.1 to keep it loopback-only.
+    host: process.env.UI_HOST || '0.0.0.0',
+    // Accept requests from any Host header (Tailscale MagicDNS, LAN IPs).
+    // Override with WEBPACK_ALLOWED_HOSTS to restrict.
+    allowedHosts: process.env.WEBPACK_ALLOWED_HOSTS || 'all',
     hot: true, // Enable Hot Module Replacement (HMR) for faster development feedback
     // Serve index.html for any 404 responses. Essential for client-side routing (SPAs).
     historyApiFallback: true,
+    // Proxy API and shutdown endpoints to the backend so the browser always
+    // sees same-origin requests, regardless of how the UI is reached
+    // (localhost, LAN, Tailscale MagicDNS, etc.). The UI never needs to know
+    // the API's host:port.
+    proxy: [
+      {
+        context: ['/api'],
+        target: 'http://localhost:3001',
+        changeOrigin: false,
+      },
+      {
+        context: ['/shutdown'],
+        target: 'http://localhost:9999',
+        changeOrigin: false,
+      },
+    ],
   },
 
   // Source maps: Control how source maps are generated for debugging.

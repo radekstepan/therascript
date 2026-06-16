@@ -7,8 +7,7 @@ import type {
   BackendChatMessage,
   StandaloneChatListItem,
 } from '../types';
-
-const API_BASE_URL = axios.defaults.baseURL || 'http://localhost:3001';
+import { API_BASE_URL } from './baseUrl';
 
 const ensureArrayResponse = (data: unknown, endpoint: string): any[] => {
   if (!Array.isArray(data)) {

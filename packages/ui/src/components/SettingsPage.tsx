@@ -50,9 +50,7 @@ import {
   requestResetTranscriptionQueue,
 } from '../api/api';
 import { cn } from '../utils';
-import axios from 'axios';
-
-const API_BASE_URL = axios.defaults.baseURL || 'http://localhost:3001';
+import { API_BASE_URL } from '../api/baseUrl';
 
 export function SettingsPage() {
   const [renderMarkdown, setRenderMarkdown] = useAtom(renderMarkdownAtom);

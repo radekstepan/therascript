@@ -1,8 +1,6 @@
 // packages/ui/src/hooks/useAnalysisStream.ts
 import { useState, useEffect, useRef } from 'react';
-import axios from 'axios';
-
-const API_BASE_URL = axios.defaults.baseURL || 'http://localhost:3001';
+import { API_BASE_URL } from '../api/baseUrl';
 
 type StreamPhase = 'thinking' | 'responding';
 

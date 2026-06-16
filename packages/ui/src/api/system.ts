@@ -1,21 +1,19 @@
 // packages/ui/src/api/system.ts
 import axios from 'axios';
 import type { GpuStats } from '../types';
+import { API_BASE_URL } from './baseUrl';
 
-const SHUTDOWN_SERVICE_URL = 'http://localhost:9999';
-const API_BASE_URL = axios.defaults.baseURL || 'http://localhost:3001';
+// The webpack dev server proxies /shutdown to the wrapper's shutdown service
+// on port 9999, so the UI always uses the same-origin path.
+const SHUTDOWN_SERVICE_URL = `${API_BASE_URL}/shutdown`;
 
 export const requestAppShutdown = async (): Promise<{ message: string }> => {
   try {
-    const response = await axios.post(
-      `${SHUTDOWN_SERVICE_URL}/shutdown`,
-      null,
-      {
-        headers: {
-          'Content-Type': 'text/plain',
-        },
-      }
-    );
+    const response = await axios.post(SHUTDOWN_SERVICE_URL, null, {
+      headers: {
+        'Content-Type': 'text/plain',
+      },
+    });
     return response.data;
   } catch (error) {
     console.error('Error requesting app shutdown:', error);

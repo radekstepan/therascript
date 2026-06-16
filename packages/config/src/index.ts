@@ -78,6 +78,7 @@ const resolvedUploadsDir = path.resolve(projectRoot, uploadsDirFromEnv);
 const config = {
   server: {
     port: parseIntEnvVar('PORT', 3001),
+    host: getEnvVar('HOST', '0.0.0.0'),
     nodeEnv: nodeEnv as 'development' | 'production',
     isProduction: isProduction,
     appMode: getEnvVar('APP_MODE', 'development') as

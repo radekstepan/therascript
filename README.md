@@ -200,7 +200,35 @@ This mode starts the API, the background worker, the UI (with hot-reloading), an
     *   Ensure the **Whisper** and **Elasticsearch** Docker containers are running and healthy.
 
 3.  **Access the Application:**
-    Open your browser and navigate to `http://localhost:3002`.
+    Open your browser and navigate to `http://localhost:3002`. From another machine on your Tailscale network, see [Accessing over Tailscale](#accessing-over-tailscale) below.
+
+### Accessing over Tailscale
+
+Therascript binds its app-facing services (UI, API, shutdown) to `0.0.0.0` by default, so they are reachable from any Tailscale peer without extra configuration. Infrastructure services (Whisper, Elasticsearch, Kibana, Redis) stay bound to `127.0.0.1` since the browser never reaches them directly — all traffic is proxied through the UI.
+
+1.  Make sure the host running Therascript is on your Tailscale network (`tailscale up` on that machine).
+2.  In `.env.api.dev` and `.env.api.prod`, set the URL you actually use to reach the UI:
+    ```bash
+    CORS_ORIGIN=http://<this-machine>.<tailnet>.ts.net:3002
+    ```
+3.  From any other Tailscale device, open `http://<this-machine>.<tailnet>.ts.net:3002`.
+
+All API and shutdown calls go through the UI dev server (`localhost:3002`), which proxies them to the backend — the browser only ever sees same-origin requests.
+
+**Optional: Tailscale HTTPS via `tailscale serve`:**
+```bash
+tailscale serve https / http://localhost:3002
+tailscale serve https /api http://localhost:3001
+```
+This gives you a valid TLS cert at `https://<machine>.<tailnet>.ts.net` and the browser stops complaining about the dev-server certificate. No code change required.
+
+**Tighter security:** if you don't want the services exposed to every Tailscale peer, override the bind hosts in the env files:
+```bash
+HOST=127.0.0.1              # in .env.api.dev / .env.api.prod
+SHUTDOWN_HOST=127.0.0.1      # passed to the run-dev / run-prod wrapper
+UI_HOST=127.0.0.1            # for the webpack dev server
+```
+…and put a reverse proxy (Tailscale `serve` or any other) in front.
 
 ### Mock Mode
 

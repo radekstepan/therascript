@@ -29,7 +29,8 @@ console.log(
 // --- End UI Port ---
 
 // --- Shutdown Service Configuration ---
-const SHUTDOWN_PORT = 9999;
+const SHUTDOWN_PORT = parseInt(process.env.SHUTDOWN_PORT || '9999', 10);
+const SHUTDOWN_HOST = process.env.SHUTDOWN_HOST || '0.0.0.0';
 let shutdownHttpServer = null; // To store the server instance
 // --- End Shutdown Service Configuration ---
 
@@ -321,9 +322,9 @@ function createShutdownService(shutdownHandlerCallback) {
     }
   });
 
-  server.listen(SHUTDOWN_PORT, 'localhost', () => {
+  server.listen(SHUTDOWN_PORT, SHUTDOWN_HOST, () => {
     console.log(
-      `[RunProd ShutdownService] Listening on http://localhost:${SHUTDOWN_PORT}/shutdown (allowing origin: ${UI_ORIGIN_FROM_ENV})`
+      `[RunProd ShutdownService] Listening on http://${SHUTDOWN_HOST}:${SHUTDOWN_PORT}/shutdown (allowing origin: ${UI_ORIGIN_FROM_ENV})`
     );
   });
 

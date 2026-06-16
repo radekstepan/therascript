@@ -52,12 +52,10 @@ import {
 } from '../../../api/api';
 import { sessionColorMap, therapyColorMap } from '../../../constants';
 import { debounce, formatIsoDateToYMD, formatDuration } from '../../../helpers';
-import axios from 'axios';
 import { useSetAtom } from 'jotai';
 import { toastMessageAtom } from '../../../store';
 import copy from 'copy-to-clipboard';
-
-const API_BASE_URL = axios.defaults.baseURL || 'http://localhost:3001';
+import { API_BASE_URL } from '../../../api/baseUrl';
 
 type BadgeCategory = 'session' | 'therapy';
 
