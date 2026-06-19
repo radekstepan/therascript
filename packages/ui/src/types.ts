@@ -185,6 +185,12 @@ export interface LlmStatus {
   configuredNumGpuLayers?: number | null;
   /** Budget for reasoning tokens (-1 = unrestricted, 0 = disabled, >0 = limit) */
   configuredThinkingBudget?: number | null;
+  /** The LLM base URL the backend is currently using (resolved; may be the default or an override). */
+  activeBaseUrl?: string;
+  /** The LLM base URL the backend considers its local/default. */
+  defaultBaseUrl?: string;
+  /** True when `activeBaseUrl` differs from `defaultBaseUrl` (i.e., remote mode is active). */
+  isRemoteBaseUrl?: boolean;
 }
 export interface AvailableModelsResponse {
   models: LlmModelInfo[];
@@ -341,6 +347,7 @@ export interface AnalysisJob {
   repeat_penalty: number | null;
   num_gpu_layers: number | null;
   map_phase_system_prompt: string | null;
+  llm_base_url: string | null;
   summaries?: IntermediateSummaryWithSessionName[];
   strategy?: AnalysisStrategy | null; // Parsed strategy object from API
 }
