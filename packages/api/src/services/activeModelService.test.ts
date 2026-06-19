@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('@therascript/config', () => ({
   default: {
-    llm: { modelPath: 'llama3' },
+    llm: { modelPath: 'llama3', baseURL: 'http://localhost:1234' },
   },
 }));
 
@@ -119,5 +119,136 @@ describe('activeModelService — numGpuLayers', () => {
     expect(svc.getConfiguredTopP()).toBe(0.85);
     expect(svc.getConfiguredRepeatPenalty()).toBe(1.3);
     expect(svc.getConfiguredNumGpuLayers()).toBe(24);
+  });
+});
+
+describe('activeModelService — LLM base URL', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it('returns the configured default base URL initially', async () => {
+    const svc = await import('./activeModelService.js');
+    expect(svc.getDefaultBaseUrl()).toBe('http://localhost:1234');
+    expect(svc.getActiveBaseUrl()).toBe('http://localhost:1234');
+    expect(svc.getConfiguredBaseUrlOverride()).toBeNull();
+    expect(svc.isRemoteLlmBaseUrl()).toBe(false);
+  });
+
+  it('normalizes a valid URL by trimming and stripping trailing slashes', async () => {
+    const svc = await import('./activeModelService.js');
+    expect(svc.normalizeLlmBaseUrl('  http://example.com:1234/  ')).toBe(
+      'http://example.com:1234'
+    );
+  });
+
+  it('normalizes empty/whitespace strings to null', async () => {
+    const svc = await import('./activeModelService.js');
+    expect(svc.normalizeLlmBaseUrl('')).toBeNull();
+    expect(svc.normalizeLlmBaseUrl('   ')).toBeNull();
+    expect(svc.normalizeLlmBaseUrl(null)).toBeNull();
+    expect(svc.normalizeLlmBaseUrl(undefined)).toBeNull();
+  });
+
+  it('rejects URLs that are not http or https', async () => {
+    const svc = await import('./activeModelService.js');
+    expect(() => svc.normalizeLlmBaseUrl('ftp://example.com')).toThrow(
+      /http or https/
+    );
+  });
+
+  it('rejects invalid URL strings', async () => {
+    const svc = await import('./activeModelService.js');
+    expect(() => svc.normalizeLlmBaseUrl('not a url')).toThrow(/Invalid LLM/);
+  });
+
+  it('treats undefined as a no-op for the override', async () => {
+    const svc = await import('./activeModelService.js');
+    svc.setActiveModelAndContextAndParams(
+      'llama3',
+      null,
+      0.7,
+      0.9,
+      1.1,
+      null,
+      null,
+      undefined
+    );
+    expect(svc.getConfiguredBaseUrlOverride()).toBeNull();
+    expect(svc.getActiveBaseUrl()).toBe('http://localhost:1234');
+  });
+
+  it('treats null as a reset to the default', async () => {
+    const svc = await import('./activeModelService.js');
+    // First set a remote URL
+    svc.setActiveModelAndContextAndParams(
+      'llama3',
+      null,
+      0.7,
+      0.9,
+      1.1,
+      null,
+      null,
+      'http://remote.example.com:1234'
+    );
+    expect(svc.getActiveBaseUrl()).toBe('http://remote.example.com:1234');
+    expect(svc.isRemoteLlmBaseUrl()).toBe(true);
+
+    // Then reset
+    svc.setActiveModelAndContextAndParams(
+      'llama3',
+      null,
+      0.7,
+      0.9,
+      1.1,
+      null,
+      null,
+      null
+    );
+    expect(svc.getConfiguredBaseUrlOverride()).toBeNull();
+    expect(svc.getActiveBaseUrl()).toBe('http://localhost:1234');
+    expect(svc.isRemoteLlmBaseUrl()).toBe(false);
+  });
+
+  it('treats a string as setting an explicit override', async () => {
+    const svc = await import('./activeModelService.js');
+    svc.setActiveModelAndContextAndParams(
+      'llama3',
+      null,
+      0.7,
+      0.9,
+      1.1,
+      null,
+      null,
+      'http://10.0.0.1:1234'
+    );
+    expect(svc.getActiveBaseUrl()).toBe('http://10.0.0.1:1234');
+    expect(svc.getConfiguredBaseUrlOverride()).toBe('http://10.0.0.1:1234');
+    expect(svc.isRemoteLlmBaseUrl()).toBe(true);
+  });
+
+  it('isRemoteLlmBaseUrl accepts an explicit candidate URL', async () => {
+    const svc = await import('./activeModelService.js');
+    // Currently default
+    expect(svc.isRemoteLlmBaseUrl('http://localhost:1234')).toBe(false);
+    expect(svc.isRemoteLlmBaseUrl('http://other:1234')).toBe(true);
+
+    // After override (active is remote at 10.0.0.1)
+    svc.setActiveModelAndContextAndParams(
+      'llama3',
+      null,
+      0.7,
+      0.9,
+      1.1,
+      null,
+      null,
+      'http://10.0.0.1:1234'
+    );
+    // Candidate is local default => not remote
+    expect(svc.isRemoteLlmBaseUrl('http://localhost:1234')).toBe(false);
+    // Candidate is the remote URL => remote
+    expect(svc.isRemoteLlmBaseUrl('http://10.0.0.1:1234')).toBe(true);
+    // No candidate => falls back to active (10.0.0.1) => remote
+    expect(svc.isRemoteLlmBaseUrl()).toBe(true);
   });
 });

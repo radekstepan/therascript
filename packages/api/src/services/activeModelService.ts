@@ -4,6 +4,12 @@ import config from '@therascript/config';
 // Initialize with the value from the config file (.env)
 let activeModelName: string = config.llm.modelPath;
 
+// Process-level override for the LLM base URL. `null` means "use config default
+// (local)". A non-null value is a normalized explicit URL (e.g. a remote LM
+// Studio-compatible server). The override is intentionally process-local; it
+// is not persisted and resets to `null` on process restart.
+let configuredBaseUrl: string | null = null;
+
 export const setActiveModelName = (name: string): void => {
   activeModelName = name;
 };
@@ -45,6 +51,60 @@ export const setActiveModelVramEstimateBytes = (bytes: number | null): void => {
   cachedVramEstimateBytes = bytes;
 };
 // --- End New Getters ---
+
+// --- LLM Base URL helpers ---
+//
+// Semantics:
+//   undefined -> do not change the currently configured base URL
+//   null      -> reset to local/default base URL
+//   string    -> use this explicit base URL (remote or custom local)
+//
+// `normalizeLlmBaseUrl` trims, validates `http(s)://`, and strips trailing
+// slashes. Empty/whitespace becomes `null`. Invalid URLs throw.
+export const normalizeLlmBaseUrl = (value?: string | null): string | null => {
+  const trimmed = value?.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error(`Invalid LLM base URL: ${trimmed}`);
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`LLM base URL must use http or https: ${trimmed}`);
+  }
+
+  return parsed.toString().replace(/\/+$/, '');
+};
+
+export const getDefaultBaseUrl = (): string => {
+  const normalized = normalizeLlmBaseUrl(config.llm.baseURL);
+
+  if (!normalized) {
+    throw new Error('config.llm.baseURL is not configured');
+  }
+
+  return normalized;
+};
+
+export const getActiveBaseUrl = (): string => {
+  return configuredBaseUrl || getDefaultBaseUrl();
+};
+
+export const isRemoteLlmBaseUrl = (baseUrl?: string | null): boolean => {
+  const target = normalizeLlmBaseUrl(baseUrl) || getActiveBaseUrl();
+  return target !== getDefaultBaseUrl();
+};
+
+export const getConfiguredBaseUrlOverride = (): string | null => {
+  return configuredBaseUrl;
+};
+// --- End LLM Base URL helpers ---
 
 // --- Modified Setter to include context size ---
 export const setActiveModelAndContext = (
@@ -103,7 +163,8 @@ export const setActiveModelAndContextAndParams = (
   newTopP?: number,
   newRepeatPenalty?: number,
   newNumGpuLayers?: number | null,
-  newThinkingBudget?: number | null
+  newThinkingBudget?: number | null,
+  newBaseUrl?: string | null
 ): void => {
   if (!newModelName || typeof newModelName !== 'string') {
     console.error(
@@ -239,6 +300,19 @@ export const setActiveModelAndContextAndParams = (
     console.log(
       `[ActiveModelService] Model and all parameters are already active.`
     );
+  }
+
+  // Apply base URL change only when caller explicitly provided a value.
+  // `undefined` means "do not change", `null` means "reset to default",
+  // a non-empty string means "use this URL".
+  if (newBaseUrl !== undefined) {
+    const normalized = normalizeLlmBaseUrl(newBaseUrl);
+    if (normalized !== configuredBaseUrl) {
+      console.log(
+        `[ActiveModelService] Changing base URL from '${configuredBaseUrl ?? 'default'}' to '${normalized ?? 'default'}'`
+      );
+      configuredBaseUrl = normalized;
+    }
   }
 };
 // --- End New Setter ---
