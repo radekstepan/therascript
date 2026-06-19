@@ -104,11 +104,17 @@ export function SelectActiveModelModal({
   const modelsBaseUrl = isRemote ? debouncedRemoteUrl.trim() : null;
   const canFetchRemoteModels = !isRemote || isValidHttpUrl(debouncedRemoteUrl);
 
-  const { data: availableModelsData, isLoading: isLoadingModels } = useQuery({
+  const {
+    data: availableModelsData,
+    isLoading: isLoadingModels,
+    isError: isErrorAvailableModels,
+    refetch: refetchAvailableModels,
+  } = useQuery({
     queryKey: ['availableLlmModels', isRemote ? modelsBaseUrl : 'local'],
     queryFn: () => fetchAvailableModels(modelsBaseUrl),
     enabled: isOpen && (!isRemote || !!canFetchRemoteModels),
     staleTime: 60 * 1000,
+    retry: false,
   });
 
   const { data: gpuStats } = useQuery({
@@ -412,6 +418,27 @@ export function SelectActiveModelModal({
                 </Text>
               )}
             </label>
+          )}
+
+          {isErrorAvailableModels && (
+            <Callout.Root color="amber" size="1">
+              <Callout.Icon>
+                <InfoCircledIcon />
+              </Callout.Icon>
+              <Callout.Text>
+                {isRemote
+                  ? `Could not connect to remote LLM server at ${modelsBaseUrl}. Check the URL and ensure the LM Studio server is running.`
+                  : 'Could not fetch available models from the local LLM server. Ensure the LM Studio server is running.'}
+                <Button
+                  variant="ghost"
+                  size="1"
+                  ml="2"
+                  onClick={() => refetchAvailableModels()}
+                >
+                  Retry
+                </Button>
+              </Callout.Text>
+            </Callout.Root>
           )}
 
           <label>
