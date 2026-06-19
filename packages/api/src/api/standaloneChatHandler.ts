@@ -37,6 +37,7 @@ import {
 import {
   getConfiguredContextSize,
   getActiveModel,
+  getActiveBaseUrl,
 } from '../services/activeModelService.js';
 import {
   type ChatRequest,
@@ -252,8 +253,12 @@ export const addStandaloneChatMessage = async ({
         ? {
             contextSize: recommendedContext,
             abortSignal: llmAbortController.signal,
+            llamaCppBaseUrl: getActiveBaseUrl(),
           }
-        : { abortSignal: llmAbortController.signal }
+        : {
+            abortSignal: llmAbortController.signal,
+            llamaCppBaseUrl: getActiveBaseUrl(),
+          }
     );
 
     const headers = new Headers({

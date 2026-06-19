@@ -34,6 +34,7 @@ import {
   getConfiguredRepeatPenalty,
   getConfiguredNumGpuLayers,
   getConfiguredThinkingBudget,
+  getActiveBaseUrl,
 } from '../services/activeModelService.js';
 import {
   type AnalysisRequest,
@@ -86,7 +87,8 @@ const getSystemPrompt = (
 const generateShortPromptInBackground = async (
   jobId: number,
   originalPrompt: string,
-  modelName?: string | null
+  modelName?: string | null,
+  jobLlmBaseUrl?: string | null
 ) => {
   try {
     console.log(`[Analysis BG ${jobId}] Generating short prompt...`);
@@ -108,7 +110,10 @@ const generateShortPromptInBackground = async (
           timestamp: Date.now(),
         },
       ],
-      { model: modelName || undefined }
+      {
+        model: modelName || undefined,
+        ...(jobLlmBaseUrl ? { llamaCppBaseUrl: jobLlmBaseUrl } : {}),
+      }
     );
     const {
       text: shortPrompt,
@@ -163,7 +168,8 @@ const generateStrategyAndUpdateJob = async (
   jobId: number,
   originalPrompt: string,
   modelName?: string | null,
-  contextSize?: number | null
+  contextSize?: number | null,
+  jobLlmBaseUrl?: string | null
 ) => {
   try {
     console.log(`[Analysis BG ${jobId}] Generating advanced strategy...`);
@@ -176,9 +182,13 @@ const generateStrategyAndUpdateJob = async (
     if (modelName && modelName !== 'default') {
       try {
         console.log(
-          `[Analysis BG ${jobId}] Ensuring model is loaded: ${modelName}`
+          `[Analysis BG ${jobId}] Ensuring model is loaded: ${modelName} (baseUrl=${jobLlmBaseUrl ?? 'active'})`
         );
-        await ensureModelLoaded(modelName, contextSize);
+        await ensureModelLoaded(
+          modelName,
+          contextSize,
+          jobLlmBaseUrl ?? undefined
+        );
         console.log(`[Analysis BG ${jobId}] Model ready.`);
       } catch (loadError: any) {
         console.error(
@@ -199,7 +209,12 @@ const generateStrategyAndUpdateJob = async (
     // This must run before the strategy stream starts so we don't have two
     // concurrent requests to the LLM — the second concurrent request would
     // cause LM Studio to auto-load a second instance.
-    await generateShortPromptInBackground(jobId, originalPrompt, modelName);
+    await generateShortPromptInBackground(
+      jobId,
+      originalPrompt,
+      modelName,
+      jobLlmBaseUrl
+    );
 
     const promptTemplate = getSystemPrompt('system_analysis_strategist');
     const strategistSystemPrompt = promptTemplate.replace(
@@ -218,7 +233,10 @@ const generateStrategyAndUpdateJob = async (
           timestamp: Date.now(),
         },
       ],
-      { model: modelName || undefined }
+      {
+        model: modelName || undefined,
+        ...(jobLlmBaseUrl ? { llamaCppBaseUrl: jobLlmBaseUrl } : {}),
+      }
     );
     const {
       text: rawStrategyOutput,
@@ -373,6 +391,12 @@ export const createAnalysisJobHandler = async ({
 
     let newJob: AnalysisJob;
 
+    // Snapshot the active LLM base URL at job-creation time so the worker
+    // (a separate process) uses the same network target even if the user
+    // later toggles between local and remote. This is the only "routing"
+    // state the worker needs to know about.
+    const jobLlmBaseUrl = getActiveBaseUrl();
+
     if (useAdvancedStrategy) {
       newJob = analysisRepository.createJob(
         prompt,
@@ -383,7 +407,8 @@ export const createAnalysisJobHandler = async ({
         null,
         'generating_strategy',
         llmParams,
-        mapPhaseSystemPrompt?.trim() ? mapPhaseSystemPrompt.trim() : null
+        mapPhaseSystemPrompt?.trim() ? mapPhaseSystemPrompt.trim() : null,
+        jobLlmBaseUrl
       );
       // Short prompt generation is handled inside generateStrategyAndUpdateJob
       // (after model load, before strategy stream) to avoid a concurrent
@@ -392,7 +417,8 @@ export const createAnalysisJobHandler = async ({
         newJob.id,
         prompt,
         modelName,
-        contextSizeToUse
+        contextSizeToUse,
+        jobLlmBaseUrl
       );
     } else {
       newJob = analysisRepository.createJob(
@@ -404,10 +430,16 @@ export const createAnalysisJobHandler = async ({
         null,
         'pending',
         llmParams,
-        mapPhaseSystemPrompt?.trim() ? mapPhaseSystemPrompt.trim() : null
+        mapPhaseSystemPrompt?.trim() ? mapPhaseSystemPrompt.trim() : null,
+        jobLlmBaseUrl
       );
       void processAnalysisJob(newJob.id);
-      void generateShortPromptInBackground(newJob.id, prompt, modelName);
+      void generateShortPromptInBackground(
+        newJob.id,
+        prompt,
+        modelName,
+        jobLlmBaseUrl
+      );
     }
 
     set.status = 202;

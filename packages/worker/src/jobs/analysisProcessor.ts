@@ -33,10 +33,9 @@ import { publishStreamEvent } from '../services/streamPublisher.js';
  */
 async function loadLlmModelForWorker(
   modelKey: string,
-  contextSize?: number | null
+  contextSize?: number | null,
+  baseUrl?: string
 ): Promise<void> {
-  const baseUrl = config.llm.baseURL;
-
   // Single fetch — used both for the early-return check and for unloading.
   type LmsModel = {
     type: string;
@@ -153,6 +152,12 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
       return;
     }
 
+    // Resolve the LLM base URL the worker should use. The job record
+    // (llm_base_url) wins if set; otherwise fall back to the worker's
+    // config default. This is the single source of truth for routing
+    // both the model-load and the Map/Reduce streams.
+    const jobLlmBaseUrl = jobRecord.llm_base_url || config.llm.baseURL;
+
     let strategy: AnalysisStrategy | null = null;
     if (jobRecord.strategy_json) {
       try {
@@ -166,10 +171,13 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
     // LM Studio requires explicit model loading before streaming
     if (jobRecord.model_name && jobRecord.model_name !== 'default') {
       try {
-        console.log(`[Analysis Worker ${jobId}] Ensuring model is loaded...`);
+        console.log(
+          `[Analysis Worker ${jobId}] Ensuring model is loaded... (baseUrl=${jobLlmBaseUrl})`
+        );
         await loadLlmModelForWorker(
           jobRecord.model_name,
-          jobRecord.context_size
+          jobRecord.context_size,
+          jobLlmBaseUrl
         );
         console.log(`[Analysis Worker ${jobId}] Model ready.`);
       } catch (loadError: any) {
@@ -325,7 +333,7 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
           model: jobRecord?.model_name || undefined,
           contextSize: jobRecord?.context_size || undefined,
           abortSignal: abortController.signal,
-          llamaCppBaseUrl: config.llm.baseURL,
+          llamaCppBaseUrl: jobLlmBaseUrl,
           temperature: jobRecord?.temperature ?? undefined,
           topP: jobRecord?.top_p ?? undefined,
           repeatPenalty: jobRecord?.repeat_penalty ?? undefined,
@@ -633,7 +641,7 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
         model: jobRecord?.model_name || undefined,
         contextSize: jobRecord?.context_size || undefined,
         abortSignal: reduceAbortController.signal,
-        llamaCppBaseUrl: config.llm.baseURL,
+        llamaCppBaseUrl: jobLlmBaseUrl,
         temperature: jobRecord?.temperature ?? undefined,
         topP: jobRecord?.top_p ?? undefined,
         repeatPenalty: jobRecord?.repeat_penalty ?? undefined,
