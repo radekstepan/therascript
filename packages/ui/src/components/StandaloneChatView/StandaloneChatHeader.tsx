@@ -27,6 +27,7 @@ import {
   SymbolIcon,
   LightningBoltIcon,
   ArchiveIcon, // <-- Keep ArchiveIcon for tokens
+  GlobeIcon,
 } from '@radix-ui/react-icons';
 import { EntitySelectorDropdown } from '../Shared/EntitySelectorDropdown';
 import { EditStandaloneChatModal } from './EditStandaloneChatModal';
@@ -421,6 +422,24 @@ export function StandaloneChatHeader({
             >
               <MixerVerticalIcon width="14" height="14" />
             </Button>
+            {llmStatus?.isRemoteBaseUrl && (
+              <Tooltip
+                content={
+                  llmStatus.activeBaseUrl
+                    ? `Remote LLM: ${llmStatus.activeBaseUrl}`
+                    : 'Remote LLM'
+                }
+              >
+                <Badge variant="soft" color="grass" size="1">
+                  <GlobeIcon
+                    width="12"
+                    height="12"
+                    style={{ marginRight: '4px' }}
+                  />
+                  Remote
+                </Badge>
+              </Tooltip>
+            )}
           </Flex>
         </Flex>
       </Flex>

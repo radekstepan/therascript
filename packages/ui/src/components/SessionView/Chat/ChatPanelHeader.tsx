@@ -17,6 +17,7 @@ import {
   LightningBoltIcon,
   ArchiveIcon,
   ExclamationTriangleIcon,
+  GlobeIcon,
 } from '@radix-ui/react-icons';
 import type {
   Session,
@@ -318,15 +319,35 @@ export function ChatPanelHeader({
         </Flex>
 
         {/* Right Side: Configure Button */}
-        <Button
-          variant="soft"
-          size="1"
-          onClick={onOpenLlmModal}
-          title="Configure AI Model"
-          disabled={isLoadingLlmStatus}
-        >
-          <MixerVerticalIcon width="14" height="14" />
-        </Button>
+        <Flex align="center" gap="2">
+          {llmStatus?.isRemoteBaseUrl && (
+            <Tooltip
+              content={
+                llmStatus.activeBaseUrl
+                  ? `Remote LLM: ${llmStatus.activeBaseUrl}`
+                  : 'Remote LLM'
+              }
+            >
+              <Badge variant="soft" color="grass" size="1">
+                <GlobeIcon
+                  width="12"
+                  height="12"
+                  style={{ marginRight: '4px' }}
+                />
+                Remote
+              </Badge>
+            </Tooltip>
+          )}
+          <Button
+            variant="soft"
+            size="1"
+            onClick={onOpenLlmModal}
+            title="Configure AI Model"
+            disabled={isLoadingLlmStatus}
+          >
+            <MixerVerticalIcon width="14" height="14" />
+          </Button>
+        </Flex>
       </Flex>
     </Box>
   );
