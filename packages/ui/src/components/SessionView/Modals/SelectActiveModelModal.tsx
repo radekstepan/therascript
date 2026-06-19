@@ -15,6 +15,7 @@ import {
   Tooltip,
   Badge,
   Slider,
+  SegmentedControl,
 } from '@radix-ui/themes';
 import {
   InfoCircledIcon,
@@ -22,6 +23,7 @@ import {
   CheckIcon,
   LightningBoltIcon,
   ReloadIcon,
+  GlobeIcon,
 } from '@radix-ui/react-icons';
 import {
   fetchAvailableModels,
@@ -35,6 +37,7 @@ import type {
   LlmStatus,
   VramEstimateResponse,
 } from '../../../types';
+import { useDebounce } from '../../../hooks/useDebounce';
 import prettyBytes from 'pretty-bytes';
 
 interface SelectActiveModelModalProps {
@@ -65,6 +68,14 @@ export function SelectActiveModelModal({
   const [userTouchedContext, setUserTouchedContext] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Local / Remote LLM toggle.
+  // The backend exposes the resolved state via llmStatus.isRemoteBaseUrl /
+  // llmStatus.activeBaseUrl, so we trust that on open instead of doing
+  // brittle substring checks like "includes('localhost')".
+  const [isRemote, setIsRemote] = useState(false);
+  const [remoteUrl, setRemoteUrl] = useState('');
+  const debouncedRemoteUrl = useDebounce(remoteUrl, 500);
+
   const [temperature, setTemperature] = useState(0.7);
   const [topP, setTopP] = useState(0.9);
   const [repeatPenalty, setRepeatPenalty] = useState(1.1);
@@ -78,10 +89,25 @@ export function SelectActiveModelModal({
     null
   );
 
+  const isValidHttpUrl = React.useCallback((value: string): boolean => {
+    try {
+      const parsed = new URL(value.trim());
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    } catch {
+      return false;
+    }
+  }, []);
+
+  // Decide which URL to pass to fetchAvailableModels. Local mode => null
+  // (uses backend's active URL). Remote mode => debounced URL. Invalid
+  // remote URLs disable the query so we don't spam the API.
+  const modelsBaseUrl = isRemote ? debouncedRemoteUrl.trim() : null;
+  const canFetchRemoteModels = !isRemote || isValidHttpUrl(debouncedRemoteUrl);
+
   const { data: availableModelsData, isLoading: isLoadingModels } = useQuery({
-    queryKey: ['availableLlmModels'],
-    queryFn: fetchAvailableModels,
-    enabled: isOpen,
+    queryKey: ['availableLlmModels', isRemote ? modelsBaseUrl : 'local'],
+    queryFn: () => fetchAvailableModels(modelsBaseUrl),
+    enabled: isOpen && (!isRemote || !!canFetchRemoteModels),
     staleTime: 60 * 1000,
   });
 
@@ -101,6 +127,7 @@ export function SelectActiveModelModal({
       repeatPenalty?: number;
       numGpuLayers?: number | null;
       thinkingBudget?: number | null;
+      baseUrl?: string | null;
     }) =>
       setLlmModel(
         variables.modelName,
@@ -109,7 +136,8 @@ export function SelectActiveModelModal({
         variables.topP,
         variables.repeatPenalty,
         variables.numGpuLayers,
-        variables.thinkingBudget
+        variables.thinkingBudget,
+        variables.baseUrl
       ),
     onSuccess: () => {
       onModelSuccessfullySet();
@@ -153,6 +181,15 @@ export function SelectActiveModelModal({
           : undefined
       );
       setThinkingBudget(llmStatus?.configuredThinkingBudget ?? -1);
+      // Initialize Local/Remote toggle from backend-provided state
+      // (no brittle "localhost" substring checks).
+      if (llmStatus?.isRemoteBaseUrl && llmStatus.activeBaseUrl) {
+        setIsRemote(true);
+        setRemoteUrl(llmStatus.activeBaseUrl);
+      } else {
+        setIsRemote(false);
+        setRemoteUrl('');
+      }
       setError(null);
     }
     prevIsOpenRef.current = isOpen;
@@ -171,6 +208,23 @@ export function SelectActiveModelModal({
       setError('Context size must be a positive number if provided.');
       return;
     }
+
+    // Resolve the base URL we send to the backend.
+    // - Remote mode + invalid URL -> block save with a clear error
+    // - Remote mode + valid URL  -> send the trimmed URL
+    // - Local mode               -> send null to reset to default
+    let baseUrl: string | null = null;
+    if (isRemote) {
+      const trimmed = remoteUrl.trim();
+      if (!isValidHttpUrl(trimmed)) {
+        setError(
+          'Please enter a valid http(s) URL for the remote LM Studio server.'
+        );
+        return;
+      }
+      baseUrl = trimmed;
+    }
+
     setModelMutation.mutate({
       modelName: selectedModel,
       contextSize,
@@ -179,6 +233,7 @@ export function SelectActiveModelModal({
       repeatPenalty,
       numGpuLayers: numGpuLayers ?? null,
       thinkingBudget: thinkingBudget,
+      baseUrl,
     });
   };
 
@@ -312,6 +367,51 @@ export function SelectActiveModelModal({
                 loaded in memory. Unload it to change settings.
               </Callout.Text>
             </Callout.Root>
+          )}
+
+          <Box>
+            <Text as="div" size="2" mb="1" weight="medium">
+              LLM Endpoint
+            </Text>
+            <SegmentedControl.Root
+              value={isRemote ? 'remote' : 'local'}
+              onValueChange={(v) => setIsRemote(v === 'remote')}
+              size="2"
+            >
+              <SegmentedControl.Item value="local">
+                Local Machine
+              </SegmentedControl.Item>
+              <SegmentedControl.Item value="remote">
+                <Flex align="center" gap="1">
+                  <GlobeIcon /> Remote Machine
+                </Flex>
+              </SegmentedControl.Item>
+            </SegmentedControl.Root>
+            {llmStatus?.defaultBaseUrl && !isRemote && (
+              <Text size="1" color="gray" mt="1">
+                Active: {llmStatus.defaultBaseUrl}
+              </Text>
+            )}
+          </Box>
+
+          {isRemote && (
+            <label>
+              <Text as="div" size="2" mb="1" weight="medium">
+                Remote LM Studio URL
+              </Text>
+              <TextField.Root
+                placeholder="http://192.168.1.100:1234"
+                value={remoteUrl}
+                onChange={(e) => setRemoteUrl(e.target.value)}
+                disabled={isSaving || isModelLoaded}
+                size="2"
+              />
+              {remoteUrl.trim().length > 0 && !isValidHttpUrl(remoteUrl) && (
+                <Text size="1" color="red" mt="1">
+                  Please enter a valid http:// or https:// URL.
+                </Text>
+              )}
+            </label>
           )}
 
           <label>

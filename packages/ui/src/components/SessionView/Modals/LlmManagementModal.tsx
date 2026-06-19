@@ -125,7 +125,7 @@ export function LlmManagementModal({
     refetch: refetchAvailableModels,
   } = useQuery({
     queryKey: ['availableLlmModels'],
-    queryFn: fetchAvailableModels,
+    queryFn: () => fetchAvailableModels(),
     enabled: isOpen,
     staleTime: 10 * 1000,
     gcTime: 1 * 60 * 1000,

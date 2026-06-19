@@ -184,7 +184,7 @@ export function CreateAnalysisJobModal({
 
   const { data: availableModelsData, isLoading: isLoadingModels } = useQuery({
     queryKey: ['availableLlmModels'],
-    queryFn: fetchAvailableModels,
+    queryFn: () => fetchAvailableModels(),
     enabled: isOpen,
   });
 
