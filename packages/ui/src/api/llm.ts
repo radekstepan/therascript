@@ -38,26 +38,43 @@ export const fetchLlmStatus = async (
 
 /**
  * Fetches the list of locally available Llm models from the backend.
- * Makes a GET request to `/api/llm/available-models`.
+ * Makes a GET request to `/api/llm/available-models`. When `baseUrl` is
+ * provided, it is forwarded as a `?baseUrl=...` query parameter so the UI
+ * can list models on a remote LM Studio-compatible server without first
+ * changing the active override.
  *
+ * @param {string | null} [baseUrl] - Optional explicit base URL. `null`/empty
+ *   means use the active backend URL.
  * @returns {Promise<AvailableModelsResponse>} A promise resolving to the list of available models.
  * @throws {Error} If the API request fails.
  */
-export const fetchAvailableModels =
-  async (): Promise<AvailableModelsResponse> => {
-    const response = await axios.get<AvailableModelsResponse>(
-      '/api/llm/available-models'
-    );
-    return response.data;
-  };
+export const fetchAvailableModels = async (
+  baseUrl?: string | null
+): Promise<AvailableModelsResponse> => {
+  const params = new URLSearchParams();
+  if (baseUrl && baseUrl.trim().length > 0) {
+    params.set('baseUrl', baseUrl.trim());
+  }
+  const query = params.toString();
+  const url = query
+    ? `/api/llm/available-models?${query}`
+    : '/api/llm/available-models';
+  const response = await axios.get<AvailableModelsResponse>(url);
+  return response.data;
+};
 
 /**
  * Sends a request to the backend to set the active Llm model and optionally its context size.
  * This triggers the backend to load the specified model.
  * Makes a POST request to `/api/llm/set-model`.
  *
+ * Pass `baseUrl: null` to reset to the local/default base URL, or a non-empty
+ * trimmed string to switch to a remote URL. Omit the parameter to leave the
+ * active base URL unchanged.
+ *
  * @param {string} modelName - The name of the model to set as active.
  * @param {number | null} [contextSize] - Optional context window size (num_ctx). Null or <= 0 means use Llm's default.
+ * @param {string | null} [baseUrl] - Optional LLM base URL override. `null` resets to default.
  * @returns {Promise<{ message: string }>} A promise resolving to a confirmation message.
  * @throws {Error} If the API request fails.
  */
@@ -68,10 +85,13 @@ export const setLlmModel = async (
   topP?: number,
   repeatPenalty?: number,
   numGpuLayers?: number | null,
-  thinkingBudget?: number | null
+  thinkingBudget?: number | null,
+  baseUrl?: string | null
 ): Promise<{ message: string }> => {
-  // Prepare payload, ensuring contextSize is null if invalid or not provided
-  const payload = {
+  // Prepare payload, ensuring contextSize is null if invalid or not provided.
+  // Only include `baseUrl` in the payload when the caller explicitly provided
+  // a value (matches the API's `undefined` = no change semantics).
+  const payload: Record<string, unknown> = {
     modelName,
     contextSize:
       contextSize === undefined || (contextSize ?? 0) <= 0 ? null : contextSize,
@@ -81,6 +101,9 @@ export const setLlmModel = async (
     numGpuLayers: numGpuLayers ?? null,
     thinkingBudget: thinkingBudget ?? null,
   };
+  if (baseUrl !== undefined) {
+    payload.baseUrl = baseUrl && baseUrl.length > 0 ? baseUrl.trim() : null;
+  }
   const response = await axios.post('/api/llm/set-model', payload);
   return response.data;
 };
