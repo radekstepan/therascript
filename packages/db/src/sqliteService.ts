@@ -95,7 +95,7 @@ export const schema = `
 `;
 
 // --- NEW MIGRATION LOGIC ---
-export const LATEST_SCHEMA_VERSION = 16;
+export const LATEST_SCHEMA_VERSION = 17;
 
 // --- NEW SYSTEM PROMPTS ---
 export const SYSTEM_PROMPT_TEMPLATES = {
@@ -594,6 +594,28 @@ function runMigrations(dbInstance: DB) {
         dbInstance.pragma(`user_version = 16`);
         currentVersion = 16;
         console.log('[db Migrator] Version 16 applied.');
+      }
+
+      // NEW MIGRATION: Version 17 to add llm_base_url to analysis_jobs.
+      // Stores the LLM base URL that was active when the job was created so
+      // background MapReduce jobs use the same network target even if the user
+      // later toggles between local and remote. NULL means "use config default".
+      if (currentVersion < 17) {
+        console.log('[db Migrator] Applying version 17...');
+        const analysisJobColumns = dbInstance.pragma(
+          'table_info(analysis_jobs)'
+        ) as { name: string }[];
+        if (!analysisJobColumns.some((col) => col.name === 'llm_base_url')) {
+          console.log(
+            '[db Migrator V17] Adding "llm_base_url" to analysis_jobs...'
+          );
+          dbInstance.exec(
+            'ALTER TABLE analysis_jobs ADD COLUMN llm_base_url TEXT NULL'
+          );
+        }
+        dbInstance.pragma(`user_version = 17`);
+        currentVersion = 17;
+        console.log('[db Migrator] Version 17 applied.');
       }
     })();
     console.log(
