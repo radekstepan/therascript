@@ -23,6 +23,15 @@ vi.mock('./activeModelService.js', () => ({
   getConfiguredThinkingBudget: vi.fn().mockReturnValue(null),
   getActiveModelVramEstimateBytes: vi.fn().mockReturnValue(null),
   setActiveModelVramEstimateBytes: vi.fn(),
+  getActiveBaseUrl: vi.fn().mockReturnValue('http://localhost:1234'),
+  getDefaultBaseUrl: vi.fn().mockReturnValue('http://localhost:1234'),
+  isRemoteLlmBaseUrl: vi.fn().mockReturnValue(false),
+  normalizeLlmBaseUrl: vi.fn((value?: string | null) => {
+    if (value === null || value === undefined) return null;
+    const trimmed = String(value).trim().replace(/\/+$/, '');
+    return trimmed || null;
+  }),
+  getConfiguredBaseUrlOverride: vi.fn().mockReturnValue(null),
 }));
 
 vi.mock('./llamaCppRuntime.js', () => ({

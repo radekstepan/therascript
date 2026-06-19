@@ -1,14 +1,11 @@
 import axios from 'axios';
 import crypto from 'node:crypto';
 import * as util from 'node:util';
-import * as path from 'node:path';
-import * as os from 'node:os';
 import {
   exec as callbackExec,
   execFile as callbackExecFile,
 } from 'node:child_process';
 
-import config from '@therascript/config';
 import {
   BackendChatMessage,
   LlmModelInfo,
@@ -35,6 +32,9 @@ import {
   getConfiguredThinkingBudget,
   getActiveModelVramEstimateBytes,
   setActiveModelVramEstimateBytes,
+  getActiveBaseUrl,
+  isRemoteLlmBaseUrl,
+  normalizeLlmBaseUrl,
 } from './activeModelService.js';
 
 import { templateRepository } from '@therascript/data';
@@ -52,6 +52,15 @@ const execAsync = util.promisify(callbackExec);
 const execFileAsync = util.promisify(callbackExecFile);
 
 const runtime = getLlmRuntime();
+
+/**
+ * Resolve an LLM base URL using the documented semantics:
+ *   - explicit non-null override (after normalization) wins
+ *   - otherwise fall back to the active process-level base URL
+ */
+const resolveLlmBaseUrl = (baseUrlOverride?: string | null): string => {
+  return normalizeLlmBaseUrl(baseUrlOverride) || getActiveBaseUrl();
+};
 
 // ---------------------------------------------------------------------------
 // LM Studio API response shapes
@@ -312,8 +321,22 @@ async function nativeLMStudioEstimate(
 export async function fetchVramUsage(
   model: LlmModelInfo,
   contextSize?: number,
-  numGpuLayers?: number | null
+  numGpuLayers?: number | null,
+  baseUrlOverride?: string | null
 ): Promise<VramEstimate | null> {
+  const targetUrl = resolveLlmBaseUrl(baseUrlOverride);
+  const isRemote = isRemoteLlmBaseUrl(targetUrl);
+
+  // For remote URLs, skip the local CLI-based estimation and fall back to
+  // the architecture-based estimate (often null since remote LM Studio
+  // typically doesn't expose per-layer architecture).
+  if (isRemote) {
+    const fallbackContextSize =
+      contextSize ?? model.defaultContextSize ?? undefined;
+    if (fallbackContextSize === undefined) return null;
+    return estimateVramUsage(model, fallbackContextSize, numGpuLayers);
+  }
+
   const gpuFlag =
     numGpuLayers === 0 ? 'off' : numGpuLayers === 99 ? 'max' : undefined;
 
@@ -328,9 +351,10 @@ export async function fetchVramUsage(
   return estimateVramUsage(model, fallbackContextSize, numGpuLayers);
 }
 
-async function isLlmApiResponsive(): Promise<boolean> {
+async function isLlmApiResponsive(baseUrl?: string): Promise<boolean> {
   try {
-    const res = await axios.get(`${config.llm.baseURL}/api/v1/models`, {
+    const target = normalizeLlmBaseUrl(baseUrl) || getActiveBaseUrl();
+    const res = await axios.get(`${target}/api/v1/models`, {
       timeout: 3000,
     });
     return res.status === 200;
@@ -339,20 +363,40 @@ async function isLlmApiResponsive(): Promise<boolean> {
   }
 }
 
-export async function ensureLlmReady(timeoutMs = 30000): Promise<void> {
+export async function ensureLlmReady(
+  baseUrlOverride?: string | null,
+  timeoutMs = 30000
+): Promise<void> {
+  const targetUrl = resolveLlmBaseUrl(baseUrlOverride);
+  const isRemote = isRemoteLlmBaseUrl(targetUrl);
+
+  if (isRemote) {
+    console.log(
+      `[LlmService] Remote base URL (${targetUrl}) — skipping local runtime startup, just checking responsiveness.`
+    );
+    if (!(await isLlmApiResponsive(targetUrl))) {
+      throw new InternalServerError(
+        `Remote LLM at ${targetUrl} failed health check.`
+      );
+    }
+    return;
+  }
+
   console.log(
     `[LlmService] Ensuring LLM runtime (${runtime.type}) is ready...`
   );
   await runtime.ensureReady(timeoutMs);
-  if (!(await isLlmApiResponsive())) {
+  if (!(await isLlmApiResponsive(targetUrl))) {
     throw new InternalServerError(
       `LLM runtime (${runtime.type}) failed health check after startup.`
     );
   }
 }
 
-export const checkLlmApiHealth = async (): Promise<boolean> => {
-  return isLlmApiResponsive();
+export const checkLlmApiHealth = async (
+  baseUrlOverride?: string | null
+): Promise<boolean> => {
+  return isLlmApiResponsive(resolveLlmBaseUrl(baseUrlOverride));
 };
 
 const getSystemPrompt = (
@@ -370,11 +414,14 @@ const getSystemPrompt = (
 
 // We will implement GGUF metadata parsing in a separate PR or using a library.
 // For now, we return basic mock architecture if it's not possible to parse easily.
-export const listModels = async (): Promise<LlmModelInfo[]> => {
+export const listModels = async (
+  baseUrlOverride?: string | null
+): Promise<LlmModelInfo[]> => {
+  const targetUrl = resolveLlmBaseUrl(baseUrlOverride);
   try {
-    await ensureLlmReady();
+    await ensureLlmReady(targetUrl);
     const res = await axios.get<{ models: LmsModelRecord[] }>(
-      `${config.llm.baseURL}/api/v1/models`,
+      `${targetUrl}/api/v1/models`,
       { timeout: 5000 }
     );
     return res.data.models
@@ -452,7 +499,7 @@ export const startDownloadModelJob = (modelRef: string): string => {
 };
 
 async function runLmsDownload(jobId: string, modelRef: string): Promise<void> {
-  const baseUrl = config.llm.baseURL;
+  const baseUrl = getActiveBaseUrl();
 
   activeDownloadJobs.set(jobId, {
     ...activeDownloadJobs.get(jobId)!,
@@ -624,29 +671,39 @@ export const deleteLlmModel = async (modelPath: string): Promise<string> => {
 
 /**
  * Load a model via the LM Studio REST API.
- * Ensures the daemon/server are running first, unloads any currently loaded
- * LLM instances, then loads the requested model key with the configured
- * context size and GPU settings.
+ * Ensures the daemon/server are running first (skipped for remote URLs),
+ * unloads any currently loaded LLM instances, then loads the requested
+ * model key with the configured context size and GPU settings.
  */
 export const loadLlmModel = async (
   modelPath: string,
-  contextSizeOverride?: number | null
+  contextSizeOverride?: number | null,
+  baseUrlOverride?: string | null
 ): Promise<void> => {
+  const targetUrl = resolveLlmBaseUrl(baseUrlOverride);
+  const isRemote = isRemoteLlmBaseUrl(targetUrl);
+
   // Clear any stale VRAM estimate from a previous model
   setActiveModelVramEstimateBytes(null);
   // Reset estimation dedup flag since we're loading a new model
   estimatingVramForModel = null;
-  // Ensure the LM Studio daemon and server are running
-  await runtime.restartWithModel(modelPath);
+  // Only start/restart the local LM Studio runtime when targeting the local default.
+  // For remote URLs we assume the user has already started their server.
+  if (!isRemote) {
+    await runtime.restartWithModel(modelPath);
+  } else {
+    console.log(
+      `[LlmService] Skipping local runtime restart for remote base URL: ${targetUrl}`
+    );
+  }
 
-  const baseUrl = config.llm.baseURL;
   const contextSize = contextSizeOverride ?? getConfiguredContextSize();
   const numGpuLayers = getConfiguredNumGpuLayers();
 
   // Unload all currently loaded LLM model instances
   try {
     const modelsRes = await axios.get<{ models: LmsModelRecord[] }>(
-      `${baseUrl}/api/v1/models`,
+      `${targetUrl}/api/v1/models`,
       { timeout: 5000 }
     );
     const loadedInstances = modelsRes.data.models
@@ -656,7 +713,7 @@ export const loadLlmModel = async (
     for (const instance of loadedInstances) {
       try {
         await axios.post(
-          `${baseUrl}/api/v1/models/unload`,
+          `${targetUrl}/api/v1/models/unload`,
           { instance_id: instance.id },
           { timeout: 30000 }
         );
@@ -691,7 +748,7 @@ export const loadLlmModel = async (
   console.log(`[LlmService] Loading model via LM Studio API: ${modelPath}`);
   try {
     const loadRes = await axios.post(
-      `${baseUrl}/api/v1/models/load`,
+      `${targetUrl}/api/v1/models/load`,
       loadPayload,
       { timeout: 120000 }
     );
@@ -699,14 +756,17 @@ export const loadLlmModel = async (
       `[LlmService] Model loaded. Instance: ${loadRes.data.instance_id}, ` +
         `load time: ${loadRes.data.load_time_seconds?.toFixed(2)}s`
     );
-    // Fire-and-forget VRAM estimate so the chat header can display it
-    const gpuFlagEst =
-      numGpuLayers === 0 ? 'off' : numGpuLayers === 99 ? 'max' : undefined;
-    nativeLMStudioEstimate(modelPath, contextSize ?? undefined, gpuFlagEst)
-      .then((est) => {
-        if (est) setActiveModelVramEstimateBytes(est.vram_bytes);
-      })
-      .catch(() => {});
+    // Fire-and-forget VRAM estimate so the chat header can display it.
+    // Skip for remote URLs — we can't shell out to a local `lms` binary.
+    if (!isRemote) {
+      const gpuFlagEst =
+        numGpuLayers === 0 ? 'off' : numGpuLayers === 99 ? 'max' : undefined;
+      nativeLMStudioEstimate(modelPath, contextSize ?? undefined, gpuFlagEst)
+        .then((est) => {
+          if (est) setActiveModelVramEstimateBytes(est.vram_bytes);
+        })
+        .catch(() => {});
+    }
   } catch (err: any) {
     const detail = err.response?.data
       ? JSON.stringify(err.response.data)
@@ -725,12 +785,13 @@ export const loadLlmModel = async (
  */
 export const ensureModelLoaded = async (
   modelPath: string,
-  requiredContextSize?: number | null
+  requiredContextSize?: number | null,
+  baseUrlOverride?: string | null
 ): Promise<void> => {
-  const baseUrl = config.llm.baseURL;
+  const targetUrl = resolveLlmBaseUrl(baseUrlOverride);
   try {
     const res = await axios.get<{ models: LmsModelRecord[] }>(
-      `${baseUrl}/api/v1/models`,
+      `${targetUrl}/api/v1/models`,
       { timeout: 5000 }
     );
     const loadedMatch = res.data.models.find(
@@ -761,16 +822,19 @@ export const ensureModelLoaded = async (
       `[LlmService] Could not check loaded model status before load: ${err.message}`
     );
   }
-  await loadLlmModel(modelPath, requiredContextSize);
+  await loadLlmModel(modelPath, requiredContextSize, baseUrlOverride);
 };
 
-export const unloadActiveModel = async (): Promise<string> => {
-  const baseUrl = config.llm.baseURL;
+export const unloadActiveModel = async (
+  baseUrlOverride?: string | null
+): Promise<string> => {
+  const targetUrl = resolveLlmBaseUrl(baseUrlOverride);
+  const isRemote = isRemoteLlmBaseUrl(targetUrl);
   let unloadedCount = 0;
 
   try {
     const modelsRes = await axios.get<{ models: LmsModelRecord[] }>(
-      `${baseUrl}/api/v1/models`,
+      `${targetUrl}/api/v1/models`,
       { timeout: 5000 }
     );
     const loadedInstances = modelsRes.data.models
@@ -783,7 +847,7 @@ export const unloadActiveModel = async (): Promise<string> => {
         loadedInstances.map(async (instance) => {
           try {
             await axios.post(
-              `${baseUrl}/api/v1/models/unload`,
+              `${targetUrl}/api/v1/models/unload`,
               { instance_id: instance.id },
               { timeout: 15000 }
             );
@@ -807,10 +871,14 @@ export const unloadActiveModel = async (): Promise<string> => {
     return `${unloadedCount} model instance(s) unloaded successfully.`;
   }
 
-  // Fallback: stop the server via runtime
-  if (runtime.stop) {
+  // Fallback: stop the local server via runtime. Skip for remote URLs.
+  if (!isRemote && runtime.stop) {
     await runtime.stop();
     return 'LM Studio server stopped (no models were loaded).';
+  }
+
+  if (isRemote) {
+    return 'No models were loaded on the remote server.';
   }
 
   return 'No models were loaded.';
@@ -821,14 +889,18 @@ export const unloadActiveModel = async (): Promise<string> => {
 let estimatingVramForModel: string | null = null;
 
 export const checkModelStatus = async (
-  modelPath: string
+  modelPath: string,
+  baseUrlOverride?: string | null
 ): Promise<LlmModelInfo | null> => {
-  const isUp = await checkLlmApiHealth();
+  const targetUrl = resolveLlmBaseUrl(baseUrlOverride);
+  const isRemote = isRemoteLlmBaseUrl(targetUrl);
+
+  const isUp = await isLlmApiResponsive(targetUrl);
   if (!isUp) return null;
 
   try {
     const res = await axios.get<{ models: LmsModelRecord[] }>(
-      `${config.llm.baseURL}/api/v1/models`,
+      `${targetUrl}/api/v1/models`,
       { timeout: 5000 }
     );
 
@@ -872,8 +944,10 @@ export const checkModelStatus = async (
 
     // If the target model is currently loaded but we have no VRAM estimate yet,
     // kick off a background estimation (handles server restarts with a model
-    // already loaded in LM Studio).
+    // already loaded in LM Studio). Skip for remote URLs — we can't shell out
+    // to a local `lms` binary.
     if (
+      !isRemote &&
       loadedModel?.key === target.key &&
       getActiveModelVramEstimateBytes() === null &&
       estimatingVramForModel !== target.key
@@ -933,6 +1007,15 @@ export const streamChatResponse = async function* (
   LlmChatChunk,
   { promptTokens: number; completionTokens: number }
 > {
+  // Honor an explicit baseUrl from the caller; otherwise use the active
+  // process-level base URL so the chat routes to the same LLM target the
+  // user currently has selected.
+  const explicitBaseUrl =
+    options && Object.prototype.hasOwnProperty.call(options, 'llamaCppBaseUrl')
+      ? options.llamaCppBaseUrl
+      : undefined;
+  const resolvedBaseUrl = resolveLlmBaseUrl(explicitBaseUrl);
+
   const finalOptions = {
     temperature: getConfiguredTemperature(),
     topP: getConfiguredTopP(),
@@ -940,7 +1023,7 @@ export const streamChatResponse = async function* (
     numGpuLayers: getConfiguredNumGpuLayers(),
     thinkingBudget: getConfiguredThinkingBudget(),
     ...options, // allow overriding defaults
-    llamaCppBaseUrl: config.llm.baseURL,
+    llamaCppBaseUrl: resolvedBaseUrl,
   };
   return yield* streamLlmChatDetailed(messages, finalOptions) as any;
 };
