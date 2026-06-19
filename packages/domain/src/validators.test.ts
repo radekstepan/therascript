@@ -336,6 +336,7 @@ describe('Database Entity Schemas', () => {
         repeat_penalty: 1.1,
         num_gpu_layers: null,
         map_phase_system_prompt: 'Keep thinking brief.',
+        llm_base_url: null,
       });
       expect(result.success).toBe(true);
     });
@@ -370,6 +371,7 @@ describe('Database Entity Schemas', () => {
           repeat_penalty: null,
           num_gpu_layers: null,
           map_phase_system_prompt: null,
+          llm_base_url: null,
         });
         expect(result.success).toBe(true);
       }
