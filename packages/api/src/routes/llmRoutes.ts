@@ -1,5 +1,4 @@
 import { Elysia, t } from 'elysia';
-import config from '@therascript/config';
 import {
   ApiError,
   InternalServerError,
@@ -28,6 +27,10 @@ import {
   getConfiguredRepeatPenalty,
   getConfiguredNumGpuLayers,
   getConfiguredThinkingBudget,
+  getActiveBaseUrl,
+  getDefaultBaseUrl,
+  isRemoteLlmBaseUrl,
+  normalizeLlmBaseUrl,
 } from '../services/activeModelService.js';
 import type {
   LlmModelInfo,
@@ -68,6 +71,9 @@ const LlmStatusResponseSchema = t.Object({
   configuredRepeatPenalty: t.Optional(t.Number()),
   configuredNumGpuLayers: t.Optional(t.Union([t.Number(), t.Null()])),
   configuredThinkingBudget: t.Optional(t.Union([t.Number(), t.Null()])),
+  activeBaseUrl: t.String(),
+  defaultBaseUrl: t.String(),
+  isRemoteBaseUrl: t.Boolean(),
 });
 const SetModelBodySchema = t.Object({
   modelName: t.String({ minLength: 1, error: 'Model name is required.' }),
@@ -85,6 +91,7 @@ const SetModelBodySchema = t.Object({
   repeatPenalty: t.Optional(t.Number({ minimum: 0.5, maximum: 2 })),
   numGpuLayers: t.Optional(t.Union([t.Number({ minimum: 0 }), t.Null()])),
   thinkingBudget: t.Optional(t.Union([t.Number(), t.Null()])),
+  baseUrl: t.Optional(t.Union([t.String(), t.Null()])),
 });
 const PullModelBodySchema = t.Object({
   modelUrl: t.String({ minLength: 1, error: 'Model URL is required.' }),
@@ -160,10 +167,18 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
     app
       .get(
         '/available-models',
-        async ({ set }) => {
-          console.log(`[API Models] Requesting available models`);
+        async ({ query, set }) => {
+          const baseUrlQuery =
+            typeof query.baseUrl === 'string' && query.baseUrl.trim().length > 0
+              ? query.baseUrl.trim()
+              : null;
+          console.log(
+            `[API Models] Requesting available models${
+              baseUrlQuery ? ` (baseUrl=${baseUrlQuery})` : ''
+            }`
+          );
           try {
-            const models = await listModels();
+            const models = await listModels(baseUrlQuery);
             set.status = 200;
             const responseModels = models.map((m) => ({
               ...m,
@@ -177,7 +192,7 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
               `[API Models] Error fetching available models:`,
               error
             );
-            if (error instanceof InternalServerError) throw error;
+            if (error instanceof ApiError) throw error;
             throw new InternalServerError(
               `Failed to fetch available models.`,
               error
@@ -185,7 +200,14 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
           }
         },
         {
-          response: { 200: 'availableModelsResponse', 500: t.Any() },
+          query: t.Object({
+            baseUrl: t.Optional(t.String()),
+          }),
+          response: {
+            200: 'availableModelsResponse',
+            400: t.Any(),
+            500: t.Any(),
+          },
           detail: { summary: 'List locally available LLM models (GGUF files)' },
         }
       )
@@ -200,6 +222,7 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
             repeatPenalty,
             numGpuLayers,
             thinkingBudget,
+            baseUrl,
           } = body;
           const sizeLog =
             contextSize === undefined
@@ -207,8 +230,23 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
               : contextSize === null
                 ? 'explicit default'
                 : contextSize;
+
+          // Normalize baseUrl when provided. `undefined` -> leave the active
+          // base URL alone. `null` -> reset to default. A string -> set the
+          // explicit URL.
+          let normalizedBaseUrl: string | null | undefined = undefined;
+          if (baseUrl !== undefined) {
+            try {
+              normalizedBaseUrl = normalizeLlmBaseUrl(baseUrl);
+            } catch (err: any) {
+              throw new BadRequestError(
+                err?.message || 'Invalid LLM base URL.'
+              );
+            }
+          }
+
           console.log(
-            `[API SetModel] Request: Set active model=${modelName}, contextSize=${sizeLog}, temperature=${temperature}, topP=${topP}, repeatPenalty=${repeatPenalty}, numGpuLayers=${numGpuLayers ?? 'auto'}, thinkingBudget=${thinkingBudget ?? 'unrestricted'}`
+            `[API SetModel] Request: Set active model=${modelName}, contextSize=${sizeLog}, temperature=${temperature}, topP=${topP}, repeatPenalty=${repeatPenalty}, numGpuLayers=${numGpuLayers ?? 'auto'}, thinkingBudget=${thinkingBudget ?? 'unrestricted'}, baseUrl=${normalizedBaseUrl === undefined ? 'unchanged' : (normalizedBaseUrl ?? 'default')}`
           );
           try {
             setActiveModelAndContextAndParams(
@@ -218,9 +256,14 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
               topP,
               repeatPenalty,
               numGpuLayers,
-              thinkingBudget
+              thinkingBudget,
+              normalizedBaseUrl
             );
-            await loadLlmModel(modelName);
+            await loadLlmModel(
+              modelName,
+              undefined,
+              normalizedBaseUrl ?? undefined
+            );
             set.status = 200;
             return {
               message: `Active model set to ${modelName} (context: ${getConfiguredContextSize() ?? 'default'}). Load initiated. Check status.`,
@@ -459,9 +502,12 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
           const currentConfiguredRepeatPenalty = getConfiguredRepeatPenalty();
           const currentConfiguredNumGpuLayers = getConfiguredNumGpuLayers();
           const currentConfiguredThinkingBudget = getConfiguredThinkingBudget();
+          const activeBaseUrl = getActiveBaseUrl();
+          const defaultBaseUrl = getDefaultBaseUrl();
+          const isRemoteBaseUrl = isRemoteLlmBaseUrl(activeBaseUrl);
           const modelNameToCheck = query.modelName ?? currentActiveModel;
           console.log(
-            `[API Status] Checking status for model: ${modelNameToCheck} (Current Active: ${currentActiveModel}, Configured Context: ${currentConfiguredContext ?? 'default'}, Temperature: ${currentConfiguredTemperature}, TopP: ${currentConfiguredTopP}, RepeatPenalty: ${currentConfiguredRepeatPenalty}, NumGpuLayers: ${currentConfiguredNumGpuLayers ?? 'auto'}, ThinkingBudget: ${currentConfiguredThinkingBudget ?? 'unrestricted'})`
+            `[API Status] Checking status for model: ${modelNameToCheck} (Current Active: ${currentActiveModel}, Configured Context: ${currentConfiguredContext ?? 'default'}, Temperature: ${currentConfiguredTemperature}, TopP: ${currentConfiguredTopP}, RepeatPenalty: ${currentConfiguredRepeatPenalty}, NumGpuLayers: ${currentConfiguredNumGpuLayers ?? 'auto'}, ThinkingBudget: ${currentConfiguredThinkingBudget ?? 'unrestricted'}, ActiveBaseUrl: ${activeBaseUrl}, IsRemote: ${isRemoteBaseUrl})`
           );
           try {
             const loadedModelResult = await checkModelStatus(modelNameToCheck);
@@ -487,6 +533,9 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
                 configuredRepeatPenalty: currentConfiguredRepeatPenalty,
                 configuredNumGpuLayers: currentConfiguredNumGpuLayers,
                 configuredThinkingBudget: currentConfiguredThinkingBudget,
+                activeBaseUrl,
+                defaultBaseUrl,
+                isRemoteBaseUrl,
               };
             } else {
               const loadedModelInfo = loadedModelResult as LlmModelInfo | null;
@@ -511,6 +560,9 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
                 configuredRepeatPenalty: currentConfiguredRepeatPenalty,
                 configuredNumGpuLayers: currentConfiguredNumGpuLayers,
                 configuredThinkingBudget: currentConfiguredThinkingBudget,
+                activeBaseUrl,
+                defaultBaseUrl,
+                isRemoteBaseUrl,
               };
             }
           } catch (error: any) {
