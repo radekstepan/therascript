@@ -13,8 +13,6 @@ import {
   Spinner,
   Callout,
   ScrollArea,
-  Badge,
-  Select,
   TextField,
   Tooltip,
   Table,
@@ -32,7 +30,6 @@ import {
 import {
   createAnalysisJob,
   fetchSession,
-  fetchAvailableModels,
   fetchTemplates,
   estimateModelVram,
   fetchGpuStats,
@@ -47,6 +44,7 @@ import { toastMessageAtom } from '../../store';
 import { cn } from '../../utils';
 import { formatIsoDateToYMD } from '../../helpers';
 import prettyBytes from 'pretty-bytes';
+import { LlmEndpointModelPicker } from '../Shared/LlmEndpointModelPicker';
 
 // --- Sub-component for the template picker popover ---
 const TemplatePicker: React.FC<{
@@ -182,11 +180,15 @@ export function CreateAnalysisJobModal({
     null
   );
 
-  const { data: availableModelsData, isLoading: isLoadingModels } = useQuery({
-    queryKey: ['availableLlmModels'],
-    queryFn: () => fetchAvailableModels(),
-    enabled: isOpen,
-  });
+  // Local / Remote LLM endpoint toggle for this analysis job. The shared
+  // LlmEndpointModelPicker renders the UI and owns the model-list query;
+  // when the user picks a remote URL we snapshot it into the create-job
+  // payload so the worker targets that endpoint. The picker persists the
+  // remote URL through `remoteBaseUrlAtom` (localStorage) so it stays in
+  // sync with the chat modal.
+  const [isRemote, setIsRemote] = useState(false);
+  const [remoteUrl, setRemoteUrl] = useState('');
+  const [availableModels, setAvailableModels] = useState<LlmModelInfo[]>([]);
 
   const { data: gpuStats } = useQuery({
     queryKey: ['gpuStats'],
@@ -196,8 +198,8 @@ export function CreateAnalysisJobModal({
   });
 
   const selectedModelDetails = useMemo(
-    () => availableModelsData?.models?.find((m) => m.name === selectedModel),
-    [availableModelsData, selectedModel]
+    () => availableModels.find((m) => m.name === selectedModel),
+    [availableModels, selectedModel]
   );
 
   const sessionQueries = useQueries({
@@ -225,19 +227,32 @@ export function CreateAnalysisJobModal({
     return max || null;
   }, [sessionData]);
 
+  // Auto-select a default model the first time a non-empty model list
+  // arrives while the modal is open. We only do this once per session so
+  // that toggling Local<->Remote (or any other action that clears
+  // `selectedModel` to '') leaves the picker empty until the user picks
+  // a model for the new endpoint.
+  const hasAutoSelectedRef = useRef(false);
+
   useEffect(() => {
+    if (!isOpen) {
+      // Reset for the next time the modal opens.
+      hasAutoSelectedRef.current = false;
+      return;
+    }
     if (
       isOpen &&
-      availableModelsData?.models &&
-      availableModelsData.models.length > 0 &&
-      !selectedModel
+      availableModels.length > 0 &&
+      !selectedModel &&
+      !hasAutoSelectedRef.current
     ) {
       const defaultModel =
-        availableModelsData.models.find((m) => m.name.includes('llama3:8b')) ||
-        availableModelsData.models[0];
+        availableModels.find((m) => m.name.includes('llama3:8b')) ||
+        availableModels[0];
       setSelectedModel(defaultModel.name);
+      hasAutoSelectedRef.current = true;
     }
-  }, [isOpen, availableModelsData, selectedModel]);
+  }, [isOpen, availableModels, selectedModel]);
 
   const recommendedContextSize = useMemo(() => {
     if (!maxTranscriptTokens) return undefined;
@@ -273,6 +288,14 @@ export function CreateAnalysisJobModal({
   }, [isOpen]);
 
   useEffect(() => {
+    // VRAM is a local-machine concept; skip the estimate when the user is
+    // targeting a remote endpoint. The backend's `estimate-vram` endpoint
+    // 404s for remote-only models, which previously surfaced as a gray
+    // "VRAM estimation unavailable" callout.
+    if (isRemote) {
+      setVramEstimate(null);
+      return;
+    }
     if (!selectedModel || !selectedModelDetails) {
       setVramEstimate(null);
       return;
@@ -300,7 +323,7 @@ export function CreateAnalysisJobModal({
           error: err.message,
         });
       });
-  }, [selectedModel, selectedModelDetails, contextSizeInput]);
+  }, [isRemote, selectedModel, selectedModelDetails, contextSizeInput]);
 
   const vramWarning = useMemo(() => {
     if (!vramEstimate?.estimated_vram_bytes || !gpuStats?.available)
@@ -356,6 +379,22 @@ export function CreateAnalysisJobModal({
       setValidationError('Please select a language model.');
       return;
     }
+    if (isRemote && remoteUrl.trim().length > 0) {
+      try {
+        const parsed = new URL(remoteUrl.trim());
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+          setValidationError(
+            'Please enter a valid http:// or https:// URL for the remote LM Studio server.'
+          );
+          return;
+        }
+      } catch {
+        setValidationError(
+          'Please enter a valid http:// or https:// URL for the remote LM Studio server.'
+        );
+        return;
+      }
+    }
 
     createJobMutation.mutate({
       sessionIds,
@@ -367,6 +406,13 @@ export function CreateAnalysisJobModal({
         : {}),
       ...(mapPhaseSystemPrompt.trim().length > 0
         ? { mapPhaseSystemPrompt: mapPhaseSystemPrompt.trim() }
+        : {}),
+      // In Remote mode, snapshot the URL into the job. The worker will
+      // target it for the Map/Reduce streams regardless of what the
+      // backend's currently active URL is. In Local mode we omit it so
+      // the backend uses the active URL.
+      ...(isRemote && remoteUrl.trim().length > 0
+        ? { baseUrl: remoteUrl.trim() }
         : {}),
     });
   };
@@ -530,82 +576,39 @@ export function CreateAnalysisJobModal({
             <Text as="div" size="2" weight="medium">
               AI Configuration
             </Text>
-            <Flex gap="3" direction={{ initial: 'column', xs: 'row' }}>
-              <Box style={{ flexGrow: 1 }}>
-                <Text as="div" size="1" color="gray" mb="1">
-                  Language Model
-                </Text>
-                <Select.Root
-                  value={selectedModel}
-                  onValueChange={setSelectedModel}
-                  disabled={isMutationPending || isLoadingModels}
-                >
-                  <Select.Trigger
-                    placeholder={
-                      isLoadingModels
-                        ? 'Loading models...'
-                        : 'Select a model...'
-                    }
-                    style={{ width: '100%' }}
-                  />
-                  <Select.Content>
-                    {availableModelsData?.models.map((model) => (
-                      <Select.Item key={model.name} value={model.name}>
-                        <Flex
-                          justify="between"
-                          align="center"
-                          gap="4"
-                          width="100%"
-                        >
-                          <Text truncate>{model.name}</Text>
-                          {model.defaultContextSize &&
-                            model.defaultContextSize > 0 && (
-                              <Tooltip
-                                content={`Default Max Context: ${model.defaultContextSize.toLocaleString()} Tokens`}
-                              >
-                                <Badge
-                                  variant="soft"
-                                  color="blue"
-                                  radius="full"
-                                  size="1"
-                                  style={{ flexShrink: 0 }}
-                                >
-                                  <LightningBoltIcon
-                                    style={{ marginRight: '2px' }}
-                                  />
-                                  {prettyBytes(
-                                    model.defaultContextSize
-                                  ).replace(' ', '')}
-                                </Badge>
-                              </Tooltip>
-                            )}
-                        </Flex>
-                      </Select.Item>
-                    ))}
-                  </Select.Content>
-                </Select.Root>
-              </Box>
-              <Box style={{ minWidth: 160 }}>
-                <Text as="div" size="1" color="gray" mb="1">
+            <LlmEndpointModelPicker
+              selectedModel={selectedModel}
+              onSelectedModelChange={setSelectedModel}
+              isRemote={isRemote}
+              setIsRemote={setIsRemote}
+              remoteUrl={remoteUrl}
+              setRemoteUrl={setRemoteUrl}
+              disabled={isMutationPending}
+              enabled={isOpen}
+              placeholder="Select a model..."
+              onModelsChange={setAvailableModels}
+            />
+            {selectedModelDetails && (
+              <label>
+                <Text as="div" size="2" mb="1" weight="medium">
                   Context Size (Optional)
                 </Text>
                 <TextField.Root
                   type="number"
                   min="1"
                   step="1024"
-                  placeholder={`Default (${selectedModelDetails?.defaultContextSize?.toLocaleString() ?? 'auto'})`}
+                  placeholder={`Default (${selectedModelDetails.defaultContextSize?.toLocaleString() ?? 'auto'})`}
                   value={contextSizeInput}
                   onChange={(e) => {
                     setContextSizeInput(e.target.value);
                     setUserTouchedContext(true);
                   }}
                   disabled={isMutationPending}
-                  style={{ width: '100%' }}
                 />
-              </Box>
-            </Flex>
+              </label>
+            )}
 
-            {vramEstimate && (
+            {!isRemote && vramEstimate && (
               <Callout.Root
                 size="1"
                 color={vramEstimate.error ? 'gray' : 'blue'}
@@ -661,7 +664,7 @@ export function CreateAnalysisJobModal({
               </Callout.Root>
             )}
 
-            {vramWarning && (
+            {!isRemote && vramWarning && (
               <Callout.Root
                 size="1"
                 color={vramWarning.type === 'error' ? 'red' : 'amber'}
@@ -715,7 +718,7 @@ export function CreateAnalysisJobModal({
           </Dialog.Close>
           <Button
             onClick={handleSubmit}
-            disabled={isMutationPending || isLoadingSessions || isLoadingModels}
+            disabled={isMutationPending || isLoadingSessions}
             className="hover:brightness-110 transition-all"
           >
             {isMutationPending ? (

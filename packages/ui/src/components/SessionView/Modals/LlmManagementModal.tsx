@@ -24,7 +24,6 @@ import {
   InfoCircledIcon,
   Cross2Icon,
   CheckCircledIcon,
-  SymbolIcon,
   ReloadIcon,
   ExclamationTriangleIcon,
   StopIcon,
@@ -36,7 +35,6 @@ import {
 import {
   fetchLlmStatus,
   fetchAvailableModels,
-  unloadLlmModel,
   startDownloadLlmModel,
   fetchDownloadLlmModelStatus,
   cancelDownloadLlmModel,
@@ -51,7 +49,6 @@ import type {
   UIDownloadJobStatusState,
   AvailableModelsResponse,
 } from '../../../types';
-import { cn } from '../../../utils';
 import prettyBytes from 'pretty-bytes';
 
 interface LlmManagementModalProps {
@@ -65,7 +62,6 @@ export function LlmManagementModal({
 }: LlmManagementModalProps) {
   const queryClient = useQueryClient();
   const setToast = useSetAtom(toastMessageAtom);
-  const [isWaitingForUnload, setIsWaitingForUnload] = useState(false);
   const [modelUrlToDownload, setModelUrlToDownload] = useState<string>('');
 
   // Ref for auto-focus
@@ -103,18 +99,17 @@ export function LlmManagementModal({
   }, [isDeleteConfirmOpen]);
 
   // --- Queries and Mutations (Unchanged logic, only ref updates) ---
-  const {
-    data: llmStatus,
-    isLoading: isLoadingStatus,
-    error: statusError,
-  } = useQuery({
+  // We still poll the LLM status while a download is in flight so the list
+  // shows a freshly-pulled model as soon as it lands. The previous fast-poll
+  // branch that watched for unload completion has been removed since this
+  // modal no longer performs unload.
+  const { data: llmStatus } = useQuery({
     queryKey: ['llmStatus'],
     queryFn: () => fetchLlmStatus(),
     enabled: isOpen,
     staleTime: 0,
     gcTime: 1000,
-    refetchInterval:
-      isOpen && (isWaitingForUnload || !!pullJobId) ? 2000 : 10000,
+    refetchInterval: isOpen && !!pullJobId ? 2000 : 10000,
     refetchOnWindowFocus: false,
   });
 
@@ -129,24 +124,6 @@ export function LlmManagementModal({
     enabled: isOpen,
     staleTime: 10 * 1000,
     gcTime: 1 * 60 * 1000,
-  });
-
-  const unloadMutation = useMutation({
-    mutationFn: unloadLlmModel,
-    onMutate: () => {
-      setIsWaitingForUnload(true);
-    },
-    onSuccess: (data) => {
-      setToast(`✅ ${data.message}`);
-      queryClient.invalidateQueries({ queryKey: ['llmStatus'] });
-    },
-    onError: (error: Error) => {
-      console.error('Unload request failed:', error);
-      setToast(
-        `❌ Error: ${error.message || 'Failed to send unload request.'}`
-      );
-      setIsWaitingForUnload(false);
-    },
   });
 
   const startPullMutation = useMutation({
@@ -336,24 +313,6 @@ export function LlmManagementModal({
     }
   };
 
-  // Effects for unload confirmation (Unchanged)
-  useEffect(() => {
-    if (isWaitingForUnload && llmStatus) {
-      if (
-        llmStatus.modelChecked === llmStatus.activeModel &&
-        !llmStatus.loaded
-      ) {
-        setIsWaitingForUnload(false);
-      }
-    }
-  }, [isWaitingForUnload, llmStatus]);
-
-  // Event Handlers (Unload) (Unchanged)
-  const handleUnloadClick = () => {
-    if (isAnyOperationActive || unloadMutation.isPending) return;
-    unloadMutation.mutate();
-  };
-
   // Handlers for Modals (Unchanged)
   const openDeleteConfirm = (model: LlmModelInfo) => {
     setModelToDelete(model);
@@ -384,9 +343,7 @@ export function LlmManagementModal({
     }
     onOpenChange(open);
     if (!open) {
-      setIsWaitingForUnload(false);
       setModelUrlToDownload('');
-      unloadMutation.reset();
       deleteModelMutation.reset();
       resetPullState(true);
       closeDeleteConfirm();
@@ -401,8 +358,8 @@ export function LlmManagementModal({
     }
   };
 
-  // Loading states (Unchanged)
-  const isUnloading = unloadMutation.isPending || isWaitingForUnload;
+  // Loading states. This modal no longer performs unload, so the only
+  // "loading process" we still need to track is an in-flight delete.
   const isDeletingSelectedModel = deleteModelMutation.isPending;
   const isPulling =
     !!pullJobId &&
@@ -412,23 +369,22 @@ export function LlmManagementModal({
   const isCancelingPull =
     cancelPullMutation.isPending || pullStatus?.status === 'canceling';
   const isStartingPull = startPullMutation.isPending;
-  const isAnyLoadingProcessActive = isUnloading || isDeletingSelectedModel;
+  const isAnyLoadingProcessActive = isDeletingSelectedModel;
   const isAnyPullProcessActive = isPulling || isCancelingPull || isStartingPull;
   const isAnyOperationActive =
     isAnyLoadingProcessActive || isAnyPullProcessActive;
   const overallError =
-    statusError?.message ||
     availableError?.message ||
-    unloadMutation.error?.message ||
     pullStatusError?.message ||
     pullStatus?.error ||
     deleteModelMutation.error?.message;
 
-  // UI Display Values (Unchanged)
-  const activeModelName = llmStatus?.activeModel ?? 'N/A';
+  // UI Display Values. `loadedModelFullName` and `isAnyModelLoaded` are
+  // still used to gate the per-row Delete action (we don't allow deleting
+  // the model that's currently loaded into memory); the rest of the active
+  // model status was moved to the chat modal's Configure AI Model dialog.
   const isAnyModelLoaded = llmStatus?.loaded ?? false;
   const loadedModelFullName = llmStatus?.details?.name;
-  const activeConfiguredContextSize = llmStatus?.configuredContextSize;
 
   // Render list item function (Changed)
   const renderModelListItem = (model: LlmModelInfo) => {
@@ -580,106 +536,9 @@ export function LlmManagementModal({
         <Dialog.Content style={{ maxWidth: 600 }}>
           <Dialog.Title>Manage Language Model</Dialog.Title>
           <Dialog.Description size="2" mb="4" color="gray">
-            View models, set the active model and context size, or download new
-            models.
+            View downloaded models, download new ones from a URL, or delete
+            existing models.
           </Dialog.Description>
-
-          {/* Active Model Status (UPDATED) */}
-          <Box
-            mb="4"
-            p="3"
-            style={{
-              backgroundColor: 'var(--gray-a2)',
-              borderRadius: 'var(--radius-3)',
-            }}
-          >
-            <Text as="div" size="1" weight="medium" color="gray" mb="2">
-              Active Model Status
-            </Text>
-            <Flex align="center" justify="between" gap="3">
-              <Flex align="center" gap="2" style={{ minWidth: 0 }}>
-                {(isLoadingStatus && !llmStatus) || isWaitingForUnload ? (
-                  <Spinner size="2" />
-                ) : isAnyModelLoaded ? (
-                  <CheckCircledIcon
-                    width="18"
-                    height="18"
-                    className="text-green-600"
-                  />
-                ) : (
-                  <SymbolIcon
-                    width="18"
-                    height="18"
-                    className="text-gray-500"
-                  />
-                )}
-                <Text size="3" weight="bold" truncate title={activeModelName}>
-                  {activeModelName}
-                </Text>
-                <Tooltip
-                  content={`Configured Context Size: ${activeConfiguredContextSize ? activeConfiguredContextSize.toLocaleString() : 'Default'}`}
-                >
-                  <Badge
-                    variant="soft"
-                    color={activeConfiguredContextSize ? 'blue' : 'gray'}
-                    size="1"
-                    className={cn(isLoadingStatus ? 'opacity-50' : '')}
-                  >
-                    <LightningBoltIcon style={{ marginRight: '2px' }} />
-                    {/* --- MODIFICATION FOR ACTIVE MODEL CONTEXT SIZE --- */}
-                    {isLoadingStatus
-                      ? '...'
-                      : activeConfiguredContextSize
-                        ? prettyBytes(activeConfiguredContextSize).replace(
-                            ' ',
-                            ''
-                          )
-                        : 'Default'}
-                    {/* --- END MODIFICATION --- */}
-                  </Badge>
-                </Tooltip>
-                {isAnyModelLoaded &&
-                  loadedModelFullName &&
-                  loadedModelFullName !== activeModelName && (
-                    <Tooltip content={`Loaded: ${loadedModelFullName}`}>
-                      <InfoCircledIcon className="text-blue-500" />
-                    </Tooltip>
-                  )}
-              </Flex>
-              <Button
-                color="orange"
-                variant="soft"
-                size="1"
-                onClick={handleUnloadClick}
-                disabled={!isAnyModelLoaded || isAnyOperationActive}
-                title={
-                  !isAnyModelLoaded ? 'No model loaded' : 'Unload active model'
-                }
-              >
-                {isUnloading ? (
-                  <>
-                    {' '}
-                    <Spinner size="1" /> Unloading...{' '}
-                  </>
-                ) : (
-                  <>
-                    {' '}
-                    <ReloadIcon /> Unload{' '}
-                  </>
-                )}
-              </Button>
-            </Flex>
-            {statusError && !isAnyLoadingProcessActive && (
-              <Callout.Root color="red" size="1" mt="2">
-                <Callout.Icon>
-                  <ExclamationTriangleIcon />
-                </Callout.Icon>
-                <Callout.Text>
-                  Error checking status: {statusError.message}
-                </Callout.Text>
-              </Callout.Root>
-            )}
-          </Box>
 
           {/* Available Models List (Unchanged) */}
           <Box mb="4">
@@ -865,16 +724,6 @@ export function LlmManagementModal({
           </Box>
 
           {/* Display General Mutation Errors (Unchanged) */}
-          {unloadMutation.isError && (
-            <Callout.Root color="red" size="1" mt="2">
-              <Callout.Icon>
-                <ExclamationTriangleIcon />
-              </Callout.Icon>
-              <Callout.Text>
-                Error during unload: {unloadMutation.error.message}
-              </Callout.Text>
-            </Callout.Root>
-          )}
           {deleteModelMutation.isError && (
             <Callout.Root color="red" size="1" mt="2">
               <Callout.Icon>
@@ -887,7 +736,6 @@ export function LlmManagementModal({
           )}
           {overallError &&
             !displayPullError &&
-            !unloadMutation.isError &&
             !deleteModelMutation.isError && (
               <Callout.Root color="red" size="1" mt="2">
                 <Callout.Icon>

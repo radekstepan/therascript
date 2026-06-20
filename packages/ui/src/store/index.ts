@@ -35,5 +35,6 @@ export * from './ui/themeAtom'; // This exports themeAtom and Theme type from it
 export * from './ui/isPersistentSidebarOpenAtom'; // Added in previous step
 export * from './ui/accentColorAtom'; // <-- ADDED EXPORT
 export * from './ui/isSystemReadyAtom'; // <-- ADDED EXPORT
+export * from './ui/remoteBaseUrlAtom'; // <-- ADDED EXPORT
 
 export * from './navigation/currentPageAtom'; // Added in previous step

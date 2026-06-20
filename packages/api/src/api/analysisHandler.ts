@@ -310,6 +310,7 @@ export const createAnalysisJobHandler = async ({
     useAdvancedStrategy,
     contextSize: requestedContextSize,
     mapPhaseSystemPrompt,
+    baseUrl: requestedBaseUrl,
   } = validatedBody;
 
   try {
@@ -391,11 +392,16 @@ export const createAnalysisJobHandler = async ({
 
     let newJob: AnalysisJob;
 
-    // Snapshot the active LLM base URL at job-creation time so the worker
+    // Snapshot the LLM base URL at job-creation time so the worker
     // (a separate process) uses the same network target even if the user
-    // later toggles between local and remote. This is the only "routing"
-    // state the worker needs to know about.
-    const jobLlmBaseUrl = getActiveBaseUrl();
+    // later toggles between local and remote. If the caller supplied a
+    // per-job `baseUrl` (e.g. picked a remote machine in the analysis
+    // modal), prefer that; otherwise fall back to the backend's currently
+    // active base URL. This is the only "routing" state the worker needs.
+    const jobLlmBaseUrl =
+      requestedBaseUrl && requestedBaseUrl.trim().length > 0
+        ? requestedBaseUrl.trim()
+        : getActiveBaseUrl();
 
     if (useAdvancedStrategy) {
       newJob = analysisRepository.createJob(

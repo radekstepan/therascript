@@ -88,6 +88,26 @@ describe('API Request Schemas', () => {
       });
       expect(result.success).toBe(false);
     });
+
+    it('accepts a valid baseUrl override', () => {
+      const result = safeValidateAnalysisRequest({
+        sessionIds: [1],
+        prompt: 'Analyze this session',
+        modelName: 'llama3',
+        baseUrl: 'http://192.168.1.100:1234',
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('rejects a malformed baseUrl', () => {
+      const result = safeValidateAnalysisRequest({
+        sessionIds: [1],
+        prompt: 'Analyze this session',
+        modelName: 'llama3',
+        baseUrl: 'not-a-url',
+      });
+      expect(result.success).toBe(false);
+    });
   });
 
   describe('renameChatRequestSchema', () => {

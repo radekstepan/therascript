@@ -1,5 +1,5 @@
 /* packages/ui/src/components/SessionView/Modals/SelectActiveModelModal.tsx */
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Dialog,
@@ -9,13 +9,11 @@ import {
   Box,
   Spinner,
   Callout,
-  Select,
   TextField,
   Strong,
   Tooltip,
   Badge,
   Slider,
-  SegmentedControl,
 } from '@radix-ui/themes';
 import {
   InfoCircledIcon,
@@ -23,10 +21,8 @@ import {
   CheckIcon,
   LightningBoltIcon,
   ReloadIcon,
-  GlobeIcon,
 } from '@radix-ui/react-icons';
 import {
-  fetchAvailableModels,
   setLlmModel,
   unloadLlmModel,
   estimateModelVram,
@@ -37,8 +33,8 @@ import type {
   LlmStatus,
   VramEstimateResponse,
 } from '../../../types';
-import { useDebounce } from '../../../hooks/useDebounce';
 import prettyBytes from 'pretty-bytes';
+import { LlmEndpointModelPicker } from '../../Shared/LlmEndpointModelPicker';
 
 interface SelectActiveModelModalProps {
   isOpen: boolean;
@@ -68,13 +64,14 @@ export function SelectActiveModelModal({
   const [userTouchedContext, setUserTouchedContext] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Local / Remote LLM toggle.
-  // The backend exposes the resolved state via llmStatus.isRemoteBaseUrl /
-  // llmStatus.activeBaseUrl, so we trust that on open instead of doing
-  // brittle substring checks like "includes('localhost')".
+  // Local / Remote LLM toggle. The shared LlmEndpointModelPicker renders the
+  // toggle UI and owns the model-list query, but the parent still needs
+  // these values to compute the `baseUrl` it sends to the backend and to
+  // decide whether to fetch the VRAM estimate. The picker persists the
+  // remote URL through `remoteBaseUrlAtom` (localStorage) and pre-fills it
+  // when the user toggles to Remote.
   const [isRemote, setIsRemote] = useState(false);
   const [remoteUrl, setRemoteUrl] = useState('');
-  const debouncedRemoteUrl = useDebounce(remoteUrl, 500);
 
   const [temperature, setTemperature] = useState(0.7);
   const [topP, setTopP] = useState(0.9);
@@ -89,6 +86,11 @@ export function SelectActiveModelModal({
     null
   );
 
+  // Models fetched by the shared picker; we keep a local mirror so
+  // `selectedModelDetails` (used for default context, VRAM, params UI) is
+  // always in sync with whatever the picker just queried.
+  const [availableModels, setAvailableModels] = useState<LlmModelInfo[]>([]);
+
   const isValidHttpUrl = React.useCallback((value: string): boolean => {
     try {
       const parsed = new URL(value.trim());
@@ -97,25 +99,6 @@ export function SelectActiveModelModal({
       return false;
     }
   }, []);
-
-  // Decide which URL to pass to fetchAvailableModels. Local mode => null
-  // (uses backend's active URL). Remote mode => debounced URL. Invalid
-  // remote URLs disable the query so we don't spam the API.
-  const modelsBaseUrl = isRemote ? debouncedRemoteUrl.trim() : null;
-  const canFetchRemoteModels = !isRemote || isValidHttpUrl(debouncedRemoteUrl);
-
-  const {
-    data: availableModelsData,
-    isLoading: isLoadingModels,
-    isError: isErrorAvailableModels,
-    refetch: refetchAvailableModels,
-  } = useQuery({
-    queryKey: ['availableLlmModels', isRemote ? modelsBaseUrl : 'local'],
-    queryFn: () => fetchAvailableModels(modelsBaseUrl),
-    enabled: isOpen && (!isRemote || !!canFetchRemoteModels),
-    staleTime: 60 * 1000,
-    retry: false,
-  });
 
   const { data: gpuStats } = useQuery({
     queryKey: ['gpuStats'],
@@ -245,8 +228,10 @@ export function SelectActiveModelModal({
 
   const isSaving = setModelMutation.isPending;
   const isModelLoaded = llmStatus?.loaded === true;
-  const models = availableModelsData?.models || [];
-  const selectedModelDetails = models.find((m) => m.name === selectedModel);
+  const selectedModelDetails = useMemo(
+    () => availableModels.find((m) => m.name === selectedModel),
+    [availableModels, selectedModel]
+  );
   const effectiveContextSize =
     contextSizeInput && parseInt(contextSizeInput, 10) > 0
       ? parseInt(contextSizeInput, 10)
@@ -295,8 +280,15 @@ export function SelectActiveModelModal({
     }
   }, [isOpen, userTouchedContext, recommendedContextSize]);
 
-  // Update VRAM estimate when model or context size changes
+  // Update VRAM estimate when model or context size changes. VRAM is a
+  // local-machine concept, so we skip the estimate entirely when the user
+  // is targeting a remote endpoint — there's no local GPU to size against
+  // and the backend's `estimate-vram` endpoint 404s for remote-only models.
   useEffect(() => {
+    if (isRemote) {
+      setVramEstimate(null);
+      return;
+    }
     if (!selectedModel || !selectedModelDetails) {
       setVramEstimate(null);
       return;
@@ -327,7 +319,13 @@ export function SelectActiveModelModal({
           error: err.message,
         });
       });
-  }, [selectedModel, selectedModelDetails, contextSizeInput, numGpuLayers]);
+  }, [
+    isRemote,
+    selectedModel,
+    selectedModelDetails,
+    contextSizeInput,
+    numGpuLayers,
+  ]);
 
   // Calculate VRAM warning based on available GPU memory
   const vramWarning = React.useMemo(() => {
@@ -375,140 +373,38 @@ export function SelectActiveModelModal({
             </Callout.Root>
           )}
 
-          <Box>
-            <Text as="div" size="2" mb="1" weight="medium">
-              LLM Endpoint
-            </Text>
-            <SegmentedControl.Root
-              value={isRemote ? 'remote' : 'local'}
-              onValueChange={(v) => setIsRemote(v === 'remote')}
-              size="2"
-            >
-              <SegmentedControl.Item value="local">
-                Local Machine
-              </SegmentedControl.Item>
-              <SegmentedControl.Item value="remote">
-                <Flex align="center" gap="1">
-                  <GlobeIcon /> Remote Machine
-                </Flex>
-              </SegmentedControl.Item>
-            </SegmentedControl.Root>
-            {llmStatus?.defaultBaseUrl && !isRemote && (
-              <Text size="1" color="gray" mt="1">
-                Active: {llmStatus.defaultBaseUrl}
-              </Text>
-            )}
-          </Box>
+          <LlmEndpointModelPicker
+            selectedModel={selectedModel}
+            onSelectedModelChange={setSelectedModel}
+            isRemote={isRemote}
+            setIsRemote={setIsRemote}
+            remoteUrl={remoteUrl}
+            setRemoteUrl={setRemoteUrl}
+            disabled={isSaving || isModelLoaded}
+            enabled={isOpen}
+            placeholder="Choose a model"
+            onModelsChange={setAvailableModels}
+          />
 
-          {isRemote && (
+          {selectedModelDetails && (
             <label>
               <Text as="div" size="2" mb="1" weight="medium">
-                Remote LM Studio URL
+                Context Size (Optional)
               </Text>
               <TextField.Root
-                placeholder="http://192.168.1.100:1234"
-                value={remoteUrl}
-                onChange={(e) => setRemoteUrl(e.target.value)}
+                type="number"
+                min="1"
+                step="1024"
+                placeholder={`Default (${selectedModelDetails.defaultContextSize?.toLocaleString() ?? 'auto'})`}
+                value={contextSizeInput}
+                onChange={(e) => {
+                  setContextSizeInput(e.target.value);
+                  setUserTouchedContext(true);
+                }}
                 disabled={isSaving || isModelLoaded}
-                size="2"
               />
-              {remoteUrl.trim().length > 0 && !isValidHttpUrl(remoteUrl) && (
-                <Text size="1" color="red" mt="1">
-                  Please enter a valid http:// or https:// URL.
-                </Text>
-              )}
             </label>
           )}
-
-          {isErrorAvailableModels && (
-            <Callout.Root color="amber" size="1">
-              <Callout.Icon>
-                <InfoCircledIcon />
-              </Callout.Icon>
-              <Callout.Text>
-                {isRemote
-                  ? `Could not connect to remote LLM server at ${modelsBaseUrl}. Check the URL and ensure the LM Studio server is running.`
-                  : 'Could not fetch available models from the local LLM server. Ensure the LM Studio server is running.'}
-                <Button
-                  variant="ghost"
-                  size="1"
-                  ml="2"
-                  onClick={() => refetchAvailableModels()}
-                >
-                  Retry
-                </Button>
-              </Callout.Text>
-            </Callout.Root>
-          )}
-
-          <label>
-            <Text as="div" size="2" mb="1" weight="medium">
-              Select Model
-            </Text>
-            <Select.Root
-              value={selectedModel}
-              onValueChange={setSelectedModel}
-              disabled={isSaving || isLoadingModels || isModelLoaded}
-              size="2"
-            >
-              <Select.Trigger
-                placeholder={
-                  isLoadingModels ? 'Loading models...' : 'Choose a model'
-                }
-              />
-              <Select.Content>
-                {models.map((model) => (
-                  <Select.Item key={model.name} value={model.name}>
-                    {/* --- *** UPDATED SECTION *** --- */}
-                    <Flex justify="between" align="center" gap="4" width="100%">
-                      <Text truncate>{model.name}</Text>
-                      {model.defaultContextSize &&
-                        model.defaultContextSize > 0 && (
-                          <Tooltip
-                            content={`Default Max Context: ${model.defaultContextSize.toLocaleString()} Tokens`}
-                          >
-                            <Badge
-                              variant="soft"
-                              color="blue"
-                              radius="full"
-                              size="1"
-                              style={{ flexShrink: 0 }}
-                            >
-                              <LightningBoltIcon
-                                style={{ marginRight: '2px' }}
-                              />
-                              {prettyBytes(model.defaultContextSize).replace(
-                                ' ',
-                                ''
-                              )}
-                            </Badge>
-                          </Tooltip>
-                        )}
-                    </Flex>
-                    {/* --- *** END UPDATED SECTION *** --- */}
-                  </Select.Item>
-                ))}
-              </Select.Content>
-            </Select.Root>
-          </label>
-
-          <label>
-            <Text as="div" size="2" mb="1" weight="medium">
-              Context Size (Optional)
-            </Text>
-            <TextField.Root
-              type="number"
-              min="1"
-              step="1024"
-              placeholder={`Default (${selectedModelDetails?.defaultContextSize?.toLocaleString() ?? 'auto'})`}
-              value={contextSizeInput}
-              onChange={(e) => {
-                setContextSizeInput(e.target.value);
-                setUserTouchedContext(true);
-              }}
-              disabled={isSaving || isModelLoaded}
-            />
-          </label>
 
           <Box>
             <Text as="div" size="2" mb="2" weight="medium">
@@ -652,7 +548,7 @@ export function SelectActiveModelModal({
             </Box>
           </Box>
 
-          {vramEstimate && (
+          {!isRemote && vramEstimate && (
             <Callout.Root size="1" color={vramEstimate.error ? 'gray' : 'blue'}>
               <Callout.Icon>
                 <LightningBoltIcon />
@@ -705,7 +601,7 @@ export function SelectActiveModelModal({
             </Callout.Root>
           )}
 
-          {vramWarning && (
+          {!isRemote && vramWarning && (
             <Callout.Root
               size="1"
               color={vramWarning.type === 'error' ? 'red' : 'amber'}

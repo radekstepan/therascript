@@ -9,6 +9,13 @@ interface CreateJobPayload {
   useAdvancedStrategy?: boolean;
   contextSize?: number;
   mapPhaseSystemPrompt?: string;
+  /**
+   * Optional LM Studio-compatible base URL override. When set, the worker
+   * targets this URL for the Map/Reduce streams instead of the backend's
+   * currently active URL. Send `null` to explicitly use the active URL.
+   * Omit to let the backend decide.
+   */
+  baseUrl?: string | null;
 }
 
 /**

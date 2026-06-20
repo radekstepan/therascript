@@ -70,6 +70,13 @@ const CreateAnalysisJobBodySchema = t.Object({
   modelName: t.Optional(t.String()),
   useAdvancedStrategy: t.Optional(t.Boolean()),
   contextSize: t.Optional(t.Number({ minimum: 1 })),
+  /**
+   * Optional LM Studio-compatible base URL override. When provided, the
+   * worker uses this URL for the Map/Reduce streams; when omitted, the
+   * backend's currently active base URL is used. Mirrors the same field on
+   * the chat `set-model` endpoint.
+   */
+  baseUrl: t.Optional(t.String({ maxLength: 2048 })),
 });
 
 const JobIdParamSchema = t.Object({

@@ -471,18 +471,16 @@ describe('llamaCppService', () => {
   });
 
   describe('listModels', () => {
-    it('returns empty array when API fails', async () => {
+    it('propagates the error when the API is unreachable', async () => {
       mockAxiosGet.mockRejectedValue(new Error('Connection refused'));
 
-      const result = await listModels();
-      expect(result).toEqual([]);
+      await expect(listModels()).rejects.toThrow();
     });
 
-    it('returns empty array when request times out', async () => {
+    it('propagates the error when the request times out', async () => {
       mockAxiosGet.mockRejectedValue(new Error('timeout'));
 
-      const result = await listModels();
-      expect(result).toEqual([]);
+      await expect(listModels()).rejects.toThrow();
     });
 
     it('filters out non-LLM models', async () => {

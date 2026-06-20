@@ -418,37 +418,36 @@ export const listModels = async (
   baseUrlOverride?: string | null
 ): Promise<LlmModelInfo[]> => {
   const targetUrl = resolveLlmBaseUrl(baseUrlOverride);
-  try {
-    await ensureLlmReady(targetUrl);
-    const res = await axios.get<{ models: LmsModelRecord[] }>(
-      `${targetUrl}/api/v1/models`,
-      { timeout: 5000 }
-    );
-    return res.data.models
-      .filter((m) => m.type === 'llm')
-      .map((m) => ({
-        name: m.key,
-        modified_at: new Date(),
-        size: m.size_bytes,
-        digest: m.key,
-        details: {
-          format: m.format || 'gguf',
-          family: m.architecture || 'unknown',
-          families: null,
-          parameter_size: m.params_string || 'unknown',
-          quantization_level: m.quantization?.name || 'unknown',
-        },
-        defaultContextSize: m.max_context_length || null,
-        // LM Studio does not expose per-layer architecture needed for VRAM estimation
-        architecture: null,
-      }));
-  } catch (error) {
-    console.warn(
-      '[LlmService] Could not fetch models from LM Studio API:',
-      error
-    );
-    return [];
-  }
+  // Let errors propagate. `ensureLlmReady` throws an InternalServerError
+  // with a descriptive message when the remote URL is unreachable, the
+  // port is wrong, or the local runtime isn't responding. The route
+  // handler turns that into a 500, which the UI surfaces as the amber
+  // "could not reach the server" warning — distinct from the gray
+  // "no models found" line that means the server is up but has no
+  // models loaded.
+  await ensureLlmReady(targetUrl);
+  const res = await axios.get<{ models: LmsModelRecord[] }>(
+    `${targetUrl}/api/v1/models`,
+    { timeout: 5000 }
+  );
+  return res.data.models
+    .filter((m) => m.type === 'llm')
+    .map((m) => ({
+      name: m.key,
+      modified_at: new Date(),
+      size: m.size_bytes,
+      digest: m.key,
+      details: {
+        format: m.format || 'gguf',
+        family: m.architecture || 'unknown',
+        families: null,
+        parameter_size: m.params_string || 'unknown',
+        quantization_level: m.quantization?.name || 'unknown',
+      },
+      defaultContextSize: m.max_context_length || null,
+      // LM Studio does not expose per-layer architecture needed for VRAM estimation
+      architecture: null,
+    }));
 };
 
 const activeDownloadJobs = new Map<string, ModelDownloadJobStatus>();
