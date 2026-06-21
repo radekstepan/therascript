@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { LlmModelInfo, VramEstimate } from '@therascript/domain';
+import type {
+  LlmModelInfo,
+  VramEstimate,
+  BackendChatMessage,
+} from '@therascript/domain';
 
 // Mock dependencies before importing the module
 vi.mock('@therascript/config', () => ({
@@ -25,6 +29,7 @@ vi.mock('./activeModelService.js', () => ({
   setActiveModelVramEstimateBytes: vi.fn(),
   getActiveBaseUrl: vi.fn().mockReturnValue('http://localhost:1234'),
   getDefaultBaseUrl: vi.fn().mockReturnValue('http://localhost:1234'),
+  setActiveBaseUrl: vi.fn(),
   isRemoteLlmBaseUrl: vi.fn().mockReturnValue(false),
   normalizeLlmBaseUrl: vi.fn((value?: string | null) => {
     if (value === null || value === undefined) return null;
@@ -34,15 +39,21 @@ vi.mock('./activeModelService.js', () => ({
   getConfiguredBaseUrlOverride: vi.fn().mockReturnValue(null),
 }));
 
-vi.mock('./llamaCppRuntime.js', () => ({
-  getLlmRuntime: vi.fn().mockReturnValue({
-    type: 'native',
+// Hoist the shared mock runtime so tests can assert against the same object
+// the service module captures at import time.
+const { mockRuntime } = vi.hoisted(() => ({
+  mockRuntime: {
+    type: 'native' as const,
     ensureReady: vi.fn().mockResolvedValue(undefined),
     restartWithModel: vi.fn().mockResolvedValue(undefined),
     stop: vi.fn().mockResolvedValue(undefined),
     deleteModel: vi.fn().mockResolvedValue('deleted'),
     getBinaryPath: vi.fn().mockResolvedValue('/mock/lms'),
-  }),
+  },
+}));
+
+vi.mock('./llamaCppRuntime.js', () => ({
+  getLlmRuntime: vi.fn(() => mockRuntime),
 }));
 
 vi.mock('@therascript/data', () => ({
@@ -104,7 +115,29 @@ const {
   cancelDownloadModelJob,
   checkModelStatus,
   fetchVramUsage,
+  loadLlmModel,
+  ensureModelLoaded,
+  unloadActiveModel,
+  ensureLlmReady,
+  checkLlmApiHealth,
+  streamChatResponse,
 } = await import('./llamaCppService.js');
+
+// Pull the mocked activeModelService helpers we need to drive local/remote branching
+const {
+  getActiveBaseUrl,
+  isRemoteLlmBaseUrl,
+  setActiveBaseUrl,
+  setActiveModelVramEstimateBytes,
+  getConfiguredNumGpuLayers,
+  getConfiguredContextSize,
+  getConfiguredTemperature,
+  getConfiguredTopP,
+  getConfiguredRepeatPenalty,
+  getConfiguredThinkingBudget,
+} = await import('./activeModelService.js');
+
+const { streamLlmChatDetailed } = await import('@therascript/services');
 
 describe('llamaCppService', () => {
   beforeEach(() => {
@@ -760,6 +793,647 @@ describe('llamaCppService', () => {
       const result = await checkModelStatus('meta/llama-3-8b');
       expect(result).not.toBeNull();
       expect(result!.size_vram).toBe(5_000_000_000);
+    });
+  });
+
+  describe('loadLlmModel — local', () => {
+    beforeEach(() => {
+      vi.mocked(isRemoteLlmBaseUrl).mockReturnValue(false);
+    });
+
+    it('restarts the local runtime, unloads prior instances, and loads with correct payload', async () => {
+      mockRuntime.restartWithModel.mockClear();
+
+      // Enumerate prior loaded instances, then unload + load
+      mockAxiosGet.mockResolvedValueOnce({
+        data: {
+          models: [
+            {
+              type: 'llm',
+              publisher: 'meta',
+              key: 'meta/old-model',
+              loaded_instances: [
+                { id: 'old-inst-1', config: { context_length: 4096 } },
+              ],
+            },
+          ],
+        },
+      });
+      mockAxiosPost.mockResolvedValueOnce({ data: {} }); // unload old
+      mockAxiosPost.mockResolvedValueOnce({
+        data: { instance_id: 'new-inst-1', load_time_seconds: 1.5 },
+      }); // load
+
+      await loadLlmModel('meta/llama-3-8b', 8192);
+
+      expect(mockRuntime.restartWithModel).toHaveBeenCalledWith(
+        'meta/llama-3-8b'
+      );
+      // VRAM estimate is cleared before load
+      expect(setActiveModelVramEstimateBytes).toHaveBeenCalledWith(null);
+      // Unload the old instance
+      expect(mockAxiosPost).toHaveBeenCalledWith(
+        'http://localhost:1234/api/v1/models/unload',
+        { instance_id: 'old-inst-1' },
+        expect.objectContaining({ timeout: 30000 })
+      );
+      // Load the new model with the right payload
+      const loadCall = mockAxiosPost.mock.calls.find(
+        ([url]: any) => url === 'http://localhost:1234/api/v1/models/load'
+      );
+      expect(loadCall).toBeDefined();
+      expect(loadCall![1]).toMatchObject({
+        model: 'meta/llama-3-8b',
+        echo_load_config: true,
+        flash_attention: true,
+        context_length: 8192,
+        offload_kv_cache_to_gpu: true, // numGpuLayers=null !== 0
+      });
+    });
+
+    it('omits context_length when no context is configured', async () => {
+      vi.mocked(getConfiguredContextSize).mockReturnValue(null);
+      mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
+      mockAxiosPost.mockResolvedValueOnce({
+        data: { instance_id: 'new-inst-1' },
+      });
+
+      await loadLlmModel('meta/llama-3-8b');
+
+      const loadCall = mockAxiosPost.mock.calls.find(
+        ([url]: any) => url === 'http://localhost:1234/api/v1/models/load'
+      );
+      expect(loadCall![1]).not.toHaveProperty('context_length');
+    });
+
+    it('sends offload_kv_cache_to_gpu=false when numGpuLayers=0 (CPU-only)', async () => {
+      vi.mocked(getConfiguredNumGpuLayers).mockReturnValue(0);
+      mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
+      mockAxiosPost.mockResolvedValueOnce({ data: { instance_id: 'inst' } });
+
+      await loadLlmModel('meta/llama-3-8b', 4096);
+
+      const loadCall = mockAxiosPost.mock.calls.find(
+        ([url]: any) => url === 'http://localhost:1234/api/v1/models/load'
+      );
+      expect(loadCall![1]).toMatchObject({ offload_kv_cache_to_gpu: false });
+    });
+
+    it('continues loading even if unloading a prior instance fails', async () => {
+      mockAxiosGet.mockResolvedValueOnce({
+        data: {
+          models: [
+            {
+              type: 'llm',
+              publisher: 'meta',
+              key: 'meta/stubborn',
+              loaded_instances: [
+                { id: 'stubborn-1', config: { context_length: 2048 } },
+              ],
+            },
+          ],
+        },
+      });
+      mockAxiosPost.mockRejectedValueOnce(new Error('unload failed'));
+      mockAxiosPost.mockResolvedValueOnce({
+        data: { instance_id: 'new-inst' },
+      });
+
+      await expect(
+        loadLlmModel('meta/llama-3-8b', 4096)
+      ).resolves.toBeUndefined();
+
+      const loadCall = mockAxiosPost.mock.calls.find(
+        ([url]: any) => url === 'http://localhost:1234/api/v1/models/load'
+      );
+      expect(loadCall).toBeDefined();
+    });
+
+    it('fires background VRAM estimate after load and stores the result', async () => {
+      mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
+      mockAxiosPost.mockResolvedValueOnce({ data: { instance_id: 'inst' } });
+      mockExecFile.mockImplementation((...args: any[]) => {
+        const callback = args[args.length - 1];
+        callback(null, {
+          stdout:
+            'Estimated GPU Memory: 4.52 GiB\nEstimated Total Memory: 5.20 GiB',
+          stderr: '',
+        });
+      });
+
+      await loadLlmModel('meta/llama-3-8b', 4096);
+      // Drain microtasks so the fire-and-forget .then() runs
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockExecFile).toHaveBeenCalled();
+      const lastCall =
+        mockExecFile.mock.calls[mockExecFile.mock.calls.length - 1];
+      // Binary + model key + context flag are passed to lms
+      expect(lastCall[0]).toMatch(/lms$/);
+      expect(lastCall[1]).toContain('meta/llama-3-8b');
+      expect(setActiveModelVramEstimateBytes).toHaveBeenCalledWith(
+        expect.any(Number)
+      );
+    });
+
+    it('throws InternalServerError when the load POST fails', async () => {
+      mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
+      mockAxiosPost.mockRejectedValueOnce({
+        response: { data: { error: 'no such model' } },
+        message: 'Request failed',
+      });
+
+      await expect(loadLlmModel('meta/missing', 4096)).rejects.toThrow(
+        /Failed to load model 'meta\/missing' via LM Studio API/
+      );
+    });
+  });
+
+  describe('loadLlmModel — remote', () => {
+    const REMOTE_URL = 'http://10.0.0.1:1234';
+
+    beforeEach(() => {
+      vi.mocked(isRemoteLlmBaseUrl).mockReturnValue(true);
+      vi.mocked(getActiveBaseUrl).mockReturnValue(REMOTE_URL);
+    });
+
+    it('does NOT restart the local runtime', async () => {
+      mockRuntime.restartWithModel.mockClear();
+
+      mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
+      mockAxiosPost.mockResolvedValueOnce({ data: { instance_id: 'inst' } });
+
+      await loadLlmModel('meta/llama-3-8b', 4096, REMOTE_URL);
+
+      expect(mockRuntime.restartWithModel).not.toHaveBeenCalled();
+    });
+
+    it('targets the explicit remote base URL for enumerate/unload/load', async () => {
+      mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
+      mockAxiosPost.mockResolvedValueOnce({ data: { instance_id: 'inst' } });
+
+      await loadLlmModel('meta/llama-3-8b', 4096, REMOTE_URL);
+
+      expect(mockAxiosGet).toHaveBeenCalledWith(
+        `${REMOTE_URL}/api/v1/models`,
+        expect.objectContaining({ timeout: 5000 })
+      );
+      const loadCall = mockAxiosPost.mock.calls.find(
+        ([url]: any) => url === `${REMOTE_URL}/api/v1/models/load`
+      );
+      expect(loadCall).toBeDefined();
+    });
+
+    it('does NOT fire the background VRAM estimator for remote URLs', async () => {
+      mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
+      mockAxiosPost.mockResolvedValueOnce({ data: { instance_id: 'inst' } });
+      mockExecFile.mockClear();
+
+      await loadLlmModel('meta/llama-3-8b', 4096, REMOTE_URL);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockExecFile).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('ensureModelLoaded', () => {
+    beforeEach(() => {
+      // Reset the local/remote branching state set up by earlier describe blocks
+      vi.mocked(isRemoteLlmBaseUrl).mockReturnValue(false);
+      vi.mocked(getActiveBaseUrl).mockReturnValue('http://localhost:1234');
+    });
+
+    it('returns early without calling loadLlmModel when the same model is already loaded with sufficient context', async () => {
+      mockAxiosGet.mockResolvedValueOnce({
+        data: {
+          models: [
+            {
+              type: 'llm',
+              publisher: 'meta',
+              key: 'meta/llama-3-8b',
+              loaded_instances: [
+                { id: 'inst-1', config: { context_length: 8192 } },
+              ],
+            },
+          ],
+        },
+      });
+      // No mockAxiosPost expected for load
+
+      await expect(
+        ensureModelLoaded('meta/llama-3-8b', 4096)
+      ).resolves.toBeUndefined();
+      expect(mockAxiosPost).not.toHaveBeenCalled();
+    });
+
+    it('reloads when the loaded context is smaller than required', async () => {
+      mockAxiosGet.mockResolvedValueOnce({
+        data: {
+          models: [
+            {
+              type: 'llm',
+              publisher: 'meta',
+              key: 'meta/llama-3-8b',
+              loaded_instances: [
+                { id: 'inst-1', config: { context_length: 2048 } },
+              ],
+            },
+          ],
+        },
+      });
+      // Enumerate again (inside loadLlmModel), unload (none), then load
+      mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
+      mockAxiosPost.mockResolvedValueOnce({ data: { instance_id: 'inst-1' } });
+
+      await ensureModelLoaded('meta/llama-3-8b', 8192);
+
+      const loadCall = mockAxiosPost.mock.calls.find(
+        ([url]: any) => url === 'http://localhost:1234/api/v1/models/load'
+      );
+      expect(loadCall).toBeDefined();
+      expect(loadCall![1]).toMatchObject({ context_length: 8192 });
+    });
+
+    it('falls through to loadLlmModel when the model is not loaded', async () => {
+      mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } }); // status check
+      mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } }); // enumerate inside load
+      mockAxiosPost.mockResolvedValueOnce({ data: { instance_id: 'inst-1' } });
+
+      await ensureModelLoaded('meta/llama-3-8b', 4096);
+
+      const loadCall = mockAxiosPost.mock.calls.find(
+        ([url]: any) => url === 'http://localhost:1234/api/v1/models/load'
+      );
+      expect(loadCall).toBeDefined();
+    });
+
+    it('matches the loaded model via the publisher/key form', async () => {
+      mockAxiosGet.mockResolvedValueOnce({
+        data: {
+          models: [
+            {
+              type: 'llm',
+              publisher: 'meta',
+              key: 'llama-3-8b',
+              loaded_instances: [
+                { id: 'inst-1', config: { context_length: 4096 } },
+              ],
+            },
+          ],
+        },
+      });
+
+      await expect(
+        ensureModelLoaded('meta/llama-3-8b', 4096)
+      ).resolves.toBeUndefined();
+      expect(mockAxiosPost).not.toHaveBeenCalled();
+    });
+
+    it('falls through to load when the status check itself fails', async () => {
+      mockAxiosGet.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+      mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } }); // enumerate inside load
+      mockAxiosPost.mockResolvedValueOnce({ data: { instance_id: 'inst-1' } });
+
+      await ensureModelLoaded('meta/llama-3-8b', 4096);
+
+      const loadCall = mockAxiosPost.mock.calls.find(
+        ([url]: any) => url === 'http://localhost:1234/api/v1/models/load'
+      );
+      expect(loadCall).toBeDefined();
+    });
+  });
+
+  describe('unloadActiveModel — local', () => {
+    const LOCAL_URL = 'http://localhost:1234';
+
+    beforeEach(() => {
+      vi.mocked(isRemoteLlmBaseUrl).mockReturnValue(false);
+      vi.mocked(getActiveBaseUrl).mockReturnValue(LOCAL_URL);
+    });
+
+    it('unloads all loaded instances in parallel and reports a count', async () => {
+      mockAxiosGet.mockResolvedValueOnce({
+        data: {
+          models: [
+            {
+              type: 'llm',
+              publisher: 'meta',
+              key: 'meta/llama-3-8b',
+              loaded_instances: [
+                { id: 'inst-1', config: { context_length: 4096 } },
+                { id: 'inst-2', config: { context_length: 4096 } },
+              ],
+            },
+          ],
+        },
+      });
+      mockAxiosPost.mockResolvedValue({ data: {} });
+
+      const message = await unloadActiveModel();
+
+      expect(mockAxiosPost).toHaveBeenCalledTimes(2);
+      expect(mockAxiosPost).toHaveBeenCalledWith(
+        `${LOCAL_URL}/api/v1/models/unload`,
+        { instance_id: 'inst-1' },
+        expect.objectContaining({ timeout: 15000 })
+      );
+      expect(mockAxiosPost).toHaveBeenCalledWith(
+        `${LOCAL_URL}/api/v1/models/unload`,
+        { instance_id: 'inst-2' },
+        expect.objectContaining({ timeout: 15000 })
+      );
+      expect(message).toMatch(/2 model instance\(s\) unloaded successfully/);
+      expect(setActiveBaseUrl).not.toHaveBeenCalled();
+    });
+
+    it('falls back to runtime.stop() when nothing was loaded locally', async () => {
+      mockRuntime.stop?.mockClear();
+
+      mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
+
+      const message = await unloadActiveModel();
+
+      expect(mockRuntime.stop).toHaveBeenCalled();
+      expect(message).toBe('LM Studio server stopped (no models were loaded).');
+    });
+
+    it('tolerates unload failures and still reports the successful count', async () => {
+      mockAxiosGet.mockResolvedValueOnce({
+        data: {
+          models: [
+            {
+              type: 'llm',
+              publisher: 'meta',
+              key: 'meta/llama-3-8b',
+              loaded_instances: [
+                { id: 'inst-1', config: { context_length: 4096 } },
+                { id: 'inst-2', config: { context_length: 4096 } },
+              ],
+            },
+          ],
+        },
+      });
+      mockAxiosPost.mockRejectedValueOnce(new Error('first unload failed'));
+      mockAxiosPost.mockResolvedValueOnce({ data: {} });
+
+      const message = await unloadActiveModel();
+
+      expect(message).toMatch(/1 model instance\(s\) unloaded successfully/);
+    });
+  });
+
+  describe('unloadActiveModel — remote', () => {
+    const REMOTE_URL = 'http://10.0.0.1:1234';
+
+    beforeEach(() => {
+      vi.mocked(isRemoteLlmBaseUrl).mockReturnValue(true);
+      vi.mocked(getActiveBaseUrl).mockReturnValue(REMOTE_URL);
+    });
+
+    it('unloads remote instances and resets the active base URL to local when resetBaseUrl=true', async () => {
+      mockAxiosGet.mockResolvedValueOnce({
+        data: {
+          models: [
+            {
+              type: 'llm',
+              publisher: 'meta',
+              key: 'meta/llama-3-8b',
+              loaded_instances: [
+                { id: 'inst-1', config: { context_length: 4096 } },
+              ],
+            },
+          ],
+        },
+      });
+      mockAxiosPost.mockResolvedValueOnce({ data: {} });
+
+      const message = await unloadActiveModel(REMOTE_URL, true);
+
+      expect(mockAxiosPost).toHaveBeenCalledWith(
+        `${REMOTE_URL}/api/v1/models/unload`,
+        { instance_id: 'inst-1' },
+        expect.objectContaining({ timeout: 15000 })
+      );
+      expect(setActiveBaseUrl).toHaveBeenCalledWith(null);
+      expect(message).toMatch(/1 model instance\(s\) unloaded successfully/);
+    });
+
+    it('leaves the active base URL alone when resetBaseUrl=false', async () => {
+      mockAxiosGet.mockResolvedValueOnce({
+        data: {
+          models: [
+            {
+              type: 'llm',
+              publisher: 'meta',
+              key: 'meta/llama-3-8b',
+              loaded_instances: [
+                { id: 'inst-1', config: { context_length: 4096 } },
+              ],
+            },
+          ],
+        },
+      });
+      mockAxiosPost.mockResolvedValueOnce({ data: {} });
+
+      await unloadActiveModel(REMOTE_URL, false);
+
+      expect(setActiveBaseUrl).not.toHaveBeenCalled();
+    });
+
+    it('does not call runtime.stop when nothing was loaded on the remote server', async () => {
+      mockRuntime.stop?.mockClear();
+
+      mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
+
+      const message = await unloadActiveModel(REMOTE_URL, true);
+
+      expect(mockRuntime.stop).not.toHaveBeenCalled();
+      expect(message).toBe('No models were loaded on the remote server.');
+    });
+  });
+
+  describe('ensureLlmReady', () => {
+    const LOCAL_URL = 'http://localhost:1234';
+    const REMOTE_URL = 'http://10.0.0.1:1234';
+
+    it('local: calls runtime.ensureReady and then health-checks via GET /api/v1/models', async () => {
+      vi.mocked(isRemoteLlmBaseUrl).mockReturnValue(false);
+      vi.mocked(getActiveBaseUrl).mockReturnValue(LOCAL_URL);
+      mockRuntime.ensureReady.mockClear();
+
+      mockAxiosGet.mockResolvedValueOnce({ status: 200 });
+
+      await expect(ensureLlmReady()).resolves.toBeUndefined();
+
+      expect(mockRuntime.ensureReady).toHaveBeenCalled();
+      expect(mockAxiosGet).toHaveBeenCalledWith(
+        `${LOCAL_URL}/api/v1/models`,
+        expect.objectContaining({ timeout: 3000 })
+      );
+    });
+
+    it('local: throws InternalServerError when the runtime comes up but the API is not responsive', async () => {
+      vi.mocked(isRemoteLlmBaseUrl).mockReturnValue(false);
+      vi.mocked(getActiveBaseUrl).mockReturnValue(LOCAL_URL);
+
+      mockAxiosGet.mockResolvedValueOnce({ status: 500 });
+
+      await expect(ensureLlmReady()).rejects.toThrow(
+        /LLM runtime \(native\) failed health check/
+      );
+    });
+
+    it('remote: skips runtime.ensureReady and only health-checks the remote URL', async () => {
+      vi.mocked(isRemoteLlmBaseUrl).mockReturnValue(true);
+      vi.mocked(getActiveBaseUrl).mockReturnValue(REMOTE_URL);
+      mockRuntime.ensureReady.mockClear();
+
+      mockAxiosGet.mockResolvedValueOnce({ status: 200 });
+
+      await expect(ensureLlmReady(REMOTE_URL)).resolves.toBeUndefined();
+
+      expect(mockRuntime.ensureReady).not.toHaveBeenCalled();
+      expect(mockAxiosGet).toHaveBeenCalledWith(
+        `${REMOTE_URL}/api/v1/models`,
+        expect.objectContaining({ timeout: 3000 })
+      );
+    });
+
+    it('remote: throws InternalServerError when the remote server is unreachable', async () => {
+      vi.mocked(isRemoteLlmBaseUrl).mockReturnValue(true);
+      vi.mocked(getActiveBaseUrl).mockReturnValue(REMOTE_URL);
+
+      mockAxiosGet.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+
+      await expect(ensureLlmReady(REMOTE_URL)).rejects.toThrow(
+        /Remote LLM at .* failed health check/
+      );
+    });
+
+    it('checkLlmApiHealth is a thin wrapper that returns isLlmApiResponsive for the resolved URL', async () => {
+      vi.mocked(isRemoteLlmBaseUrl).mockReturnValue(false);
+      vi.mocked(getActiveBaseUrl).mockReturnValue(LOCAL_URL);
+
+      mockAxiosGet.mockResolvedValueOnce({ status: 200 });
+      await expect(checkLlmApiHealth()).resolves.toBe(true);
+
+      mockAxiosGet.mockReset();
+      mockAxiosGet.mockRejectedValueOnce(new Error('boom'));
+      await expect(checkLlmApiHealth()).resolves.toBe(false);
+    });
+  });
+
+  describe('streamChatResponse', () => {
+    const messages: BackendChatMessage[] = [
+      { id: 1, chatId: 1, sender: 'user', text: 'hi', timestamp: 0 },
+    ];
+
+    beforeEach(() => {
+      vi.mocked(isRemoteLlmBaseUrl).mockReturnValue(false);
+      vi.mocked(getActiveBaseUrl).mockReturnValue('http://localhost:1234');
+      // Reset configured-value mocks so earlier tests (e.g. CPU-only numGpuLayers=0)
+      // don't leak their state into the default-merge assertions below.
+      vi.mocked(getConfiguredTemperature).mockReturnValue(0.7);
+      vi.mocked(getConfiguredTopP).mockReturnValue(0.9);
+      vi.mocked(getConfiguredRepeatPenalty).mockReturnValue(1.1);
+      vi.mocked(getConfiguredNumGpuLayers).mockReturnValue(null);
+      vi.mocked(getConfiguredThinkingBudget).mockReturnValue(null);
+    });
+
+    async function consume<T, R>(
+      gen: AsyncGenerator<T, R>
+    ): Promise<{ chunks: T[]; result: R }> {
+      const chunks: T[] = [];
+      let step: IteratorResult<T, R>;
+      while (!(step = await gen.next()).done) {
+        chunks.push(step.value);
+      }
+      return { chunks, result: step.value };
+    }
+
+    it('resolves the base URL from getActiveBaseUrl when no override is given', async () => {
+      vi.mocked(streamLlmChatDetailed).mockImplementation(async function* () {
+        yield { content: 'a' };
+        yield { content: 'b' };
+        return { promptTokens: 3, completionTokens: 2 };
+      });
+
+      const { chunks, result } = await consume(streamChatResponse(messages));
+
+      expect(chunks).toEqual([{ content: 'a' }, { content: 'b' }]);
+      expect(result).toEqual({ promptTokens: 3, completionTokens: 2 });
+      expect(streamLlmChatDetailed).toHaveBeenCalledTimes(1);
+      const passedCall = vi.mocked(streamLlmChatDetailed).mock.calls[0]!;
+      const [passedMsgs, passedOpts] = passedCall as any;
+      expect(passedMsgs).toBe(messages);
+      expect(passedOpts).toMatchObject({
+        llamaCppBaseUrl: 'http://localhost:1234',
+        temperature: 0.7,
+        topP: 0.9,
+        repeatPenalty: 1.1,
+        numGpuLayers: null,
+        thinkingBudget: null,
+      });
+    });
+
+    it('prefers an explicit llamaCppBaseUrl option over the active base URL', async () => {
+      vi.mocked(streamLlmChatDetailed).mockImplementation(async function* () {
+        return { promptTokens: 0, completionTokens: 0 };
+      });
+
+      await consume(
+        streamChatResponse(messages, {
+          llamaCppBaseUrl: 'http://10.0.0.1:1234',
+        })
+      );
+
+      const passedCall = vi.mocked(streamLlmChatDetailed).mock.calls[0]!;
+      const [, passedOpts] = passedCall as any;
+      expect(passedOpts.llamaCppBaseUrl).toBe('http://10.0.0.1:1234');
+    });
+
+    it('treats explicit null as a reset to the active base URL', async () => {
+      vi.mocked(streamLlmChatDetailed).mockImplementation(async function* () {
+        return { promptTokens: 0, completionTokens: 0 };
+      });
+
+      await consume(streamChatResponse(messages, { llamaCppBaseUrl: null }));
+
+      const passedCall = vi.mocked(streamLlmChatDetailed).mock.calls[0]!;
+      const [, passedOpts] = passedCall as any;
+      expect(passedOpts.llamaCppBaseUrl).toBe('http://localhost:1234');
+    });
+
+    it('lets explicit options override the configured defaults', async () => {
+      vi.mocked(streamLlmChatDetailed).mockImplementation(async function* () {
+        return { promptTokens: 0, completionTokens: 0 };
+      });
+
+      await consume(
+        streamChatResponse(messages, {
+          temperature: 0.2,
+          numGpuLayers: 16,
+          llamaCppBaseUrl: 'http://10.0.0.1:1234',
+        })
+      );
+
+      const passedCall = vi.mocked(streamLlmChatDetailed).mock.calls[0]!;
+      const [, passedOpts] = passedCall as any;
+      expect(passedOpts.temperature).toBe(0.2);
+      expect(passedOpts.numGpuLayers).toBe(16);
+      // base URL is always re-resolved AFTER the spread
+      expect(passedOpts.llamaCppBaseUrl).toBe('http://10.0.0.1:1234');
+    });
+
+    it('forwards the return value from the inner generator', async () => {
+      vi.mocked(streamLlmChatDetailed).mockImplementation(async function* () {
+        yield { content: 'x' };
+        return { promptTokens: 11, completionTokens: 22 };
+      });
+
+      const { result } = await consume(streamChatResponse(messages));
+
+      expect(result).toEqual({ promptTokens: 11, completionTokens: 22 });
     });
   });
 });
