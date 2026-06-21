@@ -288,6 +288,8 @@ export function SelectActiveModelModal({
   // local-machine concept, so we skip the estimate entirely when the user
   // is targeting a remote endpoint — there's no local GPU to size against
   // and the backend's `estimate-vram` endpoint 404s for remote-only models.
+  // The AbortController cancels in-flight requests when dependencies change
+  // so stale responses can't overwrite the latest one.
   useEffect(() => {
     if (isRemote) {
       setVramEstimate(null);
@@ -310,9 +312,14 @@ export function SelectActiveModelModal({
       return;
     }
 
+    const controller = new AbortController();
     estimateModelVram(selectedModel, contextSize, numGpuLayers)
-      .then(setVramEstimate)
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        setVramEstimate(data);
+      })
       .catch((err) => {
+        if (controller.signal.aborted) return;
         console.error('Failed to estimate VRAM:', err);
         setVramEstimate({
           model: selectedModel,
@@ -323,6 +330,7 @@ export function SelectActiveModelModal({
           error: err.message,
         });
       });
+    return () => controller.abort();
   }, [
     isRemote,
     selectedModel,

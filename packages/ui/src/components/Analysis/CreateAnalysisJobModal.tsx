@@ -240,12 +240,8 @@ export function CreateAnalysisJobModal({
       hasAutoSelectedRef.current = false;
       return;
     }
-    if (
-      isOpen &&
-      availableModels.length > 0 &&
-      !selectedModel &&
-      !hasAutoSelectedRef.current
-    ) {
+    if (availableModels.length === 0) return;
+    if (isOpen && !selectedModel && !hasAutoSelectedRef.current) {
       const defaultModel =
         availableModels.find((m) => m.name.includes('llama3:8b')) ||
         availableModels[0];
@@ -292,6 +288,8 @@ export function CreateAnalysisJobModal({
     // targeting a remote endpoint. The backend's `estimate-vram` endpoint
     // 404s for remote-only models, which previously surfaced as a gray
     // "VRAM estimation unavailable" callout.
+    // The AbortController cancels in-flight requests when dependencies
+    // change so stale responses can't overwrite the latest one.
     if (isRemote) {
       setVramEstimate(null);
       return;
@@ -310,9 +308,14 @@ export function CreateAnalysisJobModal({
     ) {
       return;
     }
+    const controller = new AbortController();
     estimateModelVram(selectedModel, contextSize)
-      .then(setVramEstimate)
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        setVramEstimate(data);
+      })
       .catch((err) => {
+        if (controller.signal.aborted) return;
         console.error('Failed to estimate VRAM:', err);
         setVramEstimate({
           model: selectedModel,
@@ -323,6 +326,7 @@ export function CreateAnalysisJobModal({
           error: err.message,
         });
       });
+    return () => controller.abort();
   }, [isRemote, selectedModel, selectedModelDetails, contextSizeInput]);
 
   const vramWarning = useMemo(() => {

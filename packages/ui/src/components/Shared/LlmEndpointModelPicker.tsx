@@ -9,7 +9,7 @@
 // Both consumers persist the entered remote URL through `remoteBaseUrlAtom`
 // (localStorage) so the field is pre-filled the next time the user opens
 // either modal.
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { useAtom } from 'jotai';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -136,7 +136,15 @@ export const LlmEndpointModelPicker: React.FC<LlmEndpointModelPickerProps> = ({
 
   // Surface the fetched models to the parent so it can compute derived values
   // (selectedModelDetails, recommendedContextSize, etc.) without re-fetching.
+  // Deep-compare via JSON to avoid firing when the model content is identical
+  // but the array reference is new — which happens on every query return and
+  // would otherwise trigger a cascade of re-renders / VRAM re-estimates in
+  // the parent.
+  const prevModelsJsonRef = useRef<string>('');
   React.useEffect(() => {
+    const json = JSON.stringify(models);
+    if (json === prevModelsJsonRef.current) return;
+    prevModelsJsonRef.current = json;
     onModelsChange?.(models);
   }, [models, onModelsChange]);
 
