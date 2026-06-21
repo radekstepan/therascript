@@ -5,6 +5,7 @@ import type {
   LlmStatus, // Status of the currently active model
   AvailableModelsResponse, // Response structure for listing available models
   UIDownloadJobStatus, // UI-specific type for download job status
+  VramEstimateResponse, // Response structure for VRAM estimate
 } from '../types'; // Import type definitions
 
 /**
@@ -206,23 +207,9 @@ export const deleteLlmModel = async (
 export const estimateModelVram = async (
   modelName: string,
   contextSize?: number | null,
-  numGpuLayers?: number | null
-): Promise<{
-  model: string;
-  context_size: number | null;
-  num_gpu_layers?: number | null;
-  estimated_vram_bytes: number | null;
-  estimated_ram_bytes: number | null;
-  vram_per_token_bytes: number | null;
-  breakdown?: {
-    weights_bytes: number;
-    weights_vram_bytes: number;
-    weights_ram_bytes: number;
-    kv_cache_bytes: number;
-    overhead_bytes: number;
-  };
-  error?: string;
-}> => {
+  numGpuLayers?: number | null,
+  signal?: AbortSignal
+): Promise<VramEstimateResponse> => {
   const params: Record<string, any> = {};
   if (contextSize !== undefined && contextSize !== null) {
     params.context_size = contextSize;
@@ -232,7 +219,7 @@ export const estimateModelVram = async (
   }
   const response = await axios.get(
     `/api/llm/models/${encodeURIComponent(modelName)}/estimate-vram`,
-    { params }
+    { params, signal }
   );
   return response.data;
 };

@@ -294,8 +294,11 @@ export function CreateAnalysisJobModal({
       setVramEstimate(null);
       return;
     }
-    if (!selectedModel || !selectedModelDetails) {
+    if (!selectedModel) {
       setVramEstimate(null);
+      return;
+    }
+    if (!selectedModelDetails) {
       return;
     }
     const trimmedContextSize = contextSizeInput.trim();
@@ -309,7 +312,7 @@ export function CreateAnalysisJobModal({
       return;
     }
     const controller = new AbortController();
-    estimateModelVram(selectedModel, contextSize)
+    estimateModelVram(selectedModel, contextSize, undefined, controller.signal)
       .then((data) => {
         if (controller.signal.aborted) return;
         setVramEstimate(data);
@@ -327,7 +330,7 @@ export function CreateAnalysisJobModal({
         });
       });
     return () => controller.abort();
-  }, [isRemote, selectedModel, selectedModelDetails, contextSizeInput]);
+  }, [isRemote, selectedModel, contextSizeInput]);
 
   const vramWarning = useMemo(() => {
     if (!vramEstimate?.estimated_vram_bytes || !gpuStats?.available)

@@ -313,7 +313,12 @@ export function SelectActiveModelModal({
     }
 
     const controller = new AbortController();
-    estimateModelVram(selectedModel, contextSize, numGpuLayers)
+    estimateModelVram(
+      selectedModel,
+      contextSize,
+      numGpuLayers,
+      controller.signal
+    )
       .then((data) => {
         if (controller.signal.aborted) return;
         setVramEstimate(data);
