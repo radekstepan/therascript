@@ -132,6 +132,10 @@ export const setActiveModelAndContext = (
     );
     activeModelName = newModelName;
     modelChanged = true;
+    // Clear any stale VRAM estimate from the previous model. The
+    // background `loadLlmModel` will populate a fresh estimate for the
+    // new model once it finishes loading.
+    cachedVramEstimateBytes = null;
   }
 
   // Validate and update context size
@@ -192,6 +196,10 @@ export const setActiveModelAndContextAndParams = (
     );
     activeModelName = newModelName;
     modelChanged = true;
+    // Clear any stale VRAM estimate from the previous model. The
+    // background `loadLlmModel` will populate a fresh estimate for the
+    // new model once it finishes loading.
+    cachedVramEstimateBytes = null;
   }
 
   // Validate and update context size

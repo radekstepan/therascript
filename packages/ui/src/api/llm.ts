@@ -104,7 +104,13 @@ export const setLlmModel = async (
   if (baseUrl !== undefined) {
     payload.baseUrl = baseUrl && baseUrl.length > 0 ? baseUrl.trim() : null;
   }
-  const response = await axios.post('/api/llm/set-model', payload);
+  const response = await axios.post('/api/llm/set-model', payload, {
+    // 90s timeout: under common reverse-proxy read timeouts (nginx 60s,
+    // Tailscale 60s, Cloudflare 100s) so the UI surfaces a clean error
+    // rather than hanging on "Saving..." when the backend model load
+    // takes longer than the proxy allows.
+    timeout: 90_000,
+  });
   return response.data;
 };
 

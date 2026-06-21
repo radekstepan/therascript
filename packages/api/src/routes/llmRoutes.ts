@@ -259,11 +259,22 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
               thinkingBudget,
               normalizedBaseUrl
             );
-            await loadLlmModel(
+            // Fire-and-forget the model load. The handler returns
+            // immediately so the UI doesn't sit on "Saving..." for the
+            // full load duration (up to ~155s for remote URLs, which can
+            // exceed reverse-proxy read timeouts). The 5-second
+            // `GET /api/llm/status` poll reflects the loaded state once
+            // the load completes.
+            loadLlmModel(
               modelName,
               undefined,
               normalizedBaseUrl ?? undefined
-            );
+            ).catch((err: any) => {
+              console.error(
+                `[API SetModel] Background model load failed for ${modelName} (baseUrl=${normalizedBaseUrl ?? 'active'}):`,
+                err?.message || err
+              );
+            });
             set.status = 200;
             return {
               message: `Active model set to ${modelName} (context: ${getConfiguredContextSize() ?? 'default'}). Load initiated. Check status.`,
