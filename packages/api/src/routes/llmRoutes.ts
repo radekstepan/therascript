@@ -301,7 +301,7 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
             `[API Unload] Received request to unload active model: ${modelToUnload}`
           );
           try {
-            const resultMessage = await unloadActiveModel();
+            const resultMessage = await unloadActiveModel(undefined, true);
             set.status = 200;
             return { message: resultMessage };
           } catch (error: any) {

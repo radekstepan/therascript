@@ -33,6 +33,7 @@ import {
   getActiveModelVramEstimateBytes,
   setActiveModelVramEstimateBytes,
   getActiveBaseUrl,
+  setActiveBaseUrl,
   isRemoteLlmBaseUrl,
   normalizeLlmBaseUrl,
 } from './activeModelService.js';
@@ -825,7 +826,8 @@ export const ensureModelLoaded = async (
 };
 
 export const unloadActiveModel = async (
-  baseUrlOverride?: string | null
+  baseUrlOverride?: string | null,
+  resetBaseUrl?: boolean
 ): Promise<string> => {
   const targetUrl = resolveLlmBaseUrl(baseUrlOverride);
   const isRemote = isRemoteLlmBaseUrl(targetUrl);
@@ -863,6 +865,17 @@ export const unloadActiveModel = async (
   } catch (err: any) {
     console.warn(
       `[LlmService] Could not fetch loaded models for unload: ${err.message}`
+    );
+  }
+
+  // Reset the configured base URL to local after a remote unload.
+  // This ensures the backend returns to local mode so that subsequent
+  // /api/llm/available-models requests (without ?baseUrl=) hit the local
+  // LM Studio instead of the stale remote URL.
+  if (resetBaseUrl && isRemote) {
+    setActiveBaseUrl(null);
+    console.log(
+      '[LlmService] Reset active base URL to local after remote unload.'
     );
   }
 

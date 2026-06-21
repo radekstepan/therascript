@@ -96,7 +96,11 @@ export const LlmEndpointModelPicker: React.FC<LlmEndpointModelPickerProps> = ({
     queryKey: ['availableLlmModels', isRemote ? modelsBaseUrl : 'local'],
     queryFn: () => fetchAvailableModels(modelsBaseUrl),
     enabled: enabled && (!isRemote || !!canFetchRemoteModels),
-    staleTime: 60 * 1000,
+    // Always treat the list as stale so React Query refetches on every mount
+    // and every Local<->Remote toggle. The list of available models can
+    // change at any time (new pull, new remote) and we never want to show a
+    // cached snapshot from a previous endpoint or a stale local cache.
+    staleTime: 0,
     retry: false,
   });
 
@@ -163,6 +167,12 @@ export const LlmEndpointModelPicker: React.FC<LlmEndpointModelPickerProps> = ({
     } else {
       setRemoteUrl('');
     }
+    // No manual refetch here: state updates are async, so a direct
+    // `refetchAvailableModels()` call would fire on the observer that
+    // still holds the *old* queryKey. The `queryKey` change itself
+    // (driven by `setIsRemote` + `setRemoteUrl`) creates a new observer
+    // that refetches automatically, and `staleTime: 0` guarantees the
+    // new endpoint's list comes back from the server.
   };
 
   // Whenever the user finishes typing a remote URL, mirror it to localStorage
@@ -255,6 +265,13 @@ export const LlmEndpointModelPicker: React.FC<LlmEndpointModelPickerProps> = ({
         )}
         {showSelect && (
           <Select.Root
+            // Force a full remount whenever the endpoint identity changes.
+            // Radix Select registers items in a portal-backed collection, and
+            // without this the dropdown keeps stale items from the previous
+            // endpoint and shows a literal mix of local + remote entries.
+            // Uses the debounced URL (not the live `remoteUrl`) so we don't
+            // remount on every keystroke while the user is typing.
+            key={isRemote ? `remote-${modelsBaseUrl || 'empty'}` : 'local'}
             value={selectedModel}
             onValueChange={onSelectedModelChange}
             disabled={disabled}

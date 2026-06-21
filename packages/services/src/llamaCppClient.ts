@@ -294,6 +294,17 @@ export async function* streamLlmChatDetailed(
         }
       }
       if (isDone) break;
+      // Yield to the event loop so the downstream consumer (the SSE handler
+      // in the API) gets a chance to drain its own socket and forward bytes
+      // to the browser before we demand the next chunk. Without this, a
+      // single reader.read() that contains several lines would be delivered
+      // to the consumer as a burst, and on a remote (non-loopback) socket
+      // the consumer's writes can be coalesced by the kernel send buffer
+      // into a single flush — manifesting as "loading, then full response."
+      // Cost: ~1 event-loop tick per chunk. Negligible on local LM Studio
+      // (where loopback is already microseconds) and turns remote streaming
+      // into the same token-by-token cadence the user sees locally.
+      await new Promise<void>((resolve) => setImmediate(resolve));
     }
 
     // Return the usage result to the iterator's result value

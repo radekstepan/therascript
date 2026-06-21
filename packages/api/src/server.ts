@@ -125,10 +125,21 @@ const server = http.createServer(async (req, res) => {
       try {
         const response = await app.handle(new Request(url, requestInit));
         res.writeHead(response.status, Object.fromEntries(response.headers));
+        // Flush response headers immediately so proxies (nginx, Tailscale
+        // Funnel, Cloudflare) and the client's HTTP stack begin forwarding
+        // bytes on the very first event-loop tick, instead of waiting for
+        // the first res.write() — important for SSE so the browser starts
+        // parsing data: lines token-by-token rather than holding the
+        // response until the first chunk arrives from upstream.
+        res.flushHeaders();
         if (response.body) {
           if (response.body instanceof ReadableStream) {
             for await (const chunk of response.body) {
               res.write(chunk);
+              // Optional flush — present on compression wrappers, no-op on
+              // plain http.ServerResponse. Call it if it exists to push
+              // bytes to the socket immediately on each chunk.
+              (res as unknown as { flush?: () => void }).flush?.();
             }
             res.end();
           } else if (

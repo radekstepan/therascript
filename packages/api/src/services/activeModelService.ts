@@ -104,6 +104,10 @@ export const isRemoteLlmBaseUrl = (baseUrl?: string | null): boolean => {
 export const getConfiguredBaseUrlOverride = (): string | null => {
   return configuredBaseUrl;
 };
+
+export const setActiveBaseUrl = (url: string | null): void => {
+  configuredBaseUrl = normalizeLlmBaseUrl(url);
+};
 // --- End LLM Base URL helpers ---
 
 // --- Modified Setter to include context size ---

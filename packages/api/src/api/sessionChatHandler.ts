@@ -279,7 +279,13 @@ export const addSessionChatMessage = async ({
 
     const headers = new Headers({
       'Content-Type': 'text/event-stream; charset=utf-8',
-      'Cache-Control': 'no-cache',
+      // Belt-and-suspenders streaming headers:
+      //   - X-Accel-Buffering: no   — tells nginx / Tailscale Funnel /
+      //     Cloudflare not to buffer the response (no-op when no proxy).
+      //   - Cache-Control: no-cache, no-transform — broader proxy coverage
+      //     and prevents intermediaries from rewriting/coalescing chunks.
+      'Cache-Control': 'no-cache, no-transform',
+      'X-Accel-Buffering': 'no',
       Connection: 'keep-alive',
     });
     headers.set('X-User-Message-Id', String(userMessage.id));
@@ -331,6 +337,12 @@ export const addSessionChatMessage = async ({
       let expectedPromptTokens = 0;
       let hasSentRespondingStatus = false;
       let hasOpenThinkingBlock = false;
+      // Diagnostic counters — used to log inter-chunk cadence so we can tell
+      // whether the API is forwarding in real time or in a single batch at
+      // the end (which would point at LM Studio / network, not us).
+      let contentChunkCount = 0;
+      let thinkingChunkCount = 0;
+      const CHUNK_LOG_EVERY = 20;
 
       try {
         console.log(
@@ -368,6 +380,14 @@ export const addSessionChatMessage = async ({
             }
             fullAiText += thinkingChunk;
             await writeSseEvent({ thinkingChunk });
+            thinkingChunkCount++;
+            // Yield to the event loop so the underlying socket write is
+            // drained immediately rather than being coalesced with the next
+            // write in the same microtask. This is the change that turns
+            // "all chunks at once" into token-by-token delivery for remote
+            // LM Studio connections (where Nagle / the kernel send buffer
+            // would otherwise coalesce small writes).
+            await new Promise<void>((resolve) => setImmediate(resolve));
           }
           if (typeof chunk.content === 'string') {
             if (!hasSentRespondingStatus) {
@@ -381,6 +401,20 @@ export const addSessionChatMessage = async ({
             const textChunk = chunk.content;
             fullAiText += textChunk;
             await writeSseEvent({ chunk: textChunk });
+            contentChunkCount++;
+            // Same drain-the-socket yield as above.
+            await new Promise<void>((resolve) => setImmediate(resolve));
+
+            // Diagnostic: log the first content chunk, then every Nth.
+            if (
+              contentChunkCount === 1 ||
+              contentChunkCount % CHUNK_LOG_EVERY === 0
+            ) {
+              const total = Date.now() - llmStartTime;
+              console.log(
+                `[API SSE ${chatData.id}] chunk #${contentChunkCount} +${(total / 1000).toFixed(2)}s`
+              );
+            }
           }
           iterResult = await (llmStream as AsyncGenerator<any, any>).next();
         }
@@ -395,6 +429,10 @@ export const addSessionChatMessage = async ({
         finalCompletionTokens = streamResult?.completionTokens;
         finalThinkingTokens = streamResult?.thinkingTokens;
         llmDuration = Date.now() - llmStartTime;
+
+        console.log(
+          `[API SSE ${chatData.id}] LLM done +${(llmDuration / 1000).toFixed(2)}s total, ${contentChunkCount} content chunks, ${thinkingChunkCount} thinking chunks`
+        );
 
         // More conservative truncation detection:
         // Only flag truncation when:

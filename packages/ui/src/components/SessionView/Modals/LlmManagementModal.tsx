@@ -119,10 +119,15 @@ export function LlmManagementModal({
     error: availableError,
     refetch: refetchAvailableModels,
   } = useQuery({
-    queryKey: ['availableLlmModels'],
+    // Share the cache entry with the LlmEndpointModelPicker so that an
+    // invalidation/refetch in one place (e.g. after a successful pull) is
+    // visible in the other without a manual refresh.
+    queryKey: ['availableLlmModels', 'local'],
     queryFn: () => fetchAvailableModels(),
     enabled: isOpen,
-    staleTime: 10 * 1000,
+    // Match the picker: always treat the list as stale so the modal and
+    // picker never disagree about which models are actually available.
+    staleTime: 0,
     gcTime: 1 * 60 * 1000,
   });
 
@@ -173,7 +178,7 @@ export function LlmManagementModal({
           setToast(`✅ Pull complete for ${statusData.modelName}.`);
           setTimeout(() => {
             queryClient.invalidateQueries({
-              queryKey: ['availableLlmModels'],
+              queryKey: ['availableLlmModels', 'local'],
             });
             resetPullState(false);
           }, 1500);
@@ -247,7 +252,7 @@ export function LlmManagementModal({
       setToast(`✅ ${data.message || `Model ${modelName} deleted.`}`);
       // Optimistically remove from list immediately
       queryClient.setQueryData<AvailableModelsResponse>(
-        ['availableLlmModels'],
+        ['availableLlmModels', 'local'],
         (oldData) => {
           if (!oldData) return oldData;
           return {
@@ -258,7 +263,9 @@ export function LlmManagementModal({
       );
       // Refetch after 5 seconds to get actual state from LM Studio
       setTimeout(() => {
-        queryClient.refetchQueries({ queryKey: ['availableLlmModels'] });
+        queryClient.refetchQueries({
+          queryKey: ['availableLlmModels', 'local'],
+        });
       }, 5000);
       queryClient.invalidateQueries({ queryKey: ['llmStatus'] });
       closeDeleteConfirm();
