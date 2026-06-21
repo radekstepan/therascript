@@ -125,9 +125,7 @@ export function LlmManagementModal({
     queryKey: ['availableLlmModels', 'local'],
     queryFn: () => fetchAvailableModels(),
     enabled: isOpen,
-    // Match the picker: always treat the list as stale so the modal and
-    // picker never disagree about which models are actually available.
-    staleTime: 0,
+    staleTime: 10 * 1000,
     gcTime: 1 * 60 * 1000,
   });
 

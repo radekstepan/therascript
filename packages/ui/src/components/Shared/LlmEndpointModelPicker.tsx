@@ -96,11 +96,7 @@ export const LlmEndpointModelPicker: React.FC<LlmEndpointModelPickerProps> = ({
     queryKey: ['availableLlmModels', isRemote ? modelsBaseUrl : 'local'],
     queryFn: () => fetchAvailableModels(modelsBaseUrl),
     enabled: enabled && (!isRemote || !!canFetchRemoteModels),
-    // Always treat the list as stale so React Query refetches on every mount
-    // and every Local<->Remote toggle. The list of available models can
-    // change at any time (new pull, new remote) and we never want to show a
-    // cached snapshot from a previous endpoint or a stale local cache.
-    staleTime: 0,
+    staleTime: 60 * 1000,
     retry: false,
   });
 

@@ -242,14 +242,18 @@ export function SelectActiveModelModal({
       : true
     : true;
 
-  // Reset GPU layers to Auto when the user picks a different model
+  // Reset GPU layers to Auto when the user picks a model that no longer exists
+  // in the available list. The `availableModels.length > 0` guard prevents
+  // clearing the pre-selected model on initial render before the picker's
+  // query has loaded.
   useEffect(() => {
     if (!isOpen) return;
     if (!selectedModel) return;
+    if (availableModels.length === 0) return;
     if (selectedModelDetails) return;
     setSelectedModel('');
     setVramEstimate(null);
-  }, [isOpen, selectedModel, selectedModelDetails]);
+  }, [isOpen, selectedModel, selectedModelDetails, availableModels.length]);
 
   useEffect(() => {
     if (selectedModel !== currentActiveModelName) {
