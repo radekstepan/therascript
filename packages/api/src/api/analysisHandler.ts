@@ -11,6 +11,7 @@ import {
   listModels,
   streamChatResponse,
   ensureModelLoaded,
+  unloadModelAtUrl,
 } from '../services/llamaCppService.js';
 import { calculateTokenCount } from '@therascript/services';
 import {
@@ -35,6 +36,8 @@ import {
   getConfiguredNumGpuLayers,
   getConfiguredThinkingBudget,
   getActiveBaseUrl,
+  setActiveModelAndContextAndParams,
+  getActiveModel,
 } from '../services/activeModelService.js';
 import {
   type AnalysisRequest,
@@ -402,6 +405,38 @@ export const createAnalysisJobHandler = async ({
       requestedBaseUrl && requestedBaseUrl.trim().length > 0
         ? requestedBaseUrl.trim()
         : getActiveBaseUrl();
+
+    // If the per-job URL differs from the currently active one, evict
+    // whatever model is loaded on the *previous* URL so we don't leave
+    // a stale model in VRAM. The worker's loadLlmModelForWorker will
+    // then load the requested model on the new URL.
+    const previousBaseUrl = getActiveBaseUrl();
+    if (jobLlmBaseUrl && jobLlmBaseUrl !== previousBaseUrl) {
+      try {
+        const unloaded = await unloadModelAtUrl(previousBaseUrl);
+        console.log(
+          `[Analysis (pre-create)] Pre-switch unload: removed ${unloaded} model(s) from previous URL ${previousBaseUrl} (job URL: ${jobLlmBaseUrl})`
+        );
+      } catch (unloadErr: any) {
+        console.warn(
+          `[Analysis (pre-create)] Pre-switch unload on ${previousBaseUrl} failed (non-fatal): ${unloadErr.message}`
+        );
+      }
+    }
+
+    // UPDATE GLOBAL STATE: Ensuring that the app stays in sync globally and subsequent
+    // chats hook immediately onto this exact model configuration and URL without
+    // requiring any manual "Set Model" actions from the user.
+    setActiveModelAndContextAndParams(
+      modelName || getActiveModel(),
+      contextSizeToUse,
+      getConfiguredTemperature(),
+      getConfiguredTopP(),
+      getConfiguredRepeatPenalty(),
+      getConfiguredNumGpuLayers(),
+      getConfiguredThinkingBudget(),
+      jobLlmBaseUrl
+    );
 
     if (useAdvancedStrategy) {
       newJob = analysisRepository.createJob(

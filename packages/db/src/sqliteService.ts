@@ -95,7 +95,7 @@ export const schema = `
 `;
 
 // --- NEW MIGRATION LOGIC ---
-export const LATEST_SCHEMA_VERSION = 17;
+export const LATEST_SCHEMA_VERSION = 18;
 
 // --- NEW SYSTEM PROMPTS ---
 export const SYSTEM_PROMPT_TEMPLATES = {
@@ -616,6 +616,32 @@ function runMigrations(dbInstance: DB) {
         dbInstance.pragma(`user_version = 17`);
         currentVersion = 17;
         console.log('[db Migrator] Version 17 applied.');
+      }
+
+      // NEW MIGRATION: Version 18 to add app_settings for global LLM state
+      if (currentVersion < 18) {
+        console.log('[db Migrator] Applying version 18...');
+        dbInstance.exec(`
+          CREATE TABLE IF NOT EXISTS app_settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            llm_base_url TEXT NULL,
+            llm_model_name TEXT NULL,
+            llm_context_size INTEGER NULL,
+            llm_temperature REAL NOT NULL DEFAULT 0.7,
+            llm_top_p REAL NOT NULL DEFAULT 0.9,
+            llm_repeat_penalty REAL NOT NULL DEFAULT 1.1,
+            llm_num_gpu_layers INTEGER NULL,
+            llm_thinking_budget INTEGER NULL
+          );
+          INSERT OR IGNORE INTO app_settings (
+            id, llm_model_name, llm_temperature, llm_top_p, llm_repeat_penalty
+          ) VALUES (
+            1, 'default', 0.7, 0.9, 1.1
+          );
+        `);
+        dbInstance.pragma(`user_version = 18`);
+        currentVersion = 18;
+        console.log('[db Migrator] Version 18 applied.');
       }
     })();
     console.log(

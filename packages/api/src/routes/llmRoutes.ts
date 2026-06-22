@@ -15,6 +15,7 @@ import {
   cancelDownloadModelJob,
   deleteLlmModel as deleteLlmModelService,
   unloadActiveModel,
+  unloadModelAtUrl,
   fetchVramUsage,
   getVramPerToken,
 } from '../services/llamaCppService.js';
@@ -241,6 +242,28 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
             } catch (err: any) {
               throw new BadRequestError(
                 err?.message || 'Invalid LLM base URL.'
+              );
+            }
+          }
+
+          // If the active base URL is about to change, unload any model
+          // currently loaded on the *previous* URL so we don't leave a
+          // stale model in VRAM on the other server. The subsequent
+          // `loadLlmModel(...)` below handles loading on the new URL.
+          const previousBaseUrl = getActiveBaseUrl();
+          const nextBaseUrl =
+            normalizedBaseUrl === undefined
+              ? previousBaseUrl
+              : (normalizedBaseUrl ?? getDefaultBaseUrl());
+          if (nextBaseUrl !== previousBaseUrl) {
+            try {
+              const unloaded = await unloadModelAtUrl(previousBaseUrl);
+              console.log(
+                `[API SetModel] Pre-switch unload: removed ${unloaded} model(s) from previous URL ${previousBaseUrl} (switching to ${nextBaseUrl})`
+              );
+            } catch (unloadErr: any) {
+              console.warn(
+                `[API SetModel] Pre-switch unload on ${previousBaseUrl} failed (non-fatal): ${unloadErr.message}`
               );
             }
           }

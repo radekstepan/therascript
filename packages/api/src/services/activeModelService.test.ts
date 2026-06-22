@@ -6,9 +6,32 @@ vi.mock('@therascript/config', () => ({
   },
 }));
 
+const defaultMockSettings = () => ({
+  llm_base_url: null,
+  llm_model_name: 'llama3',
+  llm_context_size: null,
+  llm_temperature: 0.7,
+  llm_top_p: 0.9,
+  llm_repeat_penalty: 1.1,
+  llm_num_gpu_layers: null,
+  llm_thinking_budget: null,
+});
+
+let mockSettings: any = defaultMockSettings();
+
+vi.mock('@therascript/data', () => ({
+  appSettingsRepository: {
+    getSettings: vi.fn(() => mockSettings),
+    updateSettings: vi.fn((updates: Record<string, unknown>) => {
+      mockSettings = { ...mockSettings, ...updates };
+    }),
+  },
+}));
+
 describe('activeModelService', () => {
   beforeEach(() => {
     vi.resetModules();
+    mockSettings = defaultMockSettings();
   });
 
   it('returns configured model initially and updates model + context size', async () => {
@@ -16,7 +39,7 @@ describe('activeModelService', () => {
     expect(svc.getActiveModel()).toBe('llama3');
     expect(svc.getConfiguredContextSize()).toBeNull();
 
-    svc.setActiveModelAndContext('mistral', 4096);
+    svc.setActiveModelAndContextAndParams('mistral', 4096);
     expect(svc.getActiveModel()).toBe('mistral');
     expect(svc.getConfiguredContextSize()).toBe(4096);
   });
@@ -25,8 +48,7 @@ describe('activeModelService', () => {
     const svc = await import('./activeModelService.js');
     const beforeModel = svc.getActiveModel();
     const beforeCtx = svc.getConfiguredContextSize();
-    // invalid input: empty model name should be ignored
-    svc.setActiveModelAndContext('' as any, 2048);
+    svc.setActiveModelAndContextAndParams('' as any, 2048);
     expect(svc.getActiveModel()).toBe(beforeModel);
     expect(svc.getConfiguredContextSize()).toBe(beforeCtx);
   });
@@ -35,6 +57,7 @@ describe('activeModelService', () => {
 describe('activeModelService — numGpuLayers', () => {
   beforeEach(() => {
     vi.resetModules();
+    mockSettings = defaultMockSettings();
   });
 
   it('starts as null (auto) by default', async () => {
@@ -125,6 +148,7 @@ describe('activeModelService — numGpuLayers', () => {
 describe('activeModelService — LLM base URL', () => {
   beforeEach(() => {
     vi.resetModules();
+    mockSettings = defaultMockSettings();
   });
 
   it('returns the configured default base URL initially', async () => {
@@ -249,6 +273,36 @@ describe('activeModelService — LLM base URL', () => {
     // Candidate is the remote URL => remote
     expect(svc.isRemoteLlmBaseUrl('http://10.0.0.1:1234')).toBe(true);
     // No candidate => falls back to active (10.0.0.1) => remote
+    expect(svc.isRemoteLlmBaseUrl()).toBe(true);
+  });
+
+  it('setting the same base URL twice in a row is idempotent (no-op semantics)', async () => {
+    const svc = await import('./activeModelService.js');
+    svc.setActiveModelAndContextAndParams(
+      'llama3',
+      null,
+      0.7,
+      0.9,
+      1.1,
+      null,
+      null,
+      'http://10.0.0.1:1234'
+    );
+    const afterFirst = svc.getActiveBaseUrl();
+    expect(afterFirst).toBe('http://10.0.0.1:1234');
+    expect(svc.isRemoteLlmBaseUrl()).toBe(true);
+
+    svc.setActiveModelAndContextAndParams(
+      'llama3',
+      null,
+      0.7,
+      0.9,
+      1.1,
+      null,
+      null,
+      'http://10.0.0.1:1234'
+    );
+    expect(svc.getActiveBaseUrl()).toBe(afterFirst);
     expect(svc.isRemoteLlmBaseUrl()).toBe(true);
   });
 });

@@ -413,6 +413,53 @@ export function StandaloneChatHeader({
                 </Badge>
               </Tooltip>
             )}
+            {llmStatus?.loaded &&
+              llmStatus.activeModel &&
+              llmStatus.activeModel !== 'default' &&
+              (llmStatus.isRemoteBaseUrl ? (
+                <Tooltip
+                  content={
+                    llmStatus.activeBaseUrl
+                      ? `Remote LLM: ${llmStatus.activeBaseUrl}`
+                      : 'Remote LLM'
+                  }
+                >
+                  <Flex
+                    align="center"
+                    gap="1"
+                    style={{ minWidth: 0, maxWidth: 220 }}
+                  >
+                    <GlobeIcon
+                      width="12"
+                      height="12"
+                      style={{ flexShrink: 0 }}
+                    />
+                    <Text
+                      size="1"
+                      color="gray"
+                      truncate
+                      title={llmStatus.activeModel}
+                    >
+                      {llmStatus.activeModel}
+                    </Text>
+                  </Flex>
+                </Tooltip>
+              ) : (
+                <Flex
+                  align="center"
+                  gap="1"
+                  style={{ minWidth: 0, maxWidth: 220 }}
+                >
+                  <Text
+                    size="1"
+                    color="gray"
+                    truncate
+                    title={llmStatus.activeModel}
+                  >
+                    {llmStatus.activeModel}
+                  </Text>
+                </Flex>
+              ))}
             <Button
               variant="soft"
               size="1"
@@ -422,24 +469,6 @@ export function StandaloneChatHeader({
             >
               <MixerVerticalIcon width="14" height="14" />
             </Button>
-            {llmStatus?.isRemoteBaseUrl && (
-              <Tooltip
-                content={
-                  llmStatus.activeBaseUrl
-                    ? `Remote LLM: ${llmStatus.activeBaseUrl}`
-                    : 'Remote LLM'
-                }
-              >
-                <Badge variant="soft" color="grass" size="1">
-                  <GlobeIcon
-                    width="12"
-                    height="12"
-                    style={{ marginRight: '4px' }}
-                  />
-                  Remote
-                </Badge>
-              </Tooltip>
-            )}
           </Flex>
         </Flex>
       </Flex>

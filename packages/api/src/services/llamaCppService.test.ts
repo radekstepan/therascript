@@ -118,6 +118,7 @@ const {
   loadLlmModel,
   ensureModelLoaded,
   unloadActiveModel,
+  unloadModelAtUrl,
   ensureLlmReady,
   checkLlmApiHealth,
   streamChatResponse,
@@ -1249,6 +1250,296 @@ describe('llamaCppService', () => {
 
       expect(mockRuntime.stop).not.toHaveBeenCalled();
       expect(message).toBe('No models were loaded on the remote server.');
+    });
+  });
+
+  describe('unloadModelAtUrl', () => {
+    const LOCAL_URL = 'http://localhost:1234';
+    const REMOTE_URL = 'http://10.0.0.1:1234';
+
+    it('unloads all loaded instances at the given local URL and returns the count', async () => {
+      vi.mocked(isRemoteLlmBaseUrl).mockImplementation(
+        (url?: string | null) => url !== LOCAL_URL && !!url
+      );
+      mockRuntime.stop?.mockClear();
+
+      mockAxiosGet.mockResolvedValueOnce({
+        data: {
+          models: [
+            {
+              type: 'llm',
+              publisher: 'meta',
+              key: 'meta/llama-3-8b',
+              loaded_instances: [
+                { id: 'inst-1', config: { context_length: 4096 } },
+                { id: 'inst-2', config: { context_length: 4096 } },
+              ],
+            },
+          ],
+        },
+      });
+      mockAxiosPost.mockResolvedValue({ data: {} });
+
+      const count = await unloadModelAtUrl(LOCAL_URL);
+
+      expect(count).toBe(2);
+      expect(mockAxiosPost).toHaveBeenCalledTimes(2);
+      expect(mockAxiosPost).toHaveBeenCalledWith(
+        `${LOCAL_URL}/api/v1/models/unload`,
+        { instance_id: 'inst-1' },
+        expect.objectContaining({ timeout: 15000 })
+      );
+      expect(mockAxiosPost).toHaveBeenCalledWith(
+        `${LOCAL_URL}/api/v1/models/unload`,
+        { instance_id: 'inst-2' },
+        expect.objectContaining({ timeout: 15000 })
+      );
+      // runtime.stop is only called when 0 instances were unloaded.
+      expect(mockRuntime.stop).not.toHaveBeenCalled();
+    });
+
+    it('unloads loaded instances at a given remote URL and does not call runtime.stop', async () => {
+      vi.mocked(isRemoteLlmBaseUrl).mockImplementation(
+        (url?: string | null) => url !== LOCAL_URL && !!url
+      );
+      mockRuntime.stop?.mockClear();
+
+      mockAxiosGet.mockResolvedValueOnce({
+        data: {
+          models: [
+            {
+              type: 'llm',
+              publisher: 'meta',
+              key: 'meta/llama-3-8b',
+              loaded_instances: [
+                { id: 'inst-1', config: { context_length: 4096 } },
+              ],
+            },
+          ],
+        },
+      });
+      mockAxiosPost.mockResolvedValueOnce({ data: {} });
+
+      const count = await unloadModelAtUrl(REMOTE_URL);
+
+      expect(count).toBe(1);
+      expect(mockAxiosPost).toHaveBeenCalledWith(
+        `${REMOTE_URL}/api/v1/models/unload`,
+        { instance_id: 'inst-1' },
+        expect.objectContaining({ timeout: 15000 })
+      );
+      expect(mockRuntime.stop).not.toHaveBeenCalled();
+    });
+
+    it('tolerates individual unload failures and still returns the successful count', async () => {
+      vi.mocked(isRemoteLlmBaseUrl).mockImplementation(
+        (url?: string | null) => url !== LOCAL_URL && !!url
+      );
+
+      mockAxiosGet.mockResolvedValueOnce({
+        data: {
+          models: [
+            {
+              type: 'llm',
+              publisher: 'meta',
+              key: 'meta/llama-3-8b',
+              loaded_instances: [
+                { id: 'inst-1', config: { context_length: 4096 } },
+                { id: 'inst-2', config: { context_length: 4096 } },
+              ],
+            },
+          ],
+        },
+      });
+      mockAxiosPost.mockRejectedValueOnce(new Error('first unload failed'));
+      mockAxiosPost.mockResolvedValueOnce({ data: {} });
+
+      const count = await unloadModelAtUrl(LOCAL_URL);
+
+      expect(count).toBe(1);
+      expect(mockAxiosPost).toHaveBeenCalledTimes(2);
+    });
+
+    it('tolerates GET failure and returns 0', async () => {
+      vi.mocked(isRemoteLlmBaseUrl).mockImplementation(
+        (url?: string | null) => url !== LOCAL_URL && !!url
+      );
+
+      mockAxiosGet.mockRejectedValueOnce(new Error('network down'));
+      mockRuntime.stop?.mockClear();
+
+      const count = await unloadModelAtUrl(REMOTE_URL);
+
+      expect(count).toBe(0);
+      // Remote URL with GET failure: no runtime.stop should be called
+      expect(mockRuntime.stop).not.toHaveBeenCalled();
+    });
+
+    it('falls back to runtime.stop() for local URL when nothing was loaded', async () => {
+      vi.mocked(isRemoteLlmBaseUrl).mockImplementation(
+        (url?: string | null) => url !== LOCAL_URL && !!url
+      );
+      mockRuntime.stop?.mockClear();
+
+      mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
+
+      const count = await unloadModelAtUrl(LOCAL_URL);
+
+      expect(count).toBe(0);
+      expect(mockRuntime.stop).toHaveBeenCalled();
+    });
+
+    it('does not call runtime.stop() for remote URL even when nothing was loaded', async () => {
+      vi.mocked(isRemoteLlmBaseUrl).mockImplementation(
+        (url?: string | null) => url !== LOCAL_URL && !!url
+      );
+      mockRuntime.stop?.mockClear();
+
+      mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
+
+      const count = await unloadModelAtUrl(REMOTE_URL);
+
+      expect(count).toBe(0);
+      expect(mockRuntime.stop).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('URL switch — local to remote unloads the previous local model', () => {
+    const LOCAL_URL = 'http://localhost:1234';
+    const REMOTE_URL = 'http://10.0.0.1:1234';
+
+    it('unloads the local URL first, then loads on the remote URL, without restarting the local runtime', async () => {
+      // Set up: active is local, new call is for remote
+      vi.mocked(isRemoteLlmBaseUrl).mockImplementation(
+        (url?: string | null) => url !== LOCAL_URL && !!url
+      );
+      vi.mocked(getActiveBaseUrl).mockReturnValue(LOCAL_URL);
+      mockRuntime.restartWithModel?.mockClear();
+
+      // 1st call (unloadModelAtUrl on previous local): GET enumerates 1 instance
+      mockAxiosGet.mockResolvedValueOnce({
+        data: {
+          models: [
+            {
+              type: 'llm',
+              publisher: 'meta',
+              key: 'meta/old-local',
+              loaded_instances: [
+                { id: 'local-inst-1', config: { context_length: 4096 } },
+              ],
+            },
+          ],
+        },
+      });
+      // 1st call: POST unload on local URL
+      mockAxiosPost.mockResolvedValueOnce({ data: {} });
+      // 2nd call (loadLlmModel on new remote): GET enumerates 0 instances
+      mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
+      // 2nd call: POST load on remote URL
+      mockAxiosPost.mockResolvedValueOnce({
+        data: { instance_id: 'remote-inst-1', load_time_seconds: 1.0 },
+      });
+
+      // Simulate the set-model route flow: unload first, then load
+      const unloaded = await unloadModelAtUrl(getActiveBaseUrl());
+      await loadLlmModel('meta/remote-model', 8192, REMOTE_URL);
+
+      expect(unloaded).toBe(1);
+      // Unload POST hit the local URL
+      expect(mockAxiosPost).toHaveBeenCalledWith(
+        `${LOCAL_URL}/api/v1/models/unload`,
+        { instance_id: 'local-inst-1' },
+        expect.objectContaining({ timeout: 15000 })
+      );
+      // Load POST hit the remote URL
+      const loadCall = mockAxiosPost.mock.calls.find(
+        ([url]: any) => url === `${REMOTE_URL}/api/v1/models/load`
+      );
+      expect(loadCall).toBeDefined();
+      expect(loadCall![1]).toMatchObject({
+        model: 'meta/remote-model',
+        context_length: 8192,
+      });
+      // Local runtime was NOT restarted (we're loading on remote)
+      expect(mockRuntime.restartWithModel).not.toHaveBeenCalled();
+    });
+
+    it('switching from remote A to remote B unloads A and loads B', async () => {
+      const REMOTE_A = 'http://10.0.0.1:1234';
+      const REMOTE_B = 'http://10.0.0.2:1234';
+
+      vi.mocked(isRemoteLlmBaseUrl).mockImplementation(
+        (url?: string | null) => !!url && url !== 'http://localhost:1234'
+      );
+      vi.mocked(getActiveBaseUrl).mockReturnValue(REMOTE_A);
+
+      // Pre-switch: GET on A returns 1 instance; POST unload on A
+      mockAxiosGet.mockResolvedValueOnce({
+        data: {
+          models: [
+            {
+              type: 'llm',
+              publisher: 'meta',
+              key: 'meta/old',
+              loaded_instances: [
+                { id: 'a-inst-1', config: { context_length: 4096 } },
+              ],
+            },
+          ],
+        },
+      });
+      mockAxiosPost.mockResolvedValueOnce({ data: {} });
+      // Load: GET on B returns 0; POST load on B
+      mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
+      mockAxiosPost.mockResolvedValueOnce({
+        data: { instance_id: 'b-inst-1', load_time_seconds: 1.0 },
+      });
+
+      const unloaded = await unloadModelAtUrl(getActiveBaseUrl());
+      await loadLlmModel('meta/new', 4096, REMOTE_B);
+
+      expect(unloaded).toBe(1);
+      expect(mockAxiosPost).toHaveBeenCalledWith(
+        `${REMOTE_A}/api/v1/models/unload`,
+        { instance_id: 'a-inst-1' },
+        expect.objectContaining({ timeout: 15000 })
+      );
+      const loadCall = mockAxiosPost.mock.calls.find(
+        ([url]: any) => url === `${REMOTE_B}/api/v1/models/load`
+      );
+      expect(loadCall).toBeDefined();
+    });
+
+    it('when the new URL equals the current URL, the helper still unloads whatever is there (caller decides)', async () => {
+      vi.mocked(isRemoteLlmBaseUrl).mockImplementation(
+        (url?: string | null) => !!url && url !== 'http://localhost:1234'
+      );
+      vi.mocked(getActiveBaseUrl).mockReturnValue('http://10.0.0.1:1234');
+
+      mockAxiosGet.mockResolvedValueOnce({
+        data: {
+          models: [
+            {
+              type: 'llm',
+              publisher: 'meta',
+              key: 'meta/same',
+              loaded_instances: [
+                { id: 'inst-same', config: { context_length: 4096 } },
+              ],
+            },
+          ],
+        },
+      });
+      mockAxiosPost.mockResolvedValueOnce({ data: {} });
+
+      const count = await unloadModelAtUrl('http://10.0.0.1:1234');
+
+      expect(count).toBe(1);
+      expect(mockAxiosPost).toHaveBeenCalledWith(
+        'http://10.0.0.1:1234/api/v1/models/unload',
+        { instance_id: 'inst-same' },
+        expect.objectContaining({ timeout: 15000 })
+      );
     });
   });
 

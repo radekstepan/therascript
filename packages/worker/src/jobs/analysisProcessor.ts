@@ -24,6 +24,56 @@ import config from '@therascript/config';
 import { publishStreamEvent } from '../services/streamPublisher.js';
 
 /**
+ * Unload any loaded LLM model instances on a specific URL via the LM Studio
+ * REST API. Worker-local counterpart of `unloadModelAtUrl` in the API's
+ * `llamaCppService`. Best-effort: per-instance failures and enumeration
+ * failures are logged but do not throw.
+ *
+ * Returns the number of model instances successfully unloaded.
+ */
+export async function unloadModelAtUrlForWorker(url: string): Promise<number> {
+  let unloadedCount = 0;
+  try {
+    const res = await fetch(`${url}/api/v1/models`);
+    if (res.ok) {
+      const data = (await res.json()) as {
+        models: Array<{
+          type: string;
+          loaded_instances: Array<{ id: string }>;
+        }>;
+      };
+      const instances = (data.models || [])
+        .filter((m) => m.type === 'llm')
+        .flatMap((m) => m.loaded_instances);
+      for (const instance of instances) {
+        try {
+          await fetch(`${url}/api/v1/models/unload`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ instance_id: instance.id }),
+          });
+          console.log(
+            `[Analysis Worker] Unloaded instance ${instance.id} from ${url}`
+          );
+          unloadedCount++;
+        } catch (e: any) {
+          console.warn(
+            `[Analysis Worker] Failed to unload ${instance.id} from ${url}:`,
+            e
+          );
+        }
+      }
+    }
+  } catch (e) {
+    console.warn(
+      `[Analysis Worker] Could not enumerate loaded models at ${url} during pre-switch unload:`,
+      e
+    );
+  }
+  return unloadedCount;
+}
+
+/**
  * Load a model in LM Studio via its REST API.
  * This is required because LM Studio doesn't auto-load models on first request.
  *
@@ -31,11 +81,29 @@ import { publishStreamEvent } from '../services/streamPublisher.js';
  * needed (early-return) and to collect instances to unload before loading
  * the new model.
  */
-async function loadLlmModelForWorker(
+export async function loadLlmModelForWorker(
   modelKey: string,
   contextSize?: number | null,
   baseUrl?: string
 ): Promise<void> {
+  // If the target URL differs from the worker's currently known default
+  // base URL, evict any model loaded on the previous URL so we don't
+  // leave a stale model in VRAM on the other server.
+  const previousBaseUrl = config.llm.baseURL;
+  if (baseUrl && baseUrl !== previousBaseUrl) {
+    try {
+      const unloaded = await unloadModelAtUrlForWorker(previousBaseUrl);
+      console.log(
+        `[Analysis Worker] Pre-switch unload: removed ${unloaded} model(s) from previous URL ${previousBaseUrl} (target: ${baseUrl})`
+      );
+    } catch (e: any) {
+      console.warn(
+        `[Analysis Worker] Pre-switch unload on ${previousBaseUrl} failed (non-fatal):`,
+        e
+      );
+    }
+  }
+
   // Single fetch — used both for the early-return check and for unloading.
   type LmsModel = {
     type: string;

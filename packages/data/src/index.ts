@@ -5,6 +5,7 @@ export { chatRepository } from './repositories/chatRepository.js';
 export { usageRepository } from './repositories/usageRepository.js';
 export { analysisRepository } from './repositories/analysisRepository.js';
 export { templateRepository } from './repositories/templateRepository.js';
+export { appSettingsRepository } from './repositories/appSettingsRepository.js';
 
 export type {
   UsageLog,

@@ -8,6 +8,7 @@ import {
   analysisJobSchema,
   intermediateSummarySchema,
   templateSchema,
+  appSettingsSchema,
 } from '@therascript/domain';
 
 interface SchemaColumn {
@@ -95,6 +96,7 @@ export const validateDatabaseSchema = (
     { name: 'analysis_jobs', schema: analysisJobSchema },
     { name: 'intermediate_summaries', schema: intermediateSummarySchema },
     { name: 'templates', schema: templateSchema },
+    { name: 'app_settings', schema: appSettingsSchema },
   ];
 
   for (const table of tables) {

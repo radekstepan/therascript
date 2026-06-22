@@ -8,3 +8,4 @@ export {
   type IntermediateSummaryRow,
 } from './intermediateSummary.js';
 export { templateSchema, type TemplateRow } from './template.js';
+export { appSettingsSchema, type AppSettingsRow } from './appSettings.js';

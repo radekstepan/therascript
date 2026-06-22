@@ -293,3 +293,4 @@ export * from './validators.js';
 export * from './schemas/api/index.js';
 export * from './schemas/jobs/index.js';
 export * from './schemas/db/index.js';
+export * from './schemas/db/appSettings.js';

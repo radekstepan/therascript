@@ -896,6 +896,75 @@ export const unloadActiveModel = async (
   return 'No models were loaded.';
 };
 
+/**
+ * Unload any loaded LLM model instances on a specific URL, regardless of
+ * whether that URL is the currently active one. Use this before switching
+ * the active base URL (local <-> remote, or remote-A <-> remote-B) so that
+ * the previously loaded model is evicted from VRAM. Best-effort: per-instance
+ * failures and enumeration failures are logged but do not throw. For a local
+ * URL with nothing loaded, falls back to `runtime.stop()` to release the
+ * `lms` daemon.
+ *
+ * Returns the number of model instances successfully unloaded.
+ */
+export const unloadModelAtUrl = async (url: string): Promise<number> => {
+  const targetUrl = url;
+  const isRemote = isRemoteLlmBaseUrl(targetUrl);
+  let unloadedCount = 0;
+
+  try {
+    const modelsRes = await axios.get<{ models: LmsModelRecord[] }>(
+      `${targetUrl}/api/v1/models`,
+      { timeout: 5000 }
+    );
+    const loadedInstances = modelsRes.data.models
+      .filter((m) => m.type === 'llm')
+      .flatMap((m) => m.loaded_instances);
+
+    if (loadedInstances.length > 0) {
+      await Promise.all(
+        loadedInstances.map(async (instance) => {
+          try {
+            await axios.post(
+              `${targetUrl}/api/v1/models/unload`,
+              { instance_id: instance.id },
+              { timeout: 15000 }
+            );
+            console.log(
+              `[LlmService] Unloaded instance ${instance.id} from ${targetUrl}`
+            );
+            unloadedCount++;
+          } catch (err: any) {
+            console.warn(
+              `[LlmService] Failed to unload ${instance.id} from ${targetUrl}: ${err.message}`
+            );
+          }
+        })
+      );
+    }
+  } catch (err: any) {
+    console.warn(
+      `[LlmService] Could not enumerate loaded models at ${targetUrl} during pre-switch unload: ${err.message}`
+    );
+  }
+
+  // Fallback: stop the local server via runtime. Skip for remote URLs.
+  if (unloadedCount === 0 && !isRemote && runtime.stop) {
+    try {
+      await runtime.stop();
+      console.log(
+        `[LlmService] Stopped local runtime at ${targetUrl} (no models were loaded).`
+      );
+    } catch (err: any) {
+      console.warn(
+        `[LlmService] runtime.stop() failed at ${targetUrl}: ${err.message}`
+      );
+    }
+  }
+
+  return unloadedCount;
+};
+
 // Dedup guard: tracks which model key is currently being estimated so we
 // don't fire duplicate background estimation calls from polling.
 let estimatingVramForModel: string | null = null;
