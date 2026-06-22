@@ -119,13 +119,9 @@ export function LlmManagementModal({
     error: availableError,
     refetch: refetchAvailableModels,
   } = useQuery({
-    // Share the cache entry with the LlmEndpointModelPicker so that an
-    // invalidation/refetch in one place (e.g. after a successful pull) is
-    // visible in the other without a manual refresh.
     queryKey: ['availableLlmModels', 'local'],
     queryFn: () => fetchAvailableModels(),
     enabled: isOpen,
-    staleTime: 10 * 1000,
     gcTime: 1 * 60 * 1000,
   });
 

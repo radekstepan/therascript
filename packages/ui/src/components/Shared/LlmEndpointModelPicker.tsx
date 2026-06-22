@@ -96,7 +96,6 @@ export const LlmEndpointModelPicker: React.FC<LlmEndpointModelPickerProps> = ({
     queryKey: ['availableLlmModels', isRemote ? modelsBaseUrl : 'local'],
     queryFn: () => fetchAvailableModels(modelsBaseUrl),
     enabled: enabled && (!isRemote || !!canFetchRemoteModels),
-    staleTime: 60 * 1000,
     retry: false,
   });
 
