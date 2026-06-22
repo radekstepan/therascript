@@ -28,6 +28,7 @@ import { cn } from '../../../utils';
 import prettyBytes from 'pretty-bytes';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchSessionContextUsage } from '../../../api/chat';
+import { useLlmModelState } from '../../../hooks/useLlmModelState';
 
 interface ChatPanelHeaderProps {
   session: Session | null;
@@ -57,6 +58,7 @@ export function ChatPanelHeader({
   const isActiveModelLoaded =
     isLoaded && llmStatus?.modelChecked === llmStatus?.activeModel;
   const configuredContextSize = llmStatus?.configuredContextSize;
+  const { isModelLoading } = useLlmModelState(llmStatus);
 
   const totalTokens = (latestPromptTokens ?? 0) + (latestCompletionTokens ?? 0);
 
@@ -320,10 +322,27 @@ export function ChatPanelHeader({
 
         {/* Right Side: Model Name + Configure Button */}
         <Flex align="center" gap="2">
-          {llmStatus?.loaded &&
-            llmStatus.activeModel &&
+          {llmStatus?.activeModel &&
             llmStatus.activeModel !== 'default' &&
-            (llmStatus.isRemoteBaseUrl ? (
+            (isModelLoading ? (
+              <Tooltip content={`Loading model: ${llmStatus.activeModel}…`}>
+                <Flex
+                  align="center"
+                  gap="1"
+                  style={{ minWidth: 0, maxWidth: 220 }}
+                >
+                  <Spinner size="1" />
+                  <Text
+                    size="1"
+                    color="gray"
+                    truncate
+                    title={llmStatus.activeModel}
+                  >
+                    {llmStatus.activeModel}
+                  </Text>
+                </Flex>
+              </Tooltip>
+            ) : llmStatus.isRemoteBaseUrl ? (
               <Tooltip
                 content={
                   llmStatus.activeBaseUrl

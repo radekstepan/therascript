@@ -42,6 +42,7 @@ import { fetchStandaloneContextUsage } from '../../api/chat';
 import { formatTimestamp } from '../../helpers';
 import { cn } from '../../utils';
 import prettyBytes from 'pretty-bytes'; // Added for VRAM usage display
+import { useLlmModelState } from '../../hooks/useLlmModelState';
 
 interface StandaloneChatHeaderProps {
   activeChatId: number | null;
@@ -127,6 +128,7 @@ export function StandaloneChatHeader({
     llmStatus?.details?.name === llmStatus?.activeModel
       ? llmStatus?.details?.defaultContextSize
       : null;
+  const { isModelLoading } = useLlmModelState(llmStatus);
 
   // --- CALCULATE VRAM USAGE STRING ---
   let vramUsageString = '';
@@ -413,10 +415,27 @@ export function StandaloneChatHeader({
                 </Badge>
               </Tooltip>
             )}
-            {llmStatus?.loaded &&
-              llmStatus.activeModel &&
+            {llmStatus?.activeModel &&
               llmStatus.activeModel !== 'default' &&
-              (llmStatus.isRemoteBaseUrl ? (
+              (isModelLoading ? (
+                <Tooltip content={`Loading model: ${llmStatus.activeModel}…`}>
+                  <Flex
+                    align="center"
+                    gap="1"
+                    style={{ minWidth: 0, maxWidth: 220 }}
+                  >
+                    <Spinner size="1" />
+                    <Text
+                      size="1"
+                      color="gray"
+                      truncate
+                      title={llmStatus.activeModel}
+                    >
+                      {llmStatus.activeModel}
+                    </Text>
+                  </Flex>
+                </Tooltip>
+              ) : llmStatus.isRemoteBaseUrl ? (
                 <Tooltip
                   content={
                     llmStatus.activeBaseUrl

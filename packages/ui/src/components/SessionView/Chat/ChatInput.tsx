@@ -43,6 +43,7 @@ import {
   fetchSessionContextUsage,
   fetchStandaloneContextUsage,
 } from '../../../api/chat';
+import { useLlmModelState } from '../../../hooks/useLlmModelState';
 
 interface AddMessageStreamMutationResult {
   userMessageId: number;
@@ -98,6 +99,8 @@ export function ChatInput({
     enabled: !disabled,
   });
 
+  const { isModelReady, isModelLoading } = useLlmModelState(llmStatus);
+
   // No longer need setModelAndLoadMutation as SelectActiveModelModal handles setting/loading
   // const setModelAndLoadMutation = useMutation(...);
 
@@ -106,7 +109,8 @@ export function ChatInput({
     isAiResponding ||
     !activeChatId ||
     isSelectModelModalOpen ||
-    isLoadingLlmStatusForInput;
+    isLoadingLlmStatusForInput ||
+    !isModelReady;
 
   useEffect(() => {
     if (activeChatId !== null && !isEffectivelyDisabled) {
@@ -170,23 +174,28 @@ export function ChatInput({
       return false;
     }
 
-    const { activeModel: currentActiveModel, modelChecked, loaded } = llmStatus;
+    // Defensive: if the model is still loading (button should already be
+    // disabled, but guard against race conditions), surface a toast and
+    // do NOT open the modal — the user already initiated the load.
+    if (isModelLoading) {
+      setToastMessageAtom('Model is still loading, please wait…');
+      return false;
+    }
 
-    if (
-      !currentActiveModel ||
-      (currentActiveModel && modelChecked === currentActiveModel && !loaded)
-    ) {
-      // Case A & B combined: No active model OR active model not loaded
-      // Open the SelectActiveModelModal in both scenarios.
+    const { activeModel: currentActiveModel } = llmStatus;
+
+    if (!currentActiveModel || currentActiveModel === 'default') {
+      // No active model configured. Open the SelectActiveModelModal so the
+      // user can pick + load one; queue the current message.
       console.log(
-        `[ChatInput] Model issue: Active='${currentActiveModel}', Loaded=${loaded}. Opening SelectActiveModelModal.`
+        `[ChatInput] No active model. Opening SelectActiveModelModal.`
       );
       setPendingMessage(queryToSend);
       setIsSelectModelModalOpen(true);
       return false;
     }
 
-    // Case C: Model is active and loaded
+    // Model is active and loaded — send.
     addMessageMutation.mutate({
       text: queryToSend,
       tempAiMessageId: -Math.floor(Math.random() * 1000000),
@@ -229,9 +238,11 @@ export function ChatInput({
   const starredButtonDisabled = isEffectivelyDisabled;
   const inputFieldDisabled = isEffectivelyDisabled;
 
-  const placeholderText = isStandalone
-    ? 'Ask anything...'
-    : 'Ask about the session...';
+  const placeholderText = isModelLoading
+    ? 'Model is loading, please wait…'
+    : isStandalone
+      ? 'Ask anything...'
+      : 'Ask about the session...';
 
   // --- Live Context Usage Preview (debounced) ---
   const [debouncedInput, setDebouncedInput] = useState<string>('');
@@ -328,10 +339,7 @@ export function ChatInput({
             size="2"
             style={{ flexGrow: 1 }}
             placeholder={
-              isAiResponding
-                ? 'AI is responding...'
-                : // : isInlineLoadingModel ? `Loading ${llmStatus?.activeModel || 'model'}...` // Removed
-                  placeholderText
+              isAiResponding ? 'AI is responding...' : placeholderText
             }
             value={currentQuery}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
@@ -362,14 +370,37 @@ export function ChatInput({
               size="2"
               onClick={handleSubmitClick}
               disabled={sendButtonDisabled}
-              title={isAiResponding ? 'AI is responding...' : 'Send message'}
-              aria-label={isAiResponding ? 'AI is responding' : 'Send message'}
+              title={
+                isModelLoading
+                  ? 'Model is loading…'
+                  : isAiResponding
+                    ? 'AI is responding...'
+                    : 'Send message'
+              }
+              aria-label={
+                isModelLoading
+                  ? 'Model is loading'
+                  : isAiResponding
+                    ? 'AI is responding'
+                    : 'Send message'
+              }
             >
-              {/* {isAiResponding || isInlineLoadingModel ? <Spinner size="1" /> : <PaperPlaneIcon />} // Removed isInlineLoadingModel */}
-              {isAiResponding ? <Spinner size="1" /> : <PaperPlaneIcon />}
+              {isAiResponding || isModelLoading ? (
+                <Spinner size="1" />
+              ) : (
+                <PaperPlaneIcon />
+              )}
             </IconButton>
           )}
         </Flex>
+        {isModelLoading && (
+          <Flex align="center" justify="center" gap="1" mt="1">
+            <Spinner size="1" />
+            <Text size="1" color="gray">
+              {`Loading model${llmStatus?.activeModel && llmStatus.activeModel !== 'default' ? `: ${llmStatus.activeModel}` : ''}…`}
+            </Text>
+          </Flex>
+        )}
         {inputError && (
           <Text size="1" color="red" align="center" mt="1">
             {inputError}
