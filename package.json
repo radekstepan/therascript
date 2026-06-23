@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "prepare": "husky",
+    "postinstall": "node scripts/check-native-bindings.mjs",
     "build": "turbo run build",
     "build:api": "turbo run build --filter=@therascript/api",
     "build:ui": "turbo run build --filter=@therascript/ui",

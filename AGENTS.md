@@ -2,6 +2,11 @@
 
 This document outlines the autonomous and semi-autonomous agents operating within the Therascript ecosystem. The system utilizes a combination of background workers (BullMQ), specialized API handlers, and LLM-driven strategies to process therapy sessions.
 
+## 0. Prerequisites
+
+- **Node 23.10.0 exactly** (see `.nvmrc`). `better-sqlite3@11.x` does not publish prebuilt binaries for Node 24+, so running on a newer Node will silently leave the native binding unbuilt and the API will fail to start with `Could not connect or initialize database`. Run `nvm use` before `yarn install`.
+- `yarn install` runs `scripts/check-native-bindings.mjs` via the `postinstall` hook. If it exits non-zero, your environment is wrong — do **not** bypass it with `--ignore-scripts`.
+
 ## 📖 System Documentation
 For detailed implementation references, please see:
 - **[Architecture](docs/ARCHITECTURE.md)**: High-level system architecture, package organization, and infrastructure.
