@@ -151,12 +151,7 @@ export function StandaloneChatHeader({
     UIContextUsageResponse | undefined,
     Error
   >({
-    queryKey: [
-      'contextUsage',
-      'standalone',
-      activeChatId,
-      configuredContextSize ?? 'default',
-    ],
+    queryKey: ['contextUsage', 'standalone', activeChatId],
     queryFn: () => fetchStandaloneContextUsage(activeChatId!),
     enabled: !!activeChatId,
     staleTime: 15 * 1000,

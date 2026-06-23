@@ -436,6 +436,20 @@ export function ChatInterface({
                     queryClient.invalidateQueries({
                       queryKey: currentChatQueryKey,
                     });
+                    if (isStandalone) {
+                      queryClient.invalidateQueries({
+                        queryKey: ['contextUsage', 'standalone', activeChatId],
+                      });
+                    } else if (activeSessionId) {
+                      queryClient.invalidateQueries({
+                        queryKey: [
+                          'contextUsage',
+                          'session',
+                          activeSessionId,
+                          activeChatId,
+                        ],
+                      });
+                    }
                   }, 100);
                 }
                 return;

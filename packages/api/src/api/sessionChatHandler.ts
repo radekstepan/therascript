@@ -540,6 +540,23 @@ export const addSessionChatMessage = async ({
                 err
               );
             }
+
+            try {
+              const finalMessages = messageRepository.findMessagesByChatId(
+                chatData.id
+              );
+              const finalUsage = await computeContextUsageForChat({
+                isStandalone: false,
+                sessionData,
+                messages: finalMessages,
+              });
+              await writeSseEvent({ usage: finalUsage });
+            } catch (finalUsageErr) {
+              console.warn(
+                `[API ProcessStream Finally ${chatData.id}] Failed to compute final usage:`,
+                finalUsageErr
+              );
+            }
           } catch (dbError) {
             console.error(
               `[API ProcessStream Finally ${chatData.id}] CRITICAL: Failed to save AI message to DB:`,
