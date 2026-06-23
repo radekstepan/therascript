@@ -70,6 +70,9 @@ const CreateAnalysisJobBodySchema = t.Object({
   modelName: t.Optional(t.String()),
   useAdvancedStrategy: t.Optional(t.Boolean()),
   contextSize: t.Optional(t.Number({ minimum: 1 })),
+  mapPhaseSystemPrompt: t.Optional(
+    t.String({ maxLength: 2000, error: 'Map phase system prompt is too long.' })
+  ),
   /**
    * Optional LM Studio-compatible base URL override. When provided, the
    * worker uses this URL for the Map/Reduce streams; when omitted, the
@@ -77,6 +80,17 @@ const CreateAnalysisJobBodySchema = t.Object({
    * the chat `set-model` endpoint.
    */
   baseUrl: t.Optional(t.String({ maxLength: 2048 })),
+  /**
+   * Per-job LLM sampling/loading overrides. When provided, the worker
+   * honors these for the Map/Reduce streams instead of falling back to the
+   * globally configured values. All optional so existing clients keep
+   * working unchanged.
+   */
+  temperature: t.Optional(t.Number({ minimum: 0, maximum: 2 })),
+  topP: t.Optional(t.Number({ minimum: 0, maximum: 1 })),
+  repeatPenalty: t.Optional(t.Number({ minimum: 0.5, maximum: 2 })),
+  numGpuLayers: t.Optional(t.Union([t.Number({ minimum: 0 }), t.Null()])),
+  thinkingBudget: t.Optional(t.Union([t.Number(), t.Null()])),
 });
 
 const JobIdParamSchema = t.Object({

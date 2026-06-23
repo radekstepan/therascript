@@ -3,3 +3,4 @@ export * from './ChatSidebarListItem'; // This might become unused
 export * from './EditEntityModal';
 export * from './EntitySelectorDropdown'; // Export new component
 export * from './LlmEndpointModelPicker'; // Shared Local/Remote + model picker
+export * from './LlmSettingsForm';

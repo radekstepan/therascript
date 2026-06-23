@@ -12,7 +12,6 @@ import {
 } from '@radix-ui/themes';
 import {
   CheckCircledIcon,
-  SymbolIcon,
   MixerVerticalIcon,
   LightningBoltIcon,
   ArchiveIcon,
@@ -187,13 +186,10 @@ export function ChatPanelHeader({
 
   const renderStatusBadge = () => {
     if (isLoadingLlmStatus) return <Spinner size="1" />;
-    if (!llmStatus?.activeModel)
-      return <SymbolIcon className="text-yellow-500" width="14" height="14" />;
-    if (isActiveModelLoaded)
-      return (
-        <CheckCircledIcon className="text-green-600" width="14" height="14" />
-      );
-    return <SymbolIcon className="text-gray-500" width="14" height="14" />;
+    if (!isActiveModelLoaded) return null;
+    return (
+      <CheckCircledIcon className="text-green-600" width="14" height="14" />
+    );
   };
 
   return (
@@ -211,7 +207,7 @@ export function ChatPanelHeader({
             </Flex>
           </Tooltip>
 
-          {llmStatus?.activeModel && (
+          {isActiveModelLoaded && (
             <Tooltip
               content={
                 `Configured Context: ${configuredContextSize ? configuredContextSize.toLocaleString() : 'Default'}` +
@@ -243,7 +239,7 @@ export function ChatPanelHeader({
           )}
 
           {/* --- CONTEXT METER --- */}
-          {effectiveModelContextSize && (
+          {isActiveModelLoaded && effectiveModelContextSize && (
             <Tooltip
               content={
                 contextUsage

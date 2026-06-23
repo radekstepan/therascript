@@ -108,6 +108,71 @@ describe('API Request Schemas', () => {
       });
       expect(result.success).toBe(false);
     });
+
+    it('accepts valid LLM param overrides', () => {
+      const result = safeValidateAnalysisRequest({
+        sessionIds: [1],
+        prompt: 'Analyze this session',
+        modelName: 'llama3',
+        temperature: 0.4,
+        topP: 0.85,
+        repeatPenalty: 1.2,
+        numGpuLayers: 24,
+        thinkingBudget: 2048,
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts null numGpuLayers (auto) and thinkingBudget (disabled)', () => {
+      const result = safeValidateAnalysisRequest({
+        sessionIds: [1],
+        prompt: 'Analyze this session',
+        modelName: 'llama3',
+        numGpuLayers: null,
+        thinkingBudget: null,
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('rejects out-of-range temperature', () => {
+      const result = safeValidateAnalysisRequest({
+        sessionIds: [1],
+        prompt: 'Analyze this session',
+        modelName: 'llama3',
+        temperature: 2.5,
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects out-of-range topP', () => {
+      const result = safeValidateAnalysisRequest({
+        sessionIds: [1],
+        prompt: 'Analyze this session',
+        modelName: 'llama3',
+        topP: 1.5,
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects out-of-range repeatPenalty', () => {
+      const result = safeValidateAnalysisRequest({
+        sessionIds: [1],
+        prompt: 'Analyze this session',
+        modelName: 'llama3',
+        repeatPenalty: 0.1,
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects negative numGpuLayers', () => {
+      const result = safeValidateAnalysisRequest({
+        sessionIds: [1],
+        prompt: 'Analyze this session',
+        modelName: 'llama3',
+        numGpuLayers: -1,
+      });
+      expect(result.success).toBe(false);
+    });
   });
 
   describe('renameChatRequestSchema', () => {

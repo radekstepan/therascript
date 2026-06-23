@@ -9,7 +9,7 @@
 // Both consumers persist the entered remote URL through `remoteBaseUrlAtom`
 // (localStorage) so the field is pre-filled the next time the user opens
 // either modal.
-import React, { useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { useAtom } from 'jotai';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -93,7 +93,11 @@ export const LlmEndpointModelPicker: React.FC<LlmEndpointModelPickerProps> = ({
     useAtom(remoteBaseUrlAtom);
 
   const debouncedRemoteUrl = useDebounce(remoteUrl, 500);
-  const modelsBaseUrl = isRemote ? debouncedRemoteUrl.trim() : localBaseUrl;
+  const isTyping = isRemote && remoteUrl !== debouncedRemoteUrl;
+
+  // Use debounced URL for queries so we don't fire requests on every keystroke.
+  // The cache slot is unique to the URL being queried.
+  const queryBaseUrl = isRemote ? debouncedRemoteUrl.trim() : localBaseUrl;
   const canFetchRemoteModels = !isRemote || isValidHttpUrl(debouncedRemoteUrl);
   const canFetchLocalModels = !isRemote && localBaseUrl.trim().length > 0;
 
@@ -105,12 +109,17 @@ export const LlmEndpointModelPicker: React.FC<LlmEndpointModelPickerProps> = ({
   } = useQuery({
     queryKey: [
       'availableLlmModels',
-      isRemote ? `remote:${modelsBaseUrl}` : `local:${modelsBaseUrl}`,
+      isRemote ? `remote:${queryBaseUrl}` : `local:${queryBaseUrl}`,
     ],
-    queryFn: () => fetchAvailableModels(modelsBaseUrl),
+    queryFn: () => fetchAvailableModels(queryBaseUrl),
     enabled:
-      enabled && (isRemote ? !!canFetchRemoteModels : canFetchLocalModels),
+      enabled &&
+      !isTyping &&
+      (isRemote ? !!canFetchRemoteModels : canFetchLocalModels),
     retry: false,
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnMount: 'always',
   });
 
   const models = useMemo<LlmModelInfo[]>(
@@ -130,7 +139,7 @@ export const LlmEndpointModelPicker: React.FC<LlmEndpointModelPickerProps> = ({
   // For local, we always render the select (the local fetch is fast and
   // there is no remote-only edge case to guard against here).
   const hasValidRemoteUrl =
-    isRemote && debouncedRemoteUrl.trim().length > 0
+    isRemote && debouncedRemoteUrl.trim().length > 0 && !isTyping
       ? isValidHttpUrl(debouncedRemoteUrl)
       : false;
   const showEmptyMessage =
@@ -248,7 +257,7 @@ export const LlmEndpointModelPicker: React.FC<LlmEndpointModelPickerProps> = ({
         <Text size="1" color="amber">
           Could not reach the{' '}
           {isRemote
-            ? `remote LLM server at ${modelsBaseUrl}`
+            ? `remote LLM server at ${queryBaseUrl || debouncedRemoteUrl.trim()}`
             : 'local LLM server'}
           . Check that LM Studio is running and the URL is correct.{' '}
           <Text
@@ -288,7 +297,7 @@ export const LlmEndpointModelPicker: React.FC<LlmEndpointModelPickerProps> = ({
             // endpoint and shows a literal mix of local + remote entries.
             // Uses the debounced URL (not the live `remoteUrl`) so we don't
             // remount on every keystroke while the user is typing.
-            key={isRemote ? `remote-${modelsBaseUrl || 'empty'}` : 'local'}
+            key={isRemote ? `remote-${queryBaseUrl || 'empty'}` : 'local'}
             value={selectedModel}
             onValueChange={onSelectedModelChange}
             disabled={disabled}

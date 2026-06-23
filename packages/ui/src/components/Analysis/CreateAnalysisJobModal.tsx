@@ -13,11 +13,9 @@ import {
   Spinner,
   Callout,
   ScrollArea,
-  TextField,
   Tooltip,
   Table,
   Checkbox,
-  Strong,
 } from '@radix-ui/themes';
 import {
   InfoCircledIcon,
@@ -25,27 +23,21 @@ import {
   CheckIcon,
   QuestionMarkCircledIcon,
   StarIcon,
-  LightningBoltIcon,
-  GlobeIcon,
 } from '@radix-ui/react-icons';
 import {
   createAnalysisJob,
   fetchSession,
   fetchTemplates,
-  estimateModelVram,
-  fetchGpuStats,
   fetchLlmStatus,
 } from '../../api/api';
-import type {
-  Session,
-  LlmStatus,
-  Template,
-  VramEstimateResponse,
-} from '../../types';
+import type { Session, LlmStatus, Template } from '../../types';
 import { toastMessageAtom } from '../../store';
 import { cn } from '../../utils';
 import { formatIsoDateToYMD } from '../../helpers';
-import prettyBytes from 'pretty-bytes';
+import {
+  LlmSettingsForm,
+  type LlmSettingsState,
+} from '../Shared/LlmSettingsForm';
 
 // --- Sub-component for the template picker popover ---
 const TemplatePicker: React.FC<{
@@ -174,17 +166,17 @@ export function CreateAnalysisJobModal({
 
   const [isTemplatePopoverOpen, setIsTemplatePopoverOpen] = useState(false);
   const [useAdvancedStrategy, setUseAdvancedStrategy] = useState(true); // Default to true
-  const [contextSizeInput, setContextSizeInput] = useState('');
-  const [userTouchedContext, setUserTouchedContext] = useState(false);
-  const [vramEstimate, setVramEstimate] = useState<VramEstimateResponse | null>(
-    null
-  );
 
-  const { data: gpuStats } = useQuery({
-    queryKey: ['gpuStats'],
-    queryFn: fetchGpuStats,
-    enabled: isOpen,
-    refetchInterval: 10000,
+  const [formState, setFormState] = useState<LlmSettingsState>({
+    selectedModel: '',
+    contextSizeInput: '',
+    isRemote: false,
+    remoteUrl: '',
+    temperature: 0.7,
+    topP: 0.9,
+    repeatPenalty: 1.1,
+    numGpuLayers: undefined,
+    thinkingBudget: -1,
   });
 
   // Fetch the currently active LLM model + context size. `staleTime: 0`
@@ -225,29 +217,11 @@ export function CreateAnalysisJobModal({
     return max || null;
   }, [sessionData]);
 
-  const recommendedContextSize = useMemo(() => {
-    if (!maxTranscriptTokens) return undefined;
-    const modelMax = llmStatus?.details?.defaultContextSize ?? null;
-    const base = Math.max(4096, maxTranscriptTokens + 2048);
-    const rounded = Math.ceil(base / 256) * 256;
-    return modelMax != null ? Math.min(rounded, modelMax) : rounded;
-  }, [maxTranscriptTokens, llmStatus?.details?.defaultContextSize]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    if (userTouchedContext) return;
-    if (recommendedContextSize && recommendedContextSize > 0) {
-      setContextSizeInput(String(recommendedContextSize));
-    }
-  }, [isOpen, userTouchedContext, recommendedContextSize]);
-
   // Snapshot the backend's currently active model + context size into the
   // form once per open-cycle, and reset ephemeral fields. The effect waits
   // for `llmStatus` to land before initializing, because the local useQuery
   // refetches on every open (staleTime: 0) and `llmStatus` is `undefined`
-  // during the in-flight request. The modal no longer carries its own model
-  // selection — it always uses the chat's active model (the user changes
-  // it via Configure AI Model in the chat).
+  // during the in-flight request.
   const prevIsOpenRef = useRef(false);
   useEffect(() => {
     if (!isOpen) {
@@ -264,100 +238,42 @@ export function CreateAnalysisJobModal({
     setValidationError(null);
     setIsTemplatePopoverOpen(false);
     setUseAdvancedStrategy(true); // Reset to default
-    setVramEstimate(null);
-    const configuredContextSize = llmStatus.configuredContextSize;
-    if (configuredContextSize && configuredContextSize > 0) {
-      setContextSizeInput(String(configuredContextSize));
-      // Mark the field as user-touched so the recommended-context
-      // useEffect below doesn't overwrite the actually configured size.
-      setUserTouchedContext(true);
-    } else {
-      setContextSizeInput('');
-      setUserTouchedContext(false);
-    }
+
+    setFormState({
+      selectedModel:
+        llmStatus.activeModel && llmStatus.activeModel !== 'default'
+          ? llmStatus.activeModel
+          : '',
+      contextSizeInput: llmStatus.configuredContextSize
+        ? String(llmStatus.configuredContextSize)
+        : '',
+      isRemote: llmStatus.isRemoteBaseUrl ?? false,
+      remoteUrl:
+        (llmStatus.isRemoteBaseUrl ? llmStatus.activeBaseUrl : '') ?? '',
+      temperature: llmStatus.configuredTemperature ?? 0.7,
+      topP: llmStatus.configuredTopP ?? 0.9,
+      repeatPenalty: llmStatus.configuredRepeatPenalty ?? 1.1,
+      numGpuLayers:
+        llmStatus.configuredNumGpuLayers != null
+          ? llmStatus.configuredNumGpuLayers
+          : undefined,
+      thinkingBudget: llmStatus.configuredThinkingBudget ?? -1,
+    });
+
     const timer = setTimeout(() => {
       textAreaRef.current?.focus();
     }, 100);
     return () => clearTimeout(timer);
   }, [isOpen, llmStatus]);
 
-  useEffect(() => {
-    // VRAM is a local-machine concept; skip the estimate when the active
-    // model is loaded on a remote endpoint. The AbortController cancels
-    // in-flight requests when dependencies change so stale responses
-    // can't overwrite the latest one.
-    const activeModel = llmStatus?.activeModel;
-    const hasActiveModel = !!activeModel && activeModel !== 'default';
-    if (!hasActiveModel) {
-      setVramEstimate(null);
-      return;
+  const isValidHttpUrl = React.useCallback((value: string): boolean => {
+    try {
+      const parsed = new URL(value.trim());
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    } catch {
+      return false;
     }
-    if (llmStatus?.isRemoteBaseUrl) {
-      setVramEstimate(null);
-      return;
-    }
-    const trimmedContextSize = contextSizeInput.trim();
-    const contextSize = trimmedContextSize
-      ? parseInt(trimmedContextSize, 10)
-      : null;
-    if (
-      trimmedContextSize &&
-      (isNaN(contextSize as number) || (contextSize as number) <= 0)
-    ) {
-      return;
-    }
-    const controller = new AbortController();
-    estimateModelVram(
-      activeModel,
-      contextSize,
-      undefined,
-      controller.signal,
-      llmStatus?.defaultBaseUrl
-    )
-      .then((data) => {
-        if (controller.signal.aborted) return;
-        setVramEstimate(data);
-      })
-      .catch((err) => {
-        if (controller.signal.aborted) return;
-        console.error('Failed to estimate VRAM:', err);
-        setVramEstimate({
-          model: activeModel,
-          context_size: contextSize,
-          estimated_vram_bytes: null,
-          estimated_ram_bytes: null,
-          vram_per_token_bytes: null,
-          error: err.message,
-        });
-      });
-    return () => controller.abort();
-  }, [
-    llmStatus?.activeModel,
-    llmStatus?.isRemoteBaseUrl,
-    llmStatus?.defaultBaseUrl,
-    contextSizeInput,
-  ]);
-
-  const vramWarning = useMemo(() => {
-    if (!vramEstimate?.estimated_vram_bytes || !gpuStats?.available)
-      return null;
-    const totalGpuMemory = gpuStats.gpus[0]?.memory.totalMb * 1024 * 1024 || 0;
-    const estimate = vramEstimate.estimated_vram_bytes;
-    if (estimate > totalGpuMemory) {
-      return {
-        type: 'error' as const,
-        message: `Estimated VRAM (${prettyBytes(estimate)}) exceeds GPU capacity (${prettyBytes(totalGpuMemory)}). This will force CPU offloading and degrade performance.`,
-      };
-    }
-    const percentUsed = (estimate / totalGpuMemory) * 100;
-    if (percentUsed > 90) {
-      return {
-        type: 'warning' as const,
-        message: `Estimated VRAM (${prettyBytes(estimate)}) is very close to GPU capacity (${prettyBytes(totalGpuMemory)}). Consider reducing context size.`,
-      };
-    }
-    return null;
-  }, [vramEstimate, gpuStats]);
+  }, []);
 
   const handleSelectTemplate = (templateText: string) => {
     setPrompt(templateText);
@@ -388,36 +304,53 @@ export function CreateAnalysisJobModal({
       setValidationError('No sessions selected.');
       return;
     }
-    const activeModel = llmStatus?.activeModel;
-    const hasActiveModel = !!activeModel && activeModel !== 'default';
-    if (!hasActiveModel) {
-      setValidationError(
-        'No model is loaded. Open Configure AI Model in the chat to load one.'
-      );
+    if (!formState.selectedModel) {
+      setValidationError('Please select a model.');
+      return;
+    }
+
+    let baseUrl: string | null = null;
+    if (formState.isRemote) {
+      const trimmed = formState.remoteUrl.trim();
+      if (!isValidHttpUrl(trimmed)) {
+        setValidationError(
+          'Please enter a valid http(s) URL for the remote LM Studio server.'
+        );
+        return;
+      }
+      baseUrl = trimmed;
+    }
+
+    const contextSize = formState.contextSizeInput
+      ? parseInt(formState.contextSizeInput, 10)
+      : null;
+    if (
+      formState.contextSizeInput &&
+      (isNaN(contextSize!) || contextSize! <= 0)
+    ) {
+      setValidationError('Context size must be a positive number if provided.');
       return;
     }
 
     createJobMutation.mutate({
       sessionIds,
       prompt,
-      modelName: activeModel,
+      modelName: formState.selectedModel,
       useAdvancedStrategy,
-      ...(contextSizeInput
-        ? { contextSize: parseInt(contextSizeInput, 10) }
-        : {}),
+      ...(contextSize ? { contextSize } : {}),
       ...(mapPhaseSystemPrompt.trim().length > 0
         ? { mapPhaseSystemPrompt: mapPhaseSystemPrompt.trim() }
         : {}),
-      // Snapshot the active base URL so the worker targets the same
-      // endpoint the model is loaded on, regardless of what the worker's
-      // config default is.
-      ...(llmStatus?.activeBaseUrl ? { baseUrl: llmStatus.activeBaseUrl } : {}),
+      ...(baseUrl ? { baseUrl } : {}),
+      temperature: formState.temperature,
+      topP: formState.topP,
+      repeatPenalty: formState.repeatPenalty,
+      numGpuLayers: formState.numGpuLayers ?? null,
+      thinkingBudget: formState.thinkingBudget,
     });
   };
 
   const isMutationPending = createJobMutation.isPending;
-  const hasActiveModelForSubmit =
-    !!llmStatus?.activeModel && llmStatus.activeModel !== 'default';
 
   return (
     <Dialog.Root open={isOpen} onOpenChange={onOpenChange}>
@@ -451,7 +384,7 @@ export function CreateAnalysisJobModal({
                 </Flex>
               ) : (
                 <table
-                  className="rt-TableRootTable rt-sticky-table size-1"
+                  className={cn('rt-TableRootTable rt-sticky-table size-1')}
                   style={{ width: '100%' }}
                 >
                   <Table.Header
@@ -576,116 +509,17 @@ export function CreateAnalysisJobModal({
             <Text as="div" size="2" weight="medium">
               AI Configuration
             </Text>
-            <Flex direction="column" gap="1">
-              <Text size="1" color="gray">
-                Model
-              </Text>
-              <Text size="2" truncate title={llmStatus?.activeModel ?? ''}>
-                {hasActiveModelForSubmit
-                  ? llmStatus?.activeModel
-                  : '(no model loaded)'}
-              </Text>
-              <Flex align="center" gap="1">
-                {llmStatus?.isRemoteBaseUrl ? (
-                  <GlobeIcon
-                    width="12"
-                    height="12"
-                    style={{ flexShrink: 0, color: 'var(--gray-a10)' }}
-                  />
-                ) : null}
-                <Text size="1" color="gray" truncate>
-                  {llmStatus?.activeBaseUrl ?? ''}
-                </Text>
-              </Flex>
-            </Flex>
-            {llmStatus?.details && (
-              <label>
-                <Text as="div" size="2" mb="1" weight="medium">
-                  Context Size (Optional)
-                </Text>
-                <TextField.Root
-                  type="number"
-                  min="1"
-                  step="1024"
-                  placeholder={`Default (${llmStatus.details.defaultContextSize?.toLocaleString() ?? 'auto'})`}
-                  value={contextSizeInput}
-                  onChange={(e) => {
-                    setContextSizeInput(e.target.value);
-                    setUserTouchedContext(true);
-                  }}
-                  disabled={isMutationPending}
-                />
-              </label>
-            )}
 
-            {!llmStatus?.isRemoteBaseUrl && vramEstimate && (
-              <Callout.Root
-                size="1"
-                color={vramEstimate.error ? 'gray' : 'blue'}
-              >
-                <Callout.Icon>
-                  <LightningBoltIcon />
-                </Callout.Icon>
-                <Callout.Text>
-                  {vramEstimate.error ? (
-                    <>VRAM estimation unavailable: {vramEstimate.error}</>
-                  ) : vramEstimate.estimated_vram_bytes ? (
-                    <>
-                      VRAM:{' '}
-                      <Strong>
-                        {prettyBytes(vramEstimate.estimated_vram_bytes)}
-                      </Strong>
-                      {vramEstimate.context_size == null && (
-                        <> using model default context</>
-                      )}
-                      {vramEstimate.breakdown &&
-                        vramEstimate.breakdown.weights_vram_bytes +
-                          vramEstimate.breakdown.kv_cache_bytes +
-                          vramEstimate.breakdown.overhead_bytes >
-                          0 && (
-                          <>
-                            {' '}
-                            (
-                            {prettyBytes(
-                              vramEstimate.breakdown.weights_vram_bytes
-                            )}{' '}
-                            weights +{' '}
-                            {prettyBytes(vramEstimate.breakdown.kv_cache_bytes)}{' '}
-                            KV cache +{' '}
-                            {prettyBytes(vramEstimate.breakdown.overhead_bytes)}{' '}
-                            CUDA)
-                          </>
-                        )}
-                      {vramEstimate.estimated_ram_bytes != null &&
-                        vramEstimate.estimated_ram_bytes > 0 && (
-                          <>
-                            {' · '}RAM:{' '}
-                            <Strong>
-                              {prettyBytes(vramEstimate.estimated_ram_bytes)}
-                            </Strong>{' '}
-                            (CPU offload)
-                          </>
-                        )}
-                    </>
-                  ) : (
-                    <>VRAM data unavailable for this model</>
-                  )}
-                </Callout.Text>
-              </Callout.Root>
-            )}
+            <LlmSettingsForm
+              llmStatus={llmStatus}
+              activeTranscriptTokens={maxTranscriptTokens}
+              state={formState}
+              onChange={setFormState}
+              isOpen={isOpen}
+              isSaving={isMutationPending}
+            />
 
-            {!llmStatus?.isRemoteBaseUrl && vramWarning && (
-              <Callout.Root
-                size="1"
-                color={vramWarning.type === 'error' ? 'red' : 'amber'}
-              >
-                <Callout.Icon>
-                  <InfoCircledIcon />
-                </Callout.Icon>
-                <Callout.Text>{vramWarning.message}</Callout.Text>
-              </Callout.Root>
-            )}
-            <Text as="label" size="2">
+            <Text as="label" size="2" mt="2">
               <Flex gap="2" align="center">
                 <Checkbox
                   checked={useAdvancedStrategy}
@@ -729,7 +563,7 @@ export function CreateAnalysisJobModal({
           <Button
             onClick={handleSubmit}
             disabled={
-              isMutationPending || isLoadingSessions || !hasActiveModelForSubmit
+              isMutationPending || isLoadingSessions || !formState.selectedModel
             }
             className="hover:brightness-110 transition-all"
           >

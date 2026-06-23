@@ -16,6 +16,16 @@ interface CreateJobPayload {
    * Omit to let the backend decide.
    */
   baseUrl?: string | null;
+  /**
+   * Per-job LLM sampling/loading overrides. When provided, the worker
+   * honors these for the Map/Reduce streams instead of the globally
+   * configured values. All optional so existing callers keep working.
+   */
+  temperature?: number;
+  topP?: number;
+  repeatPenalty?: number;
+  numGpuLayers?: number | null;
+  thinkingBudget?: number | null;
 }
 
 /**

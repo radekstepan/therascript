@@ -24,7 +24,6 @@ import {
   InfoCircledIcon,
   MixerVerticalIcon,
   CheckCircledIcon,
-  SymbolIcon,
   LightningBoltIcon,
   ArchiveIcon, // <-- Keep ArchiveIcon for tokens
   GlobeIcon,
@@ -235,13 +234,10 @@ export function StandaloneChatHeader({
 
   const renderStatusBadge = () => {
     if (isLoadingLlmStatus) return <Spinner size="1" />;
-    if (!llmStatus?.activeModel)
-      return <SymbolIcon className="text-yellow-500" width="14" height="14" />;
-    if (isActiveModelLoaded)
-      return (
-        <CheckCircledIcon className="text-green-600" width="14" height="14" />
-      );
-    return <SymbolIcon className="text-gray-500" width="14" height="14" />;
+    if (!isActiveModelLoaded) return null;
+    return (
+      <CheckCircledIcon className="text-green-600" width="14" height="14" />
+    );
   };
 
   let statusTooltipContent = 'Loading status...';
@@ -319,7 +315,7 @@ export function StandaloneChatHeader({
                 {renderStatusBadge()}
               </Flex>
             </Tooltip>
-            {llmStatus?.activeModel && (
+            {isActiveModelLoaded && (
               <Tooltip
                 content={
                   `Configured Context: ${configuredContextSize ? configuredContextSize.toLocaleString() : 'Default'}` +
@@ -349,7 +345,7 @@ export function StandaloneChatHeader({
             )}
 
             {/* --- CONTEXT METER --- */}
-            {effectiveModelContextSize && (
+            {isActiveModelLoaded && effectiveModelContextSize && (
               <Tooltip
                 content={
                   contextUsage

@@ -314,6 +314,11 @@ export const createAnalysisJobHandler = async ({
     contextSize: requestedContextSize,
     mapPhaseSystemPrompt,
     baseUrl: requestedBaseUrl,
+    temperature,
+    topP,
+    repeatPenalty,
+    numGpuLayers,
+    thinkingBudget,
   } = validatedBody;
 
   try {
@@ -384,13 +389,19 @@ export const createAnalysisJobHandler = async ({
 
     // Snapshot the user's "Set Model" params at job-creation time so the worker
     // (a separate process with its own empty in-memory state) can honor them
-    // when it streams the Map and Reduce phases.
+    // when it streams the Map and Reduce phases. If the caller supplied
+    // per-job overrides (e.g. the analysis modal's sliders), prefer those;
+    // otherwise fall back to the globally configured values.
     const llmParams = {
-      thinkingBudget: getConfiguredThinkingBudget(),
-      temperature: getConfiguredTemperature(),
-      topP: getConfiguredTopP(),
-      repeatPenalty: getConfiguredRepeatPenalty(),
-      numGpuLayers: getConfiguredNumGpuLayers(),
+      thinkingBudget:
+        thinkingBudget !== undefined
+          ? thinkingBudget
+          : getConfiguredThinkingBudget(),
+      temperature: temperature ?? getConfiguredTemperature(),
+      topP: topP ?? getConfiguredTopP(),
+      repeatPenalty: repeatPenalty ?? getConfiguredRepeatPenalty(),
+      numGpuLayers:
+        numGpuLayers !== undefined ? numGpuLayers : getConfiguredNumGpuLayers(),
     };
 
     let newJob: AnalysisJob;
@@ -426,15 +437,17 @@ export const createAnalysisJobHandler = async ({
 
     // UPDATE GLOBAL STATE: Ensuring that the app stays in sync globally and subsequent
     // chats hook immediately onto this exact model configuration and URL without
-    // requiring any manual "Set Model" actions from the user.
+    // requiring any manual "Set Model" actions from the user. We mirror the
+    // per-job LLM params (which already prefer request-supplied values) into
+    // the global store so the chat and analysis views stay aligned.
     setActiveModelAndContextAndParams(
       modelName || getActiveModel(),
       contextSizeToUse,
-      getConfiguredTemperature(),
-      getConfiguredTopP(),
-      getConfiguredRepeatPenalty(),
-      getConfiguredNumGpuLayers(),
-      getConfiguredThinkingBudget(),
+      llmParams.temperature,
+      llmParams.topP,
+      llmParams.repeatPenalty,
+      llmParams.numGpuLayers,
+      llmParams.thinkingBudget,
       jobLlmBaseUrl
     );
 

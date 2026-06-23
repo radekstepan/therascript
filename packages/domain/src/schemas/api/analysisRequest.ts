@@ -27,6 +27,11 @@ export const analysisRequestSchema = z.object({
     .url('baseUrl must be a valid URL')
     .max(2048, 'baseUrl is too long')
     .optional(),
+  temperature: z.number().min(0).max(2).optional(),
+  topP: z.number().min(0).max(1).optional(),
+  repeatPenalty: z.number().min(0.5).max(2).optional(),
+  numGpuLayers: z.number().min(0).nullable().optional(),
+  thinkingBudget: z.number().nullable().optional(),
 });
 
 export type AnalysisRequest = z.infer<typeof analysisRequestSchema>;
