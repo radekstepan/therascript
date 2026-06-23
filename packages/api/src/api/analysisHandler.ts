@@ -664,7 +664,16 @@ export const streamAnalysisJobHandler = ({
       const encoder = new TextEncoder();
 
       const send = (data: object) => {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+        // Yield to the event loop so each per-event write actually hits the
+        // wire on its own. Without this, a burst of Redis messages arriving
+        // in the same tick would be coalesced into a single kernel send
+        // buffer flush on remote (non-loopback) sockets, which is what makes
+        // analysis streaming appear to "all arrive at once" on proxies.
+        setImmediate(() => {
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify(data)}\n\n`)
+          );
+        });
       };
 
       // 1. Send initial snapshot
@@ -699,8 +708,15 @@ export const streamAnalysisJobHandler = ({
 
   return new Response(stream, {
     headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      // Belt-and-suspenders streaming headers (mirrors sessionChatHandler /
+      // standaloneChatHandler):
+      //   - X-Accel-Buffering: no   — tells nginx / Tailscale Funnel /
+      //     Cloudflare not to buffer the response (no-op when no proxy).
+      //   - Cache-Control: no-cache, no-transform — broader proxy coverage
+      //     and prevents intermediaries from rewriting/coalescing chunks.
+      'Cache-Control': 'no-cache, no-transform',
+      'X-Accel-Buffering': 'no',
       Connection: 'keep-alive',
     },
   });

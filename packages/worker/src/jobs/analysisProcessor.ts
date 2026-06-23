@@ -377,7 +377,6 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
         let hasOpenThinkingBlock = false;
         let hasSentMapThinkingStatus = false;
         let hasSentMapRespondingStatus = false;
-        let lastPublish = Date.now();
         let lastCancelCheck = Date.now();
         const abortController = new AbortController();
         let mapStreamResult: StreamResult = {};
@@ -409,6 +408,11 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
           thinkingBudget: jobRecord?.thinking_budget ?? undefined,
           maxCompletionTokens: mapMaxCompletionTokens,
         });
+        let contentChunkCount = 0;
+        let thinkingChunkCount = 0;
+        const CHUNK_LOG_EVERY = 20;
+        const mapPhaseStart = Date.now();
+
         let iterResult = await mapGenerator.next();
         while (!iterResult.done) {
           const chunk: LlmChatChunk = iterResult.value;
@@ -444,26 +448,42 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
             chunkBuffer += contentChunk;
           }
 
-          if (Date.now() - lastPublish > 100) {
-            if (chunkBuffer) {
-              publishStreamEvent(jobId, {
-                phase: 'map',
-                type: 'token',
-                summaryId: summaryTask.id,
-                delta: chunkBuffer,
-              });
-              chunkBuffer = '';
-            }
-            if (thinkingBuffer) {
-              publishStreamEvent(jobId, {
-                phase: 'map',
-                type: 'thinking',
-                summaryId: summaryTask.id,
-                delta: thinkingBuffer,
-              });
-              thinkingBuffer = '';
-            }
-            lastPublish = Date.now();
+          // Flush every accumulated chunk to Redis on the same iteration it
+          // was produced (no throttle). The setImmediate yield after each
+          // publish is the change that turns "all chunks at once" into
+          // token-by-token delivery for remote LM Studio connections (where
+          // Nagle / the kernel send buffer would otherwise coalesce writes).
+          if (chunkBuffer) {
+            publishStreamEvent(jobId, {
+              phase: 'map',
+              type: 'token',
+              summaryId: summaryTask.id,
+              delta: chunkBuffer,
+            });
+            chunkBuffer = '';
+            contentChunkCount++;
+            await new Promise<void>((resolve) => setImmediate(resolve));
+          }
+          if (thinkingBuffer) {
+            publishStreamEvent(jobId, {
+              phase: 'map',
+              type: 'thinking',
+              summaryId: summaryTask.id,
+              delta: thinkingBuffer,
+            });
+            thinkingBuffer = '';
+            thinkingChunkCount++;
+            await new Promise<void>((resolve) => setImmediate(resolve));
+          }
+
+          if (
+            contentChunkCount === 1 ||
+            contentChunkCount % CHUNK_LOG_EVERY === 0
+          ) {
+            const total = Date.now() - mapPhaseStart;
+            console.log(
+              `[Analysis Worker ${jobId}] map chunk #${contentChunkCount} +${(total / 1000).toFixed(2)}s`
+            );
           }
 
           if (Date.now() - lastCancelCheck > 500) {
@@ -491,6 +511,7 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
             summaryId: summaryTask.id,
             delta: chunkBuffer,
           });
+          chunkBuffer = '';
         }
 
         if (thinkingBuffer) {
@@ -500,6 +521,7 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
             summaryId: summaryTask.id,
             delta: thinkingBuffer,
           });
+          thinkingBuffer = '';
         }
 
         // Strip the <think>…</think> envelope when checking for emptiness so a
@@ -684,7 +706,6 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
     let hasOpenReduceThinkingBlock = false;
     let hasSentReduceThinkingStatus = false;
     let hasSentReduceRespondingStatus = false;
-    let lastReducePublish = Date.now();
     let lastReduceCancelCheck = Date.now();
     const reduceAbortController = new AbortController();
     let reduceStreamResult: StreamResult = {};
@@ -719,6 +740,12 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
       });
 
       console.log(`[Analysis Worker ${jobId}] Starting reduce phase stream...`);
+
+      let reduceContentChunkCount = 0;
+      let reduceThinkingChunkCount = 0;
+      const CHUNK_LOG_EVERY = 20;
+      const reducePhaseStart = Date.now();
+
       let reduceIterResult = await reduceGenerator.next();
 
       while (!reduceIterResult.done) {
@@ -754,24 +781,40 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
           reduceBuffer += contentChunk;
         }
 
-        if (Date.now() - lastReducePublish > 100) {
-          if (reduceBuffer) {
-            publishStreamEvent(jobId, {
-              phase: 'reduce',
-              type: 'token',
-              delta: reduceBuffer,
-            });
-            reduceBuffer = '';
-          }
-          if (reduceThinkingBuffer) {
-            publishStreamEvent(jobId, {
-              phase: 'reduce',
-              type: 'thinking',
-              delta: reduceThinkingBuffer,
-            });
-            reduceThinkingBuffer = '';
-          }
-          lastReducePublish = Date.now();
+        // Flush every accumulated chunk to Redis on the same iteration it
+        // was produced (no throttle). The setImmediate yield after each
+        // publish is the change that turns "all chunks at once" into
+        // token-by-token delivery for remote LM Studio connections (where
+        // Nagle / the kernel send buffer would otherwise coalesce writes).
+        if (reduceBuffer) {
+          publishStreamEvent(jobId, {
+            phase: 'reduce',
+            type: 'token',
+            delta: reduceBuffer,
+          });
+          reduceBuffer = '';
+          reduceContentChunkCount++;
+          await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+        if (reduceThinkingBuffer) {
+          publishStreamEvent(jobId, {
+            phase: 'reduce',
+            type: 'thinking',
+            delta: reduceThinkingBuffer,
+          });
+          reduceThinkingBuffer = '';
+          reduceThinkingChunkCount++;
+          await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+
+        if (
+          reduceContentChunkCount === 1 ||
+          reduceContentChunkCount % CHUNK_LOG_EVERY === 0
+        ) {
+          const total = Date.now() - reducePhaseStart;
+          console.log(
+            `[Analysis Worker ${jobId}] reduce chunk #${reduceContentChunkCount} +${(total / 1000).toFixed(2)}s`
+          );
         }
 
         if (Date.now() - lastReduceCancelCheck > 500) {
@@ -816,6 +859,7 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
         type: 'token',
         delta: reduceBuffer,
       });
+      reduceBuffer = '';
     }
 
     if (reduceThinkingBuffer) {
@@ -824,6 +868,7 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
         type: 'thinking',
         delta: reduceThinkingBuffer,
       });
+      reduceThinkingBuffer = '';
     }
 
     // Strip the <think>…</think> envelope when checking for emptiness so a

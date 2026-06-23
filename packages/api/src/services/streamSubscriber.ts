@@ -15,7 +15,13 @@ export function createJobSubscriber(
     if (ch === channel) {
       try {
         const event = JSON.parse(message) as StreamEvent;
-        onMessage(event);
+        // Yield to the event loop so the SSE controller has a chance to
+        // flush the previous event to the wire before we enqueue the next
+        // one. Without this, back-to-back Redis messages get coalesced into
+        // a single kernel-send-buffer flush on remote (non-loopback) sockets,
+        // which is what makes analysis streaming appear to "burst" and stall
+        // on proxies.
+        setImmediate(() => onMessage(event));
       } catch (e) {
         console.error('[StreamSubscriber] Error parsing Redis message:', e);
       }
