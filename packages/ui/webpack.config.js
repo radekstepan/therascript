@@ -1,6 +1,7 @@
 // Webpack configuration for building the React frontend application.
 
 const path = require('path'); // Node.js path module for resolving file paths
+const webpack = require('webpack'); // Webpack core for DefinePlugin (E2E_TESTING flag)
 const HtmlWebpackPlugin = require('html-webpack-plugin'); // Plugin to generate index.html with bundled scripts
 
 module.exports = {
@@ -63,6 +64,15 @@ module.exports = {
     // automatically injecting the bundled JavaScript file(s).
     new HtmlWebpackPlugin({
       template: './public/index.html', // Use this file as the template
+    }),
+    // DefinePlugin: inlines build-time constants. E2E_TESTING gates the MSW
+    // worker startup in src/index.tsx so production bundles never register
+    // a Service Worker or load handlers.ts. Playwright sets this to "true"
+    // via `E2E_TESTING=true yarn dev` (see playwright.config.ts).
+    new webpack.DefinePlugin({
+      'process.env.E2E_TESTING': JSON.stringify(
+        process.env.E2E_TESTING || 'false'
+      ),
     }),
     // Add other plugins here (e.g., MiniCssExtractPlugin for production CSS files)
   ],

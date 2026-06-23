@@ -315,3 +315,5 @@ cython_debug/
 *.tar.gz
 
 .turbo/
+
+packages/ui/test-results/

@@ -34,6 +34,14 @@
       "dependsOn": ["build"],
       "cache": false,
       "outputLogs": "errors-only"
+    },
+    "e2e": {
+      "cache": false,
+      "outputs": [
+        "packages/ui/playwright-report/**",
+        "packages/ui/test-results/**"
+      ],
+      "outputLogs": "errors-only"
     }
   }
 }

@@ -46,7 +46,11 @@
     "app:start:wrapper": "yarn build:system && $(yarn run -s _node_path_linux) packages/system/dist/startAppWrapper.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "coverage": "vitest run --coverage"
+    "coverage": "vitest run --coverage",
+    "e2e": "yarn workspace @therascript/ui e2e",
+    "e2e:ui": "yarn workspace @therascript/ui e2e:ui",
+    "e2e:headed": "yarn workspace @therascript/ui e2e:headed",
+    "e2e:install": "yarn workspace @therascript/ui e2e:install"
   },
   "keywords": [],
   "author": "",
