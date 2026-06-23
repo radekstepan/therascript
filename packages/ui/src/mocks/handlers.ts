@@ -13,6 +13,8 @@
 //   - GET /api/chats          -> src/api/chat.ts:153
 //   - GET /api/status/readiness -> src/api/meta.ts:31
 //   - GET /api/jobs/active-count -> src/api/jobs.ts:5
+//   - GET /api/system/gpu-stats -> src/api/system.ts:90 (sidebar widget)
+//   - GET /api/llm/status     -> src/api/llm.ts:31 (sidebar / chat view)
 import { http, HttpResponse } from 'msw';
 
 const NOW_ISO = new Date().toISOString();
@@ -44,6 +46,51 @@ const MOCK_STANDALONE_CHAT = {
   tags: null,
 };
 
+// `available: false` tells the UI to render the "GPU stats unavailable"
+// state instead of trying to render zero GPUs. Matches the shape in
+// types.ts:50-68.
+const MOCK_GPU_STATS = {
+  available: false,
+  driverVersion: null,
+  cudaVersion: null,
+  gpus: [],
+  summary: {
+    gpuCount: 0,
+    totalMemoryMb: 0,
+    totalMemoryUsedMb: 0,
+    avgGpuUtilizationPercent: null,
+    avgMemoryUtilizationPercent: null,
+    avgTemperatureCelsius: null,
+    totalPowerDrawWatts: null,
+    totalPowerLimitWatts: null,
+    isUnifiedMemory: false,
+  },
+  systemMemory: {
+    totalMb: 0,
+    usedMb: 0,
+    freeMb: 0,
+    percentUsed: 0,
+  },
+};
+
+// `loaded: false` so chat surfaces render the "configure model" CTA instead
+// of a streaming indicator. Matches LlmStatus in types.ts:175-194.
+const MOCK_LLM_STATUS = {
+  activeModel: '',
+  modelChecked: '',
+  loaded: false,
+  details: null,
+  configuredContextSize: null,
+  configuredTemperature: 0.7,
+  configuredTopP: 0.9,
+  configuredRepeatPenalty: 1.1,
+  configuredNumGpuLayers: null,
+  configuredThinkingBudget: -1,
+  activeBaseUrl: 'http://localhost:1234',
+  defaultBaseUrl: 'http://localhost:1234',
+  isRemoteBaseUrl: false,
+};
+
 export const handlers = [
   // Readiness must return 200 + ready: true; otherwise App.tsx:241-243
   // mounts the <ReadinessOverlay/> and never renders the Landing page.
@@ -67,4 +114,8 @@ export const handlers = [
   http.get('/api/jobs/active-count', () =>
     HttpResponse.json({ total: 0, transcription: 0, analysis: 0 })
   ),
+
+  http.get('/api/system/gpu-stats', () => HttpResponse.json(MOCK_GPU_STATS)),
+
+  http.get('/api/llm/status', () => HttpResponse.json(MOCK_LLM_STATUS)),
 ];
