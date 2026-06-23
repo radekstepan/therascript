@@ -635,7 +635,17 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
             );
           }
 
-          const models = await listModels();
+          // Resolve the URL for the model-architecture lookup. VRAM is a
+          // local-machine concept (both UIs skip this call in Remote mode),
+          // so we default to the local default URL — which also avoids
+          // resolving to a sticky remote override and 404'ing on local
+          // model names. The frontend passes `defaultBaseUrl` explicitly
+          // for an honest, symmetric contract with `available-models`.
+          const baseUrlQuery =
+            typeof query.baseUrl === 'string' && query.baseUrl.trim().length > 0
+              ? normalizeLlmBaseUrl(query.baseUrl.trim())
+              : null;
+          const models = await listModels(baseUrlQuery);
           const model = models.find((m) => m.name === modelName);
 
           if (!model) {
@@ -687,6 +697,7 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
             name: t.String({ minLength: 1, error: 'Model name is required.' }),
           }),
           query: t.Object({
+            baseUrl: t.Optional(t.String()),
             context_size: t.Optional(
               t.Union([
                 t.Number({

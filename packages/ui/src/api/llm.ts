@@ -208,7 +208,8 @@ export const estimateModelVram = async (
   modelName: string,
   contextSize?: number | null,
   numGpuLayers?: number | null,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  baseUrl?: string | null
 ): Promise<VramEstimateResponse> => {
   const params: Record<string, any> = {};
   if (contextSize !== undefined && contextSize !== null) {
@@ -216,6 +217,9 @@ export const estimateModelVram = async (
   }
   if (numGpuLayers !== undefined && numGpuLayers !== null) {
     params.num_gpu_layers = numGpuLayers;
+  }
+  if (baseUrl && baseUrl.trim().length > 0) {
+    params.baseUrl = baseUrl.trim();
   }
   const response = await axios.get(
     `/api/llm/models/${encodeURIComponent(modelName)}/estimate-vram`,

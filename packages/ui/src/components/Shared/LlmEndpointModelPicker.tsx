@@ -43,6 +43,14 @@ export interface LlmEndpointModelPickerProps {
   /** Current remote URL string (controlled). */
   remoteUrl: string;
   setRemoteUrl: (url: string) => void;
+  /**
+   * The local/default LLM base URL resolved by the backend (from
+   * `LlmStatus.defaultBaseUrl`). The picker forwards this as `?baseUrl=`
+   * in Local mode so it never falls back to the sticky process-level
+   * active URL, which can be a stale remote override and would return
+   * remote models under the "Local Machine" toggle.
+   */
+  localBaseUrl: string;
   /** Disables both the toggle, the URL field, and the model select. */
   disabled?: boolean;
   /**
@@ -75,6 +83,7 @@ export const LlmEndpointModelPicker: React.FC<LlmEndpointModelPickerProps> = ({
   setIsRemote,
   remoteUrl,
   setRemoteUrl,
+  localBaseUrl,
   disabled = false,
   enabled,
   placeholder = 'Select a model...',
@@ -84,8 +93,9 @@ export const LlmEndpointModelPicker: React.FC<LlmEndpointModelPickerProps> = ({
     useAtom(remoteBaseUrlAtom);
 
   const debouncedRemoteUrl = useDebounce(remoteUrl, 500);
-  const modelsBaseUrl = isRemote ? debouncedRemoteUrl.trim() : null;
+  const modelsBaseUrl = isRemote ? debouncedRemoteUrl.trim() : localBaseUrl;
   const canFetchRemoteModels = !isRemote || isValidHttpUrl(debouncedRemoteUrl);
+  const canFetchLocalModels = !isRemote && localBaseUrl.trim().length > 0;
 
   const {
     data: availableModelsData,
@@ -93,9 +103,13 @@ export const LlmEndpointModelPicker: React.FC<LlmEndpointModelPickerProps> = ({
     isError: isErrorAvailableModels,
     refetch: refetchAvailableModels,
   } = useQuery({
-    queryKey: ['availableLlmModels', isRemote ? modelsBaseUrl : 'local'],
+    queryKey: [
+      'availableLlmModels',
+      isRemote ? `remote:${modelsBaseUrl}` : `local:${modelsBaseUrl}`,
+    ],
     queryFn: () => fetchAvailableModels(modelsBaseUrl),
-    enabled: enabled && (!isRemote || !!canFetchRemoteModels),
+    enabled:
+      enabled && (isRemote ? !!canFetchRemoteModels : canFetchLocalModels),
     retry: false,
   });
 

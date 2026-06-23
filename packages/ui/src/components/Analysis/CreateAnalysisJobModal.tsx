@@ -26,6 +26,7 @@ import {
   QuestionMarkCircledIcon,
   StarIcon,
   LightningBoltIcon,
+  GlobeIcon,
 } from '@radix-ui/react-icons';
 import {
   createAnalysisJob,
@@ -33,10 +34,11 @@ import {
   fetchTemplates,
   estimateModelVram,
   fetchGpuStats,
+  fetchLlmStatus,
 } from '../../api/api';
 import type {
   Session,
-  LlmModelInfo,
+  LlmStatus,
   Template,
   VramEstimateResponse,
 } from '../../types';
@@ -44,7 +46,6 @@ import { toastMessageAtom } from '../../store';
 import { cn } from '../../utils';
 import { formatIsoDateToYMD } from '../../helpers';
 import prettyBytes from 'pretty-bytes';
-import { LlmEndpointModelPicker } from '../Shared/LlmEndpointModelPicker';
 
 // --- Sub-component for the template picker popover ---
 const TemplatePicker: React.FC<{
@@ -171,7 +172,6 @@ export function CreateAnalysisJobModal({
   const [validationError, setValidationError] = useState<string | null>(null);
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
 
-  const [selectedModel, setSelectedModel] = useState<string>('');
   const [isTemplatePopoverOpen, setIsTemplatePopoverOpen] = useState(false);
   const [useAdvancedStrategy, setUseAdvancedStrategy] = useState(true); // Default to true
   const [contextSizeInput, setContextSizeInput] = useState('');
@@ -180,16 +180,6 @@ export function CreateAnalysisJobModal({
     null
   );
 
-  // Local / Remote LLM endpoint toggle for this analysis job. The shared
-  // LlmEndpointModelPicker renders the UI and owns the model-list query;
-  // when the user picks a remote URL we snapshot it into the create-job
-  // payload so the worker targets that endpoint. The picker persists the
-  // remote URL through `remoteBaseUrlAtom` (localStorage) so it stays in
-  // sync with the chat modal.
-  const [isRemote, setIsRemote] = useState(false);
-  const [remoteUrl, setRemoteUrl] = useState('');
-  const [availableModels, setAvailableModels] = useState<LlmModelInfo[]>([]);
-
   const { data: gpuStats } = useQuery({
     queryKey: ['gpuStats'],
     queryFn: fetchGpuStats,
@@ -197,10 +187,18 @@ export function CreateAnalysisJobModal({
     refetchInterval: 10000,
   });
 
-  const selectedModelDetails = useMemo(
-    () => availableModels.find((m) => m.name === selectedModel),
-    [availableModels, selectedModel]
-  );
+  // Fetch the currently active LLM model + context size. `staleTime: 0`
+  // guarantees a fresh GET /api/llm/status on every open — we never want
+  // a cached "model A" leaking into the picker after the user has loaded
+  // "model B" in the chat. The query is local to the modal (not lifted
+  // into the parent page) so no other view can poison the cache.
+  const { data: llmStatus } = useQuery<LlmStatus, Error>({
+    queryKey: ['llmStatus'],
+    queryFn: () => fetchLlmStatus(),
+    enabled: isOpen,
+    staleTime: 0,
+    refetchOnWindowFocus: false,
+  });
 
   const sessionQueries = useQueries({
     queries: sessionIds.map((id) => ({
@@ -227,36 +225,13 @@ export function CreateAnalysisJobModal({
     return max || null;
   }, [sessionData]);
 
-  // Auto-select a default model the first time a non-empty model list
-  // arrives while the modal is open. We only do this once per session so
-  // that toggling Local<->Remote (or any other action that clears
-  // `selectedModel` to '') leaves the picker empty until the user picks
-  // a model for the new endpoint.
-  const hasAutoSelectedRef = useRef(false);
-
-  useEffect(() => {
-    if (!isOpen) {
-      // Reset for the next time the modal opens.
-      hasAutoSelectedRef.current = false;
-      return;
-    }
-    if (availableModels.length === 0) return;
-    if (isOpen && !selectedModel && !hasAutoSelectedRef.current) {
-      const defaultModel =
-        availableModels.find((m) => m.name.includes('llama3:8b')) ||
-        availableModels[0];
-      setSelectedModel(defaultModel.name);
-      hasAutoSelectedRef.current = true;
-    }
-  }, [isOpen, availableModels, selectedModel]);
-
   const recommendedContextSize = useMemo(() => {
     if (!maxTranscriptTokens) return undefined;
-    const modelMax = selectedModelDetails?.defaultContextSize ?? null;
+    const modelMax = llmStatus?.details?.defaultContextSize ?? null;
     const base = Math.max(4096, maxTranscriptTokens + 2048);
     const rounded = Math.ceil(base / 256) * 256;
     return modelMax != null ? Math.min(rounded, modelMax) : rounded;
-  }, [maxTranscriptTokens, selectedModelDetails?.defaultContextSize]);
+  }, [maxTranscriptTokens, llmStatus?.details?.defaultContextSize]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -266,39 +241,59 @@ export function CreateAnalysisJobModal({
     }
   }, [isOpen, userTouchedContext, recommendedContextSize]);
 
+  // Snapshot the backend's currently active model + context size into the
+  // form once per open-cycle, and reset ephemeral fields. The effect waits
+  // for `llmStatus` to land before initializing, because the local useQuery
+  // refetches on every open (staleTime: 0) and `llmStatus` is `undefined`
+  // during the in-flight request. The modal no longer carries its own model
+  // selection — it always uses the chat's active model (the user changes
+  // it via Configure AI Model in the chat).
+  const prevIsOpenRef = useRef(false);
   useEffect(() => {
-    if (isOpen) {
-      setPrompt('');
-      setMapPhaseSystemPrompt('');
-      setValidationError(null);
-      setIsTemplatePopoverOpen(false);
-      setUseAdvancedStrategy(true); // Reset to default
+    if (!isOpen) {
+      prevIsOpenRef.current = false;
+      return;
+    }
+    if (prevIsOpenRef.current) return; // already initialized this open
+    if (!llmStatus) return; // wait for the fresh /api/llm/status to land
+    prevIsOpenRef.current = true;
+
+    // Reset ephemeral prompt/strategy fields every time we open.
+    setPrompt('');
+    setMapPhaseSystemPrompt('');
+    setValidationError(null);
+    setIsTemplatePopoverOpen(false);
+    setUseAdvancedStrategy(true); // Reset to default
+    setVramEstimate(null);
+    const configuredContextSize = llmStatus.configuredContextSize;
+    if (configuredContextSize && configuredContextSize > 0) {
+      setContextSizeInput(String(configuredContextSize));
+      // Mark the field as user-touched so the recommended-context
+      // useEffect below doesn't overwrite the actually configured size.
+      setUserTouchedContext(true);
+    } else {
       setContextSizeInput('');
       setUserTouchedContext(false);
-      setVramEstimate(null);
-      const timer = setTimeout(() => {
-        textAreaRef.current?.focus();
-      }, 100);
-      return () => clearTimeout(timer);
     }
-  }, [isOpen]);
+    const timer = setTimeout(() => {
+      textAreaRef.current?.focus();
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [isOpen, llmStatus]);
 
   useEffect(() => {
-    // VRAM is a local-machine concept; skip the estimate when the user is
-    // targeting a remote endpoint. The backend's `estimate-vram` endpoint
-    // 404s for remote-only models, which previously surfaced as a gray
-    // "VRAM estimation unavailable" callout.
-    // The AbortController cancels in-flight requests when dependencies
-    // change so stale responses can't overwrite the latest one.
-    if (isRemote) {
+    // VRAM is a local-machine concept; skip the estimate when the active
+    // model is loaded on a remote endpoint. The AbortController cancels
+    // in-flight requests when dependencies change so stale responses
+    // can't overwrite the latest one.
+    const activeModel = llmStatus?.activeModel;
+    const hasActiveModel = !!activeModel && activeModel !== 'default';
+    if (!hasActiveModel) {
       setVramEstimate(null);
       return;
     }
-    if (!selectedModel) {
+    if (llmStatus?.isRemoteBaseUrl) {
       setVramEstimate(null);
-      return;
-    }
-    if (!selectedModelDetails) {
       return;
     }
     const trimmedContextSize = contextSizeInput.trim();
@@ -312,7 +307,13 @@ export function CreateAnalysisJobModal({
       return;
     }
     const controller = new AbortController();
-    estimateModelVram(selectedModel, contextSize, undefined, controller.signal)
+    estimateModelVram(
+      activeModel,
+      contextSize,
+      undefined,
+      controller.signal,
+      llmStatus?.defaultBaseUrl
+    )
       .then((data) => {
         if (controller.signal.aborted) return;
         setVramEstimate(data);
@@ -321,7 +322,7 @@ export function CreateAnalysisJobModal({
         if (controller.signal.aborted) return;
         console.error('Failed to estimate VRAM:', err);
         setVramEstimate({
-          model: selectedModel,
+          model: activeModel,
           context_size: contextSize,
           estimated_vram_bytes: null,
           estimated_ram_bytes: null,
@@ -330,7 +331,12 @@ export function CreateAnalysisJobModal({
         });
       });
     return () => controller.abort();
-  }, [isRemote, selectedModel, contextSizeInput]);
+  }, [
+    llmStatus?.activeModel,
+    llmStatus?.isRemoteBaseUrl,
+    llmStatus?.defaultBaseUrl,
+    contextSizeInput,
+  ]);
 
   const vramWarning = useMemo(() => {
     if (!vramEstimate?.estimated_vram_bytes || !gpuStats?.available)
@@ -382,31 +388,19 @@ export function CreateAnalysisJobModal({
       setValidationError('No sessions selected.');
       return;
     }
-    if (!selectedModel) {
-      setValidationError('Please select a language model.');
+    const activeModel = llmStatus?.activeModel;
+    const hasActiveModel = !!activeModel && activeModel !== 'default';
+    if (!hasActiveModel) {
+      setValidationError(
+        'No model is loaded. Open Configure AI Model in the chat to load one.'
+      );
       return;
-    }
-    if (isRemote && remoteUrl.trim().length > 0) {
-      try {
-        const parsed = new URL(remoteUrl.trim());
-        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-          setValidationError(
-            'Please enter a valid http:// or https:// URL for the remote LM Studio server.'
-          );
-          return;
-        }
-      } catch {
-        setValidationError(
-          'Please enter a valid http:// or https:// URL for the remote LM Studio server.'
-        );
-        return;
-      }
     }
 
     createJobMutation.mutate({
       sessionIds,
       prompt,
-      modelName: selectedModel,
+      modelName: activeModel,
       useAdvancedStrategy,
       ...(contextSizeInput
         ? { contextSize: parseInt(contextSizeInput, 10) }
@@ -414,17 +408,16 @@ export function CreateAnalysisJobModal({
       ...(mapPhaseSystemPrompt.trim().length > 0
         ? { mapPhaseSystemPrompt: mapPhaseSystemPrompt.trim() }
         : {}),
-      // In Remote mode, snapshot the URL into the job. The worker will
-      // target it for the Map/Reduce streams regardless of what the
-      // backend's currently active URL is. In Local mode we omit it so
-      // the backend uses the active URL.
-      ...(isRemote && remoteUrl.trim().length > 0
-        ? { baseUrl: remoteUrl.trim() }
-        : {}),
+      // Snapshot the active base URL so the worker targets the same
+      // endpoint the model is loaded on, regardless of what the worker's
+      // config default is.
+      ...(llmStatus?.activeBaseUrl ? { baseUrl: llmStatus.activeBaseUrl } : {}),
     });
   };
 
   const isMutationPending = createJobMutation.isPending;
+  const hasActiveModelForSubmit =
+    !!llmStatus?.activeModel && llmStatus.activeModel !== 'default';
 
   return (
     <Dialog.Root open={isOpen} onOpenChange={onOpenChange}>
@@ -583,19 +576,29 @@ export function CreateAnalysisJobModal({
             <Text as="div" size="2" weight="medium">
               AI Configuration
             </Text>
-            <LlmEndpointModelPicker
-              selectedModel={selectedModel}
-              onSelectedModelChange={setSelectedModel}
-              isRemote={isRemote}
-              setIsRemote={setIsRemote}
-              remoteUrl={remoteUrl}
-              setRemoteUrl={setRemoteUrl}
-              disabled={isMutationPending}
-              enabled={isOpen}
-              placeholder="Select a model..."
-              onModelsChange={setAvailableModels}
-            />
-            {selectedModelDetails && (
+            <Flex direction="column" gap="1">
+              <Text size="1" color="gray">
+                Model
+              </Text>
+              <Text size="2" truncate title={llmStatus?.activeModel ?? ''}>
+                {hasActiveModelForSubmit
+                  ? llmStatus?.activeModel
+                  : '(no model loaded)'}
+              </Text>
+              <Flex align="center" gap="1">
+                {llmStatus?.isRemoteBaseUrl ? (
+                  <GlobeIcon
+                    width="12"
+                    height="12"
+                    style={{ flexShrink: 0, color: 'var(--gray-a10)' }}
+                  />
+                ) : null}
+                <Text size="1" color="gray" truncate>
+                  {llmStatus?.activeBaseUrl ?? ''}
+                </Text>
+              </Flex>
+            </Flex>
+            {llmStatus?.details && (
               <label>
                 <Text as="div" size="2" mb="1" weight="medium">
                   Context Size (Optional)
@@ -604,7 +607,7 @@ export function CreateAnalysisJobModal({
                   type="number"
                   min="1"
                   step="1024"
-                  placeholder={`Default (${selectedModelDetails.defaultContextSize?.toLocaleString() ?? 'auto'})`}
+                  placeholder={`Default (${llmStatus.details.defaultContextSize?.toLocaleString() ?? 'auto'})`}
                   value={contextSizeInput}
                   onChange={(e) => {
                     setContextSizeInput(e.target.value);
@@ -615,7 +618,7 @@ export function CreateAnalysisJobModal({
               </label>
             )}
 
-            {!isRemote && vramEstimate && (
+            {!llmStatus?.isRemoteBaseUrl && vramEstimate && (
               <Callout.Root
                 size="1"
                 color={vramEstimate.error ? 'gray' : 'blue'}
@@ -671,7 +674,7 @@ export function CreateAnalysisJobModal({
               </Callout.Root>
             )}
 
-            {!isRemote && vramWarning && (
+            {!llmStatus?.isRemoteBaseUrl && vramWarning && (
               <Callout.Root
                 size="1"
                 color={vramWarning.type === 'error' ? 'red' : 'amber'}
@@ -725,7 +728,9 @@ export function CreateAnalysisJobModal({
           </Dialog.Close>
           <Button
             onClick={handleSubmit}
-            disabled={isMutationPending || isLoadingSessions}
+            disabled={
+              isMutationPending || isLoadingSessions || !hasActiveModelForSubmit
+            }
             className="hover:brightness-110 transition-all"
           >
             {isMutationPending ? (

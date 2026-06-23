@@ -119,9 +119,12 @@ export function LlmManagementModal({
     error: availableError,
     refetch: refetchAvailableModels,
   } = useQuery({
-    queryKey: ['availableLlmModels', 'local'],
-    queryFn: () => fetchAvailableModels(),
-    enabled: isOpen,
+    queryKey: [
+      'availableLlmModels',
+      `local:${llmStatus?.defaultBaseUrl ?? ''}`,
+    ],
+    queryFn: () => fetchAvailableModels(llmStatus?.defaultBaseUrl ?? null),
+    enabled: isOpen && !!llmStatus?.defaultBaseUrl,
     gcTime: 1 * 60 * 1000,
   });
 

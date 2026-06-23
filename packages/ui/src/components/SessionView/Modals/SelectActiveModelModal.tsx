@@ -317,7 +317,8 @@ export function SelectActiveModelModal({
       selectedModel,
       contextSize,
       numGpuLayers,
-      controller.signal
+      controller.signal,
+      llmStatus?.defaultBaseUrl
     )
       .then((data) => {
         if (controller.signal.aborted) return;
@@ -342,6 +343,7 @@ export function SelectActiveModelModal({
     selectedModelDetails,
     contextSizeInput,
     numGpuLayers,
+    llmStatus?.defaultBaseUrl,
   ]);
 
   // Calculate VRAM warning based on available GPU memory
@@ -397,6 +399,7 @@ export function SelectActiveModelModal({
             setIsRemote={setIsRemote}
             remoteUrl={remoteUrl}
             setRemoteUrl={setRemoteUrl}
+            localBaseUrl={llmStatus?.defaultBaseUrl ?? ''}
             disabled={isSaving || isModelLoaded}
             enabled={isOpen}
             placeholder="Choose a model"
