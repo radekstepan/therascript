@@ -138,11 +138,14 @@ export function LlmSettingsForm({
 
   // When the user picks a model that isn't the active one, reset the
   // sampling/loading params to defaults. This mirrors the original
-  // SelectActiveModelModal behavior.
+  // SelectActiveModelModal behavior. The context size is also cleared so
+  // the recommended-value effect below can repopulate it for the new model;
+  // otherwise the previous model's value would leak into the new selection.
   useEffect(() => {
     if (state.selectedModel !== llmStatus?.activeModel) {
       onChange((prev) => ({
         ...prev,
+        contextSizeInput: '',
         numGpuLayers: undefined,
         temperature: 0.7,
         topP: 0.9,
@@ -162,17 +165,32 @@ export function LlmSettingsForm({
     return modelMax != null ? Math.min(rounded, modelMax) : rounded;
   }, [activeTranscriptTokens, selectedModelDetails?.defaultContextSize]);
 
-  // Auto-fill the input with recommended when available and user hasn't typed
+  // Auto-fill the input with recommended when available and user hasn't typed.
+  // Treat an already-populated input as authoritative: parents seed the field
+  // with the saved `configuredContextSize` when the modal opens, and clobbering
+  // it with a recommendation would silently hide the actual loaded context.
   useEffect(() => {
     if (!isOpen) return;
     if (userTouchedContext) return;
+    const trimmed = state.contextSizeInput.trim();
+    const parsed = trimmed ? parseInt(trimmed, 10) : NaN;
+    if (trimmed && Number.isFinite(parsed) && parsed > 0) {
+      setUserTouchedContext(true);
+      return;
+    }
     if (recommendedContextSize && recommendedContextSize > 0) {
       onChange((prev) => ({
         ...prev,
         contextSizeInput: String(recommendedContextSize),
       }));
     }
-  }, [isOpen, userTouchedContext, recommendedContextSize, onChange]);
+  }, [
+    isOpen,
+    userTouchedContext,
+    recommendedContextSize,
+    state.contextSizeInput,
+    onChange,
+  ]);
 
   // Update VRAM estimate when model or context size changes. VRAM is a
   // local-machine concept, so we skip the estimate entirely when the user
