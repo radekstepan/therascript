@@ -337,6 +337,7 @@ export function ChatInput({
           <TextField.Root
             ref={inputRef}
             size="2"
+            data-testid="chat-input"
             style={{ flexGrow: 1 }}
             placeholder={
               isAiResponding ? 'AI is responding...' : placeholderText

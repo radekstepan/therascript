@@ -12,6 +12,7 @@
     "e2e:ui": "playwright test --ui",
     "e2e:headed": "playwright test --headed",
     "e2e:install": "playwright install --with-deps chromium",
+    "e2e:server": "E2E_TESTING=true yarn dev --port 3003 --no-open",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {

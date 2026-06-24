@@ -50,6 +50,7 @@
     "e2e": "yarn workspace @therascript/ui e2e",
     "e2e:ui": "yarn workspace @therascript/ui e2e:ui",
     "e2e:headed": "yarn workspace @therascript/ui e2e:headed",
+    "e2e:server": "yarn workspace @therascript/ui e2e:server",
     "e2e:install": "yarn workspace @therascript/ui e2e:install"
   },
   "keywords": [],

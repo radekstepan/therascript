@@ -30,7 +30,17 @@ export default defineConfig({
   },
   webServer: {
     command: `E2E_TESTING=true yarn dev --port ${PORT} --no-open`,
-    url: BASE_URL,
+    // Healthcheck the static index.html rather than the SPA root — once
+    // webpack-dev-server has finished its first compile this asset always
+    // returns 200, whereas `/` depends on historyApiFallback resolving
+    // before the bundle has booted. The extension's hidden stdout pipe
+    // would otherwise mask a half-started server and the spec would
+    // navigate into a 404.
+    url: 'http://localhost:3003/index.html',
+    // Locally we want the Playwright VSCode extension to reuse a dev
+    // server the developer started in a terminal (via `yarn e2e:server`),
+    // so the extension's auto-spawn race doesn't drop the spec. CI
+    // always wants a fresh server with a clean MSW state.
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
     stdout: 'pipe',
