@@ -25,8 +25,11 @@ test('landing page renders mocked sessions and standalone chats', async ({
   ).toBeVisible();
 
   // Mocked session from src/mocks/handlers.ts.
-  await expect(main.getByText('Intake Session')).toBeVisible();
-  await expect(main.getByText('Jane Doe')).toBeVisible();
+  await expect(main.getByText('Intake Session').first()).toBeVisible();
+  // The analysis e2e spec added a second session with the same client
+  // name; use .first() so strict-mode getByText does not reject the
+  // two matching cells.
+  await expect(main.getByText('Jane Doe').first()).toBeVisible();
 
   // Standalone chats card + the timestamp-fallback label
   // (LandingPage.tsx renders `Chat (${formatTimestamp(...)})` when name is null).

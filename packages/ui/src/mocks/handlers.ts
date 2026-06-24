@@ -17,6 +17,10 @@
 //   - GET /api/llm/status     -> src/api/llm.ts:31 (sidebar / chat view)
 //   - POST /api/llm/set-model -> src/api/llm.ts:82 (model selector modal)
 //   - GET /api/llm/available-models -> src/api/llm.ts:52 (model picker)
+//   - POST /api/analysis-jobs      -> src/api/analysis.ts:39 (create)
+//   - GET  /api/analysis-jobs      -> src/api/analysis.ts:48 (list)
+//   - GET  /api/analysis-jobs/:id  -> src/api/analysis.ts:57 (detail)
+//   - GET  /api/analysis-jobs/:id/stream -> src/api/analysis.ts (SSE)
 import { http, HttpResponse } from 'msw';
 
 const NOW_ISO = new Date().toISOString();
@@ -36,6 +40,24 @@ const MOCK_INTAKE_SESSION = {
   whisperJobId: null,
   transcriptTokenCount: 1234,
   duration: 1800,
+  errorMessage: null,
+  showSpeakers: 1,
+};
+
+const MOCK_FOLLOWUP_SESSION = {
+  id: 2,
+  fileName: 'followup-2026-06-30.mp3',
+  clientName: 'Jane Doe',
+  sessionName: 'Follow-up Session',
+  date: '2026-06-30T12:00:00.000Z',
+  sessionType: 'followup',
+  therapy: 'cbt',
+  numSpeakers: 2,
+  audioPath: null,
+  status: 'completed',
+  whisperJobId: null,
+  transcriptTokenCount: 1450,
+  duration: 1950,
   errorMessage: null,
   showSpeakers: 1,
 };
@@ -154,6 +176,29 @@ const REMOTE_MODELS = [
   },
 ];
 
+// --- Mutable analysis job state for the deep-analysis e2e spec ---------
+// The analysis e2e spec exercises the "Analyze Multiple Sessions" modal
+// (CreateAnalysisJobModal): it POSTs to /api/analysis-jobs, expects the
+// app to navigate to /analysis-jobs/:jobId, then asserts the streamed
+// strategy + map + reduce phases render the end-state UI. The POST
+// handler snapshots the request body here so the GET /:jobId and SSE
+// stream handlers can echo it back consistently.
+const MOCK_ANALYSIS_JOB_ID = 1;
+const MOCK_INTERMEDIATE_QUESTION =
+  'For each session, identify recurring anxiety triggers and the coping strategies the patient reported. Note any CBT techniques the therapist modeled in response.';
+const MOCK_FINAL_SYNTHESIS_INSTRUCTIONS =
+  'Synthesize the per-session findings into a single narrative that highlights evolution over time, common patterns, and concrete recommendations for the next session.';
+const MOCK_REDUCE_RESPONSE =
+  'Across both sessions the patient consistently described anxiety spikes tied to work deadlines and a tendency to catastrophize. In the follow-up, the therapist introduced cognitive reframing and the patient reported partial success applying it. Recommended next steps: continue reframing practice, introduce a worry log, and revisit the link between sleep quality and anxiety intensity.';
+
+let mockAnalysisJob: {
+  id: number;
+  originalPrompt: string;
+  shortPrompt: string;
+  modelName: string;
+  sessionIds: number[];
+} | null = null;
+
 export const handlers = [
   // Readiness must return 200 + ready: true; otherwise App.tsx:241-243
   // mounts the <ReadinessOverlay/> and never renders the Landing page.
@@ -170,7 +215,9 @@ export const handlers = [
     })
   ),
 
-  http.get('/api/sessions/', () => HttpResponse.json([MOCK_INTAKE_SESSION])),
+  http.get('/api/sessions/', () =>
+    HttpResponse.json([MOCK_INTAKE_SESSION, MOCK_FOLLOWUP_SESSION])
+  ),
 
   // Single-session fetch (used by SessionView). Adds the mocked chat id
   // so the SessionContent renders ChatInterface instead of StartChatPrompt.
@@ -185,6 +232,18 @@ export const handlers = [
           name: null,
         },
       ],
+    })
+  ),
+
+  // Second session for the deep-analysis e2e spec. The spec selects two
+  // sessions on the Landing page and submits them to
+  // CreateAnalysisJobModal. The analysis handlers below echo this
+  // session back as a completed intermediate summary so the
+  // "Intermediate Analysis" grid renders two cards.
+  http.get('/api/sessions/2', () =>
+    HttpResponse.json({
+      ...MOCK_FOLLOWUP_SESSION,
+      chats: [],
     })
   ),
 
@@ -400,6 +459,210 @@ export const handlers = [
       activeBaseUrl: MOCK_LOCAL_DEFAULT_BASE_URL,
       defaultBaseUrl: MOCK_LOCAL_DEFAULT_BASE_URL,
       isRemoteBaseUrl: false,
+    });
+  }),
+
+  // --- Analysis job handlers (deep-analysis e2e spec) -------------------
+  // POST /api/analysis-jobs — CreateAnalysisJobModal.submit mutates here.
+  // We snapshot the request body so GET /:jobId and the SSE stream can
+  // echo the same prompt, model, and sessionIds back. The backend returns
+  // 202 + { jobId }; we follow the real shape so the modal's
+  // `navigate('/analysis-jobs')` lands on the correct URL.
+  http.post('/api/analysis-jobs', async ({ request }) => {
+    const body = (await request.json()) as {
+      prompt?: string;
+      modelName?: string | null;
+      sessionIds?: number[];
+    };
+    mockAnalysisJob = {
+      id: MOCK_ANALYSIS_JOB_ID,
+      originalPrompt: body.prompt ?? '',
+      shortPrompt: 'Anxiety Trends Analysis',
+      modelName: body.modelName || mockActiveModel || 'qwen2.5-7b-instruct',
+      sessionIds: body.sessionIds ?? [],
+    };
+    return HttpResponse.json({ jobId: MOCK_ANALYSIS_JOB_ID }, { status: 202 });
+  }),
+
+  // GET /api/analysis-jobs — list view. The analysis e2e spec lands on
+  // /analysis-jobs (the list) after submitting the modal, so the row
+  // must be present for the test to click through to the detail view.
+  http.get('/api/analysis-jobs', () => {
+    if (!mockAnalysisJob) return HttpResponse.json([]);
+    const created = Date.now() - 5_000;
+    return HttpResponse.json([
+      {
+        id: mockAnalysisJob.id,
+        original_prompt: mockAnalysisJob.originalPrompt,
+        short_prompt: mockAnalysisJob.shortPrompt,
+        status: 'completed',
+        final_result: MOCK_REDUCE_RESPONSE,
+        error_message: null,
+        created_at: created,
+        completed_at: created + 4_000,
+        model_name: mockAnalysisJob.modelName,
+        context_size: 8192,
+        strategy_json: JSON.stringify({
+          intermediate_question: MOCK_INTERMEDIATE_QUESTION,
+          final_synthesis_instructions: MOCK_FINAL_SYNTHESIS_INSTRUCTIONS,
+        }),
+      },
+    ]);
+  }),
+
+  // GET /api/analysis-jobs/:jobId — full job detail with parsed strategy
+  // + per-session summaries + final_result. Mirrors the real backend's
+  // `getAnalysisJobHandler` shape (analysisRoutes.ts:53) so React Query
+  // and the JobDetailView can render the end-state UI directly.
+  http.get('/api/analysis-jobs/1', () => {
+    if (!mockAnalysisJob) {
+      return HttpResponse.json({ error: 'Job not found' }, { status: 404 });
+    }
+    const created = Date.now() - 5_000;
+    const summaries = mockAnalysisJob.sessionIds.map((sessionId, idx) => {
+      const session =
+        sessionId === 1 ? MOCK_INTAKE_SESSION : MOCK_FOLLOWUP_SESSION;
+      return {
+        id: 100 + idx,
+        analysis_job_id: MOCK_ANALYSIS_JOB_ID,
+        session_id: sessionId,
+        summary_text: `Session ${sessionId} analysis: noted anxiety spikes tied to work deadlines.`,
+        status: 'completed',
+        error_message: null,
+        sessionName: session.sessionName,
+        sessionDate: session.date,
+      };
+    });
+    return HttpResponse.json({
+      id: MOCK_ANALYSIS_JOB_ID,
+      original_prompt: mockAnalysisJob.originalPrompt,
+      short_prompt: mockAnalysisJob.shortPrompt,
+      status: 'completed',
+      final_result: MOCK_REDUCE_RESPONSE,
+      error_message: null,
+      created_at: created,
+      completed_at: created + 4_000,
+      model_name: mockAnalysisJob.modelName,
+      context_size: 8192,
+      strategy_json: JSON.stringify({
+        intermediate_question: MOCK_INTERMEDIATE_QUESTION,
+        final_synthesis_instructions: MOCK_FINAL_SYNTHESIS_INSTRUCTIONS,
+      }),
+      summaries,
+      strategy: {
+        intermediate_question: MOCK_INTERMEDIATE_QUESTION,
+        final_synthesis_instructions: MOCK_FINAL_SYNTHESIS_INSTRUCTIONS,
+      },
+    });
+  }),
+
+  // GET /api/analysis-jobs/:jobId/stream — SSE feed for the JobDetailView.
+  // Mirrors the event-shape contract in useAnalysisStream.ts:8-33 and
+  // streamAnalysisJobHandler (analysisHandler.ts:644). The real handler
+  // uses setImmediate between events to yield to the event loop; we use
+  // setTimeout(50ms) for the same reason — without a yield React cannot
+  // process intermediate state updates between enqueues.
+  //
+  // For the end-state-only assertion, we send the full completed state
+  // in the snapshot and then a terminal `status: 'completed'` to close
+  // the EventSource (useAnalysisStream.ts:285). The hook restores the
+  // map/reduce logs from the snapshot, the JobDetailView's polled
+  // `analysisJob` query returns the matching completed state from the
+  // GET /:jobId handler above, and the UI shows the deep-analysis
+  // end-state without any per-phase timing assertions.
+  http.get('/api/analysis-jobs/1/stream', () => {
+    if (!mockAnalysisJob) {
+      return new HttpResponse('Job not found', { status: 404 });
+    }
+    const created = Date.now() - 5_000;
+    const completed = created + 4_000;
+    const summaries = mockAnalysisJob.sessionIds.map((sessionId, idx) => {
+      const session =
+        sessionId === 1 ? MOCK_INTAKE_SESSION : MOCK_FOLLOWUP_SESSION;
+      return {
+        id: 100 + idx,
+        analysis_job_id: MOCK_ANALYSIS_JOB_ID,
+        session_id: sessionId,
+        summary_text: `Session ${sessionId} analysis: noted anxiety spikes tied to work deadlines.`,
+        status: 'completed',
+        error_message: null,
+        sessionName: session.sessionName,
+        sessionDate: session.date,
+      };
+    });
+    const jobSnapshot = {
+      id: MOCK_ANALYSIS_JOB_ID,
+      original_prompt: mockAnalysisJob.originalPrompt,
+      short_prompt: mockAnalysisJob.shortPrompt,
+      status: 'completed',
+      final_result: MOCK_REDUCE_RESPONSE,
+      error_message: null,
+      created_at: created,
+      completed_at: completed,
+      model_name: mockAnalysisJob.modelName,
+      context_size: 8192,
+      strategy_json: JSON.stringify({
+        intermediate_question: MOCK_INTERMEDIATE_QUESTION,
+        final_synthesis_instructions: MOCK_FINAL_SYNTHESIS_INSTRUCTIONS,
+      }),
+    };
+
+    const encoder = new TextEncoder();
+    const sse = (payload: unknown) =>
+      encoder.encode(`data: ${JSON.stringify(payload)}\n\n`);
+
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const enqueue = (data: object) => {
+          controller.enqueue(sse(data));
+        };
+
+        // 1. Snapshot with the fully completed state. The hook reads
+        // `summaries[*].summary_text` into mapLogs and
+        // `job.final_result` into reduceLog so the visible UI matches
+        // the final answer when the stream closes.
+        enqueue({
+          type: 'snapshot',
+          phase: 'status',
+          job: jobSnapshot,
+          summaries,
+        });
+
+        // 2. Send a `reduce` end event with non-zero completionTokens
+        // + duration so the hook populates reduceMetrics. The
+        // AnalysisJobsPage.tsx:621 tokens/s footer is gated on both
+        // fields being truthy, so without this the metric never
+        // renders. The end event must arrive *before* the terminal
+        // status because the hook closes the EventSource on
+        // status: 'completed' (useAnalysisStream.ts:285).
+        enqueue({
+          type: 'end',
+          phase: 'reduce',
+          promptTokens: 1840,
+          completionTokens: 96,
+          duration: 4800,
+        });
+
+        // 3. Yield so the snapshot + end events can flush, then send
+        // the terminal status event to close the stream.
+        setTimeout(() => {
+          enqueue({
+            type: 'status',
+            phase: 'status',
+            status: 'completed',
+          });
+          controller.close();
+        }, 50);
+      },
+    });
+
+    return new HttpResponse(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+        'X-Accel-Buffering': 'no',
+        Connection: 'keep-alive',
+      },
     });
   }),
 ];
