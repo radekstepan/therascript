@@ -405,7 +405,6 @@ describe('ModuleName', () => {
 | ------------------ | ----------------------------- |
 | `.env`             | Root shared config (HF_TOKEN) |
 | `.env.api.dev`     | API development               |
-| `.env.api.mock`    | API mock mode                 |
 | `.env.api.prod`    | API production                |
 | `.env.worker.dev`  | Worker development            |
 | `.env.worker.prod` | Worker production             |

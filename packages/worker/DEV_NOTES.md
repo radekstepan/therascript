@@ -18,7 +18,7 @@ Purpose: BullMQ consumers for long-running jobs (transcription, multi-session an
 
 ## Environment
 
-- `NODE_ENV`, `APP_MODE`
+- `NODE_ENV`
 - `DB_PATH` (defaults to `../api/data/therapy-analyzer-dev.sqlite` resolved from package dir)
 - `REDIS_HOST`, `REDIS_PORT`
 - `WHISPER_API_URL`, `WHISPER_MODEL`

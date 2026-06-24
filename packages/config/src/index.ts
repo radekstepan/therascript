@@ -81,10 +81,6 @@ const config = {
     host: getEnvVar('HOST', '0.0.0.0'),
     nodeEnv: nodeEnv as 'development' | 'production',
     isProduction: isProduction,
-    appMode: getEnvVar('APP_MODE', 'development') as
-      | 'development'
-      | 'production'
-      | 'mock',
     corsOrigin: getEnvVar('CORS_ORIGIN', 'http://localhost:3002'),
   },
   redis: {

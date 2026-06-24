@@ -57,12 +57,6 @@ This package contains the React-based frontend application for Therascript. It p
     # Run from project root
     yarn dev
     ```
-*   **Development with Mock API (via root `yarn dev:mock`):**
-    *   Starts the UI dev server alongside the API running in mock mode.
-    ```bash
-    # Run from project root
-    yarn dev:mock
-    ```
 *   **Building for Production:**
     *   Run `yarn build:ui` from the root directory.
     *   This uses `webpack --mode production` to create optimized static assets in the `packages/ui/dist` folder. These assets would typically be served by a static file server (like Nginx or Caddy) or hosted on a platform like Vercel or Netlify in a real deployment.

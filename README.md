@@ -125,7 +125,7 @@ Before you begin, ensure you have the following installed:
     *   Copy the example environment file `.env.example` to:
         *   `.env.api.dev` (for the API in development)
         *   `.env.worker.dev` (for the background worker in development)
-        *   And optionally `.env.api.mock`, `.env.api.prod`.
+        *   And optionally `.env.api.prod`.
     *   Adjust the variables as needed for your setup (e.g., `LM_STUDIO_BASE_URL`, `DB_PATH`).
 
 4.  **Build All Packages:**
@@ -229,16 +229,6 @@ SHUTDOWN_HOST=127.0.0.1      # passed to the run-dev / run-prod wrapper
 UI_HOST=127.0.0.1            # for the webpack dev server
 ```
 …and put a reverse proxy (Tailscale `serve` or any other) in front.
-
-### Mock Mode
-
-For frontend development without running real AI/transcription services, you can use mock mode.
-
-```bash
-# Run from project root
-yarn dev:mock
-```
-This starts the UI and a mocked version of the API, providing placeholder data and responses.
 
 ### Stopping the Application
 

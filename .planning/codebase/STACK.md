@@ -140,7 +140,6 @@
 
 - `.env` — Root environment (shared, includes `HF_TOKEN`)
 - `.env.api.dev` — API development configuration
-- `.env.api.mock` — API mock mode (stubbed services)
 - `.env.api.prod` — API production configuration
 - `.env.worker.dev` — Worker development configuration
 - `.env.worker.prod` — Worker production configuration

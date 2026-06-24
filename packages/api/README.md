@@ -16,7 +16,6 @@ This package contains the backend API server for the Therascript application, bu
 *   Includes API endpoints for managing Docker container status (`docker` service).
 *   Uses a structured error handling approach (`ApiError` subclasses).
 *   Provides API documentation via Swagger UI (`@elysiajs/swagger`).
-*   Supports a "mock" mode (`APP_MODE=mock` in `.env`) for frontend development without running real LM Studio/Whisper services.
 
 ## Key Technologies
 
@@ -32,12 +31,11 @@ This package contains the backend API server for the Therascript application, bu
 
 1.  **Dependencies:** Installed via `yarn install` in the project root.
 2.  **Environment Variables:**
-    *   API configuration is managed via `.env.api.*` files in the project root (e.g., `.env.api.dev`, `.env.api.prod`, `.env.api.mock`).
+    *   API configuration is managed via `.env.api.*` files in the project root (e.g., `.env.api.dev`, `.env.api.prod`).
     *   These files are loaded by Node.js using the `--env-file` flag in the root `package.json` scripts.
     *   Key variables include:
         *   `PORT`: API server port.
         *   `NODE_ENV`: `development` or `production`.
-        *   `APP_MODE`: `development`, `production`, or `mock`.
         *   `CORS_ORIGIN`: Allowed frontend origin URL.
         *   `LM_STUDIO_BASE_URL`: URL of the LM Studio service (if updated).
         *   `LM_STUDIO_MODEL`: Default/active LM Studio model.
@@ -46,7 +44,6 @@ This package contains the backend API server for the Therascript application, bu
         *   `DB_PATH`: Path *relative to this package directory* for the SQLite database file.
         *   `DB_UPLOADS_DIR`: Path *relative to this package directory* for storing uploaded audio files.
         *   `UPLOAD_MAX_FILE_SIZE`: Maximum allowed upload size.
-        *   Mock-specific variables (`MOCK_*_DELAY_MS`, `MOCK_LLM_MODEL_NAME`).
 3.  **Database Initialization:** The SQLite database file and schema are created automatically on first run based on the `DB_PATH` and the schema defined in `src/db/sqliteService.ts`.
 
 ## Running the Server
@@ -57,13 +54,6 @@ This package contains the backend API server for the Therascript application, bu
     ```bash
     # Run from project root
     yarn dev
-    ```
-*   **Mock Mode (via root `yarn dev:mock`):**
-    *   Builds the API and runs the server using `.env.api.mock`.
-    *   Uses mock implementations for LM Studio and Whisper services.
-    ```bash
-    # Run from project root
-    yarn dev:mock
     ```
 *   **Production Mode (via root `yarn start` or `yarn start:api`):**
     *   Builds the API (`tsc`).
