@@ -35,8 +35,8 @@ const MOCK_INTAKE_SESSION = {
   clientName: 'Jane Doe',
   sessionName: 'Intake Session',
   date: `${INTAKE_DATE}T12:00:00.000Z`,
-  sessionType: 'intake',
-  therapy: 'cbt',
+  sessionType: 'Intake',
+  therapy: 'CBT',
   numSpeakers: 2,
   audioPath: null,
   status: 'completed',
@@ -53,8 +53,8 @@ const MOCK_FOLLOWUP_SESSION = {
   clientName: 'Jane Doe',
   sessionName: 'Follow-up Session',
   date: '2026-06-30T12:00:00.000Z',
-  sessionType: 'followup',
-  therapy: 'cbt',
+  sessionType: 'Individual',
+  therapy: 'CBT',
   numSpeakers: 2,
   audioPath: null,
   status: 'completed',
@@ -201,6 +201,297 @@ let mockAnalysisJob: {
   modelName: string;
   sessionIds: number[];
 } | null = null;
+
+// ============================================================
+// --- e2e mock state (search, crud, templates, analysis jobs) --
+// ============================================================
+// Mutable stores for the new specs. Kept separate from
+// `mockChatMessages` and `mockAnalysisJob` so concurrent specs
+// don't clobber each other. `e2eMockSeed` (below) reseeds them
+// via POST /api/__e2e/reset in the specs' `beforeEach`.
+let e2eSessions: Array<{
+  id: number;
+  fileName: string;
+  clientName: string;
+  sessionName: string;
+  date: string;
+  sessionType: string;
+  therapy: string;
+  numSpeakers: number;
+  audioPath: string | null;
+  status: string;
+  whisperJobId: string | null;
+  transcriptTokenCount: number;
+  duration: number;
+  errorMessage: string | null;
+  showSpeakers: number;
+}> = [{ ...MOCK_INTAKE_SESSION }, { ...MOCK_FOLLOWUP_SESSION }];
+
+let e2eSessionChats: Record<
+  number,
+  Array<{
+    id: number;
+    sessionId: number;
+    timestamp: number;
+    name: string | null;
+  }>
+> = {
+  // 1 has two chats. Chat 10 is the most recent so the existing
+  // session-chat.spec.ts auto-redirect to it still works; the
+  // chat-navigation.spec.ts navigates to chat 11 explicitly.
+  1: [
+    {
+      id: 10,
+      sessionId: 1,
+      timestamp: Date.parse('2026-06-23T14:00:00.000Z'),
+      name: null,
+    },
+    {
+      id: 11,
+      sessionId: 1,
+      timestamp: Date.parse('2026-06-23T12:30:00.000Z'),
+      name: 'Second chat',
+    },
+  ],
+  2: [],
+  3: [],
+};
+
+let e2eStandaloneChats: Array<{
+  id: number;
+  sessionId: null;
+  timestamp: number;
+  name: string | null;
+  tags: string[] | null;
+}> = [
+  {
+    id: 42,
+    sessionId: null,
+    timestamp: Date.parse('2026-06-22T10:15:00.000Z'),
+    name: null,
+    tags: null,
+  },
+  { id: 43, sessionId: null, timestamp: Date.now(), name: null, tags: null },
+];
+
+let e2eTemplates: Array<{
+  id: number;
+  title: string;
+  text: string;
+  createdAt: number;
+}> = [
+  {
+    id: 1,
+    title: 'system_analyst',
+    text: 'You are a careful clinical analyst. Cite the speaker before each claim.',
+    createdAt: Date.parse('2026-06-01T09:00:00.000Z'),
+  },
+  {
+    id: 2,
+    title: 'CBT reframing coach',
+    text: 'Help the user identify cognitive distortions and propose reframes.',
+    createdAt: Date.parse('2026-06-10T11:00:00.000Z'),
+  },
+];
+
+let e2eNextTemplateId = 3;
+
+let e2eAnalysisJobs: Array<{
+  id: number;
+  original_prompt: string;
+  short_prompt: string;
+  status:
+    | 'processing'
+    | 'completed'
+    | 'failed'
+    | 'canceled'
+    | 'canceling'
+    | 'pending'
+    | 'generating_strategy'
+    | 'mapping'
+    | 'reducing';
+  final_result: string | null;
+  error_message: string | null;
+  created_at: number;
+  completed_at: number | null;
+  model_name: string;
+  context_size: number;
+  strategy_json: string;
+}> = [
+  {
+    id: 100,
+    original_prompt: 'Summarize sleep issues across these sessions.',
+    short_prompt: 'Sleep Issues (mapping)',
+    status: 'mapping',
+    final_result: null,
+    error_message: null,
+    created_at: Date.now() - 60_000,
+    completed_at: null,
+    model_name: 'qwen2.5-7b-instruct',
+    context_size: 8192,
+    strategy_json: JSON.stringify({
+      intermediate_question: 'Identify sleep-related complaints per session.',
+      final_synthesis_instructions:
+        'Combine the per-session findings into a short narrative.',
+    }),
+  },
+  {
+    id: 101,
+    original_prompt: 'Find progress markers for client goals.',
+    short_prompt: 'Client Progress (completed)',
+    status: 'completed',
+    final_result:
+      'The client reached two of three goals in the last 4 sessions.',
+    error_message: null,
+    created_at: Date.now() - 600_000,
+    completed_at: Date.now() - 580_000,
+    model_name: 'mistral-7b-local',
+    context_size: 8192,
+    strategy_json: JSON.stringify({
+      intermediate_question: 'List per-session goal progress.',
+      final_synthesis_instructions:
+        'Aggregate progress markers into a summary.',
+    }),
+  },
+];
+
+// Readiness overlay test hook. The readiness spec sets this to false
+// before navigating to the app; the readiness handler reads it on
+// every call so the overlay either shows or clears accordingly.
+//
+// The flag is persisted to `localStorage` (key: `e2e:readiness`)
+// because MSW handlers run inside the service worker's JS
+// context, which is a different realm from the page's
+// `globalThis`. `localStorage` is the only storage the page and
+// the SW share. Page navigations re-evaluate the page's bundle
+// and would otherwise reset a module-level `let`, but the
+// `localStorage` write survives.
+const E2E_READINESS_KEY = 'e2e:readiness';
+type ReadinessShape = {
+  ready: boolean;
+  services: {
+    database: string;
+    elasticsearch: string;
+    llm: string;
+    whisper: string;
+  };
+};
+const DEFAULT_READINESS: ReadinessShape = {
+  ready: true,
+  services: {
+    database: 'connected',
+    elasticsearch: 'connected',
+    llm: 'connected',
+    whisper: 'connected',
+  },
+};
+const readReadiness = (): ReadinessShape => {
+  try {
+    const raw = localStorage.getItem(E2E_READINESS_KEY);
+    if (!raw) return DEFAULT_READINESS;
+    return { ...DEFAULT_READINESS, ...JSON.parse(raw) };
+  } catch {
+    return DEFAULT_READINESS;
+  }
+};
+const writeReadiness = (next: ReadinessShape) => {
+  try {
+    localStorage.setItem(E2E_READINESS_KEY, JSON.stringify(next));
+  } catch {
+    // Ignore — localStorage is unavailable in some test contexts.
+  }
+};
+
+const e2eMockSeed = () => {
+  e2eSessions = [{ ...MOCK_INTAKE_SESSION }, { ...MOCK_FOLLOWUP_SESSION }];
+  e2eSessionChats = {
+    1: [
+      {
+        id: 10,
+        sessionId: 1,
+        timestamp: Date.parse('2026-06-23T14:00:00.000Z'),
+        name: null,
+      },
+      {
+        id: 11,
+        sessionId: 1,
+        timestamp: Date.parse('2026-06-23T12:30:00.000Z'),
+        name: 'Second chat',
+      },
+    ],
+    2: [],
+    3: [],
+  };
+  e2eStandaloneChats = [
+    {
+      id: 42,
+      sessionId: null,
+      timestamp: Date.parse('2026-06-22T10:15:00.000Z'),
+      name: null,
+      tags: null,
+    },
+    {
+      id: 43,
+      sessionId: null,
+      timestamp: Date.now(),
+      name: null,
+      tags: null,
+    },
+  ];
+  e2eTemplates = [
+    {
+      id: 1,
+      title: 'system_analyst',
+      text: 'You are a careful clinical analyst. Cite the speaker before each claim.',
+      createdAt: Date.parse('2026-06-01T09:00:00.000Z'),
+    },
+    {
+      id: 2,
+      title: 'CBT reframing coach',
+      text: 'Help the user identify cognitive distortions and propose reframes.',
+      createdAt: Date.parse('2026-06-10T11:00:00.000Z'),
+    },
+  ];
+  e2eNextTemplateId = 3;
+  e2eAnalysisJobs = [
+    {
+      id: 100,
+      original_prompt: 'Summarize sleep issues across these sessions.',
+      short_prompt: 'Sleep Issues (mapping)',
+      status: 'mapping',
+      final_result: null,
+      error_message: null,
+      created_at: Date.now() - 60_000,
+      completed_at: null,
+      model_name: 'qwen2.5-7b-instruct',
+      context_size: 8192,
+      strategy_json: JSON.stringify({
+        intermediate_question: 'Identify sleep-related complaints per session.',
+        final_synthesis_instructions:
+          'Combine the per-session findings into a short narrative.',
+      }),
+    },
+    {
+      id: 101,
+      original_prompt: 'Find progress markers for client goals.',
+      short_prompt: 'Client Progress (completed)',
+      status: 'completed',
+      final_result:
+        'The client reached two of three goals in the last 4 sessions.',
+      error_message: null,
+      created_at: Date.now() - 600_000,
+      completed_at: Date.now() - 580_000,
+      model_name: 'mistral-7b-local',
+      context_size: 8192,
+      strategy_json: JSON.stringify({
+        intermediate_question: 'List per-session goal progress.',
+        final_synthesis_instructions:
+          'Aggregate progress markers into a summary.',
+      }),
+    },
+  ];
+  writeReadiness(DEFAULT_READINESS);
+};
 
 let mockStandaloneChatMessages: Array<{
   id: number;
@@ -419,52 +710,10 @@ const buildUsageLogs = () => {
 };
 
 export const handlers = [
-  // Readiness must return 200 + ready: true; otherwise App.tsx:241-243
-  // mounts the <ReadinessOverlay/> and never renders the Landing page.
-  http.get('/api/status/readiness', () =>
-    HttpResponse.json({
-      ready: true,
-      services: {
-        database: 'connected',
-        elasticsearch: 'connected',
-        llm: 'connected',
-        whisper: 'connected',
-      },
-      timestamp: NOW_ISO,
-    })
-  ),
-
-  http.get('/api/sessions/', () =>
-    HttpResponse.json([MOCK_INTAKE_SESSION, MOCK_FOLLOWUP_SESSION])
-  ),
-
-  // Single-session fetch (used by SessionView). Adds the mocked chat id
-  // so the SessionContent renders ChatInterface instead of StartChatPrompt.
-  http.get('/api/sessions/1', () =>
-    HttpResponse.json({
-      ...MOCK_INTAKE_SESSION,
-      chats: [
-        {
-          id: MOCK_CHAT_ID,
-          sessionId: 1,
-          timestamp: Date.parse('2026-06-23T12:30:00.000Z'),
-          name: null,
-        },
-      ],
-    })
-  ),
-
-  // Second session for the deep-analysis e2e spec. The spec selects two
-  // sessions on the Landing page and submits them to
-  // CreateAnalysisJobModal. The analysis handlers below echo this
-  // session back as a completed intermediate summary so the
-  // "Intermediate Analysis" grid renders two cards.
-  http.get('/api/sessions/2', () =>
-    HttpResponse.json({
-      ...MOCK_FOLLOWUP_SESSION,
-      chats: [],
-    })
-  ),
+  // Readiness, sessions list, single-session fetch, and the chat list
+  // are all served by the e2e-aware handlers further below. The block
+  // intentionally sits after the existing transcript/chat endpoints
+  // so those keep working for the chat + transcript-edit specs.
 
   // Structured transcript paragraphs for the intake session. Small but
   // non-empty so the Transcription panel renders content and the
@@ -514,21 +763,6 @@ export const handlers = [
         speaker: 'Therapist',
       },
     ])
-  ),
-
-  // Chat details for the mocked chat id. Starts with an empty messages
-  // list so the chat input is enabled once a model is loaded, then
-  // accumulates messages as POST /messages streams complete so the
-  // post-stream invalidateQueries in ChatInterface does not clobber the
-  // optimistic insert.
-  http.get('/api/sessions/1/chats/10', () =>
-    HttpResponse.json({
-      id: MOCK_CHAT_ID,
-      sessionId: 1,
-      timestamp: Date.parse('2026-06-23T12:30:00.000Z'),
-      name: null,
-      messages: mockChatMessages,
-    })
   ),
 
   // Context-usage snapshot for the active chat. Non-zero prompt/percent
@@ -627,31 +861,8 @@ export const handlers = [
     });
   }),
 
-  http.get('/api/chats', () =>
-    HttpResponse.json([
-      MOCK_STANDALONE_CHAT,
-      {
-        id: 43,
-        sessionId: null,
-        timestamp: Date.now(),
-        name: null,
-        tags: null,
-      },
-    ])
-  ),
-
-  http.post('/api/chats', () => {
-    return HttpResponse.json(
-      {
-        id: 43,
-        sessionId: null,
-        timestamp: Date.now(),
-        name: null,
-        tags: null,
-      },
-      { status: 201 }
-    );
-  }),
+  // /api/chats list + create is served by the e2e-aware handlers
+  // further below.
 
   http.get('/api/chats/:chatId', ({ params }) => {
     const chatId = parseInt(params.chatId as string, 10);
@@ -905,31 +1116,12 @@ export const handlers = [
     return HttpResponse.json({ jobId: MOCK_ANALYSIS_JOB_ID }, { status: 202 });
   }),
 
-  // GET /api/analysis-jobs — list view. The analysis e2e spec lands on
-  // /analysis-jobs (the list) after submitting the modal, so the row
-  // must be present for the test to click through to the detail view.
-  http.get('/api/analysis-jobs', () => {
-    if (!mockAnalysisJob) return HttpResponse.json([]);
-    const created = Date.now() - 5_000;
-    return HttpResponse.json([
-      {
-        id: mockAnalysisJob.id,
-        original_prompt: mockAnalysisJob.originalPrompt,
-        short_prompt: mockAnalysisJob.shortPrompt,
-        status: 'completed',
-        final_result: MOCK_REDUCE_RESPONSE,
-        error_message: null,
-        created_at: created,
-        completed_at: created + 4_000,
-        model_name: mockAnalysisJob.modelName,
-        context_size: 8192,
-        strategy_json: JSON.stringify({
-          intermediate_question: MOCK_INTERMEDIATE_QUESTION,
-          final_synthesis_instructions: MOCK_FINAL_SYNTHESIS_INSTRUCTIONS,
-        }),
-      },
-    ]);
-  }),
+  // GET /api/analysis-jobs — list view. The union of
+  // `e2eAnalysisJobs` (analysis-jobs.spec.ts) and `mockAnalysisJob`
+  // (the deep-analysis spec) is served by the e2e-aware handler
+  // further below. The deep-analysis spec finds its row by the
+  // unique `Anxiety Trends Analysis` short_prompt so the order is
+  // irrelevant.
 
   // GET /api/analysis-jobs/:jobId — full job detail with parsed strategy
   // + per-session summaries + final_result. Mirrors the real backend's
@@ -1123,4 +1315,372 @@ export const handlers = [
       offset: 0,
     });
   }),
+
+  // ============================================================
+  // --- e2e mock state (search, crud, templates, analysis jobs) --
+  // ============================================================
+  // The state itself is declared at module scope above (so the
+  // handlers stay closure-light). The handlers below only read /
+  // mutate the same variables.
+
+  // Test-only hooks. Production code never hits these.
+  http.post('/api/__e2e/reset', () => {
+    e2eMockSeed();
+    return HttpResponse.json({ ok: true });
+  }),
+  http.post('/api/__e2e/set-ready', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      ready?: boolean;
+      services?: ReadinessShape['services'];
+    };
+    const current = readReadiness();
+    const next: ReadinessShape = {
+      ready: typeof body.ready === 'boolean' ? body.ready : current.ready,
+      services: body.services ?? current.services,
+    };
+    writeReadiness(next);
+    return HttpResponse.json({ ok: true });
+  }),
+
+  // GET /api/status/readiness — reads the localStorage-backed flag
+  // so the readiness spec can flip the overlay on/off across page
+  // navigations. The page and the MSW service worker share
+  // localStorage, while the page's module-level state would reset
+  // on every page navigation.
+  http.get('/api/status/readiness', () => {
+    const r = readReadiness();
+    return HttpResponse.json({
+      ready: r.ready,
+      services: r.services,
+      timestamp: new Date().toISOString(),
+    });
+  }),
+
+  // --- Search (search.spec.ts) ------------------------------------
+  // Mirrors src/api/search.ts — query is the lowercase "q" param.
+  // Returns one transcript hit + one chat hit for "anxiety" so the
+  // spec can assert both navigation branches, and an empty result set
+  // for any other query.
+  http.get('/api/search', ({ request }) => {
+    const url = new URL(request.url);
+    const q = (url.searchParams.get('q') || '').toLowerCase();
+    if (!q || (!q.includes('anxious') && !q.includes('anxiety'))) {
+      return HttpResponse.json({ query: q, total: 0, results: [] });
+    }
+    return HttpResponse.json({
+      query: q,
+      total: 2,
+      results: [
+        {
+          id: '1_1',
+          type: 'transcript',
+          chatId: null,
+          sessionId: 1,
+          sender: null,
+          timestamp: 6000,
+          snippet:
+            'I have been feeling anxious for the past few months, especially at work.',
+          highlights: {
+            text: [
+              'I have been feeling <mark>anxious</mark> for the past few months, especially at work.',
+            ],
+          },
+          score: 2.5,
+          clientName: 'Jane Doe',
+        },
+        {
+          id: 'chat-msg-100',
+          type: 'chat',
+          chatId: 10,
+          sessionId: 1,
+          sender: 'user',
+          timestamp: Date.now() - 60_000,
+          snippet: 'What coping strategies have you tried for anxiety?',
+          highlights: {
+            text: [
+              'What coping strategies have you tried for <mark>anxiety</mark>?',
+            ],
+          },
+          score: 1.8,
+          clientName: 'Jane Doe',
+        },
+      ],
+    });
+  }),
+
+  // --- Session CRUD (crud.spec.ts) -------------------------------
+  // GET /api/sessions/ — served from the mutable `e2eSessions` list
+  // so delete + edit are observable on the next landing fetch.
+  http.get('/api/sessions/', () => HttpResponse.json(e2eSessions)),
+
+  // PUT /api/sessions/:id/metadata — edit session. Returns the merged
+  // record. The spec verifies the row's text + the toast.
+  http.put('/api/sessions/:id/metadata', async ({ request, params }) => {
+    const id = parseInt(params.id as string, 10);
+    const body = (await request.json().catch(() => ({}))) as Record<
+      string,
+      unknown
+    >;
+    e2eSessions = e2eSessions.map((s) =>
+      s.id === id
+        ? {
+            ...s,
+            sessionName:
+              typeof body.sessionName === 'string'
+                ? body.sessionName
+                : s.sessionName,
+            clientName:
+              typeof body.clientName === 'string'
+                ? body.clientName
+                : s.clientName,
+            date: typeof body.date === 'string' ? body.date : s.date,
+            sessionType:
+              typeof body.sessionType === 'string'
+                ? body.sessionType
+                : s.sessionType,
+            therapy:
+              typeof body.therapy === 'string' ? body.therapy : s.therapy,
+          }
+        : s
+    );
+    const updated = e2eSessions.find((s) => s.id === id);
+    return HttpResponse.json(updated);
+  }),
+
+  // DELETE /api/sessions/:id — removes the session from the list.
+  http.delete('/api/sessions/:id', ({ params }) => {
+    const id = parseInt(params.id as string, 10);
+    e2eSessions = e2eSessions.filter((s) => s.id !== id);
+    delete e2eSessionChats[id];
+    return HttpResponse.json({ message: `Session ${id} deleted.` });
+  }),
+
+  // GET /api/sessions/:id — returns chats from the e2e mutable store.
+  // The deep-analysis spec's `chatExistsInSession` check on
+  // sessionMetadata.chats still passes for id=1 (id 10 + 11).
+  http.get('/api/sessions/:id', ({ params }) => {
+    const id = parseInt(params.id as string, 10);
+    const session = e2eSessions.find((s) => s.id === id);
+    if (!session) {
+      return HttpResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+    return HttpResponse.json({
+      ...session,
+      chats: e2eSessionChats[id] || [],
+    });
+  }),
+
+  // POST /api/sessions/:id/chats/ — start a new chat for a session.
+  http.post('/api/sessions/:id/chats/', ({ params }) => {
+    const id = parseInt(params.id as string, 10);
+    const existing = e2eSessionChats[id] || [];
+    const nextId = existing.length
+      ? Math.max(...existing.map((c) => c.id)) + 1
+      : 10;
+    const newChat = {
+      id: nextId,
+      sessionId: id,
+      timestamp: Date.now(),
+      name: null,
+    };
+    e2eSessionChats[id] = [...existing, newChat];
+    return HttpResponse.json(newChat);
+  }),
+
+  // GET /api/sessions/:sessionId/chats/:chatId — used by the chat
+  // panel when the user navigates between chats. Returns the
+  // canned mock transcript from the existing chat spec handler when
+  // chatId === 10, otherwise returns an empty chat.
+  http.get('/api/sessions/:sessionId/chats/:chatId', ({ params }) => {
+    const chatId = parseInt(params.chatId as string, 10);
+    if (chatId === 10) {
+      return HttpResponse.json({
+        id: 10,
+        sessionId: 1,
+        timestamp: Date.parse('2026-06-23T12:30:00.000Z'),
+        name: null,
+        messages: mockChatMessages,
+      });
+    }
+    return HttpResponse.json({
+      id: chatId,
+      sessionId: parseInt(params.sessionId as string, 10),
+      timestamp: Date.now(),
+      name: null,
+      messages: [],
+    });
+  }),
+
+  // Context-usage for any non-10 session chat (the chat-navigation
+  // spec navigates to chat 11). Mirrors the canned chat-10 response
+  // but with transcriptTokens=0 since the new chat has no transcript
+  // grounded tokens yet.
+  http.get('/api/sessions/:sessionId/chats/:chatId/context-usage', () =>
+    HttpResponse.json({
+      model: {
+        name: mockActiveModel || 'mock-model',
+        configuredContextSize: 8192,
+        defaultContextSize: 8192,
+        effectiveContextSize: 8192,
+      },
+      breakdown: {
+        systemTokens: 312,
+        transcriptTokens: 0,
+        chatHistoryTokens: 0,
+        inputDraftTokens: 0,
+      },
+      reserved: { outputTokens: 1024 },
+      totals: {
+        promptTokens: 312,
+        percentUsed: 0.04,
+        remainingForPrompt: 6856,
+        remainingForOutput: 1024,
+      },
+      thresholds: { warnAt: 0.6, dangerAt: 0.85 },
+    })
+  ),
+
+  // --- Standalone chat CRUD (crud.spec.ts) -----------------------
+  // GET /api/chats — served from the mutable list.
+  http.get('/api/chats', () => HttpResponse.json(e2eStandaloneChats)),
+
+  // POST /api/chats — create. Adds a new id 44 by default.
+  http.post('/api/chats', () => {
+    const newChat = {
+      id: 44,
+      sessionId: null,
+      timestamp: Date.now(),
+      name: null,
+      tags: null,
+    };
+    e2eStandaloneChats = [...e2eStandaloneChats, newChat];
+    return HttpResponse.json(newChat, { status: 201 });
+  }),
+
+  // PATCH /api/chats/:id/details — edit name + tags.
+  http.patch('/api/chats/:id/details', async ({ request, params }) => {
+    const id = parseInt(params.id as string, 10);
+    const body = (await request.json().catch(() => ({}))) as {
+      name?: string | null;
+      tags?: string[] | null;
+    };
+    e2eStandaloneChats = e2eStandaloneChats.map((c) =>
+      c.id === id
+        ? {
+            ...c,
+            name: body.name === undefined ? c.name : body.name,
+            tags: body.tags === undefined ? c.tags : body.tags,
+          }
+        : c
+    );
+    const updated = e2eStandaloneChats.find((c) => c.id === id);
+    return HttpResponse.json(updated);
+  }),
+
+  // DELETE /api/chats/:id — removes from the list.
+  http.delete('/api/chats/:id', ({ params }) => {
+    const id = parseInt(params.id as string, 10);
+    e2eStandaloneChats = e2eStandaloneChats.filter((c) => c.id !== id);
+    return HttpResponse.json({ message: `Chat ${id} deleted.` });
+  }),
+
+  // --- Analysis job actions (analysis-jobs.spec.ts) --------------
+  // GET /api/analysis-jobs — list. The deep-analysis spec's job is
+  // appended when POSTed, so the union is what the list returns.
+  http.get('/api/analysis-jobs', () => {
+    const baseList = e2eAnalysisJobs.map((j) => ({ ...j }));
+    if (mockAnalysisJob) {
+      const created = Date.now() - 5_000;
+      baseList.push({
+        id: mockAnalysisJob.id,
+        original_prompt: mockAnalysisJob.originalPrompt,
+        short_prompt: mockAnalysisJob.shortPrompt,
+        status: 'completed',
+        final_result: MOCK_REDUCE_RESPONSE,
+        error_message: null,
+        created_at: created,
+        completed_at: created + 4_000,
+        model_name: mockAnalysisJob.modelName,
+        context_size: 8192,
+        strategy_json: JSON.stringify({
+          intermediate_question: MOCK_INTERMEDIATE_QUESTION,
+          final_synthesis_instructions: MOCK_FINAL_SYNTHESIS_INSTRUCTIONS,
+        }),
+      });
+    }
+    return HttpResponse.json(baseList);
+  }),
+
+  // POST /api/analysis-jobs/:id/cancel — transitions the processing
+  // job to "canceling" so the UI's spinner shows. A subsequent list
+  // fetch observes "canceled".
+  http.post('/api/analysis-jobs/:id/cancel', ({ params }) => {
+    const id = parseInt(params.id as string, 10);
+    e2eAnalysisJobs = e2eAnalysisJobs.map((j) =>
+      j.id === id ? { ...j, status: 'canceled', completed_at: Date.now() } : j
+    );
+    return HttpResponse.json({ message: `Job ${id} cancellation requested.` });
+  }),
+
+  // DELETE /api/analysis-jobs/:id — removes the job from the list.
+  http.delete('/api/analysis-jobs/:id', ({ params }) => {
+    const id = parseInt(params.id as string, 10);
+    e2eAnalysisJobs = e2eAnalysisJobs.filter((j) => j.id !== id);
+    return HttpResponse.json({ message: `Job ${id} deleted.` });
+  }),
+
+  // --- Templates (templates.spec.ts) -----------------------------
+  // GET /api/templates — list seeded templates.
+  http.get('/api/templates', () => HttpResponse.json(e2eTemplates)),
+
+  // POST /api/templates — create.
+  http.post('/api/templates', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      title?: string;
+      text?: string;
+    };
+    const tpl = {
+      id: e2eNextTemplateId++,
+      title: body.title || 'Untitled',
+      text: body.text || '',
+      createdAt: Date.now(),
+    };
+    e2eTemplates = [...e2eTemplates, tpl];
+    return HttpResponse.json(tpl, { status: 201 });
+  }),
+
+  // PUT /api/templates/:id — update.
+  http.put('/api/templates/:id', async ({ request, params }) => {
+    const id = parseInt(params.id as string, 10);
+    const body = (await request.json().catch(() => ({}))) as {
+      title?: string;
+      text?: string;
+    };
+    e2eTemplates = e2eTemplates.map((t) =>
+      t.id === id
+        ? {
+            ...t,
+            title: typeof body.title === 'string' ? body.title : t.title,
+            text: typeof body.text === 'string' ? body.text : t.text,
+          }
+        : t
+    );
+    const updated = e2eTemplates.find((t) => t.id === id);
+    return HttpResponse.json(updated);
+  }),
+
+  // DELETE /api/templates/:id — remove.
+  http.delete('/api/templates/:id', ({ params }) => {
+    const id = parseInt(params.id as string, 10);
+    e2eTemplates = e2eTemplates.filter((t) => t.id !== id);
+    return HttpResponse.json({ message: `Template ${id} deleted.` });
+  }),
+
+  // --- Settings data management (settings-data.spec.ts) ----------
+  http.post('/api/admin/reset-all-data', () =>
+    HttpResponse.json({
+      message: 'All application data has been reset.',
+      errors: [],
+    })
+  ),
 ];
