@@ -36,5 +36,5 @@ test('landing page renders mocked sessions and standalone chats', async ({
   await expect(
     main.getByRole('heading', { name: /Standalone Chats/i })
   ).toBeVisible();
-  await expect(main.getByText(/^Chat \(/)).toBeVisible();
+  await expect(main.getByText(/^Chat \(/).first()).toBeVisible();
 });

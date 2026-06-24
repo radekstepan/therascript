@@ -199,6 +199,19 @@ let mockAnalysisJob: {
   sessionIds: number[];
 } | null = null;
 
+let mockStandaloneChatMessages: Array<{
+  id: number;
+  chatId: number;
+  sender: 'user' | 'ai';
+  text: string;
+  timestamp: number;
+  promptTokens?: number | null;
+  completionTokens?: number | null;
+  thinkingTokens?: number | null;
+  duration?: number | null;
+  isTruncated?: boolean;
+}> = [];
+
 export const handlers = [
   // Readiness must return 200 + ready: true; otherwise App.tsx:241-243
   // mounts the <ReadinessOverlay/> and never renders the Landing page.
@@ -250,6 +263,30 @@ export const handlers = [
   // Structured transcript paragraphs for the intake session. Small but
   // non-empty so the Transcription panel renders content and the
   // transcript token count is plausibly non-zero.
+  http.patch('/api/sessions/1/transcript', async () => {
+    // Return updated transcript
+    return HttpResponse.json([
+      {
+        id: 0,
+        timestamp: 0,
+        text: 'Therapist: Hi Jane, thanks for coming in today. Can you tell me what brought you here?',
+        speaker: 'Therapist',
+      },
+      {
+        id: 1,
+        timestamp: 6000,
+        text: 'Jane: I have been feeling VERY anxious for the past few months, especially at work.',
+        speaker: 'Jane',
+      },
+      {
+        id: 2,
+        timestamp: 14000,
+        text: 'Therapist: That sounds difficult. Let us explore that together.',
+        speaker: 'Therapist',
+      },
+    ]);
+  }),
+
   http.get('/api/sessions/1/transcript', () =>
     HttpResponse.json([
       {
@@ -384,13 +421,191 @@ export const handlers = [
     });
   }),
 
-  http.get('/api/chats', () => HttpResponse.json([MOCK_STANDALONE_CHAT])),
+  http.get('/api/chats', () =>
+    HttpResponse.json([
+      MOCK_STANDALONE_CHAT,
+      {
+        id: 43,
+        sessionId: null,
+        timestamp: Date.now(),
+        name: null,
+        tags: null,
+      },
+    ])
+  ),
+
+  http.post('/api/chats', () => {
+    return HttpResponse.json(
+      {
+        id: 43,
+        sessionId: null,
+        timestamp: Date.now(),
+        name: null,
+        tags: null,
+      },
+      { status: 201 }
+    );
+  }),
+
+  http.get('/api/chats/:chatId', ({ params }) => {
+    const chatId = parseInt(params.chatId as string, 10);
+    return HttpResponse.json({
+      id: chatId,
+      sessionId: null,
+      timestamp: Date.now(),
+      name: null,
+      tags: null,
+      messages: chatId === 43 ? mockStandaloneChatMessages : [],
+    });
+  }),
+
+  http.get('/api/chats/:chatId/context-usage', () => {
+    return HttpResponse.json({
+      model: {
+        name: mockActiveModel || 'mock-model',
+        configuredContextSize: 8192,
+        defaultContextSize: 8192,
+        effectiveContextSize: 8192,
+      },
+      breakdown: {
+        systemTokens: 312,
+        transcriptTokens: 0,
+        chatHistoryTokens: 0,
+        inputDraftTokens: 6,
+      },
+      reserved: { outputTokens: 1024 },
+      totals: {
+        promptTokens: 318,
+        percentUsed: 0.04,
+        remainingForPrompt: 6850,
+        remainingForOutput: 1024,
+      },
+      thresholds: { warnAt: 0.6, dangerAt: 0.85 },
+    });
+  }),
+
+  http.post('/api/chats/:chatId/messages', async ({ request, params }) => {
+    const body = (await request.json().catch(() => ({}))) as { text?: string };
+    const userText = typeof body.text === 'string' ? body.text : '';
+    const chatId = parseInt(params.chatId as string, 10);
+
+    mockMessageCounter += 1;
+    const userMessageId = 100 + (mockMessageCounter - 1) * 2;
+    const aiMessageId = 101 + (mockMessageCounter - 1) * 2;
+    const timestamp = Date.now();
+
+    const encoder = new TextEncoder();
+    const sse = (payload: unknown) =>
+      encoder.encode(`data: ${JSON.stringify(payload)}\n\n`);
+
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(sse({ status: 'thinking' }));
+        controller.enqueue(sse({ status: 'responding' }));
+        controller.enqueue(sse({ chunk: 'Hello ' }));
+        controller.enqueue(sse({ chunk: 'from standalone mock LLM' }));
+        controller.enqueue(
+          sse({
+            done: true,
+            completionTokens: 24,
+            thinkingTokens: 0,
+            duration: 1200,
+            isTruncated: false,
+          })
+        );
+        controller.close();
+      },
+    });
+
+    mockStandaloneChatMessages.push({
+      id: userMessageId,
+      chatId,
+      sender: 'user',
+      text: userText,
+      timestamp,
+    });
+    mockStandaloneChatMessages.push({
+      id: aiMessageId,
+      chatId,
+      sender: 'ai',
+      text: 'Hello from standalone mock LLM',
+      timestamp: timestamp + 1,
+      promptTokens: null,
+      completionTokens: 24,
+      thinkingTokens: 0,
+      duration: 1200,
+      isTruncated: false,
+    });
+
+    return new HttpResponse(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'X-User-Message-Id': String(userMessageId),
+      },
+    });
+  }),
+
+  http.get('/api/transcription/status/:jobId', ({ params }) => {
+    return HttpResponse.json({
+      job_id: params.jobId,
+      status: 'completed',
+      progress: 100,
+      duration: 120,
+      message: 'Transcription completed',
+    });
+  }),
+
+  http.post('/api/sessions/upload', async () => {
+    return HttpResponse.json(
+      {
+        sessionId: 3,
+        jobId: 'mock-job-id',
+        message: 'Upload successful, transcription queued.',
+      },
+      { status: 202 }
+    );
+  }),
+
+  http.get('/api/sessions/3', () =>
+    HttpResponse.json({
+      ...MOCK_INTAKE_SESSION,
+      id: 3,
+      status: 'completed',
+      chats: [],
+    })
+  ),
+
+  http.get('/api/sessions/3/transcript', () =>
+    HttpResponse.json([
+      {
+        id: 0,
+        timestamp: 0,
+        text: 'New session transcript.',
+        speaker: 'Therapist',
+      },
+    ])
+  ),
 
   http.get('/api/jobs/active-count', () =>
     HttpResponse.json({ total: 0, transcription: 0, analysis: 0 })
   ),
 
   http.get('/api/system/gpu-stats', () => HttpResponse.json(MOCK_GPU_STATS)),
+
+  http.post('/api/admin/reindex-elasticsearch', () =>
+    HttpResponse.json({
+      message: 'Re-indexing complete',
+      transcriptsIndexed: 0,
+      messagesIndexed: 0,
+      errors: [],
+    })
+  ),
+
+  http.post('/api/jobs/reset-transcription', () =>
+    HttpResponse.json({
+      success: true,
+    })
+  ),
 
   // /api/llm/available-models branches on the baseUrl query param so the
   // LlmEndpointModelPicker can render disjoint local and remote lists.

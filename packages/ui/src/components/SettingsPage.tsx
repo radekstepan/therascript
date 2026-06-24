@@ -215,6 +215,7 @@ export function SettingsPage() {
                   checked={renderMarkdown}
                   onCheckedChange={handleMarkdownToggle}
                   className="cursor-pointer"
+                  aria-label="Toggle Markdown rendering for AI responses"
                 />
               </Flex>
               <Separator my="5" size="4" />
