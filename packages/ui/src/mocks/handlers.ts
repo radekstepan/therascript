@@ -21,6 +21,9 @@
 //   - GET  /api/analysis-jobs      -> src/api/analysis.ts:48 (list)
 //   - GET  /api/analysis-jobs/:id  -> src/api/analysis.ts:57 (detail)
 //   - GET  /api/analysis-jobs/:id/stream -> src/api/analysis.ts (SSE)
+//   - GET /api/usage/history       -> src/api/usage.ts:82 (UsageSection chart)
+//   - GET /api/usage/stats         -> src/api/usage.ts:89 (UsageSection cards)
+//   - GET /api/usage/logs          -> src/api/usage.ts:96 (UsageSection table)
 import { http, HttpResponse } from 'msw';
 
 const NOW_ISO = new Date().toISOString();
@@ -211,6 +214,209 @@ let mockStandaloneChatMessages: Array<{
   duration?: number | null;
   isTruncated?: boolean;
 }> = [];
+
+// --- Usage mock data (UsageSection in SettingsPage) -------------------
+// UsageSection.tsx:67-85 fires /api/usage/{history,stats,logs} on mount
+// and on every filter change. Without MSW handlers, the requests fall
+// through to the webpack-dev-server proxy, hit a stopped API on
+// http://localhost:3001, and produce ECONNREFUSED noise in test output.
+// Shapes mirror src/api/usage.ts interfaces and the Elysia response
+// schemas in packages/api/src/routes/usageRoutes.ts:9-114.
+const USAGE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+// Deterministic but realistic-looking per-week cost seeds. Re-mixed
+// across `weeks` so the chart always shows a non-trivial bar pattern
+// (mix of LLM-only, whisper-only, both, and one empty week) regardless
+// of the `?weeks=N` query param the UsageSection sends.
+const USAGE_LLM_WEEK_TOKENS = [
+  142_000, 98_000, 165_000, 78_000, 0, 121_000, 88_000, 154_000, 67_000,
+  110_000, 132_000, 95_000,
+];
+const USAGE_WHISPER_WEEK_SECS = [
+  312, 240, 0, 0, 195, 268, 0, 305, 412, 220, 0, 178,
+];
+
+const buildUsageWeeks = (count: number) => {
+  const now = Date.now();
+  const currentWeekEnd = now - (now % USAGE_WEEK_MS) + USAGE_WEEK_MS;
+  const weeks = [];
+  for (let i = count - 1; i >= 0; i--) {
+    const idx = (count - 1 - i) % USAGE_LLM_WEEK_TOKENS.length;
+    const weekEnd = currentWeekEnd - i * USAGE_WEEK_MS;
+    const weekStart = weekEnd - USAGE_WEEK_MS;
+    const llmTokens = USAGE_LLM_WEEK_TOKENS[idx];
+    const whisperSecs = USAGE_WHISPER_WEEK_SECS[idx];
+    // Qwen 2.5 7B: $0.18/1M prompt, $0.18/1M completion (mock).
+    const llmCost = (llmTokens / 1_000_000) * 0.18;
+    // Whisper: $0.006/min (mock).
+    const whisperCost = (whisperSecs / 60) * 0.006;
+    weeks.push({
+      weekStart,
+      weekEnd,
+      llm: {
+        totalPromptTokens: Math.floor(llmTokens * 0.7),
+        totalCompletionTokens: Math.floor(llmTokens * 0.3),
+        estimatedCost: llmCost,
+        callCount:
+          llmTokens > 0 ? Math.max(1, Math.floor(llmTokens / 3500)) : 0,
+      },
+      whisper: {
+        totalDuration: whisperSecs,
+        estimatedCost: whisperCost,
+        callCount:
+          whisperSecs > 0 ? Math.max(1, Math.floor(whisperSecs / 60)) : 0,
+      },
+      totalCost: llmCost + whisperCost,
+    });
+  }
+  return weeks;
+};
+
+const MOCK_USAGE_HISTORY = {
+  weeks: buildUsageWeeks(12),
+  pricing: {
+    llm: {
+      'qwen2.5-7b-instruct': {
+        promptCostPer1M: 0.18,
+        completionCostPer1M: 0.18,
+      },
+      'mistral-7b-local': { promptCostPer1M: 0.2, completionCostPer1M: 0.2 },
+    },
+    whisper: {
+      'large-v3': { costPerMinute: 0.006 },
+    },
+  },
+};
+
+const MOCK_USAGE_STATS = (() => {
+  const llmTotalPrompt = 985_400;
+  const llmTotalCompletion = 422_300;
+  const llmTotalCost =
+    ((llmTotalPrompt + llmTotalCompletion) / 1_000_000) * 0.18;
+  const whisperTotalDuration = 8_124;
+  const whisperTotalCost = (whisperTotalDuration / 60) * 0.006;
+  return {
+    llm: {
+      totalPromptTokens: llmTotalPrompt,
+      totalCompletionTokens: llmTotalCompletion,
+      estimatedCost: llmTotalCost,
+      callCount: 482,
+      callsByModel: {
+        'qwen2.5-7b-instruct': 312,
+        'mistral-7b-local': 170,
+      },
+      callsBySource: {
+        'session-chat': 264,
+        analysis: 138,
+        'standalone-chat': 80,
+      },
+    },
+    whisper: {
+      totalDuration: whisperTotalDuration,
+      estimatedCost: whisperTotalCost,
+      callCount: 14,
+      callsByModel: {
+        'large-v3': 14,
+      },
+    },
+    totalEstimatedCost: llmTotalCost + whisperTotalCost,
+  };
+})();
+
+const buildUsageLogs = () => {
+  const HOUR = 60 * 60 * 1000;
+  const now = Date.now();
+  return [
+    {
+      id: 1,
+      type: 'llm' as const,
+      source: 'session-chat',
+      model: 'qwen2.5-7b-instruct',
+      promptTokens: 1840,
+      completionTokens: 96,
+      duration: null,
+      timestamp: now - 12 * 60_000,
+      estimatedCost: 0.000349,
+    },
+    {
+      id: 2,
+      type: 'whisper' as const,
+      source: 'transcription',
+      model: 'large-v3',
+      promptTokens: null,
+      completionTokens: null,
+      duration: 1842,
+      timestamp: now - 3 * HOUR,
+      estimatedCost: 0.1842,
+    },
+    {
+      id: 3,
+      type: 'llm' as const,
+      source: 'analysis',
+      model: 'mistral-7b-local',
+      promptTokens: 4210,
+      completionTokens: 312,
+      duration: null,
+      timestamp: now - 5 * HOUR,
+      estimatedCost: 0.000814,
+    },
+    {
+      id: 4,
+      type: 'llm' as const,
+      source: 'session-chat',
+      model: 'qwen2.5-7b-instruct',
+      promptTokens: 1208,
+      completionTokens: 64,
+      duration: null,
+      timestamp: now - 9 * HOUR,
+      estimatedCost: 0.000229,
+    },
+    {
+      id: 5,
+      type: 'whisper' as const,
+      source: 'transcription',
+      model: 'large-v3',
+      promptTokens: null,
+      completionTokens: null,
+      duration: 2010,
+      timestamp: now - 26 * HOUR,
+      estimatedCost: 0.201,
+    },
+    {
+      id: 6,
+      type: 'llm' as const,
+      source: 'standalone-chat',
+      model: 'qwen2.5-7b-instruct',
+      promptTokens: 612,
+      completionTokens: 188,
+      duration: null,
+      timestamp: now - 31 * HOUR,
+      estimatedCost: 0.000144,
+    },
+    {
+      id: 7,
+      type: 'llm' as const,
+      source: 'analysis',
+      model: 'qwen2.5-7b-instruct',
+      promptTokens: 3842,
+      completionTokens: 240,
+      duration: null,
+      timestamp: now - 2 * 24 * HOUR,
+      estimatedCost: 0.000735,
+    },
+    {
+      id: 8,
+      type: 'whisper' as const,
+      source: 'transcription',
+      model: 'large-v3',
+      promptTokens: null,
+      completionTokens: null,
+      duration: 1602,
+      timestamp: now - 3 * 24 * HOUR,
+      estimatedCost: 0.1602,
+    },
+  ];
+};
 
 export const handlers = [
   // Readiness must return 200 + ready: true; otherwise App.tsx:241-243
@@ -878,6 +1084,43 @@ export const handlers = [
         'X-Accel-Buffering': 'no',
         Connection: 'keep-alive',
       },
+    });
+  }),
+
+  // GET /api/usage/history?weeks=N — drives the Weekly Cost History bar
+  // chart. UsageSection.tsx:57 defaults to 12 weeks and re-queries on
+  // every Select.Root change (4, 8, or 12 weeks), so we honor the param.
+  http.get('/api/usage/history', ({ request }) => {
+    const url = new URL(request.url);
+    const weeksParam = url.searchParams.get('weeks');
+    const weeks = weeksParam ? Math.max(1, parseInt(weeksParam, 10) || 12) : 12;
+    return HttpResponse.json({
+      weeks: buildUsageWeeks(weeks),
+      pricing: MOCK_USAGE_HISTORY.pricing,
+    });
+  }),
+
+  // GET /api/usage/stats — powers the Total LLM Tokens / Total Whisper
+  // Duration / Total Estimated Cost cards and the Model + Source filter
+  // dropdowns in UsageSection.tsx:366-405. callsByModel and
+  // callsBySource are intentionally non-empty so the Select.Content
+  // dropdowns render real options.
+  http.get('/api/usage/stats', () => HttpResponse.json(MOCK_USAGE_STATS)),
+
+  // GET /api/usage/logs — drives the "Detailed Usage Logs" table in
+  // UsageSection.tsx:418-552. Mix of LLM and whisper entries with
+  // recency-graded timestamps so formatDistanceToNow produces a range
+  // of "X minutes/hours/days ago" labels. Query params (start, end,
+  // type, model, source, limit, offset) are accepted but ignored — the
+  // real backend filters server-side; the mock always returns a stable
+  // payload so the table renders without 500s.
+  http.get('/api/usage/logs', () => {
+    const items = buildUsageLogs();
+    return HttpResponse.json({
+      items,
+      total: items.length,
+      limit: 100,
+      offset: 0,
     });
   }),
 ];
