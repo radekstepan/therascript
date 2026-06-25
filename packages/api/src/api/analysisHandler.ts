@@ -658,21 +658,38 @@ export const streamAnalysisJobHandler = ({
 
   // Create stream with proper cleanup handling
   let unsubscribe: (() => void) | null = null;
+  // Shared between start() and cancel(): once any path closes the
+  // controller (terminal status event, stream cancel, or client
+  // disconnect), subsequent in-flight `setImmediate` enqueues from
+  // the send() helper must short-circuit instead of throwing
+  // ERR_INVALID_STATE, which would otherwise escape as an
+  // uncaughtException and kill the whole API.
+  let streamClosed = false;
 
   const stream = new ReadableStream({
     start(controller) {
       const encoder = new TextEncoder();
 
       const send = (data: object) => {
+        if (streamClosed) return;
         // Yield to the event loop so each per-event write actually hits the
         // wire on its own. Without this, a burst of Redis messages arriving
         // in the same tick would be coalesced into a single kernel send
         // buffer flush on remote (non-loopback) sockets, which is what makes
         // analysis streaming appear to "all arrive at once" on proxies.
         setImmediate(() => {
-          controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify(data)}\n\n`)
-          );
+          if (streamClosed) return;
+          try {
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify(data)}\n\n`)
+            );
+          } catch (e: any) {
+            if (e?.code === 'ERR_INVALID_STATE') {
+              streamClosed = true;
+              return;
+            }
+            throw e;
+          }
         });
       };
 
@@ -695,6 +712,7 @@ export const streamAnalysisJobHandler = ({
           ['completed', 'failed', 'canceled'].includes(event.status!)
         ) {
           console.log(`[Stream API] Job ${jobId} finished. Closing stream.`);
+          streamClosed = true;
           controller.close();
           unsubscribe?.();
         }
@@ -702,6 +720,7 @@ export const streamAnalysisJobHandler = ({
     },
     cancel() {
       console.log(`[Stream API] Client disconnected from job ${jobId} stream.`);
+      streamClosed = true;
       unsubscribe?.();
     },
   });
