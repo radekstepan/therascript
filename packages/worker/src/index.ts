@@ -12,6 +12,11 @@ import {
 import transcriptionProcessor from './jobs/transcriptionProcessor.js';
 import analysisProcessor from './jobs/analysisProcessor.js';
 import { closePublisher } from './services/streamPublisher.js';
+import {
+  getLoadedBaseUrls as getTrackedLoadedBaseUrls,
+  clear as clearLoadedModelsTracker,
+} from './jobs/loadedModelsTracker.js';
+import { unloadModelAtUrlForWorker } from './jobs/analysisProcessor.js';
 
 console.log('[Worker] Initializing worker process...');
 
@@ -94,6 +99,30 @@ async function shutdown(signal: string) {
   try {
     await Promise.all([transcriptionWorker.close(), analysisWorker.close()]);
     console.log('[Worker] All BullMQ components closed.');
+    // Unload any models we loaded during in-flight analysis jobs (including
+    // per-job remote URLs the API process can't see). Best-effort: a
+    // transient network blip must not block the exit.
+    const trackedUrls = getTrackedLoadedBaseUrls();
+    if (trackedUrls.length > 0) {
+      console.log(
+        `[Worker] Unloading ${trackedUrls.length} tracked URL(s): ${trackedUrls.join(', ')}`
+      );
+      await Promise.allSettled(
+        trackedUrls.map(async (url) => {
+          try {
+            const count = await unloadModelAtUrlForWorker(url);
+            console.log(
+              `[Worker] Unloaded ${count} model instance(s) from ${url}`
+            );
+          } catch (err: any) {
+            console.warn(
+              `[Worker] Failed to unload models from ${url}: ${err?.message ?? err}`
+            );
+          }
+        })
+      );
+    }
+    clearLoadedModelsTracker();
     closeDb();
     console.log('[Worker] Database connection closed.');
     await closeElasticsearchClient();

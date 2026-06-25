@@ -22,6 +22,10 @@ import {
 } from '@therascript/services';
 import config from '@therascript/config';
 import { publishStreamEvent } from '../services/streamPublisher.js';
+import {
+  markLoaded as trackerMarkLoaded,
+  markUnloaded as trackerMarkUnloaded,
+} from './loadedModelsTracker.js';
 
 /**
  * Unload any loaded LLM model instances on a specific URL via the LM Studio
@@ -55,6 +59,7 @@ export async function unloadModelAtUrlForWorker(url: string): Promise<number> {
           console.log(
             `[Analysis Worker] Unloaded instance ${instance.id} from ${url}`
           );
+          trackerMarkUnloaded(url, instance.id);
           unloadedCount++;
         } catch (e: any) {
           console.warn(
@@ -155,6 +160,7 @@ export async function loadLlmModelForWorker(
         body: JSON.stringify({ instance_id: instance.id }),
       });
       console.log(`[Analysis Worker] Unloaded instance: ${instance.id}`);
+      trackerMarkUnloaded(baseUrl, instance.id);
     } catch (e) {
       console.warn(
         `[Analysis Worker] Failed to unload instance ${instance.id}:`,
@@ -191,6 +197,9 @@ export async function loadLlmModelForWorker(
   console.log(
     `[Analysis Worker] Model loaded. Instance: ${loadData.instance_id}, load time: ${loadData.load_time_seconds?.toFixed(2)}s`
   );
+  if (loadData?.instance_id) {
+    trackerMarkLoaded(baseUrl, loadData.instance_id);
+  }
 }
 
 export default async function (job: Job<AnalysisJobData, any, string>) {

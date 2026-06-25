@@ -115,6 +115,32 @@ async function cleanupLmsDaemon() {
 }
 // --- End LM Studio Daemon Cleanup ---
 
+// --- Graceful Process Exit Wait ---
+/**
+ * Resolves to true if `child` exits within `timeoutMs`, false otherwise.
+ * Used after a SIGTERM to give children a grace period to run their own
+ * shutdown handlers (e.g. unload LLM models, close DB pools) before we
+ * fall back to SIGKILL.
+ */
+function waitForProcessExit(child, timeoutMs) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (value) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    if (!child || child.exitCode !== null || child.signalCode !== null) {
+      finish(true);
+      return;
+    }
+    child.once('exit', () => finish(true));
+  });
+}
+// --- End Graceful Process Exit Wait ---
+
 // --- UI Process Cleanup Function (Improved) ---
 async function cleanupUiProcess(port) {
   console.log(
@@ -259,10 +285,32 @@ async function handleShutdown(reason) {
           `[RunProd] Sent taskkill to concurrently process (PID: ${appProcess.pid}) and its children.`
         );
       } else {
-        process.kill(-appProcess.pid, 'SIGKILL');
+        // Graceful path: SIGTERM the whole process group so each child
+        // (API, UI, worker, whisper-manager, ES-manager) can run its
+        // shutdown handler. The API uses this window to call
+        // `unloadActiveModel` + the LLM runtime stop on both local and
+        // remote URLs, which is the only way to free VRAM on a remote
+        // LM Studio host. After 5s we escalate to SIGKILL as a hard
+        // fallback in case any child is wedged.
+        process.kill(-appProcess.pid, 'SIGTERM');
         console.log(
-          `[RunProd] Kill signal sent to concurrently process group (PGID: ${appProcess.pid}).`
+          `[RunProd] SIGTERM sent to concurrently process group (PGID: ${appProcess.pid}). Waiting up to 5s for graceful exit...`
         );
+        const exited = await waitForProcessExit(appProcess, 5000);
+        if (!exited) {
+          console.warn(
+            '[RunProd] Graceful shutdown timed out, escalating to SIGKILL.'
+          );
+          try {
+            process.kill(-appProcess.pid, 'SIGKILL');
+          } catch (e) {
+            if (!appProcess.killed) appProcess.kill('SIGKILL');
+          }
+        } else {
+          console.log(
+            '[RunProd] Concurrently process group exited gracefully.'
+          );
+        }
       }
     } catch (killError) {
       console.warn(
@@ -276,7 +324,7 @@ async function handleShutdown(reason) {
     );
   }
 
-  await new Promise((resolve) => setTimeout(resolve, 2000));
+  await new Promise((resolve) => setTimeout(resolve, 1000));
 
   await cleanupLmsDaemon();
   await cleanupDocker();

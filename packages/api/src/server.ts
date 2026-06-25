@@ -14,8 +14,13 @@ import {
 import { getLlmRuntime } from './services/llamaCppRuntime.js';
 import {
   unloadActiveModel,
+  unloadModelAtUrl,
   syncModelStateOnBoot,
 } from './services/llamaCppService.js';
+import {
+  getLoadedBaseUrls as getTrackedLoadedBaseUrls,
+  clear as clearLoadedModelsTracker,
+} from './services/loadedModelsTracker.js';
 import { closeDb } from '@therascript/db';
 import { closeQueues } from './services/jobQueueService.js';
 import {
@@ -261,6 +266,30 @@ async function shutdown(signal: string) {
     } catch (err) {
       console.warn('[Server] Error unloading active model:', err);
     }
+    // Unload any models that were loaded against per-request remote URLs
+    // (e.g. one-off analysis jobs) that the active-URL unload above did
+    // not touch. Best-effort: failures are logged and shutdown continues.
+    const otherLoadedUrls = getTrackedLoadedBaseUrls();
+    if (otherLoadedUrls.length > 0) {
+      console.log(
+        `[Server] Unloading ${otherLoadedUrls.length} additional tracked URL(s): ${otherLoadedUrls.join(', ')}`
+      );
+      await Promise.allSettled(
+        otherLoadedUrls.map(async (url) => {
+          try {
+            const count = await unloadModelAtUrl(url);
+            console.log(
+              `[Server] Unloaded ${count} model instance(s) from ${url}`
+            );
+          } catch (err: any) {
+            console.warn(
+              `[Server] Failed to unload models from ${url}: ${err.message ?? err}`
+            );
+          }
+        })
+      );
+    }
+    clearLoadedModelsTracker();
     // Stop the LLM runtime (docker container or native process)
     try {
       const runtime = getLlmRuntime();

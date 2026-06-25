@@ -44,6 +44,10 @@ import { templateRepository } from '@therascript/data';
 import { SYSTEM_PROMPT_TEMPLATES } from '@therascript/db/dist/sqliteService.js';
 import { getLlmRuntime } from './llamaCppRuntime.js';
 import {
+  markLoaded as trackerMarkLoaded,
+  markUnloaded as trackerMarkUnloaded,
+} from './loadedModelsTracker.js';
+import {
   streamLlmChatDetailed,
   LlmChatChunk,
   LlmConnectionError,
@@ -776,6 +780,9 @@ export const loadLlmModel = async (
       `[LlmService] Model loaded. Instance: ${loadRes.data.instance_id}, ` +
         `load time: ${loadRes.data.load_time_seconds?.toFixed(2)}s`
     );
+    if (loadRes.data?.instance_id) {
+      trackerMarkLoaded(targetUrl, loadRes.data.instance_id);
+    }
     // Fire-and-forget VRAM estimate so the chat header can display it.
     // Skip for remote URLs — we can't shell out to a local `lms` binary.
     if (!isRemote) {
@@ -873,6 +880,7 @@ export const unloadActiveModel = async (
               { timeout: 15000 }
             );
             console.log(`[LlmService] Unloaded instance: ${instance.id}`);
+            trackerMarkUnloaded(targetUrl, instance.id);
             unloadedCount++;
           } catch (err: any) {
             console.warn(
@@ -953,6 +961,7 @@ export const unloadModelAtUrl = async (url: string): Promise<number> => {
             console.log(
               `[LlmService] Unloaded instance ${instance.id} from ${targetUrl}`
             );
+            trackerMarkUnloaded(targetUrl, instance.id);
             unloadedCount++;
           } catch (err: any) {
             console.warn(

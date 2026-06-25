@@ -206,3 +206,52 @@ Every chat stream now logs chunk cadence to the API console:
 - If the log shows a single burst of chunks near the end (e.g. `chunk #1 +0.04s` then `chunk #400 +12s`), the buffering is upstream of the API and cannot be fixed from Therascript. The next step in that case is to look at LM Studio's own HTTP server flush behavior.
 
 These do not fire under Elysia 1.2.25 (the bug above). They are kept so that if Elysia is upgraded to a fixed version, the unload starts working on the server side without further code changes. `triggerUnload` has a `modelUnloaded` guard, so the UI-driven call and any future server-side call are mutually safe.
+
+## 8. Process Shutdown & Model Unload
+
+**Goal:** Free LM Studio VRAM/RAM on both the local daemon and any remote LM Studio host whenever the user stops the app — via the UI **Shutdown App** button, a terminal **Ctrl+C** in the wrapper script, or a direct signal to the API/worker process.
+
+### 8.1 Loaded-Model Tracker
+
+Every successful `POST /api/v1/models/load` (in either the API process or the analysis-worker process) records `baseUrl + instance_id` in a process-local registry:
+
+- `packages/api/src/services/loadedModelsTracker.ts` — used by the API.
+- `packages/worker/src/jobs/loadedModelsTracker.ts` — used by the worker.
+
+Successful unloads remove the entry. The registry is the source of truth for "which URLs is this process keeping models loaded on right now?" — needed because a remote URL used for a per-request analysis job is not the "active" base URL the API normally tracks, so the active-URL unload alone would miss it.
+
+### 8.2 API Shutdown (`server.ts:242`)
+
+On `SIGINT` / `SIGTERM` the API runs `shutdown(signal)`:
+
+1. Close the HTTP listener (`server.close`).
+2. `unloadActiveModel()` — unloads the active base URL.
+3. For each remaining URL in the loaded-models tracker, call `unloadModelAtUrl(url)`. This catches per-request remote URLs.
+4. `runtime.stop()` — only meaningful for the local `lms` daemon (remote hosts are intentionally not killed).
+5. Close BullMQ queues, SQLite, Elasticsearch client.
+6. `process.exit(...)`.
+
+For a remote URL the unload path is identical to local: `GET /api/v1/models` to enumerate, then `POST /api/v1/models/unload { instance_id }` per instance. The LM Studio REST API is symmetric for local and remote.
+
+### 8.3 Worker Shutdown (`packages/worker/src/index.ts:90`)
+
+On `SIGINT` / `SIGTERM` the worker:
+
+1. Closes both BullMQ workers (`transcriptionWorker.close()`, `analysisWorker.close()`).
+2. For each URL in its own loaded-models tracker, calls `unloadModelAtUrlForWorker(url)`. This is what unloads a per-job remote URL the API process never knew about.
+3. Closes the SQLite, Elasticsearch, and Redis-publisher connections.
+4. `process.exit(0)`.
+
+### 8.4 Wrapper Scripts (`scripts/run-dev.js`, `scripts/run-prod.js`)
+
+The wrapper scripts (which spawn `concurrently` for the API, UI, worker, whisper-manager, and ES-manager) used to `SIGKILL` the entire process group on shutdown, which bypassed the graceful handlers above. The current behavior is:
+
+1. **SIGTERM** the concurrently process group (negative PID, so all children receive the signal).
+2. **Wait up to 5 seconds** for the group to exit (`waitForProcessExit` polls the `exit` event).
+3. If still alive, escalate to **SIGKILL** as a hard fallback.
+4. Run the local-only `cleanupLmsDaemon()` (`lms daemon down`) and Docker/UI cleanup as belt-and-suspenders.
+
+The 5-second grace period is the window in which the API and worker run their `unloadActiveModel` / `unloadModelAtUrl` / `runtime.stop` calls. On the UI **Shutdown App** path (which posts to the wrapper's port-9999 service) and on terminal **Ctrl+C** (which concurrently forwards), both paths now produce the same outcome: local + remote models get freed, the `lms` daemon is taken down, and the process tree exits cleanly.
+
+The Windows path (`taskkill /T /F`) is unchanged — Windows does not have a graceful signal equivalent and the wrapper falls back to force kill there.
+
