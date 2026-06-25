@@ -81,6 +81,42 @@ export const setActiveBaseUrl = (url: string | null): void => {
   });
 };
 
+/**
+ * Reset every LLM-related setting in `app_settings` to its schema default
+ * and clear the in-memory VRAM estimate. Used by the startup sync to wipe
+ * any state that references a model which is no longer (or never was)
+ * loaded in LM Studio.
+ */
+export const clearActiveLlmSettings = (): void => {
+  const current = appSettingsRepository.getSettings();
+  const defaults = {
+    llm_base_url: null,
+    llm_model_name: 'default',
+    llm_context_size: null,
+    llm_temperature: 0.7,
+    llm_top_p: 0.9,
+    llm_repeat_penalty: 1.1,
+    llm_num_gpu_layers: null,
+    llm_thinking_budget: null,
+  };
+  if (
+    current.llm_base_url !== defaults.llm_base_url ||
+    current.llm_model_name !== defaults.llm_model_name ||
+    current.llm_context_size !== defaults.llm_context_size ||
+    current.llm_temperature !== defaults.llm_temperature ||
+    current.llm_top_p !== defaults.llm_top_p ||
+    current.llm_repeat_penalty !== defaults.llm_repeat_penalty ||
+    current.llm_num_gpu_layers !== defaults.llm_num_gpu_layers ||
+    current.llm_thinking_budget !== defaults.llm_thinking_budget
+  ) {
+    console.log(
+      '[ActiveModelService] Clearing all active LLM settings to defaults.'
+    );
+    appSettingsRepository.updateSettings(defaults);
+  }
+  cachedVramEstimateBytes = null;
+};
+
 export const setActiveModelAndContextAndParams = (
   newModelName: string,
   newContextSize?: number | null,
