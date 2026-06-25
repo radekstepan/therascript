@@ -11,6 +11,9 @@ vi.mock('@therascript/config', () => ({
     llm: {
       baseURL: 'http://localhost:1234',
     },
+    whisper: {
+      apiUrl: 'http://localhost:8001',
+    },
   },
 }));
 
@@ -935,7 +938,8 @@ describe('llamaCppService', () => {
     it('restarts the local runtime, unloads prior instances, and loads with correct payload', async () => {
       mockRuntime.restartWithModel.mockClear();
 
-      // Enumerate prior loaded instances, then unload + load
+      // Whisper unload, then enumerate, unload old, load
+      mockAxiosPost.mockResolvedValueOnce({ data: {} }); // whisper unload
       mockAxiosGet.mockResolvedValueOnce({
         data: {
           models: [
@@ -962,6 +966,12 @@ describe('llamaCppService', () => {
       );
       // VRAM estimate is cleared before load
       expect(setActiveModelVramEstimateBytes).toHaveBeenCalledWith(null);
+      // Whisper model is unloaded first to free VRAM
+      expect(mockAxiosPost).toHaveBeenCalledWith(
+        'http://localhost:8001/model/unload',
+        {},
+        expect.objectContaining({ timeout: 5000 })
+      );
       // Unload the old instance
       expect(mockAxiosPost).toHaveBeenCalledWith(
         'http://localhost:1234/api/v1/models/unload',
@@ -984,6 +994,7 @@ describe('llamaCppService', () => {
 
     it('omits context_length when no context is configured', async () => {
       vi.mocked(getConfiguredContextSize).mockReturnValue(null);
+      mockAxiosPost.mockResolvedValueOnce({ data: {} }); // whisper unload
       mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
       mockAxiosPost.mockResolvedValueOnce({
         data: { instance_id: 'new-inst-1' },
@@ -999,6 +1010,7 @@ describe('llamaCppService', () => {
 
     it('sends offload_kv_cache_to_gpu=false when numGpuLayers=0 (CPU-only)', async () => {
       vi.mocked(getConfiguredNumGpuLayers).mockReturnValue(0);
+      mockAxiosPost.mockResolvedValueOnce({ data: {} }); // whisper unload
       mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
       mockAxiosPost.mockResolvedValueOnce({ data: { instance_id: 'inst' } });
 
@@ -1011,6 +1023,7 @@ describe('llamaCppService', () => {
     });
 
     it('continues loading even if unloading a prior instance fails', async () => {
+      mockAxiosPost.mockResolvedValueOnce({ data: {} }); // whisper unload
       mockAxiosGet.mockResolvedValueOnce({
         data: {
           models: [
@@ -1041,6 +1054,7 @@ describe('llamaCppService', () => {
     });
 
     it('fires background VRAM estimate after load and stores the result', async () => {
+      mockAxiosPost.mockResolvedValueOnce({ data: {} }); // whisper unload
       mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
       mockAxiosPost.mockResolvedValueOnce({ data: { instance_id: 'inst' } });
       mockExecFile.mockImplementation((...args: any[]) => {
@@ -1068,6 +1082,7 @@ describe('llamaCppService', () => {
     });
 
     it('throws InternalServerError when the load POST fails', async () => {
+      mockAxiosPost.mockResolvedValueOnce({ data: {} }); // whisper unload
       mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
       mockAxiosPost.mockRejectedValueOnce({
         response: { data: { error: 'no such model' } },
@@ -1077,6 +1092,28 @@ describe('llamaCppService', () => {
       await expect(loadLlmModel('meta/missing', 4096)).rejects.toThrow(
         /Failed to load model 'meta\/missing' via LM Studio API/
       );
+    });
+
+    it('continues loading even if the Whisper unload call fails', async () => {
+      mockRuntime.restartWithModel.mockClear();
+
+      // Whisper service unreachable — must not break chat.
+      mockAxiosPost.mockRejectedValueOnce(
+        new Error('connect ECONNREFUSED 127.0.0.1:8001')
+      );
+      mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
+      mockAxiosPost.mockResolvedValueOnce({
+        data: { instance_id: 'new-inst' },
+      });
+
+      await expect(
+        loadLlmModel('meta/llama-3-8b', 4096)
+      ).resolves.toBeUndefined();
+
+      const loadCall = mockAxiosPost.mock.calls.find(
+        ([url]: any) => url === 'http://localhost:1234/api/v1/models/load'
+      );
+      expect(loadCall).toBeDefined();
     });
   });
 
@@ -1091,6 +1128,7 @@ describe('llamaCppService', () => {
     it('does NOT restart the local runtime', async () => {
       mockRuntime.restartWithModel.mockClear();
 
+      mockAxiosPost.mockResolvedValueOnce({ data: {} }); // whisper unload
       mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
       mockAxiosPost.mockResolvedValueOnce({ data: { instance_id: 'inst' } });
 
@@ -1100,6 +1138,7 @@ describe('llamaCppService', () => {
     });
 
     it('targets the explicit remote base URL for enumerate/unload/load', async () => {
+      mockAxiosPost.mockResolvedValueOnce({ data: {} }); // whisper unload
       mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
       mockAxiosPost.mockResolvedValueOnce({ data: { instance_id: 'inst' } });
 
@@ -1116,6 +1155,7 @@ describe('llamaCppService', () => {
     });
 
     it('does NOT fire the background VRAM estimator for remote URLs', async () => {
+      mockAxiosPost.mockResolvedValueOnce({ data: {} }); // whisper unload
       mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
       mockAxiosPost.mockResolvedValueOnce({ data: { instance_id: 'inst' } });
       mockExecFile.mockClear();
@@ -1124,6 +1164,24 @@ describe('llamaCppService', () => {
       await vi.advanceTimersByTimeAsync(0);
 
       expect(mockExecFile).not.toHaveBeenCalled();
+    });
+
+    it('still unloads Whisper even though no local runtime is started', async () => {
+      mockRuntime.restartWithModel.mockClear();
+
+      mockAxiosPost.mockResolvedValueOnce({ data: {} }); // whisper unload
+      mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
+      mockAxiosPost.mockResolvedValueOnce({ data: { instance_id: 'inst' } });
+
+      await loadLlmModel('meta/llama-3-8b', 4096, REMOTE_URL);
+
+      // Whisper unload must fire for remote selections too — keeps VRAM
+      // behaviour consistent regardless of where the chat model lives.
+      expect(mockAxiosPost).toHaveBeenCalledWith(
+        'http://localhost:8001/model/unload',
+        {},
+        expect.objectContaining({ timeout: 5000 })
+      );
     });
   });
 
@@ -1172,7 +1230,8 @@ describe('llamaCppService', () => {
           ],
         },
       });
-      // Enumerate again (inside loadLlmModel), unload (none), then load
+      // Whisper unload, enumerate (inside loadLlmModel), then load
+      mockAxiosPost.mockResolvedValueOnce({ data: {} }); // whisper unload
       mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
       mockAxiosPost.mockResolvedValueOnce({ data: { instance_id: 'inst-1' } });
 
@@ -1187,6 +1246,7 @@ describe('llamaCppService', () => {
 
     it('falls through to loadLlmModel when the model is not loaded', async () => {
       mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } }); // status check
+      mockAxiosPost.mockResolvedValueOnce({ data: {} }); // whisper unload
       mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } }); // enumerate inside load
       mockAxiosPost.mockResolvedValueOnce({ data: { instance_id: 'inst-1' } });
 
@@ -1222,6 +1282,7 @@ describe('llamaCppService', () => {
 
     it('falls through to load when the status check itself fails', async () => {
       mockAxiosGet.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+      mockAxiosPost.mockResolvedValueOnce({ data: {} }); // whisper unload
       mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } }); // enumerate inside load
       mockAxiosPost.mockResolvedValueOnce({ data: { instance_id: 'inst-1' } });
 

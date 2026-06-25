@@ -6,6 +6,7 @@ import {
   execFile as callbackExecFile,
 } from 'node:child_process';
 
+import config from '@therascript/config';
 import {
   BackendChatMessage,
   LlmModelInfo,
@@ -683,6 +684,24 @@ export const loadLlmModel = async (
 ): Promise<void> => {
   const targetUrl = resolveLlmBaseUrl(baseUrlOverride);
   const isRemote = isRemoteLlmBaseUrl(targetUrl);
+
+  // Free any Whisper ASR model from VRAM so the chat load has room.
+  // Symmetric to the LM Studio unload the transcription service performs
+  // before submitting a job. Runs for both local and remote URLs so the
+  // user gets consistent VRAM behaviour regardless of chat model source.
+  // Best-effort: a down or busy Whisper service must not break chat.
+  try {
+    await axios.post(
+      `${config.whisper.apiUrl}/model/unload`,
+      {},
+      { timeout: 5000 }
+    );
+    console.log(
+      '[LlmService] Whisper model unload requested before chat load.'
+    );
+  } catch (err: any) {
+    console.warn(`[LlmService] Could not unload Whisper model: ${err.message}`);
+  }
 
   // Clear any stale VRAM estimate from a previous model
   setActiveModelVramEstimateBytes(null);
