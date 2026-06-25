@@ -12,10 +12,7 @@ import {
   getConfiguredContextSize,
 } from './services/activeModelService.js';
 import { getLlmRuntime } from './services/llamaCppRuntime.js';
-import {
-  unloadActiveModel,
-  checkModelStatus,
-} from './services/llamaCppService.js';
+import { unloadActiveModel } from './services/llamaCppService.js';
 import { closeDb } from '@therascript/db';
 import { closeQueues } from './services/jobQueueService.js';
 import {
@@ -60,19 +57,6 @@ async function checkLmStudioConnectionOnStartup() {
   try {
     await runtime.ensureReady();
     console.log('[Server Startup] ✅ LM Studio daemon and server are up.');
-
-    try {
-      console.log(
-        '[Server Startup] Syncing active model state with LM Studio...'
-      );
-      await checkModelStatus(getActiveModel());
-      console.log('[Server Startup] ✅ Active model state synced.');
-    } catch (syncErr) {
-      console.warn(
-        '[Server Startup] ⚠️ Failed to sync active model state:',
-        syncErr
-      );
-    }
   } catch (err) {
     console.error('-------------------------------------------------------');
     console.error('[Server Startup] ⚠️ LM Studio failed to start:', err);

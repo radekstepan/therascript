@@ -27,7 +27,6 @@ vi.mock('./activeModelService.js', () => ({
   getConfiguredThinkingBudget: vi.fn().mockReturnValue(null),
   getActiveModelVramEstimateBytes: vi.fn().mockReturnValue(null),
   setActiveModelVramEstimateBytes: vi.fn(),
-  clearActiveLlmSettings: vi.fn(),
   getActiveBaseUrl: vi.fn().mockReturnValue('http://localhost:1234'),
   getDefaultBaseUrl: vi.fn().mockReturnValue('http://localhost:1234'),
   setActiveBaseUrl: vi.fn(),
@@ -131,16 +130,12 @@ const {
   isRemoteLlmBaseUrl,
   setActiveBaseUrl,
   setActiveModelVramEstimateBytes,
-  getActiveModelVramEstimateBytes,
   getConfiguredNumGpuLayers,
   getConfiguredContextSize,
   getConfiguredTemperature,
   getConfiguredTopP,
   getConfiguredRepeatPenalty,
   getConfiguredThinkingBudget,
-  clearActiveLlmSettings,
-  getActiveModel,
-  setActiveModelName,
 } = await import('./activeModelService.js');
 
 const { streamLlmChatDetailed } = await import('@therascript/services');
@@ -724,26 +719,15 @@ describe('llamaCppService', () => {
   });
 
   describe('checkModelStatus', () => {
-    it('returns null and clears all settings when API is not responsive', async () => {
-      vi.mocked(isRemoteLlmBaseUrl).mockReturnValue(false);
+    it('returns null when API is not responsive', async () => {
+      // First mock returns true for isLlmApiResponsive, second returns null for actual call
       mockAxiosGet.mockRejectedValueOnce(new Error('Connection refused'));
 
       const result = await checkModelStatus('meta/llama-3-8b');
       expect(result).toBeNull();
-      expect(clearActiveLlmSettings).toHaveBeenCalledTimes(1);
     });
 
-    it('clears all settings when remote target is unreachable', async () => {
-      vi.mocked(isRemoteLlmBaseUrl).mockReturnValue(true);
-      mockAxiosGet.mockRejectedValueOnce(new Error('Connection refused'));
-
-      const result = await checkModelStatus('meta/llama-3-8b');
-      expect(result).toBeNull();
-      expect(clearActiveLlmSettings).toHaveBeenCalledTimes(1);
-    });
-
-    it('clears all settings when a model exists but no instances are loaded', async () => {
-      vi.mocked(getActiveModel).mockReturnValue('meta/llama-3-8b');
+    it('returns model info when model is available but not loaded', async () => {
       // First call for isLlmApiResponsive, second for actual data
       mockAxiosGet
         .mockResolvedValueOnce({ status: 200, data: { models: [] } })
@@ -771,12 +755,13 @@ describe('llamaCppService', () => {
       expect(result).not.toBeNull();
       expect(result!.name).toBe('meta/llama-3-8b');
       expect(result!.size_vram).toBeUndefined();
-      expect(clearActiveLlmSettings).toHaveBeenCalledTimes(1);
     });
 
-    it('does not clear settings when a model is loaded', async () => {
+    it('includes VRAM estimate when model is loaded', async () => {
+      const { getActiveModelVramEstimateBytes } = await import(
+        './activeModelService.js'
+      );
       vi.mocked(getActiveModelVramEstimateBytes).mockReturnValue(5_000_000_000);
-      vi.mocked(getActiveModel).mockReturnValue('meta/llama-3-8b');
 
       // First call for isLlmApiResponsive, second for actual data
       mockAxiosGet
@@ -809,38 +794,6 @@ describe('llamaCppService', () => {
       const result = await checkModelStatus('meta/llama-3-8b');
       expect(result).not.toBeNull();
       expect(result!.size_vram).toBe(5_000_000_000);
-      expect(clearActiveLlmSettings).not.toHaveBeenCalled();
-      expect(setActiveModelName).not.toHaveBeenCalled();
-    });
-
-    it('returns model info when model is available but not loaded (legacy)', async () => {
-      // First call for isLlmApiResponsive, second for actual data
-      mockAxiosGet
-        .mockResolvedValueOnce({ status: 200, data: { models: [] } })
-        .mockResolvedValueOnce({
-          data: {
-            models: [
-              {
-                type: 'llm',
-                publisher: 'meta',
-                key: 'meta/llama-3-8b',
-                display_name: 'Llama 3 8B',
-                architecture: 'llama',
-                quantization: { name: 'Q4_K_M', bits_per_weight: 4.5 },
-                size_bytes: 4_500_000_000,
-                params_string: '8B',
-                loaded_instances: [],
-                max_context_length: 8192,
-                format: 'gguf',
-              },
-            ],
-          },
-        });
-
-      const result = await checkModelStatus('meta/llama-3-8b');
-      expect(result).not.toBeNull();
-      expect(result!.name).toBe('meta/llama-3-8b');
-      expect(result!.size_vram).toBeUndefined();
     });
   });
 

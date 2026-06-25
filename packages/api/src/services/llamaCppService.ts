@@ -32,7 +32,6 @@ import {
   getConfiguredThinkingBudget,
   getActiveModelVramEstimateBytes,
   setActiveModelVramEstimateBytes,
-  clearActiveLlmSettings,
   getActiveBaseUrl,
   setActiveBaseUrl,
   isRemoteLlmBaseUrl,
@@ -978,15 +977,7 @@ export const checkModelStatus = async (
   const isRemote = isRemoteLlmBaseUrl(targetUrl);
 
   const isUp = await isLlmApiResponsive(targetUrl);
-  if (!isUp) {
-    if (isRemoteLlmBaseUrl(targetUrl)) {
-      console.warn(
-        `[LlmService] Active LLM base URL ${targetUrl} is unreachable; clearing all LLM settings.`
-      );
-    }
-    clearActiveLlmSettings();
-    return null;
-  }
+  if (!isUp) return null;
 
   try {
     const res = await axios.get<{ models: LmsModelRecord[] }>(
@@ -1019,14 +1010,10 @@ export const checkModelStatus = async (
         );
         setConfiguredContextSize(actualContext);
       }
-    } else {
-      // If nothing is loaded but we thought there was a model, reset all
-      // runtime-derived LLM settings to their schema defaults so the UI
-      // doesn't display stale state from a previous run.
-      console.log(
-        `[LlmService] No model instances loaded; clearing all LLM settings.`
-      );
-      clearActiveLlmSettings();
+    } else if (getActiveModel() !== 'default') {
+      // If nothing is loaded but we thought there was a model, reset to 'default'
+      console.log(`[LlmService] Clear active model (no instances found)`);
+      setActiveModelName('default');
     }
 
     // Now check if OUR requested model is the one loaded
