@@ -157,15 +157,7 @@ const dateToIsoStringForStorage = (dateString: string): string => {
   return dt.toISOString();
 };
 
-const parseSize = (sizeStr: string): number => {
-  const l = sizeStr.toLowerCase();
-  const v = parseFloat(l);
-  if (isNaN(v)) return 0;
-  if (l.endsWith('g') || l.endsWith('gb')) return v * 1024 * 1024 * 1024;
-  if (l.endsWith('m') || l.endsWith('mb')) return v * 1024 * 1024;
-  if (l.endsWith('k') || l.endsWith('kb')) return v * 1024;
-  return v;
-};
+import { parseSize } from '../parseSize.js';
 
 export const sessionRoutes = new Elysia({ prefix: '/api' })
   .model({
