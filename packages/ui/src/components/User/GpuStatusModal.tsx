@@ -22,6 +22,7 @@ import {
   ExclamationTriangleIcon,
   LightningBoltIcon,
   DesktopIcon,
+  GlobeIcon,
 } from '@radix-ui/react-icons';
 import type { GpuStats, GpuDeviceStats, LlmStatus } from '../../types';
 import prettyBytes from 'pretty-bytes';
@@ -267,6 +268,73 @@ const ActiveModelCard: React.FC<{ status: LlmStatus }> = ({ status }) => {
   );
 };
 
+const RemoteModelCard: React.FC<{ status: LlmStatus }> = ({ status }) => {
+  if (!status.activeModel || !status.loaded) return null;
+
+  const activeUrl = status.activeBaseUrl ?? '';
+  const defaultUrl = status.defaultBaseUrl ?? '';
+  const showDefault = defaultUrl.length > 0 && defaultUrl !== activeUrl;
+
+  return (
+    <Card size="2">
+      <Flex direction="column" gap="3">
+        <Heading as="h3" size="4">
+          Active Model Resources
+        </Heading>
+        <Flex justify="between" align="center" gap="2">
+          <Text size="2" weight="medium">
+            Model:
+          </Text>
+          <Flex align="center" gap="2" style={{ minWidth: 0 }}>
+            <GlobeIcon
+              width="14"
+              height="14"
+              style={{ flexShrink: 0 }}
+              aria-label="Remote LLM"
+            />
+            <Text size="2" truncate style={{ maxWidth: 260 }}>
+              {status.activeModel}
+            </Text>
+            <Badge color="blue" variant="soft">
+              Remote
+            </Badge>
+          </Flex>
+        </Flex>
+        <Flex direction="column" gap="1">
+          <Flex justify="between" align="center" gap="2">
+            <Text size="2" color="gray">
+              Endpoint:
+            </Text>
+            {activeUrl ? (
+              <Text size="2" truncate style={{ maxWidth: 260 }}>
+                {activeUrl}
+              </Text>
+            ) : (
+              <Text size="2" color="gray">
+                Unknown
+              </Text>
+            )}
+          </Flex>
+          {showDefault && (
+            <Flex justify="between" align="center" gap="2">
+              <Text size="2" color="gray">
+                Local default:
+              </Text>
+              <Text size="2" color="gray" truncate style={{ maxWidth: 260 }}>
+                {defaultUrl}
+              </Text>
+            </Flex>
+          )}
+        </Flex>
+        <Text size="1" color="gray">
+          Model is running on a remote server. Local VRAM/RAM metrics do not
+          apply.
+        </Text>
+      </Flex>
+    </Card>
+  );
+};
+
 const SystemMemoryCard: React.FC<{
   memory: import('../../types').SystemMemory;
 }> = ({ memory }) => (
@@ -364,12 +432,18 @@ export function GpuStatusModal({
               </Callout.Root>
             ) : (
               <Flex direction="column" gap="4">
-                {llmStatus && llmStatus.loaded && llmStatus.details && (
-                  <>
-                    <ActiveModelCard status={llmStatus} />
-                    <Separator size="4" />
-                  </>
-                )}
+                {llmStatus?.loaded &&
+                  (llmStatus.isRemoteBaseUrl ? (
+                    <>
+                      <RemoteModelCard status={llmStatus} />
+                      <Separator size="4" />
+                    </>
+                  ) : llmStatus.details ? (
+                    <>
+                      <ActiveModelCard status={llmStatus} />
+                      <Separator size="4" />
+                    </>
+                  ) : null)}
 
                 {!isUnifiedMemory && gpuStats?.systemMemory && (
                   <>
