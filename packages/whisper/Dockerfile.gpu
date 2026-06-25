@@ -1,5 +1,5 @@
 # GPU-enabled Dockerfile for Whisper - uses NVIDIA CUDA
-FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04
+FROM nvidia/cuda:12.1.0-cudnn9-runtime-ubuntu22.04
 
 WORKDIR /app
 
