@@ -81,6 +81,34 @@ export const setActiveBaseUrl = (url: string | null): void => {
   });
 };
 
+/**
+ * Reset only the model-derived fields to their schema defaults and clear the
+ * in-memory VRAM estimate. Leaves user sampling params (temperature, topP,
+ * repeatPenalty, numGpuLayers, thinkingBudget) and the remote base URL
+ * override alone — only `llm_model_name`, `llm_context_size`, and
+ * `cachedVramEstimateBytes` are meaningless when no model is actually loaded.
+ *
+ * Called from the server boot sync. Never call this from a per-request code
+ * path: it writes to the database and would race with the user's own edits.
+ */
+export const clearModelAndContext = (): void => {
+  const current = appSettingsRepository.getSettings();
+  const updates: Partial<typeof current> = {};
+  if (current.llm_model_name !== 'default') {
+    updates.llm_model_name = 'default';
+  }
+  if (current.llm_context_size !== null) {
+    updates.llm_context_size = null;
+  }
+  if (Object.keys(updates).length > 0) {
+    console.log(
+      '[ActiveModelService] Clearing active model + context to defaults.'
+    );
+    appSettingsRepository.updateSettings(updates);
+  }
+  cachedVramEstimateBytes = null;
+};
+
 export const setActiveModelAndContextAndParams = (
   newModelName: string,
   newContextSize?: number | null,

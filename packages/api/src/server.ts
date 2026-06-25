@@ -12,7 +12,10 @@ import {
   getConfiguredContextSize,
 } from './services/activeModelService.js';
 import { getLlmRuntime } from './services/llamaCppRuntime.js';
-import { unloadActiveModel } from './services/llamaCppService.js';
+import {
+  unloadActiveModel,
+  syncModelStateOnBoot,
+} from './services/llamaCppService.js';
 import { closeDb } from '@therascript/db';
 import { closeQueues } from './services/jobQueueService.js';
 import {
@@ -64,6 +67,24 @@ async function checkLmStudioConnectionOnStartup() {
       '   LLM features will be unavailable until the service is running.'
     );
     console.error('-------------------------------------------------------');
+  }
+
+  // One-shot reconciliation of persisted model state with whatever LM Studio
+  // currently has loaded. Runs after the startup attempt regardless of
+  // outcome — if LM Studio is down, the sync will detect that and clear
+  // stale model + context so the UI doesn't show a phantom loaded model.
+  // Never invoked from request handlers: see syncModelStateOnBoot.
+  try {
+    console.log(
+      '[Server Startup] Syncing active model state with LM Studio (one-shot)...'
+    );
+    await syncModelStateOnBoot();
+    console.log('[Server Startup] ✅ Active model state synced.');
+  } catch (syncErr) {
+    console.warn(
+      '[Server Startup] ⚠️ Failed to sync active model state:',
+      syncErr
+    );
   }
 }
 

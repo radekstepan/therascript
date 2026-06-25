@@ -37,6 +37,7 @@ vi.mock('./activeModelService.js', () => ({
     return trimmed || null;
   }),
   getConfiguredBaseUrlOverride: vi.fn().mockReturnValue(null),
+  clearModelAndContext: vi.fn(),
 }));
 
 // Hoist the shared mock runtime so tests can assert against the same object
@@ -122,6 +123,7 @@ const {
   ensureLlmReady,
   checkLlmApiHealth,
   streamChatResponse,
+  syncModelStateOnBoot,
 } = await import('./llamaCppService.js');
 
 // Pull the mocked activeModelService helpers we need to drive local/remote branching
@@ -136,6 +138,10 @@ const {
   getConfiguredTopP,
   getConfiguredRepeatPenalty,
   getConfiguredThinkingBudget,
+  getActiveModel,
+  setActiveModelName,
+  setConfiguredContextSize,
+  clearModelAndContext,
 } = await import('./activeModelService.js');
 
 const { streamLlmChatDetailed } = await import('@therascript/services');
@@ -725,6 +731,10 @@ describe('llamaCppService', () => {
 
       const result = await checkModelStatus('meta/llama-3-8b');
       expect(result).toBeNull();
+      // checkModelStatus must NEVER clear settings — it's called by the UI's
+      // /api/llm/status poll. The boot sync owns destructive resets.
+      expect(clearModelAndContext).not.toHaveBeenCalled();
+      expect(setActiveModelName).not.toHaveBeenCalled();
     });
 
     it('returns model info when model is available but not loaded', async () => {
@@ -755,6 +765,10 @@ describe('llamaCppService', () => {
       expect(result).not.toBeNull();
       expect(result!.name).toBe('meta/llama-3-8b');
       expect(result!.size_vram).toBeUndefined();
+      // No destructive reset when the target is available but not loaded.
+      // The user may have it staged; the boot sync decides.
+      expect(clearModelAndContext).not.toHaveBeenCalled();
+      expect(setActiveModelName).not.toHaveBeenCalled();
     });
 
     it('includes VRAM estimate when model is loaded', async () => {
@@ -794,6 +808,122 @@ describe('llamaCppService', () => {
       const result = await checkModelStatus('meta/llama-3-8b');
       expect(result).not.toBeNull();
       expect(result!.size_vram).toBe(5_000_000_000);
+      expect(clearModelAndContext).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('syncModelStateOnBoot', () => {
+    it('clears model + context when the API is unreachable', async () => {
+      // isLlmApiResponsive short-circuits via isLlmApiResponsive's mocked axios.get rejection
+      mockAxiosGet.mockRejectedValueOnce(new Error('Connection refused'));
+
+      await syncModelStateOnBoot();
+
+      expect(clearModelAndContext).toHaveBeenCalledTimes(1);
+      // We must not silently update the active model name to something else.
+      expect(setActiveModelName).not.toHaveBeenCalled();
+      expect(setConfiguredContextSize).not.toHaveBeenCalled();
+    });
+
+    it('clears model + context when API is up but no LLM is loaded', async () => {
+      // isLlmApiResponsive: 200, models: []. Then model list returns no loaded llm.
+      mockAxiosGet
+        .mockResolvedValueOnce({ status: 200, data: { models: [] } })
+        .mockResolvedValueOnce({
+          data: {
+            models: [
+              {
+                type: 'embedding',
+                publisher: 'lmstudio-community',
+                key: 'text-embedding-nomic-embed-text-v1.5',
+                display_name: 'Nomic Embed',
+                architecture: null,
+                quantization: null,
+                size_bytes: 100_000_000,
+                params_string: null,
+                loaded_instances: [],
+                max_context_length: 2048,
+                format: 'gguf',
+              },
+            ],
+          },
+        });
+
+      await syncModelStateOnBoot();
+
+      expect(clearModelAndContext).toHaveBeenCalledTimes(1);
+      expect(setActiveModelName).not.toHaveBeenCalled();
+    });
+
+    it('syncs active model + context when a model is loaded', async () => {
+      vi.mocked(getActiveModel).mockReturnValue('meta/old-llama');
+      vi.mocked(getConfiguredContextSize).mockReturnValue(null);
+
+      // isLlmApiResponsive: 200, models: []. Then model list returns a loaded LLM.
+      mockAxiosGet
+        .mockResolvedValueOnce({ status: 200, data: { models: [] } })
+        .mockResolvedValueOnce({
+          data: {
+            models: [
+              {
+                type: 'llm',
+                publisher: 'meta',
+                key: 'meta/llama-3-8b',
+                display_name: 'Llama 3 8B',
+                architecture: 'llama',
+                quantization: { name: 'Q4_K_M', bits_per_weight: 4.5 },
+                size_bytes: 4_500_000_000,
+                params_string: '8B',
+                loaded_instances: [
+                  { id: 'instance-1', config: { context_length: 4096 } },
+                ],
+                max_context_length: 8192,
+                format: 'gguf',
+              },
+            ],
+          },
+        });
+
+      await syncModelStateOnBoot();
+
+      expect(setActiveModelName).toHaveBeenCalledWith('meta/llama-3-8b');
+      expect(setConfiguredContextSize).toHaveBeenCalledWith(4096);
+      expect(clearModelAndContext).not.toHaveBeenCalled();
+    });
+
+    it('is a no-op when active model + context already match the loaded instance', async () => {
+      vi.mocked(getActiveModel).mockReturnValue('meta/llama-3-8b');
+      vi.mocked(getConfiguredContextSize).mockReturnValue(4096);
+
+      mockAxiosGet
+        .mockResolvedValueOnce({ status: 200, data: { models: [] } })
+        .mockResolvedValueOnce({
+          data: {
+            models: [
+              {
+                type: 'llm',
+                publisher: 'meta',
+                key: 'meta/llama-3-8b',
+                display_name: 'Llama 3 8B',
+                architecture: 'llama',
+                quantization: { name: 'Q4_K_M', bits_per_weight: 4.5 },
+                size_bytes: 4_500_000_000,
+                params_string: '8B',
+                loaded_instances: [
+                  { id: 'instance-1', config: { context_length: 4096 } },
+                ],
+                max_context_length: 8192,
+                format: 'gguf',
+              },
+            ],
+          },
+        });
+
+      await syncModelStateOnBoot();
+
+      expect(setActiveModelName).not.toHaveBeenCalled();
+      expect(setConfiguredContextSize).not.toHaveBeenCalled();
+      expect(clearModelAndContext).not.toHaveBeenCalled();
     });
   });
 

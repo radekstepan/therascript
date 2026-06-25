@@ -36,6 +36,7 @@ import {
   setActiveBaseUrl,
   isRemoteLlmBaseUrl,
   normalizeLlmBaseUrl,
+  clearModelAndContext,
 } from './activeModelService.js';
 
 import { templateRepository } from '@therascript/data';
@@ -969,6 +970,84 @@ export const unloadModelAtUrl = async (url: string): Promise<number> => {
 // don't fire duplicate background estimation calls from polling.
 let estimatingVramForModel: string | null = null;
 
+/**
+ * Best-effort lookup of whatever LLM instance LM Studio currently has loaded.
+ * Returns the model key + the actual context length of the first loaded
+ * instance, or `null` if the API is unreachable, the model list call fails,
+ * or no LLM is currently loaded. Pure: never writes to the DB.
+ */
+async function getLoadedLlmModelState(
+  baseUrl: string
+): Promise<{ key: string; contextLength: number | null } | null> {
+  if (!(await isLlmApiResponsive(baseUrl))) return null;
+  try {
+    const res = await axios.get<{ models: LmsModelRecord[] }>(
+      `${baseUrl}/api/v1/models`,
+      { timeout: 5000 }
+    );
+    const loaded = res.data.models.find(
+      (m) => m.type === 'llm' && m.loaded_instances.length > 0
+    );
+    if (!loaded) return null;
+    return {
+      key: loaded.key,
+      contextLength: loaded.loaded_instances[0]?.config?.context_length ?? null,
+    };
+  } catch (err: any) {
+    console.warn(
+      `[LlmService] Failed to enumerate loaded models during boot sync: ${err?.message ?? err}`
+    );
+    return null;
+  }
+}
+
+/**
+ * Reconcile persisted active-model state with whatever LM Studio actually has
+ * loaded. Runs ONCE at server boot. Never call this from a per-request path:
+ * it may reset `llm_model_name` and `llm_context_size` to defaults, which
+ * would race with the user's in-flight edits if fired from `/api/llm/status`.
+ *
+ * Behavior:
+ *   - If the API is unreachable OR no LLM is loaded: clear model + context.
+ *     User's sampling params (temp, topP, etc.) and remote base URL override
+ *     are preserved.
+ *   - If a model is loaded: sync `llm_model_name` and `llm_context_size` to
+ *     match the actual loaded instance (idempotent — no-op if already in sync).
+ */
+export const syncModelStateOnBoot = async (
+  baseUrlOverride?: string | null
+): Promise<void> => {
+  const targetUrl = resolveLlmBaseUrl(baseUrlOverride);
+  console.log(
+    `[LlmService] Boot sync: reconciling model state with ${targetUrl}`
+  );
+
+  const loaded = await getLoadedLlmModelState(targetUrl);
+  if (loaded === null) {
+    console.log(
+      '[LlmService] Boot sync: no model loaded (or endpoint unreachable); clearing model + context.'
+    );
+    clearModelAndContext();
+    return;
+  }
+
+  if (getActiveModel() !== loaded.key) {
+    console.log(
+      `[LlmService] Boot sync: setting active model to ${loaded.key}`
+    );
+    setActiveModelName(loaded.key);
+  }
+  if (
+    loaded.contextLength !== null &&
+    getConfiguredContextSize() !== loaded.contextLength
+  ) {
+    console.log(
+      `[LlmService] Boot sync: setting context size to ${loaded.contextLength}`
+    );
+    setConfiguredContextSize(loaded.contextLength);
+  }
+};
+
 export const checkModelStatus = async (
   modelPath: string,
   baseUrlOverride?: string | null
@@ -1010,11 +1089,13 @@ export const checkModelStatus = async (
         );
         setConfiguredContextSize(actualContext);
       }
-    } else if (getActiveModel() !== 'default') {
-      // If nothing is loaded but we thought there was a model, reset to 'default'
-      console.log(`[LlmService] Clear active model (no instances found)`);
-      setActiveModelName('default');
     }
+    // NOTE: we deliberately do NOT clear settings here when no instance is
+    // loaded. This function is called by the UI's /api/llm/status poll, and
+    // the user can legitimately have modelName=foo saved while LM Studio is
+    // momentarily starting up or the user is browsing before they click Load.
+    // The destructive reset lives in `syncModelStateOnBoot`, which runs once
+    // at server startup and never on a per-request path.
 
     // Now check if OUR requested model is the one loaded
     const target = res.data.models.find(

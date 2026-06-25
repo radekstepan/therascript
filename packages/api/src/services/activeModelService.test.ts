@@ -306,3 +306,75 @@ describe('activeModelService — LLM base URL', () => {
     expect(svc.isRemoteLlmBaseUrl()).toBe(true);
   });
 });
+
+describe('activeModelService — clearModelAndContext', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    mockSettings = {
+      llm_base_url: 'http://10.0.0.1:1234',
+      llm_model_name: 'llama3:8b',
+      llm_context_size: 8192,
+      llm_temperature: 1.2,
+      llm_top_p: 0.85,
+      llm_repeat_penalty: 1.3,
+      llm_num_gpu_layers: 24,
+      llm_thinking_budget: 512,
+    };
+  });
+
+  it('resets model name + context size to defaults', async () => {
+    const svc = await import('./activeModelService.js');
+    svc.clearModelAndContext();
+
+    expect(svc.getActiveModel()).toBe('default');
+    expect(svc.getConfiguredContextSize()).toBeNull();
+  });
+
+  it('preserves user sampling params (temp, topP, repeatPenalty, gpu layers, thinking)', async () => {
+    const svc = await import('./activeModelService.js');
+    svc.clearModelAndContext();
+
+    expect(svc.getConfiguredTemperature()).toBe(1.2);
+    expect(svc.getConfiguredTopP()).toBe(0.85);
+    expect(svc.getConfiguredRepeatPenalty()).toBe(1.3);
+    expect(svc.getConfiguredNumGpuLayers()).toBe(24);
+    expect(svc.getConfiguredThinkingBudget()).toBe(512);
+  });
+
+  it('preserves the remote base URL override', async () => {
+    const svc = await import('./activeModelService.js');
+    svc.clearModelAndContext();
+
+    expect(svc.getConfiguredBaseUrlOverride()).toBe('http://10.0.0.1:1234');
+    expect(svc.isRemoteLlmBaseUrl()).toBe(true);
+  });
+
+  it('clears the in-memory VRAM estimate', async () => {
+    const svc = await import('./activeModelService.js');
+    svc.setActiveModelVramEstimateBytes(5_000_000_000);
+    expect(svc.getActiveModelVramEstimateBytes()).toBe(5_000_000_000);
+
+    svc.clearModelAndContext();
+    expect(svc.getActiveModelVramEstimateBytes()).toBeNull();
+  });
+
+  it('is a no-op when model + context are already at defaults', async () => {
+    mockSettings = {
+      llm_base_url: 'http://10.0.0.1:1234',
+      llm_model_name: 'default',
+      llm_context_size: null,
+      llm_temperature: 1.2,
+      llm_top_p: 0.85,
+      llm_repeat_penalty: 1.3,
+      llm_num_gpu_layers: 24,
+      llm_thinking_budget: 512,
+    };
+    const svc = await import('./activeModelService.js');
+    const { appSettingsRepository } = await import('@therascript/data');
+    vi.mocked(appSettingsRepository.updateSettings).mockClear();
+
+    svc.clearModelAndContext();
+
+    expect(appSettingsRepository.updateSettings).not.toHaveBeenCalled();
+  });
+});
