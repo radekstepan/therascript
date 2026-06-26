@@ -82,6 +82,43 @@ export const setActiveBaseUrl = (url: string | null): void => {
 };
 
 /**
+ * Read the currently stored remote LLM API token. Returns `null` when no
+ * token is configured (or when the stored value is blank whitespace). The
+ * token is global — a single value applies to every remote base URL — and
+ * is intentionally never returned by the API surface to the UI; the route
+ * handler exposes only its presence as `hasRemoteApiToken` on `LlmStatus`.
+ */
+export const getActiveApiToken = (): string | null => {
+  const raw = appSettingsRepository.getSettings().llm_api_token;
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+/**
+ * Persist a new remote LLM API token, or clear the existing one.
+ *   - `null`  -> clear the stored token.
+ *   - `''`    -> also clear (treated as "no token").
+ *   - any non-empty string -> trimmed and stored.
+ * Trims the input so accidental whitespace never reaches the wire.
+ */
+export const setActiveApiToken = (token: string | null): void => {
+  const trimmed = typeof token === 'string' ? token.trim() : null;
+  const next = trimmed && trimmed.length > 0 ? trimmed : null;
+  const current = getActiveApiToken();
+  if (current === next) {
+    return;
+  }
+  appSettingsRepository.updateSettings({ llm_api_token: next });
+  console.log(
+    `[ActiveModelService] ${next ? 'Set' : 'Cleared'} remote LLM API token.`
+  );
+};
+
+/** True when a non-null remote LLM API token is currently configured. */
+export const hasActiveApiToken = (): boolean => getActiveApiToken() !== null;
+
+/**
  * Reset only the model-derived fields to their schema defaults and clear the
  * in-memory VRAM estimate. Leaves user sampling params (temperature, topP,
  * repeatPenalty, numGpuLayers, thinkingBudget) and the remote base URL
@@ -117,7 +154,8 @@ export const setActiveModelAndContextAndParams = (
   newRepeatPenalty?: number,
   newNumGpuLayers?: number | null,
   newThinkingBudget?: number | null,
-  newBaseUrl?: string | null
+  newBaseUrl?: string | null,
+  newApiToken?: string | null
 ): void => {
   if (!newModelName || typeof newModelName !== 'string') {
     console.error(
@@ -228,6 +266,19 @@ export const setActiveModelAndContextAndParams = (
         `[ActiveModelService] Changing base URL from '${current.llm_base_url ?? 'default'}' to '${normalized ?? 'default'}'`
       );
       updates.llm_base_url = normalized;
+    }
+  }
+
+  if (newApiToken !== undefined) {
+    const normalized =
+      typeof newApiToken === 'string' && newApiToken.trim().length > 0
+        ? newApiToken.trim()
+        : null;
+    if (normalized !== current.llm_api_token) {
+      console.log(
+        `[ActiveModelService] ${normalized ? 'Setting' : 'Clearing'} remote LLM API token.`
+      );
+      updates.llm_api_token = normalized;
     }
   }
 

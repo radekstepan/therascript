@@ -49,6 +49,14 @@ export interface LlmSettingsState {
   contextSizeInput: string;
   isRemote: boolean;
   remoteUrl: string;
+  /**
+   * The typed API token value (transient form state, never persisted
+   * to localStorage). The "is a token configured?" signal comes from
+   * `llmStatus.hasRemoteApiToken` and is independent of this string —
+   * the user can clear the saved token by leaving this empty and
+   * saving, or replace it by typing a new value.
+   */
+  apiToken: string;
   temperature: number;
   topP: number;
   repeatPenalty: number;
@@ -327,6 +335,9 @@ export function LlmSettingsForm({
         setRemoteUrl={(val) =>
           onChange((prev) => ({ ...prev, remoteUrl: val }))
         }
+        apiToken={state.apiToken}
+        setApiToken={(val) => onChange((prev) => ({ ...prev, apiToken: val }))}
+        hasRemoteApiToken={llmStatus?.hasRemoteApiToken ?? false}
         localBaseUrl={llmStatus?.defaultBaseUrl ?? ''}
         disabled={isSaving || isModelLoaded}
         enabled={isOpen}

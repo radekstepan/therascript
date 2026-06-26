@@ -37,6 +37,7 @@ import {
   setActiveBaseUrl,
   isRemoteLlmBaseUrl,
   normalizeLlmBaseUrl,
+  getActiveApiToken,
   clearModelAndContext,
 } from './activeModelService.js';
 
@@ -67,6 +68,39 @@ const runtime = getLlmRuntime();
  */
 const resolveLlmBaseUrl = (baseUrlOverride?: string | null): string => {
   return normalizeLlmBaseUrl(baseUrlOverride) || getActiveBaseUrl();
+};
+
+/**
+ * Build the Authorization header for an outgoing LLM HTTP request.
+ *
+ * The token is **only** attached when the resolved base URL is non-local.
+ * This is the single gating function for credential forwarding — every
+ * axios call in this module routes through it so the local LM Studio
+ * daemon never receives an `Authorization` header it does not understand,
+ * and the remote endpoint receives the token automatically regardless of
+ * which specific URL the caller resolved.
+ *
+ * Returns an empty object so callers can splat it unconditionally into
+ * the axios `headers` option without conditional logic.
+ */
+const authHeadersFor = (baseUrl: string): { Authorization?: string } => {
+  if (!isRemoteLlmBaseUrl(baseUrl)) return {};
+  const token = getActiveApiToken();
+  if (!token) return {};
+  return { Authorization: `Bearer ${token}` };
+};
+
+/**
+ * Resolve the LLM API token for a given base URL. Returns the active
+ * token only when the URL is remote — `null` otherwise. Used by
+ * `streamChatResponse` to forward the credential to the streaming
+ * `streamLlmChatDetailed` client, which can't go through the axios
+ * `headers` option.
+ */
+const resolveLlmApiToken = (baseUrlOverride?: string | null): string | null => {
+  const targetUrl = resolveLlmBaseUrl(baseUrlOverride);
+  if (!isRemoteLlmBaseUrl(targetUrl)) return null;
+  return getActiveApiToken();
 };
 
 // ---------------------------------------------------------------------------
@@ -363,6 +397,7 @@ async function isLlmApiResponsive(baseUrl?: string): Promise<boolean> {
     const target = normalizeLlmBaseUrl(baseUrl) || getActiveBaseUrl();
     const res = await axios.get(`${target}/api/v1/models`, {
       timeout: 3000,
+      headers: authHeadersFor(target),
     });
     return res.status === 200;
   } catch (error) {
@@ -435,7 +470,7 @@ export const listModels = async (
   await ensureLlmReady(targetUrl);
   const res = await axios.get<{ models: LmsModelRecord[] }>(
     `${targetUrl}/api/v1/models`,
-    { timeout: 5000 }
+    { timeout: 5000, headers: authHeadersFor(targetUrl) }
   );
   return res.data.models
     .filter((m) => m.type === 'llm')
@@ -517,7 +552,7 @@ async function runLmsDownload(jobId: string, modelRef: string): Promise<void> {
     const res = await axios.post<LmsDownloadStartResponse>(
       `${baseUrl}/api/v1/models/download`,
       { model: modelRef },
-      { timeout: 30000 }
+      { timeout: 30000, headers: authHeadersFor(baseUrl) }
     );
 
     if (res.data.status === 'already_downloaded') {
@@ -587,7 +622,7 @@ async function pollLmsDownloadStatus(
     try {
       const res = await axios.get<LmsDownloadStatusResponse>(
         `${baseUrl}/api/v1/models/download/status/${lmsJobId}`,
-        { timeout: 5000 }
+        { timeout: 5000, headers: authHeadersFor(baseUrl) }
       );
       const data = res.data;
       const progress =
@@ -728,7 +763,7 @@ export const loadLlmModel = async (
   try {
     const modelsRes = await axios.get<{ models: LmsModelRecord[] }>(
       `${targetUrl}/api/v1/models`,
-      { timeout: 5000 }
+      { timeout: 5000, headers: authHeadersFor(targetUrl) }
     );
     const loadedInstances = modelsRes.data.models
       .filter((m) => m.type === 'llm')
@@ -739,7 +774,7 @@ export const loadLlmModel = async (
         await axios.post(
           `${targetUrl}/api/v1/models/unload`,
           { instance_id: instance.id },
-          { timeout: 30000 }
+          { timeout: 30000, headers: authHeadersFor(targetUrl) }
         );
         console.log(`[LlmService] Unloaded instance: ${instance.id}`);
       } catch (err: any) {
@@ -774,7 +809,7 @@ export const loadLlmModel = async (
     const loadRes = await axios.post(
       `${targetUrl}/api/v1/models/load`,
       loadPayload,
-      { timeout: 120000 }
+      { timeout: 120000, headers: authHeadersFor(targetUrl) }
     );
     console.log(
       `[LlmService] Model loaded. Instance: ${loadRes.data.instance_id}, ` +
@@ -819,7 +854,7 @@ export const ensureModelLoaded = async (
   try {
     const res = await axios.get<{ models: LmsModelRecord[] }>(
       `${targetUrl}/api/v1/models`,
-      { timeout: 5000 }
+      { timeout: 5000, headers: authHeadersFor(targetUrl) }
     );
     const loadedMatch = res.data.models.find(
       (m) =>
@@ -863,7 +898,7 @@ export const unloadActiveModel = async (
   try {
     const modelsRes = await axios.get<{ models: LmsModelRecord[] }>(
       `${targetUrl}/api/v1/models`,
-      { timeout: 5000 }
+      { timeout: 5000, headers: authHeadersFor(targetUrl) }
     );
     const loadedInstances = modelsRes.data.models
       .filter((m) => m.type === 'llm')
@@ -877,7 +912,7 @@ export const unloadActiveModel = async (
             await axios.post(
               `${targetUrl}/api/v1/models/unload`,
               { instance_id: instance.id },
-              { timeout: 15000 }
+              { timeout: 15000, headers: authHeadersFor(targetUrl) }
             );
             console.log(`[LlmService] Unloaded instance: ${instance.id}`);
             trackerMarkUnloaded(targetUrl, instance.id);
@@ -943,7 +978,7 @@ export const unloadModelAtUrl = async (url: string): Promise<number> => {
   try {
     const modelsRes = await axios.get<{ models: LmsModelRecord[] }>(
       `${targetUrl}/api/v1/models`,
-      { timeout: 5000 }
+      { timeout: 5000, headers: authHeadersFor(targetUrl) }
     );
     const loadedInstances = modelsRes.data.models
       .filter((m) => m.type === 'llm')
@@ -956,7 +991,7 @@ export const unloadModelAtUrl = async (url: string): Promise<number> => {
             await axios.post(
               `${targetUrl}/api/v1/models/unload`,
               { instance_id: instance.id },
-              { timeout: 15000 }
+              { timeout: 15000, headers: authHeadersFor(targetUrl) }
             );
             console.log(
               `[LlmService] Unloaded instance ${instance.id} from ${targetUrl}`
@@ -1011,7 +1046,7 @@ async function getLoadedLlmModelState(
   try {
     const res = await axios.get<{ models: LmsModelRecord[] }>(
       `${baseUrl}/api/v1/models`,
-      { timeout: 5000 }
+      { timeout: 5000, headers: authHeadersFor(baseUrl) }
     );
     const loaded = res.data.models.find(
       (m) => m.type === 'llm' && m.loaded_instances.length > 0
@@ -1089,7 +1124,7 @@ export const checkModelStatus = async (
   try {
     const res = await axios.get<{ models: LmsModelRecord[] }>(
       `${targetUrl}/api/v1/models`,
-      { timeout: 5000 }
+      { timeout: 5000, headers: authHeadersFor(targetUrl) }
     );
 
     // Find the currently LOADED model instance
@@ -1205,6 +1240,10 @@ export const streamChatResponse = async function* (
       ? options.llamaCppBaseUrl
       : undefined;
   const resolvedBaseUrl = resolveLlmBaseUrl(explicitBaseUrl);
+  // Resolve the matching API token. Returns null when the resolved URL is
+  // local, so the streaming client never accidentally sends credentials to
+  // the local LM Studio daemon.
+  const resolvedApiToken = resolveLlmApiToken(explicitBaseUrl);
 
   const finalOptions = {
     temperature: getConfiguredTemperature(),
@@ -1214,6 +1253,7 @@ export const streamChatResponse = async function* (
     thinkingBudget: getConfiguredThinkingBudget(),
     ...options, // allow overriding defaults
     llamaCppBaseUrl: resolvedBaseUrl,
+    llmApiToken: resolvedApiToken,
   };
   return yield* streamLlmChatDetailed(messages, finalOptions) as any;
 };

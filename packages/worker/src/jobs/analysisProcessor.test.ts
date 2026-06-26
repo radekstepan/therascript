@@ -23,6 +23,11 @@ vi.mock('@therascript/data', () => ({
   transcriptRepository: {},
   sessionRepository: {},
   usageRepository: {},
+  appSettingsRepository: {
+    getSettings: vi.fn().mockReturnValue({
+      llm_api_token: null,
+    }),
+  },
 }));
 
 vi.mock('@therascript/services', () => ({
@@ -43,6 +48,7 @@ vi.stubGlobal('fetch', mockFetch);
 const { unloadModelAtUrlForWorker, loadLlmModelForWorker } = await import(
   './analysisProcessor.js'
 );
+const { appSettingsRepository } = await import('@therascript/data');
 
 const LOCAL_URL = 'http://localhost:1234';
 const REMOTE_URL = 'http://10.0.0.1:1234';
@@ -269,6 +275,180 @@ describe('analysis worker — loadLlmModelForWorker URL switching', () => {
       expect(calls[1].url).toBe(`${REMOTE_B}/api/v1/models`);
       expect(calls[2].url).toBe(`${REMOTE_B}/api/v1/models/unload`);
       expect(calls[3].url).toBe(`${REMOTE_B}/api/v1/models/load`);
+    });
+  });
+
+  describe('Authorization header — remote-only credential forwarding', () => {
+    const TEST_TOKEN = 'sk-worker-token-abc';
+
+    const findCall = (urlSuffix: string) =>
+      mockFetch.mock.calls.find(
+        ([url]: any) => typeof url === 'string' && url.endsWith(urlSuffix)
+      );
+    const headerFor = (urlSuffix: string): Record<string, string> => {
+      const call = findCall(urlSuffix);
+      if (!call) return {};
+      const init = call[1] as RequestInit | undefined;
+      return (init?.headers ?? {}) as Record<string, string>;
+    };
+    // POST /api/v1/models/load and the unload POSTs always include
+    // `Content-Type: application/json` from the worker's own fetch call,
+    // so a "no auth" assertion can't expect an empty object — it must
+    // assert the absence of `Authorization` specifically.
+    const expectNoAuth = (urlSuffix: string) => {
+      const headers = headerFor(urlSuffix);
+      expect(headers.Authorization).toBeUndefined();
+    };
+    const expectAuth = (urlSuffix: string, token: string) => {
+      expect(headerFor(urlSuffix).Authorization).toBe(`Bearer ${token}`);
+    };
+
+    it('omits Authorization when the URL is local, even if a token is configured', async () => {
+      vi.mocked(appSettingsRepository.getSettings).mockReturnValue({
+        llm_api_token: TEST_TOKEN,
+      } as any);
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({ models: [] }));
+      mockFetch.mockResolvedValueOnce(
+        makeJsonResponse({ instance_id: 'local-inst' })
+      );
+
+      await loadLlmModelForWorker('meta/local', 4096, LOCAL_URL);
+
+      expectNoAuth(`${LOCAL_URL}/api/v1/models`);
+      expectNoAuth(`${LOCAL_URL}/api/v1/models/load`);
+    });
+
+    it('attaches Bearer <token> to enumerate + load on a remote URL when a token is configured', async () => {
+      vi.mocked(appSettingsRepository.getSettings).mockReturnValue({
+        llm_api_token: TEST_TOKEN,
+      } as any);
+      // Pre-switch GET on the local default URL (returns 0 instances so
+      // no unload POST is needed). Then the main flow: GET enumerate on
+      // the target URL + POST load.
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({ models: [] }));
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({ models: [] }));
+      mockFetch.mockResolvedValueOnce(
+        makeJsonResponse({ instance_id: 'remote-inst' })
+      );
+
+      await loadLlmModelForWorker('meta/remote', 4096, REMOTE_URL);
+
+      expectAuth(`${REMOTE_URL}/api/v1/models`, TEST_TOKEN);
+      expectAuth(`${REMOTE_URL}/api/v1/models/load`, TEST_TOKEN);
+    });
+
+    it('omits Authorization on a remote URL when no token is configured', async () => {
+      vi.mocked(appSettingsRepository.getSettings).mockReturnValue({
+        llm_api_token: null,
+      } as any);
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({ models: [] }));
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({ models: [] }));
+      mockFetch.mockResolvedValueOnce(
+        makeJsonResponse({ instance_id: 'remote-inst' })
+      );
+
+      await loadLlmModelForWorker('meta/remote', 4096, REMOTE_URL);
+
+      expectNoAuth(`${REMOTE_URL}/api/v1/models`);
+      expectNoAuth(`${REMOTE_URL}/api/v1/models/load`);
+    });
+
+    it('attaches Bearer header to unload POSTs at a remote URL when a token is configured', async () => {
+      vi.mocked(appSettingsRepository.getSettings).mockReturnValue({
+        llm_api_token: TEST_TOKEN,
+      } as any);
+      mockFetch.mockResolvedValueOnce(
+        makeJsonResponse({
+          models: [
+            {
+              type: 'llm',
+              loaded_instances: [{ id: 'r-inst-1' }, { id: 'r-inst-2' }],
+            },
+          ],
+        })
+      );
+      mockFetch.mockResolvedValue(makeJsonResponse({}));
+
+      await unloadModelAtUrlForWorker(REMOTE_URL);
+
+      // GET enumerate
+      expectAuth(`${REMOTE_URL}/api/v1/models`, TEST_TOKEN);
+      // Every call to the remote URL carries the header.
+      for (const call of mockFetch.mock.calls) {
+        const [url, init] = call as [string, RequestInit | undefined];
+        if (typeof url === 'string' && url.includes(REMOTE_URL)) {
+          const headers = (init?.headers ?? {}) as Record<string, string>;
+          expect(headers.Authorization).toBe(`Bearer ${TEST_TOKEN}`);
+        }
+      }
+    });
+
+    it('omits Authorization from unload POSTs at a remote URL when no token is configured', async () => {
+      vi.mocked(appSettingsRepository.getSettings).mockReturnValue({
+        llm_api_token: null,
+      } as any);
+      mockFetch.mockResolvedValueOnce(
+        makeJsonResponse({
+          models: [{ type: 'llm', loaded_instances: [{ id: 'r-inst-1' }] }],
+        })
+      );
+      mockFetch.mockResolvedValue(makeJsonResponse({}));
+
+      await unloadModelAtUrlForWorker(REMOTE_URL);
+
+      for (const call of mockFetch.mock.calls) {
+        const [url, init] = call as [string, RequestInit | undefined];
+        if (typeof url === 'string' && url.includes(REMOTE_URL)) {
+          const headers = (init?.headers ?? {}) as Record<string, string>;
+          expect(headers.Authorization).toBeUndefined();
+        }
+      }
+    });
+
+    it('re-reads the token from app_settings on every call (rotation works without restart)', async () => {
+      // First call: token = 'old'
+      vi.mocked(appSettingsRepository.getSettings).mockReturnValueOnce({
+        llm_api_token: 'old',
+      } as any);
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({ models: [] }));
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({ models: [] }));
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({ instance_id: 'r-1' }));
+      await loadLlmModelForWorker('meta/r1', 4096, REMOTE_URL);
+      expectAuth(`${REMOTE_URL}/api/v1/models`, 'old');
+
+      // Second call: token = 'new' (rotation)
+      vi.mocked(appSettingsRepository.getSettings).mockReturnValueOnce({
+        llm_api_token: 'new',
+      } as any);
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({ models: [] }));
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({ models: [] }));
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({ instance_id: 'r-2' }));
+      await loadLlmModelForWorker('meta/r2', 4096, REMOTE_URL);
+      const secondCall = mockFetch.mock.calls
+        .slice(-2)
+        .find(
+          ([url]: any) =>
+            typeof url === 'string' &&
+            url.endsWith(`${REMOTE_URL}/api/v1/models`)
+        );
+      const headers = (secondCall![1] as RequestInit | undefined)?.headers as
+        | Record<string, string>
+        | undefined;
+      expect(headers?.Authorization).toBe('Bearer new');
+    });
+
+    it('treats whitespace token as cleared (no Authorization header)', async () => {
+      vi.mocked(appSettingsRepository.getSettings).mockReturnValue({
+        llm_api_token: '   ',
+      } as any);
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({ models: [] }));
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({ models: [] }));
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({ instance_id: 'r-1' }));
+
+      await loadLlmModelForWorker('meta/r', 4096, REMOTE_URL);
+
+      expectNoAuth(`${REMOTE_URL}/api/v1/models`);
+      expectNoAuth(`${REMOTE_URL}/api/v1/models/load`);
     });
   });
 });

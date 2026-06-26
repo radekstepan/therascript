@@ -105,7 +105,49 @@ Model listing, pulling, loading, and unloading.
 | `GET` | `/api/llm/pull-status/:jobId` | Get status/progress of an ongoing model pull job |
 | `POST` | `/api/llm/cancel-pull/:jobId` | Attempt to cancel an ongoing model pull job |
 | `POST` | `/api/llm/delete-model` | Delete a locally downloaded LLM model |
+| `POST` | `/api/llm/api-token` | Set or clear the global API token used to authenticate against remote LLM endpoints |
 | `GET` | `/api/llm/status` | Check loaded status and context sizes for active/specific model |
+
+### Remote LLM API token
+
+A single, globally-stored, optional API token is automatically attached as
+`Authorization: Bearer <token>` to every request targeting a non-local
+LLM base URL — and to no request targeting the local default. One value
+applies to all remote URLs; the user sets/clears it once via the
+"Configure AI Model" dialog (or the "Analyze Multiple Sessions" dialog).
+
+**`POST /api/llm/api-token`**
+
+Body:
+
+```json
+{ "token": "sk-abc-123" }
+```
+
+Pass a non-empty string to set or replace; pass an empty string or
+`null` to clear. The response only exposes the new presence state —
+the token value itself is never returned:
+
+```json
+{ "message": "Remote LLM API token saved.", "hasRemoteApiToken": true }
+```
+
+The presence boolean is also surfaced on `GET /api/llm/status` as
+`hasRemoteApiToken` so the UI can render the right placeholder
+("Token is set — type a new value to replace" vs
+"Enter API token (optional)") without ever pulling the credential back
+to the client.
+
+Behaviour:
+
+- The token is persisted in `app_settings.llm_api_token` and survives
+  the server's boot-time `clearModelAndContext()` — it is global state,
+  not model-derived state.
+- The token is read fresh on every API call, so rotation takes effect
+  immediately without restarting the API or the worker.
+- The local LM Studio daemon is never asked for credentials it cannot
+  validate; the `isRemoteLlmBaseUrl(url)` gate is the single source of
+  truth.
 
 ---
 

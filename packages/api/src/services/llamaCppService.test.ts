@@ -40,6 +40,7 @@ vi.mock('./activeModelService.js', () => ({
     return trimmed || null;
   }),
   getConfiguredBaseUrlOverride: vi.fn().mockReturnValue(null),
+  getActiveApiToken: vi.fn().mockReturnValue(null),
   clearModelAndContext: vi.fn(),
 }));
 
@@ -144,6 +145,7 @@ const {
   getActiveModel,
   setActiveModelName,
   setConfiguredContextSize,
+  getActiveApiToken,
   clearModelAndContext,
 } = await import('./activeModelService.js');
 
@@ -1917,5 +1919,259 @@ describe('llamaCppService', () => {
 
       expect(result).toEqual({ promptTokens: 11, completionTokens: 22 });
     });
+  });
+});
+
+describe('llamaCppService — Authorization header gating', () => {
+  const REMOTE_URL = 'http://10.0.0.1:1234';
+  const LOCAL_URL = 'http://localhost:1234';
+  const TEST_TOKEN = 'sk-test-token-abc';
+  const messages: BackendChatMessage[] = [
+    { id: 1, chatId: 1, sender: 'user', text: 'hi', timestamp: 0 },
+  ];
+
+  // Find a recorded axios call by URL suffix. Returns the matching call's
+  // axios config so tests can read the `headers` field.
+  //   - axios.get(url, config?)            -> config is call[1]
+  //   - axios.post(url, data?, config?)    -> config is call[2]
+  // We try both positions and return the one that actually has a `headers`
+  // object, so the helper works uniformly for every call site under test.
+  const findCall = (
+    mockFn: ReturnType<typeof vi.fn>,
+    urlSuffix: string
+  ): { url: string; config: any } | undefined => {
+    const call = mockFn.mock.calls.find(
+      ([url]: any) => typeof url === 'string' && url.endsWith(urlSuffix)
+    );
+    if (!call) return undefined;
+    const candidates = [call[1], call[2]];
+    const config = candidates.find(
+      (c) => c && typeof c === 'object' && 'headers' in c
+    );
+    return { url: call[0], config: config ?? {} };
+  };
+
+  const setRemote = () => {
+    vi.mocked(isRemoteLlmBaseUrl).mockReturnValue(true);
+    vi.mocked(getActiveBaseUrl).mockReturnValue(REMOTE_URL);
+  };
+  const setLocal = () => {
+    vi.mocked(isRemoteLlmBaseUrl).mockReturnValue(false);
+    vi.mocked(getActiveBaseUrl).mockReturnValue(LOCAL_URL);
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setLocal();
+    vi.mocked(getActiveApiToken).mockReturnValue(null);
+    // Default axios responses. `isLlmApiResponsive` (called by
+    // `ensureLlmReady` before `listModels`) only checks `res.status === 200`,
+    // so we mock a real-looking status. The subsequent `listModels` GET
+    // also uses this stub.
+    mockAxiosGet.mockResolvedValue({
+      status: 200,
+      data: { models: [] },
+    } as any);
+    mockAxiosPost.mockResolvedValue({ data: {} });
+  });
+
+  it('listModels sends no Authorization header when target is local', async () => {
+    await listModels();
+    const call = findCall(mockAxiosGet, '/api/v1/models');
+    expect(call).toBeDefined();
+    expect(call!.config.headers).toEqual({});
+  });
+
+  it('listModels sends no Authorization header when remote and no token configured', async () => {
+    setRemote();
+    await listModels();
+    const call = findCall(mockAxiosGet, '/api/v1/models');
+    expect(call!.config.headers).toEqual({});
+  });
+
+  it('listModels sends Bearer <token> when remote and a token is configured', async () => {
+    setRemote();
+    vi.mocked(getActiveApiToken).mockReturnValue(TEST_TOKEN);
+    await listModels();
+    const call = findCall(mockAxiosGet, '/api/v1/models');
+    expect(call!.config.headers).toEqual({
+      Authorization: `Bearer ${TEST_TOKEN}`,
+    });
+  });
+
+  it('loadLlmModel attaches Bearer header on enumerate/load only when remote + token', async () => {
+    setRemote();
+    vi.mocked(getActiveApiToken).mockReturnValue(TEST_TOKEN);
+    mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
+    mockAxiosPost.mockResolvedValueOnce({ data: { instance_id: 'inst' } });
+
+    await loadLlmModel('meta/llama', 4096, REMOTE_URL);
+
+    const enumerate = findCall(mockAxiosGet, '/api/v1/models');
+    expect(enumerate!.config.headers).toEqual({
+      Authorization: `Bearer ${TEST_TOKEN}`,
+    });
+
+    const load = findCall(mockAxiosPost, `${REMOTE_URL}/api/v1/models/load`);
+    expect(load!.config.headers).toEqual({
+      Authorization: `Bearer ${TEST_TOKEN}`,
+    });
+  });
+
+  it('loadLlmModel omits Authorization header on a local URL even with a token configured', async () => {
+    setLocal();
+    vi.mocked(getActiveApiToken).mockReturnValue(TEST_TOKEN);
+    mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
+    mockAxiosPost.mockResolvedValueOnce({ data: { instance_id: 'inst' } });
+
+    await loadLlmModel('meta/llama', 4096, LOCAL_URL);
+
+    const enumerate = findCall(mockAxiosGet, `${LOCAL_URL}/api/v1/models`);
+    expect(enumerate!.config.headers).toEqual({});
+
+    const load = findCall(mockAxiosPost, `${LOCAL_URL}/api/v1/models/load`);
+    expect(load!.config.headers).toEqual({});
+  });
+
+  it('unloadActiveModel attaches Bearer header to enumerate + unload POSTs when remote + token', async () => {
+    setRemote();
+    vi.mocked(getActiveApiToken).mockReturnValue(TEST_TOKEN);
+    mockAxiosGet.mockResolvedValueOnce({
+      data: {
+        models: [{ type: 'llm', loaded_instances: [{ id: 'inst-1' }] }],
+      },
+    });
+    mockAxiosPost.mockResolvedValueOnce({ data: {} });
+
+    await unloadActiveModel(REMOTE_URL, true);
+
+    const enumerate = findCall(mockAxiosGet, `${REMOTE_URL}/api/v1/models`);
+    expect(enumerate!.config.headers).toEqual({
+      Authorization: `Bearer ${TEST_TOKEN}`,
+    });
+
+    const unload = findCall(
+      mockAxiosPost,
+      `${REMOTE_URL}/api/v1/models/unload`
+    );
+    expect(unload!.config.headers).toEqual({
+      Authorization: `Bearer ${TEST_TOKEN}`,
+    });
+  });
+
+  it('unloadModelAtUrl attaches Bearer header to both the enumerate GET and unload POSTs when remote + token', async () => {
+    setRemote();
+    vi.mocked(getActiveApiToken).mockReturnValue(TEST_TOKEN);
+    mockAxiosGet.mockResolvedValueOnce({
+      data: {
+        models: [{ type: 'llm', loaded_instances: [{ id: 'inst-1' }] }],
+      },
+    });
+    mockAxiosPost.mockResolvedValueOnce({ data: {} });
+
+    await unloadModelAtUrl(REMOTE_URL);
+
+    const enumerate = findCall(mockAxiosGet, `${REMOTE_URL}/api/v1/models`);
+    expect(enumerate!.config.headers).toEqual({
+      Authorization: `Bearer ${TEST_TOKEN}`,
+    });
+
+    const unload = findCall(
+      mockAxiosPost,
+      `${REMOTE_URL}/api/v1/models/unload`
+    );
+    expect(unload!.config.headers).toEqual({
+      Authorization: `Bearer ${TEST_TOKEN}`,
+    });
+  });
+
+  it('checkModelStatus attaches Bearer header when remote + token', async () => {
+    setRemote();
+    vi.mocked(getActiveApiToken).mockReturnValue(TEST_TOKEN);
+    mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
+
+    await checkModelStatus('meta/llama', REMOTE_URL);
+
+    const enumerate = findCall(mockAxiosGet, `${REMOTE_URL}/api/v1/models`);
+    expect(enumerate!.config.headers).toEqual({
+      Authorization: `Bearer ${TEST_TOKEN}`,
+    });
+  });
+
+  it('startDownloadModelJob attaches Bearer header to its POST when remote + token', async () => {
+    setRemote();
+    vi.mocked(getActiveApiToken).mockReturnValue(TEST_TOKEN);
+    // skip polling, return already_downloaded so we don't loop
+    mockAxiosPost.mockResolvedValueOnce({
+      data: { status: 'already_downloaded' },
+    });
+
+    startDownloadModelJob('meta/llama');
+
+    // wait for the fire-and-forget promise to settle
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const download = findCall(
+      mockAxiosPost,
+      `${REMOTE_URL}/api/v1/models/download`
+    );
+    expect(download).toBeDefined();
+    expect(download!.config.headers).toEqual({
+      Authorization: `Bearer ${TEST_TOKEN}`,
+    });
+  });
+
+  it('streamChatResponse forwards the resolved token to streamLlmChatDetailed (remote + token)', async () => {
+    setRemote();
+    vi.mocked(getActiveApiToken).mockReturnValue(TEST_TOKEN);
+    vi.mocked(streamLlmChatDetailed).mockImplementation(async function* () {
+      yield { content: 'x' };
+      return { promptTokens: 1, completionTokens: 1 };
+    });
+
+    const gen = streamChatResponse(messages);
+    await gen.next();
+    await gen.return({ promptTokens: 1, completionTokens: 1 });
+
+    expect(streamLlmChatDetailed).toHaveBeenCalledTimes(1);
+    const callArgs = vi.mocked(streamLlmChatDetailed).mock.calls[0]!;
+    const options = callArgs[1] as Record<string, unknown>;
+    expect(options.llamaCppBaseUrl).toBe(REMOTE_URL);
+    expect(options.llmApiToken).toBe(TEST_TOKEN);
+  });
+
+  it('streamChatResponse forwards null token to streamLlmChatDetailed when the URL is local', async () => {
+    setLocal();
+    vi.mocked(getActiveApiToken).mockReturnValue(TEST_TOKEN);
+    vi.mocked(streamLlmChatDetailed).mockImplementation(async function* () {
+      yield { content: 'x' };
+      return { promptTokens: 1, completionTokens: 1 };
+    });
+
+    const gen = streamChatResponse(messages);
+    await gen.next();
+    await gen.return({ promptTokens: 1, completionTokens: 1 });
+
+    const callArgs = vi.mocked(streamLlmChatDetailed).mock.calls[0]!;
+    const options = callArgs[1] as Record<string, unknown>;
+    expect(options.llamaCppBaseUrl).toBe(LOCAL_URL);
+    expect(options.llmApiToken).toBeNull();
+  });
+
+  it('streamChatResponse forwards null token when remote but no token configured', async () => {
+    setRemote();
+    vi.mocked(getActiveApiToken).mockReturnValue(null);
+    vi.mocked(streamLlmChatDetailed).mockImplementation(async function* () {
+      yield { content: 'x' };
+      return { promptTokens: 1, completionTokens: 1 };
+    });
+
+    const gen = streamChatResponse(messages);
+    await gen.next();
+    await gen.return({ promptTokens: 1, completionTokens: 1 });
+
+    const callArgs = vi.mocked(streamLlmChatDetailed).mock.calls[0]!;
+    const options = callArgs[1] as Record<string, unknown>;
+    expect(options.llmApiToken).toBeNull();
   });
 });

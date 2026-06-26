@@ -388,3 +388,119 @@ describe('streamLlmChatDetailed', () => {
     );
   });
 });
+
+describe('streamLlmChatDetailed — Authorization header', () => {
+  let mockFetch: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    mockFetch = vi.fn();
+    vi.stubGlobal('fetch', mockFetch);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const readHeaders = (): Record<string, string> => {
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const init = mockFetch.mock.calls[0]![1] as RequestInit;
+    return (init.headers ?? {}) as Record<string, string>;
+  };
+
+  const consumeOne = async () => {
+    mockFetch.mockResolvedValue(makeSseResponse(['[DONE]']));
+    await consume(
+      streamLlmChatDetailed(messages, {
+        llamaCppBaseUrl: 'http://10.0.0.1:1234',
+      })
+    );
+  };
+
+  it('omits the Authorization header when no token is supplied', async () => {
+    await consumeOne();
+    expect(readHeaders()).not.toHaveProperty('Authorization');
+  });
+
+  it('omits the Authorization header when the token is undefined', async () => {
+    mockFetch.mockResolvedValue(makeSseResponse(['[DONE]']));
+    await consume(
+      streamLlmChatDetailed(messages, {
+        llamaCppBaseUrl: 'http://10.0.0.1:1234',
+        llmApiToken: undefined,
+      })
+    );
+    expect(readHeaders()).not.toHaveProperty('Authorization');
+  });
+
+  it('omits the Authorization header when the token is null', async () => {
+    mockFetch.mockResolvedValue(makeSseResponse(['[DONE]']));
+    await consume(
+      streamLlmChatDetailed(messages, {
+        llamaCppBaseUrl: 'http://10.0.0.1:1234',
+        llmApiToken: null,
+      })
+    );
+    expect(readHeaders()).not.toHaveProperty('Authorization');
+  });
+
+  it('omits the Authorization header when the token is an empty string', async () => {
+    mockFetch.mockResolvedValue(makeSseResponse(['[DONE]']));
+    await consume(
+      streamLlmChatDetailed(messages, {
+        llamaCppBaseUrl: 'http://10.0.0.1:1234',
+        llmApiToken: '',
+      })
+    );
+    expect(readHeaders()).not.toHaveProperty('Authorization');
+  });
+
+  it('omits the Authorization header when the token is whitespace-only', async () => {
+    mockFetch.mockResolvedValue(makeSseResponse(['[DONE]']));
+    await consume(
+      streamLlmChatDetailed(messages, {
+        llamaCppBaseUrl: 'http://10.0.0.1:1234',
+        llmApiToken: '   \t\n  ',
+      })
+    );
+    expect(readHeaders()).not.toHaveProperty('Authorization');
+  });
+
+  it('attaches Authorization: Bearer <token> when a non-empty token is supplied', async () => {
+    mockFetch.mockResolvedValue(makeSseResponse(['[DONE]']));
+    await consume(
+      streamLlmChatDetailed(messages, {
+        llamaCppBaseUrl: 'http://10.0.0.1:1234',
+        llmApiToken: 'sk-abc-123',
+      })
+    );
+    expect(readHeaders()['Authorization']).toBe('Bearer sk-abc-123');
+  });
+
+  it('trims surrounding whitespace from the token before attaching', async () => {
+    mockFetch.mockResolvedValue(makeSseResponse(['[DONE]']));
+    await consume(
+      streamLlmChatDetailed(messages, {
+        llamaCppBaseUrl: 'http://10.0.0.1:1234',
+        llmApiToken: '  sk-abc-123  ',
+      })
+    );
+    expect(readHeaders()['Authorization']).toBe('Bearer sk-abc-123');
+  });
+
+  it('does not gate on URL — forwards the token to whatever URL the caller supplied', async () => {
+    // The client is intentionally URL-agnostic; the upstream layer is
+    // responsible for resolving the token to null for local URLs. This
+    // test pins that contract: when the caller says "send a token",
+    // a Bearer header is sent, period.
+    mockFetch.mockResolvedValue(makeSseResponse(['[DONE]']));
+    await consume(
+      streamLlmChatDetailed(messages, {
+        llamaCppBaseUrl: 'http://10.0.0.1:1234',
+        llmApiToken: 'sk-abc-123',
+      })
+    );
+    const url = mockFetch.mock.calls[0]![0] as string;
+    expect(url).toBe('http://10.0.0.1:1234/v1/chat/completions');
+    expect(readHeaders()['Authorization']).toBe('Bearer sk-abc-123');
+  });
+});

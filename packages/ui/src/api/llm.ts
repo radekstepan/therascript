@@ -227,3 +227,26 @@ export const estimateModelVram = async (
   );
   return response.data;
 };
+
+/**
+ * Set or clear the global API token used to authenticate against remote
+ * LLM endpoints. Pass a non-empty string to set/replace, an empty string
+ * or `null` to clear. The token is sent as
+ * `Authorization: Bearer <token>` on every request whose base URL is
+ * non-local; the local LM Studio daemon is never asked for credentials.
+ *
+ * The response exposes the new presence state (`hasRemoteApiToken`) so
+ * the calling form can refresh its placeholder without an extra
+ * `GET /api/llm/status` round-trip.
+ */
+export const setLlmApiToken = async (
+  token: string | null
+): Promise<{ message: string; hasRemoteApiToken: boolean }> => {
+  const response = await axios.post<{
+    message: string;
+    hasRemoteApiToken: boolean;
+  }>('/api/llm/api-token', {
+    token: typeof token === 'string' && token.length > 0 ? token : null,
+  });
+  return response.data;
+};

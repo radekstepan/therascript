@@ -32,6 +32,8 @@ import {
   getDefaultBaseUrl,
   isRemoteLlmBaseUrl,
   normalizeLlmBaseUrl,
+  hasActiveApiToken,
+  setActiveApiToken,
 } from '../services/activeModelService.js';
 import type {
   LlmModelInfo,
@@ -65,7 +67,7 @@ const LlmStatusResponseSchema = t.Object({
   activeModel: t.String(),
   modelChecked: t.String(),
   loaded: t.Boolean(),
-  details: t.Optional(LlmModelInfoSchema),
+  details: t.Optional(LlmModelDetailSchema),
   configuredContextSize: t.Optional(t.Union([t.Number(), t.Null()])),
   configuredTemperature: t.Optional(t.Number()),
   configuredTopP: t.Optional(t.Number()),
@@ -75,6 +77,7 @@ const LlmStatusResponseSchema = t.Object({
   activeBaseUrl: t.String(),
   defaultBaseUrl: t.String(),
   isRemoteBaseUrl: t.Boolean(),
+  hasRemoteApiToken: t.Boolean(),
 });
 const SetModelBodySchema = t.Object({
   modelName: t.String({ minLength: 1, error: 'Model name is required.' }),
@@ -96,6 +99,25 @@ const SetModelBodySchema = t.Object({
 });
 const PullModelBodySchema = t.Object({
   modelUrl: t.String({ minLength: 1, error: 'Model URL is required.' }),
+});
+/**
+ * Body for POST /api/llm/api-token. Accepts a non-empty string to set or
+ * replace the global remote LLM API token, and an empty string or explicit
+ * `null` to clear it. The token is stored in the DB and automatically
+ * attached as `Authorization: Bearer <token>` to every request targeting
+ * a non-local base URL.
+ */
+const SetApiTokenBodySchema = t.Object({
+  token: t.Optional(
+    t.Union([
+      t.String({ minLength: 1, error: 'Token must be a non-empty string.' }),
+      t.Null(),
+    ])
+  ),
+});
+const SetApiTokenResponseSchema = t.Object({
+  message: t.String(),
+  hasRemoteApiToken: t.Boolean(),
 });
 const StartPullResponseSchema = t.Object({
   jobId: t.String(),
@@ -153,6 +175,8 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
   .model({
     setModelBody: SetModelBodySchema,
     pullModelBody: PullModelBodySchema,
+    setApiTokenBody: SetApiTokenBodySchema,
+    setApiTokenResponse: SetApiTokenResponseSchema,
     llmModelInfo: LlmModelInfoSchema,
     availableModelsResponse: AvailableModelsResponseSchema,
     llmStatusResponse: LlmStatusResponseSchema,
@@ -364,6 +388,40 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
         }
       )
       .post(
+        '/api-token',
+        async ({ body, set }) => {
+          const rawToken = body?.token;
+          // Treat an empty string the same as `null` so the frontend can
+          // send `{ token: '' }` to clear without needing a special
+          // sentinel. Whitespace-only is also cleared by the service.
+          const next: string | null =
+            typeof rawToken === 'string' && rawToken.length > 0
+              ? rawToken
+              : null;
+          setActiveApiToken(next);
+          const present = hasActiveApiToken();
+          set.status = 200;
+          return {
+            message: present
+              ? 'Remote LLM API token saved.'
+              : 'Remote LLM API token cleared.',
+            hasRemoteApiToken: present,
+          };
+        },
+        {
+          body: 'setApiTokenBody',
+          response: {
+            200: 'setApiTokenResponse',
+            400: t.Any(),
+            500: t.Any(),
+          },
+          detail: {
+            summary:
+              'Set or clear the global API token used to authenticate against remote LLM endpoints. The token is sent as `Authorization: Bearer <token>` on every request whose base URL is non-local, and is never returned in API responses — the `hasRemoteApiToken` boolean is the only signal of its presence.',
+          },
+        }
+      )
+      .post(
         '/pull-model',
         ({ body, set }) => {
           const { modelUrl } = body;
@@ -539,9 +597,12 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
           const activeBaseUrl = getActiveBaseUrl();
           const defaultBaseUrl = getDefaultBaseUrl();
           const isRemoteBaseUrl = isRemoteLlmBaseUrl(activeBaseUrl);
+          // Token presence boolean (never the token value itself) so the
+          // UI can render "Token is set" vs empty placeholder.
+          const hasRemoteApiToken = hasActiveApiToken();
           const modelNameToCheck = query.modelName ?? currentActiveModel;
           console.log(
-            `[API Status] Checking status for model: ${modelNameToCheck} (Current Active: ${currentActiveModel}, Configured Context: ${currentConfiguredContext ?? 'default'}, Temperature: ${currentConfiguredTemperature}, TopP: ${currentConfiguredTopP}, RepeatPenalty: ${currentConfiguredRepeatPenalty}, NumGpuLayers: ${currentConfiguredNumGpuLayers ?? 'auto'}, ThinkingBudget: ${currentConfiguredThinkingBudget ?? 'unrestricted'}, ActiveBaseUrl: ${activeBaseUrl}, IsRemote: ${isRemoteBaseUrl})`
+            `[API Status] Checking status for model: ${modelNameToCheck} (Current Active: ${currentActiveModel}, Configured Context: ${currentConfiguredContext ?? 'default'}, Temperature: ${currentConfiguredTemperature}, TopP: ${currentConfiguredTopP}, RepeatPenalty: ${currentConfiguredRepeatPenalty}, NumGpuLayers: ${currentConfiguredNumGpuLayers ?? 'auto'}, ThinkingBudget: ${currentConfiguredThinkingBudget ?? 'unrestricted'}, ActiveBaseUrl: ${activeBaseUrl}, IsRemote: ${isRemoteBaseUrl}, HasRemoteApiToken: ${hasRemoteApiToken})`
           );
           try {
             const loadedModelResult = await checkModelStatus(modelNameToCheck);
@@ -570,6 +631,7 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
                 activeBaseUrl,
                 defaultBaseUrl,
                 isRemoteBaseUrl,
+                hasRemoteApiToken,
               };
             } else {
               const loadedModelInfo = loadedModelResult as LlmModelInfo | null;
@@ -597,6 +659,7 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
                 activeBaseUrl,
                 defaultBaseUrl,
                 isRemoteBaseUrl,
+                hasRemoteApiToken,
               };
             }
           } catch (error: any) {

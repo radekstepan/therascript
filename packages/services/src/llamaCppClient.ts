@@ -26,6 +26,15 @@ export interface StreamLlmChatOptions {
   timeoutMs?: number;
   stopTokens?: string[];
   llamaCppBaseUrl?: string;
+  /**
+   * Optional API token (e.g. `Authorization: Bearer ...`) to attach to
+   * the outgoing request. The caller is responsible for resolving the
+   * token against the active base URL — this client does not check
+   * whether the URL is local or remote, so it is safe to pass a token
+   * unconditionally and let the upstream layer gate on `isRemote`.
+   * Undefined / null / empty -> no Authorization header is sent.
+   */
+  llmApiToken?: string | null;
   temperature?: number;
   topP?: number;
   repeatPenalty?: number;
@@ -156,9 +165,23 @@ export async function* streamLlmChatDetailed(
     )
       bodyPayload.reasoning_budget = options.thinkingBudget;
 
+    // Build headers. Authorization is only attached when a non-empty token
+    // is supplied; the caller (API/worker) is expected to have already
+    // gated on "is this a remote URL?" so the local LM Studio daemon is
+    // never asked for credentials it cannot validate.
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (
+      typeof options?.llmApiToken === 'string' &&
+      options.llmApiToken.trim().length > 0
+    ) {
+      headers['Authorization'] = `Bearer ${options.llmApiToken.trim()}`;
+    }
+
     const response = await fetch(`${baseUrl}/v1/chat/completions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       signal: combinedSignal,
       body: JSON.stringify(bodyPayload),
     });

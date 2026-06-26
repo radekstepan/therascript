@@ -643,6 +643,30 @@ function runMigrations(dbInstance: DB) {
         currentVersion = 18;
         console.log('[db Migrator] Version 18 applied.');
       }
+
+      // NEW MIGRATION: Version 19 to add llm_api_token to app_settings.
+      // Stores a single global API token (e.g. Authorization: Bearer ...) that
+      // is automatically attached to every request targeting a remote LLM base
+      // URL. NULL means "no token configured"; the token is only ever sent
+      // when the resolved base URL is non-local, so the local LM Studio
+      // daemon is never asked for credentials it does not understand.
+      if (currentVersion < 19) {
+        console.log('[db Migrator] Applying version 19...');
+        const appSettingsColumns = dbInstance.pragma(
+          'table_info(app_settings)'
+        ) as { name: string }[];
+        if (!appSettingsColumns.some((col) => col.name === 'llm_api_token')) {
+          console.log(
+            '[db Migrator V19] Adding "llm_api_token" to app_settings...'
+          );
+          dbInstance.exec(
+            'ALTER TABLE app_settings ADD COLUMN llm_api_token TEXT NULL'
+          );
+        }
+        dbInstance.pragma(`user_version = 19`);
+        currentVersion = 19;
+        console.log('[db Migrator] Version 19 applied.');
+      }
     })();
     console.log(
       `[db Migrator] Migrations complete. Database is now at version ${currentVersion}.`

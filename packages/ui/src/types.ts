@@ -191,6 +191,14 @@ export interface LlmStatus {
   defaultBaseUrl?: string;
   /** True when `activeBaseUrl` differs from `defaultBaseUrl` (i.e., remote mode is active). */
   isRemoteBaseUrl?: boolean;
+  /**
+   * True when the backend has a non-null API token configured for remote
+   * LLM endpoints. The token value itself is never returned to the UI —
+   * only its presence — so the form can render the right placeholder
+   * ("Token is set — type a new value to replace") and the user can
+   * clear it without re-entering the original value.
+   */
+  hasRemoteApiToken?: boolean;
 }
 export interface AvailableModelsResponse {
   models: LlmModelInfo[];

@@ -15,6 +15,7 @@ const defaultMockSettings = () => ({
   llm_repeat_penalty: 1.1,
   llm_num_gpu_layers: null,
   llm_thinking_budget: null,
+  llm_api_token: null,
 });
 
 let mockSettings: any = defaultMockSettings();
@@ -319,6 +320,7 @@ describe('activeModelService — clearModelAndContext', () => {
       llm_repeat_penalty: 1.3,
       llm_num_gpu_layers: 24,
       llm_thinking_budget: 512,
+      llm_api_token: null,
     };
   });
 
@@ -368,6 +370,7 @@ describe('activeModelService — clearModelAndContext', () => {
       llm_repeat_penalty: 1.3,
       llm_num_gpu_layers: 24,
       llm_thinking_budget: 512,
+      llm_api_token: null,
     };
     const svc = await import('./activeModelService.js');
     const { appSettingsRepository } = await import('@therascript/data');
@@ -376,5 +379,116 @@ describe('activeModelService — clearModelAndContext', () => {
     svc.clearModelAndContext();
 
     expect(appSettingsRepository.updateSettings).not.toHaveBeenCalled();
+  });
+});
+
+describe('activeModelService — remote LLM API token', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    mockSettings = defaultMockSettings();
+  });
+
+  it('returns null and reports not-set by default', async () => {
+    const svc = await import('./activeModelService.js');
+    expect(svc.getActiveApiToken()).toBeNull();
+    expect(svc.hasActiveApiToken()).toBe(false);
+  });
+
+  it('persists a non-empty token and is read back trimmed', async () => {
+    const svc = await import('./activeModelService.js');
+    svc.setActiveApiToken('  sk-test-123  ');
+    expect(svc.getActiveApiToken()).toBe('sk-test-123');
+    expect(svc.hasActiveApiToken()).toBe(true);
+  });
+
+  it('clears the token when set to null or empty string', async () => {
+    const svc = await import('./activeModelService.js');
+    svc.setActiveApiToken('sk-test-123');
+    expect(svc.getActiveApiToken()).toBe('sk-test-123');
+
+    svc.setActiveApiToken(null);
+    expect(svc.getActiveApiToken()).toBeNull();
+
+    svc.setActiveApiToken('sk-test-456');
+    expect(svc.getActiveApiToken()).toBe('sk-test-456');
+    svc.setActiveApiToken('');
+    expect(svc.getActiveApiToken()).toBeNull();
+
+    svc.setActiveApiToken('  ');
+    expect(svc.getActiveApiToken()).toBeNull();
+  });
+
+  it('treats whitespace-only as a clear', async () => {
+    const svc = await import('./activeModelService.js');
+    svc.setActiveApiToken('sk-test-123');
+    svc.setActiveApiToken('   \t\n   ');
+    expect(svc.getActiveApiToken()).toBeNull();
+  });
+
+  it('is a no-op when setting the same token twice (idempotent)', async () => {
+    const svc = await import('./activeModelService.js');
+    const { appSettingsRepository } = await import('@therascript/data');
+    svc.setActiveApiToken('sk-test-123');
+    vi.mocked(appSettingsRepository.updateSettings).mockClear();
+
+    svc.setActiveApiToken('sk-test-123');
+    expect(appSettingsRepository.updateSettings).not.toHaveBeenCalled();
+  });
+
+  it('is preserved by clearModelAndContext (token is not model-derived)', async () => {
+    mockSettings = {
+      ...defaultMockSettings(),
+      llm_model_name: 'qwen:7b',
+      llm_context_size: 8192,
+      llm_api_token: 'sk-keep-me',
+    };
+    const svc = await import('./activeModelService.js');
+
+    svc.clearModelAndContext();
+
+    expect(svc.getActiveApiToken()).toBe('sk-keep-me');
+    expect(svc.getActiveModel()).toBe('default');
+  });
+
+  it('setActiveModelAndContextAndParams updates the token when supplied', async () => {
+    const svc = await import('./activeModelService.js');
+    svc.setActiveModelAndContextAndParams(
+      'llama3',
+      null,
+      0.7,
+      0.9,
+      1.1,
+      null,
+      null,
+      'http://10.0.0.1:1234',
+      'sk-another'
+    );
+    expect(svc.getActiveApiToken()).toBe('sk-another');
+  });
+
+  it('setActiveModelAndContextAndParams treats undefined as a no-op for the token', async () => {
+    mockSettings = {
+      ...defaultMockSettings(),
+      llm_api_token: 'sk-keep-me',
+    };
+    const svc = await import('./activeModelService.js');
+
+    // No newApiToken (undefined) — must NOT clear the stored token.
+    svc.setActiveModelAndContextAndParams('llama3', null, 0.7, 0.9, 1.1);
+    expect(svc.getActiveApiToken()).toBe('sk-keep-me');
+
+    // Explicit null — must clear the stored token.
+    svc.setActiveModelAndContextAndParams(
+      'llama3',
+      null,
+      0.7,
+      0.9,
+      1.1,
+      null,
+      null,
+      undefined,
+      null
+    );
+    expect(svc.getActiveApiToken()).toBeNull();
   });
 });

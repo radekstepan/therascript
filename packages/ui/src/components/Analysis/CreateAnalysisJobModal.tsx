@@ -29,6 +29,7 @@ import {
   fetchSession,
   fetchTemplates,
   fetchLlmStatus,
+  setLlmApiToken,
 } from '../../api/api';
 import type { Session, LlmStatus, Template } from '../../types';
 import { toastMessageAtom } from '../../store';
@@ -172,6 +173,7 @@ export function CreateAnalysisJobModal({
     contextSizeInput: '',
     isRemote: false,
     remoteUrl: '',
+    apiToken: '',
     temperature: 0.7,
     topP: 0.9,
     repeatPenalty: 1.1,
@@ -250,6 +252,10 @@ export function CreateAnalysisJobModal({
       isRemote: llmStatus.isRemoteBaseUrl ?? false,
       remoteUrl:
         (llmStatus.isRemoteBaseUrl ? llmStatus.activeBaseUrl : '') ?? '',
+      // Token is never sent back from the server; the user must re-enter
+      // to change it. The form's "is a token set?" comes from
+      // llmStatus.hasRemoteApiToken, surfaced via the picker's placeholder.
+      apiToken: '',
       temperature: llmStatus.configuredTemperature ?? 0.7,
       topP: llmStatus.configuredTopP ?? 0.9,
       repeatPenalty: llmStatus.configuredRepeatPenalty ?? 1.1,
@@ -330,6 +336,25 @@ export function CreateAnalysisJobModal({
     ) {
       setValidationError('Context size must be a positive number if provided.');
       return;
+    }
+
+    // Token change semantics (mirrors SelectActiveModelModal):
+    //   - non-empty typed value  -> set/replace
+    //   - empty                    -> no-op (preserves any existing token)
+    // The empty-field case deliberately does NOT clear the token, even
+    // when one is currently saved. Submitting the analysis modal without
+    // touching the token field must not wipe the credential — the user
+    // has an explicit Clear icon button in the picker for that.
+    // Fire-and-forget so a token-save failure doesn't block the analysis
+    // job; the next /api/llm/status poll will reflect the real state.
+    const trimmedToken = formState.apiToken.trim();
+    if (trimmedToken.length > 0) {
+      setLlmApiToken(trimmedToken).catch((err) => {
+        console.warn(
+          'Failed to set remote LLM API token:',
+          err?.message ?? err
+        );
+      });
     }
 
     createJobMutation.mutate({

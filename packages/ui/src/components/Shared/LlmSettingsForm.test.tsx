@@ -64,10 +64,18 @@ vi.mock('./LlmEndpointModelPicker', () => ({
     onModelsChange,
     selectedModel,
     onSelectedModelChange,
+    apiToken,
+    setApiToken,
+    hasRemoteApiToken,
+    isRemote,
   }: {
     onModelsChange?: (models: LlmModelInfo[]) => void;
     selectedModel: string;
     onSelectedModelChange: (model: string) => void;
+    apiToken: string;
+    setApiToken: (token: string) => void;
+    hasRemoteApiToken?: boolean;
+    isRemote: boolean;
   }) => {
     React.useEffect(() => {
       onModelsChange?.([MODEL_A, MODEL_B]);
@@ -82,6 +90,28 @@ vi.mock('./LlmEndpointModelPicker', () => ({
         >
           Pick model B
         </button>
+        {isRemote && (
+          <div data-testid="picker-token-controls">
+            <span data-testid="picker-token-value">{apiToken}</span>
+            <span data-testid="picker-token-presence">
+              {hasRemoteApiToken ? 'set' : 'unset'}
+            </span>
+            <button
+              type="button"
+              onClick={() => setApiToken('new-token-xyz')}
+              data-testid="picker-set-token"
+            >
+              set token
+            </button>
+            <button
+              type="button"
+              onClick={() => setApiToken('')}
+              data-testid="picker-clear-token"
+            >
+              clear token
+            </button>
+          </div>
+        )}
       </div>
     );
   },
@@ -119,6 +149,7 @@ const baseState: LlmSettingsState = {
   contextSizeInput: '',
   isRemote: false,
   remoteUrl: '',
+  apiToken: '',
   temperature: 0.7,
   topP: 0.9,
   repeatPenalty: 1.1,
@@ -141,6 +172,7 @@ function makeLlmStatus(overrides: Partial<LlmStatus> = {}): LlmStatus {
     activeBaseUrl: 'http://localhost:1234',
     defaultBaseUrl: 'http://localhost:1234',
     isRemoteBaseUrl: false,
+    hasRemoteApiToken: false,
     ...overrides,
   };
 }
@@ -348,5 +380,86 @@ describe('LlmSettingsForm — user typing behaviour', () => {
     await user.type(input, '8192');
     expect(input.value).toBe('8192');
     expect(current.contextSizeInput).toBe('8192');
+  });
+});
+
+describe('LlmSettingsForm — remote API token field', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('does not render the token controls when isRemote is false', () => {
+    const state: LlmSettingsState = {
+      ...baseState,
+      isRemote: false,
+    };
+    const llmStatus = makeLlmStatus();
+    renderForm({ state, llmStatus });
+    expect(screen.queryByTestId('picker-token-controls')).toBeNull();
+  });
+
+  it('renders the token controls with the "unset" presence label when no token is configured', () => {
+    const state: LlmSettingsState = {
+      ...baseState,
+      isRemote: true,
+      remoteUrl: 'http://10.0.0.1:1234',
+    };
+    const llmStatus = makeLlmStatus({
+      isRemoteBaseUrl: true,
+      activeBaseUrl: 'http://10.0.0.1:1234',
+      defaultBaseUrl: 'http://localhost:1234',
+      hasRemoteApiToken: false,
+    });
+    renderForm({ state, llmStatus });
+
+    expect(screen.queryByTestId('picker-token-controls')).not.toBeNull();
+    expect(screen.getByTestId('picker-token-value').textContent).toBe('');
+    expect(screen.getByTestId('picker-token-presence').textContent).toBe(
+      'unset'
+    );
+  });
+
+  it('renders the token controls with the "set" presence label when a token is configured', () => {
+    const state: LlmSettingsState = {
+      ...baseState,
+      isRemote: true,
+      remoteUrl: 'http://10.0.0.1:1234',
+    };
+    const llmStatus = makeLlmStatus({
+      isRemoteBaseUrl: true,
+      activeBaseUrl: 'http://10.0.0.1:1234',
+      defaultBaseUrl: 'http://localhost:1234',
+      hasRemoteApiToken: true,
+    });
+    renderForm({ state, llmStatus });
+
+    expect(screen.getByTestId('picker-token-presence').textContent).toBe('set');
+  });
+
+  it('updates state.apiToken when the picker reports a new typed value', async () => {
+    const state: LlmSettingsState = {
+      ...baseState,
+      isRemote: true,
+      remoteUrl: 'http://10.0.0.1:1234',
+    };
+    const llmStatus = makeLlmStatus({
+      isRemoteBaseUrl: true,
+      activeBaseUrl: 'http://10.0.0.1:1234',
+      defaultBaseUrl: 'http://localhost:1234',
+    });
+    let current: LlmSettingsState = state;
+    const onChange = (
+      updater: (prev: LlmSettingsState) => LlmSettingsState
+    ) => {
+      current = updater(current);
+    };
+    const user = userEvent.setup();
+    renderForm({ state, llmStatus, onChange });
+
+    await user.click(screen.getByTestId('picker-set-token'));
+    expect(current.apiToken).toBe('new-token-xyz');
+
+    await user.click(screen.getByTestId('picker-clear-token'));
+    expect(current.apiToken).toBe('');
   });
 });

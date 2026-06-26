@@ -7,6 +7,7 @@ import {
   transcriptRepository,
   sessionRepository,
   usageRepository,
+  appSettingsRepository,
 } from '@therascript/data';
 import type {
   AnalysisStrategy,
@@ -28,6 +29,60 @@ import {
 } from './loadedModelsTracker.js';
 
 /**
+ * Read the globally stored remote LLM API token. Worker-local counterpart
+ * of `getActiveApiToken` in the API's `activeModelService` — the worker
+ * is a separate process and shares the same SQLite DB via
+ * `appSettingsRepository`, so reading here gives the worker the same
+ * single global token the user configured in the API. Returns `null`
+ * when the stored value is blank/whitespace or the row is missing.
+ */
+export function loadLlmApiTokenForWorker(): string | null {
+  try {
+    const row = appSettingsRepository.getSettings();
+    const raw = row.llm_api_token;
+    if (typeof raw !== 'string') return null;
+    const trimmed = raw.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  } catch (e) {
+    // The DB may not be ready at boot, or the row may not exist yet.
+    // Treat that as "no token" rather than failing the job.
+    console.warn(
+      '[Analysis Worker] Failed to read remote LLM API token:',
+      (e as Error)?.message ?? e
+    );
+    return null;
+  }
+}
+
+/**
+ * Worker-side companion to the API's `authHeadersFor`:
+ *   - `null` when the URL is the local default (token is never sent)
+ *   - `{ Authorization: 'Bearer <token>' }` when the URL is remote and
+ *     a token is configured
+ *   - `{}` when the URL is remote but no token is configured
+ *
+ * The "is this remote?" check uses the same `config.llm.baseURL` baseline
+ * the existing URL-switch logic in `loadLlmModelForWorker` uses (the
+ * worker has no notion of a `defaultBaseUrl` override; the config value
+ * is the only local URL it ever talks to).
+ */
+function authHeadersForWorker(url: string | undefined): {
+  Authorization?: string;
+} {
+  if (!url || url === config.llm.baseURL) return {};
+  const token = loadLlmApiTokenForWorker();
+  if (!token) return {};
+  return { Authorization: `Bearer ${token}` };
+}
+
+/** Same as `authHeadersForWorker` but returns `null` for the streaming
+ *  `llmApiToken` option (the llama.cpp client trims/null-checks for us). */
+function resolveLlmApiTokenForWorker(url: string | undefined): string | null {
+  if (!url || url === config.llm.baseURL) return null;
+  return loadLlmApiTokenForWorker();
+}
+
+/**
  * Unload any loaded LLM model instances on a specific URL via the LM Studio
  * REST API. Worker-local counterpart of `unloadModelAtUrl` in the API's
  * `llamaCppService`. Best-effort: per-instance failures and enumeration
@@ -38,7 +93,9 @@ import {
 export async function unloadModelAtUrlForWorker(url: string): Promise<number> {
   let unloadedCount = 0;
   try {
-    const res = await fetch(`${url}/api/v1/models`);
+    const res = await fetch(`${url}/api/v1/models`, {
+      headers: authHeadersForWorker(url),
+    });
     if (res.ok) {
       const data = (await res.json()) as {
         models: Array<{
@@ -53,7 +110,10 @@ export async function unloadModelAtUrlForWorker(url: string): Promise<number> {
         try {
           await fetch(`${url}/api/v1/models/unload`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              ...authHeadersForWorker(url),
+            },
             body: JSON.stringify({ instance_id: instance.id }),
           });
           console.log(
@@ -121,7 +181,9 @@ export async function loadLlmModelForWorker(
   };
   let loadedModels: LmsModel[] = [];
   try {
-    const res = await fetch(`${baseUrl}/api/v1/models`);
+    const res = await fetch(`${baseUrl}/api/v1/models`, {
+      headers: authHeadersForWorker(baseUrl),
+    });
     if (res.ok) {
       const data = (await res.json()) as { models: LmsModel[] };
       loadedModels = data.models.filter((m) => m.type === 'llm');
@@ -156,7 +218,10 @@ export async function loadLlmModelForWorker(
     try {
       await fetch(`${baseUrl}/api/v1/models/unload`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeadersForWorker(baseUrl),
+        },
         body: JSON.stringify({ instance_id: instance.id }),
       });
       console.log(`[Analysis Worker] Unloaded instance: ${instance.id}`);
@@ -182,7 +247,10 @@ export async function loadLlmModelForWorker(
   console.log(`[Analysis Worker] Loading model: ${modelKey}`);
   const loadRes = await fetch(`${baseUrl}/api/v1/models/load`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeadersForWorker(baseUrl),
+    },
     body: JSON.stringify(loadPayload),
   });
 
@@ -410,6 +478,7 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
           contextSize: jobRecord?.context_size || undefined,
           abortSignal: abortController.signal,
           llamaCppBaseUrl: jobLlmBaseUrl,
+          llmApiToken: resolveLlmApiTokenForWorker(jobLlmBaseUrl),
           temperature: jobRecord?.temperature ?? undefined,
           topP: jobRecord?.top_p ?? undefined,
           repeatPenalty: jobRecord?.repeat_penalty ?? undefined,
@@ -740,6 +809,7 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
         contextSize: jobRecord?.context_size || undefined,
         abortSignal: reduceAbortController.signal,
         llamaCppBaseUrl: jobLlmBaseUrl,
+        llmApiToken: resolveLlmApiTokenForWorker(jobLlmBaseUrl),
         temperature: jobRecord?.temperature ?? undefined,
         topP: jobRecord?.top_p ?? undefined,
         repeatPenalty: jobRecord?.repeat_penalty ?? undefined,

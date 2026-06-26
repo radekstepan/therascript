@@ -97,6 +97,28 @@ export const MOCK_LOCAL_DEFAULT_BASE_URL = 'http://localhost:1234';
 export let mockActiveModel = '';
 export let mockModelLoaded = false;
 
+// The "active" base URL the user most recently selected. `null` means
+// "use the local default" (which the /api/llm/status handler fills
+// in from MOCK_LOCAL_DEFAULT_BASE_URL). The real backend persists
+// this in app_settings.llm_base_url via
+// activeModelService.setActiveBaseUrl; the mock mirrors the same
+// round-trip so a subsequent re-open of the Configure AI Model
+// dialog sees the user's remote URL reflected in the picker.
+export let mockActiveBaseUrl: string | null = null;
+export const setMockActiveBaseUrl = (value: string | null) => {
+  mockActiveBaseUrl = value && value.length > 0 ? value : null;
+};
+
+// --- Mutable remote LLM API token state --------------------------------
+// POST /api/llm/api-token writes to `mockLlmApiToken` and the next
+// /api/llm/status poll reports `hasRemoteApiToken: !!mockLlmApiToken`.
+// Cleared to null by /api/__e2e/reset. The token value itself is never
+// returned to the UI — only its presence — mirroring the real backend.
+export let mockLlmApiToken: string | null = null;
+export const setMockLlmApiToken = (value: string | null) => {
+  mockLlmApiToken = value && value.length > 0 ? value : null;
+};
+
 // Accumulated chat messages for the mocked chat. Pushed to in the
 // POST /api/sessions/1/chats/10/messages handler and read back by the
 // GET /api/sessions/1/chats/10 handler. Without this buffer the chat
@@ -443,6 +465,18 @@ export const writeReadiness = (next: ReadinessShape) => {
 };
 
 export const e2eMockSeed = () => {
+  setMockLlmApiToken(null);
+  // Reset the LLM "active model" + "loaded" flags + base URL too so
+  // specs that open the Configure AI Model dialog
+  // (e.g. remote-llm-api-token) start from a clean slate. Without
+  // this, a spec that ran in the same worker and called
+  // `setLlmModel` would leave the model flagged as loaded (and the
+  // URL set to a remote), which disables the model picker (the
+  // form is gated on `llmStatus.loaded === true`) and would skip
+  // the local/remote toggle correctly.
+  setMockActiveModel('');
+  setMockModelLoaded(false);
+  setMockActiveBaseUrl(null);
   setE2eSessions([{ ...MOCK_INTAKE_SESSION }, { ...MOCK_FOLLOWUP_SESSION }]);
   setE2eSessionChats({
     1: [

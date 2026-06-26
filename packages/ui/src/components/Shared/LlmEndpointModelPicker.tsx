@@ -22,13 +22,18 @@ import {
   Badge,
   Spinner,
   Tooltip,
+  Button,
 } from '@radix-ui/themes';
-import { GlobeIcon, LightningBoltIcon } from '@radix-ui/react-icons';
+import {
+  GlobeIcon,
+  LightningBoltIcon,
+  Cross2Icon,
+} from '@radix-ui/react-icons';
 import prettyBytes from 'pretty-bytes';
 import { fetchAvailableModels } from '../../api/api';
 import { useDebounce } from '../../hooks/useDebounce';
 import { remoteBaseUrlAtom } from '../../store';
-import type { LlmModelInfo } from '../../types';
+import type { LlmModelInfo, LlmStatus } from '../../types';
 
 const EMPTY_MODELS: readonly LlmModelInfo[] = [];
 
@@ -43,6 +48,18 @@ export interface LlmEndpointModelPickerProps {
   /** Current remote URL string (controlled). */
   remoteUrl: string;
   setRemoteUrl: (url: string) => void;
+  /**
+   * Current API token string (controlled). The picker treats an empty
+   * string as "no value entered yet" — the real "is a token configured?"
+   * signal comes from `llmStatus?.hasRemoteApiToken`, which the parent
+   * passes via the picker. The actual token is only sent on save, so
+   * this field is transient form state.
+   */
+  apiToken: string;
+  setApiToken: (token: string) => void;
+  /** When `true`, the local LlmStatus reports a token is set. Drives the
+   *  placeholder text + the visibility of the "Clear token" button. */
+  hasRemoteApiToken?: boolean;
   /**
    * The local/default LLM base URL resolved by the backend (from
    * `LlmStatus.defaultBaseUrl`). The picker forwards this as `?baseUrl=`
@@ -83,6 +100,9 @@ export const LlmEndpointModelPicker: React.FC<LlmEndpointModelPickerProps> = ({
   setIsRemote,
   remoteUrl,
   setRemoteUrl,
+  apiToken,
+  setApiToken,
+  hasRemoteApiToken = false,
   localBaseUrl,
   disabled = false,
   enabled,
@@ -192,6 +212,12 @@ export const LlmEndpointModelPicker: React.FC<LlmEndpointModelPickerProps> = ({
       }
     } else {
       setRemoteUrl('');
+      // The API token is a global setting that applies to *any* remote
+      // URL, but we don't want stale typed bytes sitting behind a Local
+      // toggle. The form re-opens the same way it does today, with
+      // hasRemoteApiToken telling the user whether a token is still
+      // saved server-side.
+      setApiToken('');
     }
     // No manual refetch here: state updates are async, so a direct
     // `refetchAvailableModels()` call would fire on the observer that
@@ -251,6 +277,49 @@ export const LlmEndpointModelPicker: React.FC<LlmEndpointModelPickerProps> = ({
             </Text>
           )}
         </label>
+      )}
+
+      {isRemote && (
+        <Box>
+          <Text as="div" size="2" mb="1" weight="medium">
+            API Token (optional)
+          </Text>
+          <Flex align="center" gap="2">
+            <TextField.Root
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder={
+                hasRemoteApiToken
+                  ? 'Token is set — type a new value to replace'
+                  : 'Enter API token (optional)'
+              }
+              value={apiToken}
+              onChange={(e) => setApiToken(e.target.value)}
+              disabled={disabled}
+              size="2"
+              style={{ flexGrow: 1 }}
+            />
+            {(hasRemoteApiToken || apiToken.length > 0) && !disabled && (
+              <Tooltip content="Clear the typed token (sends a clear on save)">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  color="gray"
+                  size="1"
+                  onClick={() => setApiToken('')}
+                  aria-label="Clear API token"
+                >
+                  <Cross2Icon />
+                </Button>
+              </Tooltip>
+            )}
+          </Flex>
+          <Text size="1" color="gray" mt="1">
+            Sent as <code>Authorization: Bearer …</code> on every request to a
+            remote LM Studio. Local endpoints never receive a token.
+          </Text>
+        </Box>
       )}
 
       {isErrorAvailableModels && (

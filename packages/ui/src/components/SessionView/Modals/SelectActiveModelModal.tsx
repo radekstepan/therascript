@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Dialog, Button, Flex, Text, Spinner, Callout } from '@radix-ui/themes';
 import { InfoCircledIcon, Cross2Icon, CheckIcon } from '@radix-ui/react-icons';
-import { setLlmModel } from '../../../api/api';
+import { setLlmApiToken, setLlmModel } from '../../../api/api';
 import type { LlmStatus } from '../../../types';
 import {
   LlmSettingsForm,
@@ -38,6 +38,7 @@ export function SelectActiveModelModal({
     contextSizeInput: '',
     isRemote: false,
     remoteUrl: '',
+    apiToken: '',
     temperature: 0.7,
     topP: 0.9,
     repeatPenalty: 1.1,
@@ -85,6 +86,24 @@ export function SelectActiveModelModal({
     },
   });
 
+  // Separate mutation for the API token so the model save isn't blocked
+  // if the token update fails (and vice versa). Fires only when the user
+  // actually changed the token field — i.e. the typed value differs from
+  // the server-side presence boolean.
+  const setApiTokenMutation = useMutation({
+    mutationFn: (token: string | null) => setLlmApiToken(token),
+    onSuccess: (data) => {
+      queryClient.setQueryData<LlmStatus | undefined>(['llmStatus'], (prev) =>
+        prev ? { ...prev, hasRemoteApiToken: data.hasRemoteApiToken } : prev
+      );
+      queryClient.invalidateQueries({ queryKey: ['llmStatus'] });
+    },
+    onError: (err: Error) => {
+      // Don't block the model save flow — surface a non-fatal error.
+      console.warn('Failed to set remote LLM API token:', err.message);
+    },
+  });
+
   // Fix flickering bug: only initialize form once when modal opens
   // Decouple from llmStatus polling by using ref-based guard
   useEffect(() => {
@@ -98,6 +117,10 @@ export function SelectActiveModelModal({
         isRemote: llmStatus?.isRemoteBaseUrl ?? false,
         remoteUrl:
           (llmStatus?.isRemoteBaseUrl ? llmStatus?.activeBaseUrl : '') ?? '',
+        // Token is never sent back from the server; the user must re-enter
+        // to change it. The form's "is a token set?" comes from
+        // llmStatus.hasRemoteApiToken, surfaced via the picker's placeholder.
+        apiToken: '',
         temperature: llmStatus?.configuredTemperature ?? 0.7,
         topP: llmStatus?.configuredTopP ?? 0.9,
         repeatPenalty: llmStatus?.configuredRepeatPenalty ?? 1.1,
@@ -143,6 +166,20 @@ export function SelectActiveModelModal({
         return;
       }
       baseUrl = trimmed;
+    }
+
+    // Token change semantics:
+    // - apiToken !== ''  -> set/replace (saves the typed value to the DB)
+    // - apiToken === ''  -> no-op (preserves any existing token)
+    //
+    // The empty-field case deliberately does NOT clear the token, even
+    // when a token is currently configured. Re-opening the dialog and
+    // clicking Save & Load Model without typing a new value must not
+    // wipe the credential — the user has an explicit Clear icon button
+    // in the picker for that.
+    const trimmedToken = formState.apiToken.trim();
+    if (trimmedToken.length > 0) {
+      setApiTokenMutation.mutate(trimmedToken);
     }
 
     setModelMutation.mutate({

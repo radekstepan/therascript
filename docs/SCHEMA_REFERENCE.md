@@ -81,6 +81,24 @@ Saved message templates for quick reuse.
 
 **Indices:** `idx_template_created_at`
 
+#### `app_settings`
+Single-row table (id=1) that holds the global LLM configuration. There
+is only ever one row — any other id violates the `CHECK (id = 1)`
+constraint.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | INTEGER | PK, CHECK (id = 1) | Singleton identifier |
+| `llm_base_url` | TEXT | NULL | Active LLM base URL override; `NULL` = use `config.llm.baseURL` |
+| `llm_model_name` | TEXT | NULL | Currently active model key (e.g. `qwen2.5-7b-instruct`) |
+| `llm_context_size` | INTEGER | NULL | Configured context window size; `NULL` = use the model default |
+| `llm_temperature` | REAL | NOT NULL, DEFAULT 0.7 | Sampling temperature |
+| `llm_top_p` | REAL | NOT NULL, DEFAULT 0.9 | Nucleus sampling threshold |
+| `llm_repeat_penalty` | REAL | NOT NULL, DEFAULT 1.1 | Repeat penalty |
+| `llm_num_gpu_layers` | INTEGER | NULL | Number of GPU layers; `NULL` = auto |
+| `llm_thinking_budget` | INTEGER | NULL | Reasoning budget; `NULL` = unrestricted |
+| `llm_api_token` | TEXT | NULL | **Added in V19.** Optional API token (e.g. `Authorization: Bearer …`) sent only when the resolved base URL is non-local. The value is never returned to the UI; the API surfaces its presence as `hasRemoteApiToken` on `LlmStatus`. |
+
 ### Analysis Tables
 
 #### `analysis_jobs`
