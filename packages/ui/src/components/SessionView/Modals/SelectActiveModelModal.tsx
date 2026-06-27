@@ -1,10 +1,12 @@
 /* packages/ui/src/components/SessionView/Modals/SelectActiveModelModal.tsx */
 import React, { useState, useEffect, useRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useSetAtom } from 'jotai';
 import { Dialog, Button, Flex, Text, Spinner, Callout } from '@radix-ui/themes';
 import { InfoCircledIcon, Cross2Icon, CheckIcon } from '@radix-ui/react-icons';
 import { setLlmApiToken, setLlmModel } from '../../../api/api';
 import type { LlmStatus } from '../../../types';
+import { remoteBaseUrlAtom } from '../../../store';
 import {
   LlmSettingsForm,
   type LlmSettingsState,
@@ -32,6 +34,7 @@ export function SelectActiveModelModal({
   const queryClient = useQueryClient();
   const prevIsOpenRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
+  const setPersistedRemoteUrl = useSetAtom(remoteBaseUrlAtom);
 
   const [formState, setFormState] = useState<LlmSettingsState>({
     selectedModel: currentActiveModelName || '',
@@ -167,6 +170,13 @@ export function SelectActiveModelModal({
       }
       baseUrl = trimmed;
     }
+
+    // Persist the URL the user just confirmed (or the cleared state) into
+    // the localStorage-backed atom so the next dialog — chat or analysis —
+    // pre-fills it. Empty string is a valid intentional state ("no remote
+    // URL saved") and survives across reloads. Skipped on the invalid-URL
+    // early-return above so a blocked save never overwrites a good value.
+    setPersistedRemoteUrl(formState.remoteUrl.trim());
 
     // Token change semantics:
     // - apiToken !== ''  -> set/replace (saves the typed value to the DB)

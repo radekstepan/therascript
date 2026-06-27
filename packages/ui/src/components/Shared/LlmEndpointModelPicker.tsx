@@ -6,11 +6,14 @@
 //   - CreateAnalysisJobModal (Analyze Multiple Sessions dialog) — to choose
 //     which model + endpoint a one-off analysis job should use.
 //
-// Both consumers persist the entered remote URL through `remoteBaseUrlAtom`
-// (localStorage) so the field is pre-filled the next time the user opens
-// either modal.
+// The remote URL itself is *not* persisted by this picker. Both consumers
+// (SelectActiveModelModal, CreateAnalysisJobModal) write the URL into
+// `remoteBaseUrlAtom` (localStorage) at the moment of Save. The picker
+// reads the atom only to pre-fill the field on a Local→Remote toggle
+// within a session, so the user doesn't have to retype their last
+// saved URL. Cancel / Escape do not persist.
 import React, { useEffect, useMemo, useRef } from 'react';
-import { useAtom } from 'jotai';
+import { useAtomValue } from 'jotai';
 import { useQuery } from '@tanstack/react-query';
 import {
   Box,
@@ -109,8 +112,7 @@ export const LlmEndpointModelPicker: React.FC<LlmEndpointModelPickerProps> = ({
   placeholder = 'Select a model...',
   onModelsChange,
 }) => {
-  const [persistedRemoteUrl, setPersistedRemoteUrl] =
-    useAtom(remoteBaseUrlAtom);
+  const persistedRemoteUrl = useAtomValue(remoteBaseUrlAtom);
 
   const debouncedRemoteUrl = useDebounce(remoteUrl, 500);
   const isTyping = isRemote && remoteUrl !== debouncedRemoteUrl;
@@ -227,13 +229,11 @@ export const LlmEndpointModelPicker: React.FC<LlmEndpointModelPickerProps> = ({
     // new endpoint's list comes back from the server.
   };
 
-  // Whenever the user finishes typing a remote URL, mirror it to localStorage
-  // so the next dialog (chat or analysis) opens with the same value.
+  // Typing into the remote URL input is purely local form state. The URL is
+  // persisted to `remoteBaseUrlAtom` by the modal's Save handler, not here,
+  // so Cancel / Escape discard any unsaved typing.
   const handleRemoteUrlChange = (next: string) => {
     setRemoteUrl(next);
-    if (next.trim().length > 0) {
-      setPersistedRemoteUrl(next.trim());
-    }
   };
 
   return (

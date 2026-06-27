@@ -32,7 +32,7 @@ import {
   setLlmApiToken,
 } from '../../api/api';
 import type { Session, LlmStatus, Template } from '../../types';
-import { toastMessageAtom } from '../../store';
+import { toastMessageAtom, remoteBaseUrlAtom } from '../../store';
 import { cn } from '../../utils';
 import { formatIsoDateToYMD } from '../../helpers';
 import {
@@ -160,6 +160,7 @@ export function CreateAnalysisJobModal({
 }: CreateAnalysisJobModalProps) {
   const navigate = useNavigate();
   const setToast = useSetAtom(toastMessageAtom);
+  const setPersistedRemoteUrl = useSetAtom(remoteBaseUrlAtom);
   const [prompt, setPrompt] = useState('');
   const [mapPhaseSystemPrompt, setMapPhaseSystemPrompt] = useState('');
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -326,6 +327,13 @@ export function CreateAnalysisJobModal({
       }
       baseUrl = trimmed;
     }
+
+    // Persist the confirmed URL (or the cleared state) into the
+    // localStorage-backed atom so the next dialog — chat or analysis —
+    // pre-fills it. Empty string is a valid intentional state and survives
+    // across reloads. Skipped on the invalid-URL early-return above so a
+    // blocked submit never overwrites a good value.
+    setPersistedRemoteUrl(formState.remoteUrl.trim());
 
     const contextSize = formState.contextSizeInput
       ? parseInt(formState.contextSizeInput, 10)
