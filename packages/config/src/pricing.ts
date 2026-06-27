@@ -16,6 +16,10 @@ export const pricing: PricingConfig = {
   llm: {
     'gemma3:4b': { promptCostPer1M: 0.01703, completionCostPer1M: 0.06815 },
     'gemma3:12b': { promptCostPer1M: 0.03, completionCostPer1M: 0.1 },
+    'qwen3.5-9b': { promptCostPer1M: 0.1, completionCostPer1M: 0.15 },
+    'qwen3.6-27b': { promptCostPer1M: 0.2885, completionCostPer1M: 2.65 },
+    'qwen/qwen3.6-27b': { promptCostPer1M: 0.2885, completionCostPer1M: 2.65 },
+    'qwen3.6-27b-mtp': { promptCostPer1M: 0.2885, completionCostPer1M: 2.65 },
     default: { promptCostPer1M: 0.15, completionCostPer1M: 0.6 },
   },
   whisper: {
