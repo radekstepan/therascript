@@ -49,6 +49,18 @@ const LlmModelDetailSchema = t.Object({
   parameter_size: t.String(),
   quantization_level: t.String(),
 });
+// Mirrors `LlmModelInfo.architecture` from `@therascript/domain`. All
+// fields are optional numbers; LM Studio currently doesn't expose any of
+// them, but the route handlers still emit `architecture: null` so the
+// schema has to allow it.
+const LlmModelArchitectureSchema = t.Object({
+  num_layers: t.Optional(t.Number()),
+  num_attention_heads: t.Optional(t.Number()),
+  num_key_value_heads: t.Optional(t.Number()),
+  hidden_size: t.Optional(t.Number()),
+  head_dim: t.Optional(t.Number()),
+  precision: t.Optional(t.Number()),
+});
 const LlmModelInfoSchema = t.Object({
   name: t.String(),
   modified_at: t.String(),
@@ -58,6 +70,13 @@ const LlmModelInfoSchema = t.Object({
   defaultContextSize: t.Optional(t.Union([t.Number(), t.Null()])),
   size_vram: t.Optional(t.Number()),
   expires_at: t.Optional(t.String()),
+  // Both `listModels` and `checkModelStatus` always emit
+  // `architecture: null` because LM Studio does not expose per-layer
+  // metadata. The field is declared on the domain `LlmModelInfo` type
+  // and the UI renders it, so the schema has to allow it explicitly —
+  // otherwise Elysia's strict response validation rejects every status
+  // response with a 422 and the UI never learns the model is loaded.
+  architecture: t.Optional(t.Union([LlmModelArchitectureSchema, t.Null()])),
 });
 const AvailableModelsResponseSchema = t.Object({
   models: t.Array(LlmModelInfoSchema),
@@ -67,7 +86,14 @@ const LlmStatusResponseSchema = t.Object({
   activeModel: t.String(),
   modelChecked: t.String(),
   loaded: t.Boolean(),
-  details: t.Optional(LlmModelDetailSchema),
+  // The status handler spreads the full `LlmModelInfo` (name, size,
+  // digest, details, defaultContextSize, size_vram, architecture, ...)
+  // into `details` at `llmRoutes.ts:637-646`. Earlier this was typed
+  // as `LlmModelDetailSchema`, which mismatched the serialized shape
+  // and made Elysia 422 every status response after a successful
+  // /set-model — the model loaded fine on the LM Studio side, but the
+  // UI saw no `loaded: true` and refused to surface it.
+  details: t.Optional(LlmModelInfoSchema),
   configuredContextSize: t.Optional(t.Union([t.Number(), t.Null()])),
   configuredTemperature: t.Optional(t.Number()),
   configuredTopP: t.Optional(t.Number()),
@@ -787,3 +813,29 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
         }
       )
   );
+
+// Exported for the response-schema regression test. The test pins the
+// shape of the payloads that `llmRoutes` actually serializes so a future
+// refactor of `checkModelStatus` or `listModels` can't silently 422 the
+// status endpoint again (the original bug: `details` was typed as
+// `LlmModelDetailSchema` while the route handler spread the full
+// `LlmModelInfo`, which made Elysia reject every status response).
+// Each schema is cast to TypeBox's `TSchema` because the inferred
+// `TObject<...>` types don't statically re-export the `[Kind]` brand
+// that `Value.Check` validates against; the runtime values are the
+// exact same schema objects the Elysia router uses.
+type TSchema = import('@sinclair/typebox').TSchema;
+export const llmResponseSchemas: {
+  LlmModelInfoSchema: TSchema;
+  LlmModelDetailSchema: TSchema;
+  LlmModelArchitectureSchema: TSchema;
+  LlmStatusResponseSchema: TSchema;
+  AvailableModelsResponseSchema: TSchema;
+} = {
+  LlmModelInfoSchema: LlmModelInfoSchema as unknown as TSchema,
+  LlmModelDetailSchema: LlmModelDetailSchema as unknown as TSchema,
+  LlmModelArchitectureSchema: LlmModelArchitectureSchema as unknown as TSchema,
+  LlmStatusResponseSchema: LlmStatusResponseSchema as unknown as TSchema,
+  AvailableModelsResponseSchema:
+    AvailableModelsResponseSchema as unknown as TSchema,
+};
