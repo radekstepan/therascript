@@ -326,6 +326,13 @@ export function CreateAnalysisJobModal({
         return;
       }
       baseUrl = trimmed;
+    } else if (llmStatus?.defaultBaseUrl) {
+      // Local mode: mirror SelectActiveModelModal's behavior of always
+      // sending `baseUrl` so the backend never falls back to a stale
+      // remote override from a prior session — that fallback would
+      // make the analysis handler's listModels() health-check the old
+      // remote URL and return 500.
+      baseUrl = llmStatus.defaultBaseUrl;
     }
 
     // Persist the confirmed URL (or the cleared state) into the
@@ -374,7 +381,7 @@ export function CreateAnalysisJobModal({
       ...(mapPhaseSystemPrompt.trim().length > 0
         ? { mapPhaseSystemPrompt: mapPhaseSystemPrompt.trim() }
         : {}),
-      ...(baseUrl ? { baseUrl } : {}),
+      ...(baseUrl !== null ? { baseUrl } : {}),
       temperature: formState.temperature,
       topP: formState.topP,
       repeatPenalty: formState.repeatPenalty,

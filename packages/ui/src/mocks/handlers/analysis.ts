@@ -16,8 +16,10 @@ import {
   MOCK_INTAKE_SESSION,
   MOCK_FOLLOWUP_SESSION,
   MOCK_INTERMEDIATE_QUESTION,
+  MOCK_LOCAL_DEFAULT_BASE_URL,
   MOCK_REDUCE_RESPONSE,
   e2eAnalysisJobs,
+  mockActiveBaseUrl,
   mockActiveModel,
   mockAnalysisJob,
   setE2eAnalysisJobs,
@@ -34,7 +36,27 @@ export const analysisHandlers = [
       prompt?: string;
       modelName?: string | null;
       sessionIds?: number[];
+      baseUrl?: string | null;
     };
+
+    // Mirror the real backend's ensureLlmReady: if the request omits
+    // baseUrl while the global active URL is remote, fail the health
+    // check instead of silently accepting. This pins the regression
+    // where the analysis modal's Local-mode submit dropped the field
+    // and the server's listModels() health-checked the stale remote
+    // URL (analysisHandler.ts:326, ensureLlmReady in
+    // llamaCppService.ts:408-436).
+    if (
+      (body.baseUrl === undefined || body.baseUrl === null) &&
+      mockActiveBaseUrl &&
+      mockActiveBaseUrl !== MOCK_LOCAL_DEFAULT_BASE_URL
+    ) {
+      return HttpResponse.json(
+        { error: `Remote LLM at ${mockActiveBaseUrl} failed health check.` },
+        { status: 500 }
+      );
+    }
+
     setMockAnalysisJob({
       id: MOCK_ANALYSIS_JOB_ID,
       originalPrompt: body.prompt ?? '',

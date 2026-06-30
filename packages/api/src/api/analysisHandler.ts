@@ -322,8 +322,19 @@ export const createAnalysisJobHandler = async ({
   } = validatedBody;
 
   try {
+    // Resolve the per-job LLM base URL *before* the context-size lookup so
+    // `listModels()` queries the same endpoint the worker will eventually
+    // stream to. This mirrors `SelectActiveModelModal`, which always sends
+    // `baseUrl` so the backend never falls back to a stale remote override
+    // that would make `listModels()` health-check a server the user no
+    // longer wants to talk to.
+    const jobLlmBaseUrl =
+      requestedBaseUrl && requestedBaseUrl.trim().length > 0
+        ? requestedBaseUrl.trim()
+        : getActiveBaseUrl();
+
     // --- CONTEXT SIZE CALCULATION ---
-    const allModels = await listModels();
+    const allModels = await listModels(jobLlmBaseUrl);
     const selectedModelInfo = allModels.find((m) => m.name === modelName);
     const modelMaxContext = selectedModelInfo?.defaultContextSize || 8192;
 
@@ -405,17 +416,6 @@ export const createAnalysisJobHandler = async ({
     };
 
     let newJob: AnalysisJob;
-
-    // Snapshot the LLM base URL at job-creation time so the worker
-    // (a separate process) uses the same network target even if the user
-    // later toggles between local and remote. If the caller supplied a
-    // per-job `baseUrl` (e.g. picked a remote machine in the analysis
-    // modal), prefer that; otherwise fall back to the backend's currently
-    // active base URL. This is the only "routing" state the worker needs.
-    const jobLlmBaseUrl =
-      requestedBaseUrl && requestedBaseUrl.trim().length > 0
-        ? requestedBaseUrl.trim()
-        : getActiveBaseUrl();
 
     // If the per-job URL differs from the currently active one, evict
     // whatever model is loaded on the *previous* URL so we don't leave
