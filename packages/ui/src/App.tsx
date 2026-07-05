@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useLayoutEffect } from 'react';
+import React, { useEffect, useState, useLayoutEffect, useRef } from 'react';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import {
@@ -40,12 +40,14 @@ import {
   themeAtom,
   accentColorAtom,
   isSystemReadyAtom,
+  isRestartingAtom,
 } from './store';
 import { isPersistentSidebarOpenAtom } from './store/ui/isPersistentSidebarOpenAtom';
 import { currentPageAtom } from './store/navigation/currentPageAtom';
 import { cn } from './utils';
 import type { ReadinessStatus } from './types';
 import { fetchReadinessStatus } from './api/meta';
+import { RestartScreen } from './components/Layout/RestartScreen';
 
 function ReadinessOverlay({
   status,
@@ -165,6 +167,7 @@ function App() {
   );
   const currentAccentColor = useAtomValue(accentColorAtom);
   const [isSystemReady, setIsSystemReady] = useAtom(isSystemReadyAtom);
+  const [isRestarting, setIsRestarting] = useAtom(isRestartingAtom);
 
   const { data: readinessStatus, error: readinessError } = useQuery<
     ReadinessStatus,
@@ -200,6 +203,51 @@ function App() {
       setIsSystemReady(true);
     }
   }, [readinessError, setIsSystemReady]);
+
+  // Backend readiness signal: a successful response with `ready: true` means
+  // the system is back. During a restart the API either 404s or returns
+  // network errors, which surface as `readinessStatus === undefined` /
+  // `readinessError` set, so this stays `false` until the new API answers.
+  const isBackendReady = readinessStatus?.ready === true && !readinessError;
+
+  // Restart progress index, derived purely from existing readiness signals.
+  // Each transition is a real observable state, not a timer:
+  //   0 → readinessError set                 (concurrently killed, system down)
+  //   1 → readinessStatus defined again       (API back, Docker up)
+  //   2 → services.llm === 'connected'        (LLM daemon up)
+  //   3 → readinessStatus.ready === true     (DB connected, fully ready)
+  //   4 (= STEPS.length) → all done, render CompleteScreen
+  const restartStep = (() => {
+    if (isBackendReady) return 4;
+    if (readinessStatus?.services?.llm === 'connected') return 3;
+    if (readinessStatus) return 2;
+    if (readinessError) return 1;
+    return 0;
+  })();
+
+  // Once the system is back online after a user-initiated restart, drop the
+  // restarting flag so the RestartScreen fades out and the UI returns.
+  // We only dismiss after we've actually observed the system go down during
+  // this restart — otherwise a stale "ready: true" in the React Query cache
+  // would clear isRestarting on the very first render and the user would
+  // never see the RestartScreen at all.
+  const hasSeenNotReadyRef = useRef(false);
+  useEffect(() => {
+    const notReady = !!readinessError || readinessStatus?.ready === false;
+    if (notReady) {
+      hasSeenNotReadyRef.current = true;
+    }
+    if (isRestarting && hasSeenNotReadyRef.current && isBackendReady) {
+      setIsRestarting(false);
+      hasSeenNotReadyRef.current = false;
+    }
+  }, [
+    isRestarting,
+    isBackendReady,
+    readinessError,
+    readinessStatus,
+    setIsRestarting,
+  ]);
 
   useLayoutEffect(() => {
     const handleResize = () => {
@@ -238,7 +286,8 @@ function App() {
         <GeneratedBackground />
         {/* Root container ensures RadixTheme styles apply globally and takes full viewport height */}
         <div className="flex flex-col h-screen">
-          {!isSystemReady && (
+          {isRestarting && <RestartScreen step={restartStep} />}
+          {!isRestarting && !isSystemReady && (
             <ReadinessOverlay status={readinessStatus} error={readinessError} />
           )}
           {/* Main layout flex container: Left Sidebar + Content Area + Right Sidebar */}

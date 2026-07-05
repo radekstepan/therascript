@@ -3,9 +3,10 @@ import axios from 'axios';
 import type { GpuStats } from '../types';
 import { API_BASE_URL } from './baseUrl';
 
-// The webpack dev server proxies /shutdown to the wrapper's shutdown service
-// on port 9999, so the UI always uses the same-origin path.
+// The webpack dev server proxies /shutdown and /restart to the wrapper's
+// shutdown service on port 9999, so the UI always uses the same-origin path.
 const SHUTDOWN_SERVICE_URL = `${API_BASE_URL}/shutdown`;
+const RESTART_SERVICE_URL = `${API_BASE_URL}/restart`;
 
 export const requestAppShutdown = async (): Promise<{ message: string }> => {
   try {
@@ -40,6 +41,43 @@ export const requestAppShutdown = async (): Promise<{ message: string }> => {
     }
     throw new Error(
       `Failed to send shutdown request: An unknown error occurred.`
+    );
+  }
+};
+
+export const requestAppRestart = async (): Promise<{ message: string }> => {
+  try {
+    const response = await axios.post(RESTART_SERVICE_URL, null, {
+      headers: {
+        'Content-Type': 'text/plain',
+      },
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Error requesting app restart:', error);
+    if (axios.isAxiosError(error)) {
+      if (!error.response) {
+        throw new Error(
+          'Restart service is not reachable. Is the application running?'
+        );
+      } else {
+        const responseErrorMessage =
+          typeof error.response.data === 'object' &&
+          error.response.data !== null &&
+          'message' in error.response.data &&
+          typeof error.response.data.message === 'string'
+            ? error.response.data.message
+            : error.message;
+        throw new Error(
+          `Restart request failed: ${error.response.status} ${responseErrorMessage}`
+        );
+      }
+    }
+    if (error instanceof Error) {
+      throw new Error(`Failed to send restart request: ${error.message}`);
+    }
+    throw new Error(
+      `Failed to send restart request: An unknown error occurred.`
     );
   }
 };

@@ -6,7 +6,7 @@ import {
   Link,
   useLocation,
 } from 'react-router-dom';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   LayoutDashboard,
   ListOrdered,
@@ -25,6 +25,7 @@ import {
   BrainCircuit,
   ChevronDown,
   ChevronRight,
+  RefreshCw,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -34,6 +35,7 @@ import {
   Text,
   Badge,
   Select,
+  DropdownMenu,
 } from '@radix-ui/themes';
 import { themeAtom, Theme } from '../../store/ui/themeAtom';
 import { effectiveThemeAtom } from '../../store';
@@ -44,10 +46,15 @@ import {
   currentQueryAtom,
   toastMessageAtom,
   activeLlmJobsAtom,
+  isRestartingAtom,
 } from '../../store';
 import { JobsQueueModal } from '../Jobs/JobsQueueModal';
 import { ShutdownScreen } from './ShutdownScreen';
-import { requestAppShutdown, fetchActiveJobCount } from '../../api/api';
+import {
+  requestAppShutdown,
+  requestAppRestart,
+  fetchActiveJobCount,
+} from '../../api/api';
 import { fetchSessions } from '../../api/session';
 import { fetchStandaloneChats } from '../../api/chat';
 import { GpuStatusIndicator } from '../User/GpuStatusIndicator';
@@ -85,9 +92,13 @@ export function PersistentSidebar() {
   const setToast = useSetAtom(toastMessageAtom);
   const reactRouterNavigate = useReactRouterNavigate();
   const location = useLocation();
+  const setIsRestarting = useSetAtom(isRestartingAtom);
+  const queryClient = useQueryClient();
+  const [isPowerMenuOpen, setIsPowerMenuOpen] = useState(false);
 
   const [isJobsModalOpen, setIsJobsModalOpen] = useState(false);
   const [isShutdownConfirmOpen, setIsShutdownConfirmOpen] = useState(false);
+  const [isRestartConfirmOpen, setIsRestartConfirmOpen] = useState(false);
   const [showShutdownScreen, setShowShutdownScreen] = useState(false);
   const [isSessionsExpanded, setIsSessionsExpanded] = useState(true);
   const [isChatsExpanded, setIsChatsExpanded] = useState(true);
@@ -159,6 +170,41 @@ export function PersistentSidebar() {
     setIsShutdownConfirmOpen(false);
     setShowShutdownScreen(true);
     shutdownMutation.mutate();
+  };
+
+  const restartMutation = useMutation({
+    mutationFn: requestAppRestart,
+    onSuccess: () => {
+      // The app will restart, making the backend unreachable momentarily.
+      // ReadinessOverlay will automatically appear when API goes down.
+    },
+    onError: (error: Error) => {
+      if (
+        error.message.toLowerCase().includes('not reachable') ||
+        error.message.toLowerCase().includes('network error')
+      ) {
+        setToast(
+          `❌ Restart Error: Could not reach the service. Is the main script running?`
+        );
+      } else {
+        setToast(`❌ Restart Error: ${error.message}`);
+      }
+      setIsRestartConfirmOpen(false);
+    },
+  });
+
+  const handleRestartAppClick = () => {
+    setIsRestartConfirmOpen(true);
+  };
+
+  const handleConfirmRestart = () => {
+    setIsRestartConfirmOpen(false);
+    setIsRestarting(true);
+    // Drop the cached "ready: true" so isBackendReady is false the moment the
+    // RestartScreen mounts, otherwise the dismissal effect would immediately
+    // clear isRestarting from the stale cache and the user would never see it.
+    queryClient.invalidateQueries({ queryKey: ['systemReadiness'] });
+    restartMutation.mutate();
   };
 
   return (
@@ -446,29 +492,129 @@ export function PersistentSidebar() {
 
           <GpuStatusIndicator isSidebarOpen={isSidebarOpen} />
 
-          <button
-            title="Shutdown App"
-            onClick={handleShutdownAppClick}
-            className={cn(
-              'flex items-center w-full py-2 text-left text-sm text-[var(--gray-11)] hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-md transition-colors',
-              isSidebarOpen ? 'px-3' : 'justify-center px-0'
-            )}
-            disabled={shutdownMutation.isPending}
-          >
-            {shutdownMutation.isPending ? (
-              <Spinner size="1" className={cn(isSidebarOpen ? 'mr-2' : '')} />
-            ) : (
-              <Power
-                size={18}
-                className={cn(isSidebarOpen ? 'mr-2' : 'mr-0')}
-                aria-hidden="true"
-              />
-            )}
-            {isSidebarOpen &&
-              (shutdownMutation.isPending
-                ? 'Shutting down...'
-                : 'Shutdown App')}
-          </button>
+          {isSidebarOpen ? (
+            <div
+              className={cn(
+                'mt-4',
+                'flex w-full items-stretch rounded-md overflow-hidden',
+                'border border-[var(--gray-a4)]',
+                'hover:border-red-300 dark:hover:border-red-800',
+                'hover:bg-red-50/50 dark:hover:bg-red-950/20',
+                'transition-colors group'
+              )}
+            >
+              <button
+                title="Shutdown App"
+                onClick={handleShutdownAppClick}
+                className={cn(
+                  'flex items-center flex-grow py-2 pl-3 pr-2 text-left text-sm',
+                  'text-[var(--gray-11)] group-hover:text-red-600',
+                  'transition-colors'
+                )}
+                disabled={
+                  shutdownMutation.isPending || restartMutation.isPending
+                }
+              >
+                {shutdownMutation.isPending ? (
+                  <Spinner size="1" className="mr-2" />
+                ) : (
+                  <Power size={18} className="mr-2" aria-hidden="true" />
+                )}
+                {shutdownMutation.isPending
+                  ? 'Shutting down...'
+                  : 'Shutdown App'}
+              </button>
+
+              <DropdownMenu.Root
+                open={isPowerMenuOpen}
+                onOpenChange={setIsPowerMenuOpen}
+              >
+                <DropdownMenu.Trigger>
+                  <button
+                    aria-label="More power options"
+                    className={cn(
+                      'flex items-center justify-center px-2.5 py-2',
+                      'border-l border-[var(--gray-a4)]',
+                      'group-hover:border-red-300 dark:group-hover:border-red-800',
+                      'text-[var(--gray-11)] group-hover:text-red-600',
+                      'transition-colors cursor-pointer',
+                      'disabled:opacity-50 disabled:cursor-not-allowed'
+                    )}
+                    disabled={
+                      shutdownMutation.isPending || restartMutation.isPending
+                    }
+                  >
+                    <ChevronDown
+                      size={16}
+                      className={cn(
+                        'transition-transform duration-200',
+                        isPowerMenuOpen && 'rotate-180'
+                      )}
+                    />
+                  </button>
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Content
+                  align="end"
+                  size="1"
+                  className={cn(
+                    'min-w-56 w-56',
+                    'rounded-md',
+                    'border border-[var(--gray-a4)]',
+                    'bg-[var(--color-panel-solid)]',
+                    'shadow-lg',
+                    'p-1'
+                  )}
+                >
+                  <DropdownMenu.Item
+                    onSelect={handleRestartAppClick}
+                    color="blue"
+                    className="rounded-sm px-3 py-2 text-sm"
+                  >
+                    <RefreshCw size={14} className="mr-2" /> Restart App
+                  </DropdownMenu.Item>
+                </DropdownMenu.Content>
+              </DropdownMenu.Root>
+            </div>
+          ) : (
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger>
+                <button
+                  title="Power Options"
+                  className={cn(
+                    'flex items-center justify-center w-full py-2',
+                    'border border-[var(--gray-a4)]',
+                    'text-[var(--gray-11)] hover:text-red-600',
+                    'hover:bg-red-50 dark:hover:bg-red-950/30',
+                    'hover:border-red-300 dark:hover:border-red-800',
+                    'rounded-md transition-colors cursor-pointer'
+                  )}
+                  disabled={
+                    shutdownMutation.isPending || restartMutation.isPending
+                  }
+                >
+                  {shutdownMutation.isPending || restartMutation.isPending ? (
+                    <Spinner size="1" />
+                  ) : (
+                    <Power size={18} aria-hidden="true" />
+                  )}
+                </button>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Content align="start" side="right" size="1">
+                <DropdownMenu.Item
+                  onSelect={handleShutdownAppClick}
+                  color="red"
+                >
+                  <Power size={14} className="mr-2" /> Shutdown App
+                </DropdownMenu.Item>
+                <DropdownMenu.Item
+                  onSelect={handleRestartAppClick}
+                  color="blue"
+                >
+                  <RefreshCw size={14} className="mr-2" /> Restart App
+                </DropdownMenu.Item>
+              </DropdownMenu.Content>
+            </DropdownMenu.Root>
+          )}
         </div>
       </div>
 
@@ -511,6 +657,48 @@ export function PersistentSidebar() {
                 {shutdownMutation.isPending && <Spinner size="1" />}
                 <Text ml={shutdownMutation.isPending ? '2' : '0'}>
                   {shutdownMutation.isPending ? 'Shutting Down...' : 'Shutdown'}
+                </Text>
+              </RadixButton>
+            </AlertDialog.Action>
+          </Flex>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
+
+      <AlertDialog.Root
+        open={isRestartConfirmOpen}
+        onOpenChange={setIsRestartConfirmOpen}
+      >
+        <AlertDialog.Content style={{ maxWidth: 450 }}>
+          <AlertDialog.Title>
+            <Flex align="center" gap="2">
+              <RefreshCw className="text-blue-500" /> Confirm Restart
+            </Flex>
+          </AlertDialog.Title>
+          <AlertDialog.Description size="2">
+            Are you sure you want to restart all application services? This will
+            briefly close the backend and associated Docker containers, then
+            start them up again.
+          </AlertDialog.Description>
+          <Flex gap="3" mt="4" justify="end">
+            <AlertDialog.Cancel>
+              <RadixButton
+                variant="soft"
+                color="gray"
+                onClick={() => setIsRestartConfirmOpen(false)}
+                disabled={restartMutation.isPending}
+              >
+                Cancel
+              </RadixButton>
+            </AlertDialog.Cancel>
+            <AlertDialog.Action>
+              <RadixButton
+                color="blue"
+                onClick={handleConfirmRestart}
+                disabled={restartMutation.isPending}
+              >
+                {restartMutation.isPending && <Spinner size="1" />}
+                <Text ml={restartMutation.isPending ? '2' : '0'}>
+                  {restartMutation.isPending ? 'Restarting...' : 'Restart'}
                 </Text>
               </RadixButton>
             </AlertDialog.Action>

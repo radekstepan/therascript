@@ -255,3 +255,17 @@ The 5-second grace period is the window in which the API and worker run their `u
 
 The Windows path (`taskkill /T /F`) is unchanged — Windows does not have a graceful signal equivalent and the wrapper falls back to force kill there.
 
+### 8.5 Restart (`/restart` proxy endpoint)
+
+The wrapper exposes a sibling `/restart` endpoint on the same port-9999 service that `/shutdown` uses. It is plumbed through the same shutdown pipeline but, instead of exiting the wrapper script, re-enters `main()` to spawn a fresh `concurrently` group.
+
+Flow:
+
+1. The UI's sidebar split-button posts to `/restart` (proxied to the wrapper by webpack during dev, or by the production front-end server).
+2. The wrapper's request handler calls `handleShutdown('API_RESTART_REQUEST', isRestart=true)`.
+3. `handleShutdown` runs the **exact same teardown** as a shutdown: SIGTERM the concurrently group, wait 5s, SIGKILL fallback, `cleanupLmsDaemon`, Docker container stop+remove, UI-port cleanup. This is the same code path that gives `/shutdown` a clean exit, so all model-unload and connection-close guarantees from §8.1–§8.4 carry over.
+4. Instead of `process.exit(0)`, the handler then sets `devProcess = null`, flips `isShuttingDown` back to `false`, and invokes `main()` again. The new `main()` first closes any leftover `shutdownHttpServer` from the previous lifecycle (avoids `EADDRINUSE` on port 9999), then re-runs Redis health, respawns the concurrently group, and re-registers the shutdown service.
+5. The UI's `ReadinessOverlay` (`App.tsx:50`) appears the moment `/api/status/readiness` starts failing, and disappears once the new API comes back healthy. There is no separate "Restarting" screen — the existing "System Initializing" overlay is reused.
+
+The `currentProcess !== devProcess` guard in the concurrently event handlers is the safety net that prevents a stale `close` event from the old process from triggering cleanup during the restart window.
+

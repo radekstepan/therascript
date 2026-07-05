@@ -246,6 +246,16 @@ let devProcess; // To hold the concurrently process
 let isShuttingDown = false;
 
 async function main() {
+  // Close any leftover shutdown server from a previous lifecycle (e.g. restart)
+  // so the new one can bind to SHUTDOWN_PORT without an EADDRINUSE collision.
+  if (shutdownHttpServer) {
+    console.log(
+      '[RunDev] Closing leftover shutdown HTTP service from previous lifecycle...'
+    );
+    await new Promise((resolve) => shutdownHttpServer.close(resolve));
+    shutdownHttpServer = null;
+  }
+
   console.log('[RunDev] Ensuring Redis service is running...');
   try {
     // Start Redis and wait for its health check to pass before proceeding.
@@ -267,18 +277,22 @@ async function main() {
   });
 
   // --- Process Event Handling ---
-  devProcess.on('spawn', () => {
+  const currentProcess = devProcess;
+
+  currentProcess.on('spawn', () => {
     console.log('[RunDev] Concurrently process spawned successfully.');
   });
 
-  devProcess.on('error', (error) => {
+  currentProcess.on('error', (error) => {
+    if (currentProcess !== devProcess) return;
     console.error('[RunDev] Error spawning concurrently:', error);
     cleanupDocker()
       .then(() => cleanupUiProcess(UI_PORT))
       .finally(() => process.exit(1));
   });
 
-  devProcess.on('close', (code, signal) => {
+  currentProcess.on('close', (code, signal) => {
+    if (currentProcess !== devProcess) return;
     console.log(
       `[RunDev] Concurrently process exited with code ${code}, signal ${signal}.`
     );
@@ -305,12 +319,14 @@ async function main() {
 }
 
 // --- Graceful Shutdown Handling ---
-async function handleShutdown(reason) {
+async function handleShutdown(reason, isRestart = false) {
   if (isShuttingDown) return;
   isShuttingDown = true;
-  console.log(`\n[RunDev] Received ${reason}. Initiating shutdown...`);
+  console.log(
+    `\n[RunDev] Received ${reason}. Initiating ${isRestart ? 'restart' : 'shutdown'}...`
+  );
 
-  if (shutdownHttpServer) {
+  if (!isRestart && shutdownHttpServer) {
     console.log('[RunDev] Closing shutdown HTTP service...');
     await new Promise((resolve) => shutdownHttpServer.close(resolve));
     console.log('[RunDev] Shutdown HTTP service closed.');
@@ -367,8 +383,18 @@ async function handleShutdown(reason) {
   await cleanupDocker();
   await cleanupUiProcess(UI_PORT);
 
-  console.log('[RunDev] Shutdown complete. Exiting wrapper script.');
-  process.exit(0);
+  if (isRestart) {
+    console.log('[RunDev] Cleanup complete. Restarting application...');
+    devProcess = null;
+    isShuttingDown = false;
+    main().catch((err) => {
+      console.error('[RunDev] A critical error occurred during restart:', err);
+      process.exit(1);
+    });
+  } else {
+    console.log('[RunDev] Shutdown complete. Exiting wrapper script.');
+    process.exit(0);
+  }
 }
 
 process.on('SIGINT', () => handleShutdown('SIGINT'));
@@ -399,7 +425,18 @@ function createShutdownService(shutdownHandlerCallback) {
         JSON.stringify({ message: 'Shutdown initiated via API for dev server' })
       );
       setTimeout(() => {
-        shutdownHandlerCallback('API_REQUEST');
+        shutdownHandlerCallback('API_REQUEST', false);
+      }, 100);
+    } else if (req.method === 'POST' && req.url === '/restart') {
+      console.log(
+        `[RunDev ShutdownService] Received /restart request. Initiating restart...`
+      );
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({ message: 'Restart initiated via API for dev server' })
+      );
+      setTimeout(() => {
+        shutdownHandlerCallback('API_RESTART_REQUEST', true);
       }, 100);
     } else {
       res.writeHead(404, { 'Content-Type': 'text/plain' });

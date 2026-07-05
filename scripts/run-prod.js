@@ -208,6 +208,16 @@ let appProcess;
 let isShuttingDown = false;
 
 async function main() {
+  // Close any leftover shutdown server from a previous lifecycle (e.g. restart)
+  // so the new one can bind to SHUTDOWN_PORT without an EADDRINUSE collision.
+  if (shutdownHttpServer) {
+    console.log(
+      '[RunProd] Closing leftover shutdown HTTP service from previous lifecycle...'
+    );
+    await new Promise((resolve) => shutdownHttpServer.close(resolve));
+    shutdownHttpServer = null;
+  }
+
   console.log('[RunProd] Ensuring Redis service is running...');
   try {
     await execPromise('docker compose up -d --wait redis');
@@ -226,20 +236,24 @@ async function main() {
     detached: process.platform !== 'win32',
   });
 
-  appProcess.on('spawn', () => {
+  const currentProcess = appProcess;
+
+  currentProcess.on('spawn', () => {
     console.log(
       '[RunProd] Concurrently process for production-like start spawned successfully.'
     );
   });
 
-  appProcess.on('error', (error) => {
+  currentProcess.on('error', (error) => {
+    if (currentProcess !== appProcess) return;
     console.error('[RunProd] Error spawning concurrently:', error);
     cleanupDocker()
       .then(() => cleanupUiProcess(UI_PORT))
       .finally(() => process.exit(1));
   });
 
-  appProcess.on('close', (code, signal) => {
+  currentProcess.on('close', (code, signal) => {
+    if (currentProcess !== appProcess) return;
     console.log(
       `[RunProd] Concurrently process exited with code ${code}, signal ${signal}.`
     );
@@ -264,12 +278,14 @@ async function main() {
   }
 }
 
-async function handleShutdown(reason) {
+async function handleShutdown(reason, isRestart = false) {
   if (isShuttingDown) return;
   isShuttingDown = true;
-  console.log(`\n[RunProd] Received ${reason}. Initiating shutdown...`);
+  console.log(
+    `\n[RunProd] Received ${reason}. Initiating ${isRestart ? 'restart' : 'shutdown'}...`
+  );
 
-  if (shutdownHttpServer) {
+  if (!isRestart && shutdownHttpServer) {
     console.log('[RunProd] Closing shutdown HTTP service...');
     await new Promise((resolve) => shutdownHttpServer.close(resolve));
     console.log('[RunProd] Shutdown HTTP service closed.');
@@ -330,8 +346,18 @@ async function handleShutdown(reason) {
   await cleanupDocker();
   await cleanupUiProcess(UI_PORT);
 
-  console.log('[RunProd] Shutdown complete. Exiting wrapper script.');
-  process.exit(0);
+  if (isRestart) {
+    console.log('[RunProd] Cleanup complete. Restarting application...');
+    appProcess = null;
+    isShuttingDown = false;
+    main().catch((err) => {
+      console.error('[RunProd] A critical error occurred during restart:', err);
+      process.exit(1);
+    });
+  } else {
+    console.log('[RunProd] Shutdown complete. Exiting wrapper script.');
+    process.exit(0);
+  }
 }
 
 process.on('SIGINT', () => handleShutdown('SIGINT'));
@@ -362,7 +388,20 @@ function createShutdownService(shutdownHandlerCallback) {
         })
       );
       setTimeout(() => {
-        shutdownHandlerCallback('API_REQUEST');
+        shutdownHandlerCallback('API_REQUEST', false);
+      }, 100);
+    } else if (req.method === 'POST' && req.url === '/restart') {
+      console.log(
+        `[RunProd ShutdownService] Received /restart request. Initiating restart...`
+      );
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          message: 'Restart initiated via API for prod server',
+        })
+      );
+      setTimeout(() => {
+        shutdownHandlerCallback('API_RESTART_REQUEST', true);
       }, 100);
     } else {
       res.writeHead(404, { 'Content-Type': 'text/plain' });

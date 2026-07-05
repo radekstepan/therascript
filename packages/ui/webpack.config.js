@@ -105,7 +105,7 @@ module.exports = {
         changeOrigin: false,
       },
       {
-        context: ['/shutdown'],
+        context: ['/shutdown', '/restart'],
         target: 'http://localhost:9999',
         changeOrigin: false,
       },
