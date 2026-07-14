@@ -270,6 +270,87 @@ export async function loadLlmModelForWorker(
   }
 }
 
+/**
+ * Build the LLM message array for the analysis reduce phase.
+ *
+ * Pure function: no I/O, no LLM calls, no `Date.now()` rounding concerns
+ * beyond `timestamp` placeholders. Extracted from the reduce phase so it
+ * can be unit-tested for chronological ordering independently of the
+ * streaming LLM.
+ *
+ * Contract: the returned messages reference intermediate summaries in
+ * oldest-to-newest order, matching the strategy prompt's promise to the
+ * LLM that "intermediate answers are provided in chronological order."
+ * The DB already returns `successfulSummaries` sorted by `sessions.date
+ * ASC, intermediate_summaries.id ASC`; this helper re-sorts as a
+ * defense-in-depth so the contract survives any future caller that
+ * bypasses the repository helper.
+ *
+ * `sessionsById` MUST be a Map; passing an array would make the
+ * per-summary session lookup O(n²) and is rejected by the type.
+ */
+export function assembleReducePrompt(
+  successfulSummaries: IntermediateSummary[],
+  sessionsById: Map<number, BackendSession>,
+  originalPrompt: string,
+  strategy: AnalysisStrategy | null
+): BackendChatMessage[] {
+  const enrichedSummaries = successfulSummaries
+    .map((summary) => ({
+      summary,
+      session: sessionsById.get(summary.session_id),
+    }))
+    .filter(
+      (
+        item
+      ): item is {
+        summary: IntermediateSummary;
+        session: BackendSession;
+      } => !!item.session
+    )
+    .sort((a, b) => {
+      const dateDiff =
+        new Date(a.session.date).getTime() - new Date(b.session.date).getTime();
+      // Stable tiebreaker: summaries inserted earlier (lower id) come
+      // first when two sessions share a date.
+      return dateDiff !== 0 ? dateDiff : a.summary.id - b.summary.id;
+    });
+
+  const intermediateSummariesText = enrichedSummaries
+    .map(({ summary, session }) => {
+      return `--- Analysis from Session "${session.sessionName || session.fileName}" ---\n${summary.summary_text}`;
+    })
+    .join('\n\n');
+
+  if (strategy) {
+    return [
+      {
+        id: 0,
+        chatId: 0,
+        sender: 'system',
+        text: strategy.final_synthesis_instructions,
+        timestamp: Date.now(),
+      },
+      {
+        id: 1,
+        chatId: 0,
+        sender: 'user',
+        text: `USER'S QUESTION: "${originalPrompt}"\n\nINTERMEDIATE ANSWERS:\n"""${intermediateSummariesText}"""`,
+        timestamp: Date.now(),
+      },
+    ];
+  }
+  return [
+    {
+      id: 0,
+      chatId: 0,
+      sender: 'user',
+      text: `USER'S QUESTION: "${originalPrompt}"\n\nINTERMEDIATE SUMMARIES:\n"""${intermediateSummariesText}"""\n\nYOUR TASK: Create a single, cohesive answer to the user's question based *only* on the intermediate summaries.`,
+      timestamp: Date.now(),
+    },
+  ];
+}
+
 export default async function (job: Job<AnalysisJobData, any, string>) {
   const validationResult = safeValidateAnalysisJob(job.data);
   if (!validationResult.success) {
@@ -714,60 +795,23 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
     if (successfulSummaries.length === 0)
       throw new Error('No summaries were successfully generated.');
 
-    const enrichedSummaries = successfulSummaries
-      .map((summary: IntermediateSummary) => ({
-        summary,
-        session: sessionRepository.findById(summary.session_id),
-      }))
-      .filter(
-        (
-          item
-        ): item is {
-          summary: IntermediateSummary;
-          session: NonNullable<BackendSession>;
-        } => !!item.session
-      )
-      .sort(
-        (a, b) =>
-          new Date(a.session.date).getTime() -
-          new Date(b.session.date).getTime()
-      );
-
-    const intermediateSummariesText = enrichedSummaries
-      .map(({ summary, session }) => {
-        return `--- Analysis from Session "${session.sessionName || session.fileName}" ---\n${summary.summary_text}`;
-      })
-      .join('\n\n');
-
-    let reduceMessages: BackendChatMessage[];
-    if (strategy) {
-      reduceMessages = [
-        {
-          id: 0,
-          chatId: 0,
-          sender: 'system',
-          text: strategy.final_synthesis_instructions,
-          timestamp: Date.now(),
-        },
-        {
-          id: 1,
-          chatId: 0,
-          sender: 'user',
-          text: `USER'S QUESTION: "${jobRecord?.original_prompt}"\n\nINTERMEDIATE ANSWERS:\n"""${intermediateSummariesText}"""`,
-          timestamp: Date.now(),
-        },
-      ];
-    } else {
-      reduceMessages = [
-        {
-          id: 0,
-          chatId: 0,
-          sender: 'user',
-          text: `USER'S QUESTION: "${jobRecord?.original_prompt}"\n\nINTERMEDIATE SUMMARIES:\n"""${intermediateSummariesText}"""\n\nYOUR TASK: Create a single, cohesive answer to the user's question based *only* on the intermediate summaries.`,
-          timestamp: Date.now(),
-        },
-      ];
+    // Pre-load the underlying sessions in one pass and hand them to the
+    // pure helper. The DB already returned summaries in date order, but
+    // assembleReducePrompt re-sorts as defense-in-depth so the
+    // "oldest → newest" contract survives any future caller that bypasses
+    // the repository helper.
+    const sessionsById = new Map<number, BackendSession>();
+    for (const summary of successfulSummaries) {
+      const session = sessionRepository.findById(summary.session_id);
+      if (session) sessionsById.set(session.id, session);
     }
+
+    const reduceMessages = assembleReducePrompt(
+      successfulSummaries,
+      sessionsById,
+      jobRecord?.original_prompt ?? '',
+      strategy
+    );
 
     const reducePromptTokens =
       calculateTokenCount(reduceMessages.map((m) => m.text).join('\n')) || 0;

@@ -28,12 +28,28 @@ const insertIntermediateSummarySql = `
     INSERT INTO intermediate_summaries (analysis_job_id, session_id, status) 
     VALUES (?, ?, ?)
 `;
+// Both summary queries return rows ordered by the underlying session's
+// calendar date ascending, with `intermediate_summaries.id` as a stable
+// tiebreaker for sessions sharing a date. This is the single source of
+// truth for the "oldest → newest" guarantee that the analysis worker's
+// reduce phase contracts with the LLM via the strategy prompt (see
+// SYSTEM_PROMPT_TEMPLATES.ANALYSIS_STRATEGIST in @therascript/db).
+// INNER JOIN is safe here because intermediate_summaries.session_id has
+// ON DELETE CASCADE to sessions(id), so an orphan summary is impossible.
 const selectPendingSummariesByJobIdSql = `
-    SELECT * FROM intermediate_summaries 
-    WHERE analysis_job_id = ? AND status = 'pending'
+    SELECT intermediate_summaries.*
+    FROM intermediate_summaries
+    INNER JOIN sessions s ON s.id = intermediate_summaries.session_id
+    WHERE intermediate_summaries.analysis_job_id = ?
+      AND intermediate_summaries.status = 'pending'
+    ORDER BY s.date ASC, intermediate_summaries.id ASC
 `;
 const selectAllSummariesByJobIdSql = `
-    SELECT * FROM intermediate_summaries WHERE analysis_job_id = ?
+    SELECT intermediate_summaries.*
+    FROM intermediate_summaries
+    INNER JOIN sessions s ON s.id = intermediate_summaries.session_id
+    WHERE intermediate_summaries.analysis_job_id = ?
+    ORDER BY s.date ASC, intermediate_summaries.id ASC
 `;
 const selectAllIntermediateSummariesSql =
   'SELECT * FROM intermediate_summaries';

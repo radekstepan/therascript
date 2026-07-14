@@ -1,5 +1,10 @@
 // packages/worker/src/jobs/analysisProcessor.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type {
+  AnalysisStrategy,
+  BackendSession,
+  IntermediateSummary,
+} from '@therascript/domain';
 
 vi.mock('@therascript/config', () => ({
   default: {
@@ -45,9 +50,11 @@ vi.mock('../services/streamPublisher.js', () => ({
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 
-const { unloadModelAtUrlForWorker, loadLlmModelForWorker } = await import(
-  './analysisProcessor.js'
-);
+const {
+  unloadModelAtUrlForWorker,
+  loadLlmModelForWorker,
+  assembleReducePrompt,
+} = await import('./analysisProcessor.js');
 const { appSettingsRepository } = await import('@therascript/data');
 
 const LOCAL_URL = 'http://localhost:1234';
@@ -450,5 +457,240 @@ describe('analysis worker — loadLlmModelForWorker URL switching', () => {
       expectNoAuth(`${REMOTE_URL}/api/v1/models`);
       expectNoAuth(`${REMOTE_URL}/api/v1/models/load`);
     });
+  });
+});
+
+/**
+ * The reduce phase of the analysis MapReduce job is contracted to feed
+ * the LLM intermediate summaries in chronological order
+ * (oldest → newest) so the model can describe "change over time."
+ * That contract is enforced by:
+ *   1. `analysisRepository` SQL `ORDER BY s.date ASC, id ASC` (DB layer)
+ *   2. `assembleReducePrompt` re-sorting in JS (defense-in-depth)
+ *
+ * These tests guard #2 directly. If anyone removes the helper sort
+ * thinking "the DB already sorts," these tests will fail.
+ */
+describe('analysis worker — assembleReducePrompt (chronological ordering)', () => {
+  const makeSession = (
+    id: number,
+    date: string,
+    sessionName = `Session ${id}`
+  ): BackendSession => ({
+    id,
+    fileName: `file-${id}.wav`,
+    clientName: 'Test Client',
+    sessionName,
+    date,
+    sessionType: 'individual',
+    therapy: 'cbt',
+    audioPath: null,
+    status: 'completed',
+    whisperJobId: null,
+    transcriptTokenCount: 1000,
+    duration: 3000,
+    errorMessage: null,
+    showSpeakers: 1,
+  });
+
+  const makeSummary = (
+    id: number,
+    sessionId: number,
+    text: string
+  ): IntermediateSummary => ({
+    id,
+    analysis_job_id: 1,
+    session_id: sessionId,
+    summary_text: text,
+    status: 'completed',
+    error_message: null,
+  });
+
+  const sessionsByIdFromList = (sessions: BackendSession[]) =>
+    new Map(sessions.map((s) => [s.id, s]));
+
+  const userTextOf = (messages: { text: string }[]) =>
+    messages.find((m) => m.text.includes('INTERMEDIATE'))?.text ?? '';
+
+  it('renders summaries in oldest-to-newest order even when input is shuffled', () => {
+    const sessions = [
+      makeSession(1, '2024-03-15', 'March Session'),
+      makeSession(2, '2024-01-10', 'January Session'),
+      makeSession(3, '2024-05-20', 'May Session'),
+      makeSession(4, '2024-02-08', 'February Session'),
+    ];
+    const summaries = sessions.map((s, idx) =>
+      makeSummary(idx + 1, s.id, `summary-for-${s.sessionName}`)
+    );
+    // Shuffle the input order to prove the helper sorts.
+    const shuffled = [summaries[2], summaries[0], summaries[3], summaries[1]];
+
+    const messages = assembleReducePrompt(
+      shuffled,
+      sessionsByIdFromList(sessions),
+      'How is the patient progressing?',
+      null
+    );
+
+    const text = userTextOf(messages);
+    const janIdx = text.indexOf('January Session');
+    const febIdx = text.indexOf('February Session');
+    const marIdx = text.indexOf('March Session');
+    const mayIdx = text.indexOf('May Session');
+
+    expect(janIdx).toBeGreaterThan(-1);
+    expect(febIdx).toBeGreaterThan(janIdx);
+    expect(marIdx).toBeGreaterThan(febIdx);
+    expect(mayIdx).toBeGreaterThan(marIdx);
+  });
+
+  it('breaks ties on identical dates by summary id ascending (stable, deterministic)', () => {
+    // Three sessions share the same date. The helper must still emit a
+    // deterministic order via the summary.id tiebreaker, not arbitrary
+    // order. Contract: ascending summary id wins on date ties, so the
+    // rendered order is B (id=10) → C (id=20) → A (id=30).
+    const sessions = [
+      makeSession(1, '2024-04-01', 'Tied A'),
+      makeSession(2, '2024-04-01', 'Tied B'),
+      makeSession(3, '2024-04-01', 'Tied C'),
+    ];
+    const summaries = [
+      makeSummary(30, 1, 'summary-tied-A'),
+      makeSummary(10, 2, 'summary-tied-B'),
+      makeSummary(20, 3, 'summary-tied-C'),
+    ];
+
+    const messages = assembleReducePrompt(
+      summaries,
+      sessionsByIdFromList(sessions),
+      'q',
+      null
+    );
+
+    const text = userTextOf(messages);
+    const bIdx = text.indexOf('Tied B');
+    const cIdx = text.indexOf('Tied C');
+    const aIdx = text.indexOf('Tied A');
+    expect(bIdx).toBeGreaterThan(-1);
+    expect(cIdx).toBeGreaterThan(bIdx);
+    expect(aIdx).toBeGreaterThan(cIdx);
+  });
+
+  it('drops summaries whose session is missing from the lookup map', () => {
+    const sessions = [makeSession(1, '2024-01-10', 'Jan')];
+    const summaries = [
+      makeSummary(1, 1, 'kept'),
+      // session_id 99 has no entry in sessionsById → must be dropped
+      makeSummary(2, 99, 'orphan'),
+    ];
+
+    const messages = assembleReducePrompt(
+      summaries,
+      sessionsByIdFromList(sessions),
+      'q',
+      null
+    );
+
+    const text = userTextOf(messages);
+    expect(text).toContain('kept');
+    expect(text).not.toContain('orphan');
+  });
+
+  it('uses INTERMEDIATE SUMMARIES phrasing and a single user message when no strategy is provided', () => {
+    const sessions = [makeSession(1, '2024-01-10', 'Jan')];
+    const summaries = [makeSummary(1, 1, 'only-summary')];
+
+    const messages = assembleReducePrompt(
+      summaries,
+      sessionsByIdFromList(sessions),
+      'q',
+      null
+    );
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0].sender).toBe('user');
+    expect(messages[0].text).toContain('INTERMEDIATE SUMMARIES');
+    expect(messages[0].text).toContain(
+      "Create a single, cohesive answer to the user's question"
+    );
+  });
+
+  it('uses INTERMEDIATE ANSWERS phrasing and a system+user pair when a strategy is provided', () => {
+    const sessions = [makeSession(1, '2024-01-10', 'Jan')];
+    const summaries = [makeSummary(1, 1, 'only-summary')];
+    const strategy: AnalysisStrategy = {
+      intermediate_question: 'extract X',
+      final_synthesis_instructions: 'synthesize according to Y',
+    };
+
+    const messages = assembleReducePrompt(
+      summaries,
+      sessionsByIdFromList(sessions),
+      'q',
+      strategy
+    );
+
+    expect(messages).toHaveLength(2);
+    expect(messages[0].sender).toBe('system');
+    expect(messages[0].text).toBe('synthesize according to Y');
+    expect(messages[1].sender).toBe('user');
+    expect(messages[1].text).toContain('INTERMEDIATE ANSWERS');
+    expect(messages[1].text).not.toContain('INTERMEDIATE SUMMARIES');
+  });
+
+  it('formats each session block with the `--- Analysis from Session "<name>" ---` separator', () => {
+    const sessions = [
+      makeSession(1, '2024-01-10', 'First'),
+      makeSession(2, '2024-02-10', 'Second'),
+    ];
+    const summaries = [
+      makeSummary(1, 1, 'first-summary-text'),
+      makeSummary(2, 2, 'second-summary-text'),
+    ];
+
+    const messages = assembleReducePrompt(
+      summaries,
+      sessionsByIdFromList(sessions),
+      'q',
+      null
+    );
+
+    const text = userTextOf(messages);
+    expect(text).toContain('--- Analysis from Session "First" ---');
+    expect(text).toContain('first-summary-text');
+    expect(text).toContain('--- Analysis from Session "Second" ---');
+    expect(text).toContain('second-summary-text');
+    // First block must precede Second block in the rendered prompt.
+    expect(text.indexOf('First')).toBeLessThan(text.indexOf('Second'));
+  });
+
+  it('falls back to fileName when sessionName is empty', () => {
+    const session = makeSession(1, '2024-01-10', '');
+    session.fileName = 'recording.wav';
+    const summaries = [makeSummary(1, 1, 'text')];
+
+    const messages = assembleReducePrompt(
+      summaries,
+      sessionsByIdFromList([session]),
+      'q',
+      null
+    );
+
+    const text = userTextOf(messages);
+    expect(text).toContain('--- Analysis from Session "recording.wav" ---');
+  });
+
+  it('returns no messages with content if every summary is missing its session', () => {
+    const summaries = [makeSummary(1, 999, 'orphan')];
+
+    const messages = assembleReducePrompt(summaries, new Map(), 'q', null);
+
+    // The no-strategy branch always produces exactly one user message
+    // (with an empty INTERMEDIATE SUMMARIES body). Verify it exists but
+    // contains no session block — i.e. nothing leaked through.
+    expect(messages).toHaveLength(1);
+    expect(messages[0].sender).toBe('user');
+    expect(messages[0].text).not.toContain('orphan');
+    expect(messages[0].text).not.toContain('--- Analysis from Session');
   });
 });
