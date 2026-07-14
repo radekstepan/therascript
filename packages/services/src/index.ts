@@ -1,8 +1,17 @@
-export { calculateTokenCount } from './tokenizerService.js';
+export {
+  calculateTokenCount,
+  truncateTranscriptToTokenBudget,
+  type TruncateResult,
+} from './tokenizerService.js';
 export {
   isNodeError,
   cleanLlmOutput,
   createSessionListDTO,
+  extractJsonObject,
+  parseJsonObjectFromLlm,
+  withBackoff,
+  streamWithRetry,
+  type ExtractedJson,
 } from './helpers.js';
 export {
   saveUploadedAudio,

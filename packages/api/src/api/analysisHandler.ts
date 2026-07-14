@@ -27,7 +27,11 @@ import type {
   IntermediateSummaryWithSessionName,
   AnalysisStrategy,
 } from '@therascript/domain';
-import { cleanLlmOutput } from '@therascript/services';
+import {
+  cleanLlmOutput,
+  parseJsonObjectFromLlm,
+  type StreamLlmChatOptions,
+} from '@therascript/services';
 import { createJobSubscriber } from '../services/streamSubscriber.js';
 import {
   getConfiguredTemperature,
@@ -226,6 +230,18 @@ const generateStrategyAndUpdateJob = async (
     );
 
     const startTime = Date.now();
+    // Pin the analysis-friendly defaults: low temperature (the global 0.7
+    // is a known loop amplifier for structured output), pass default stop
+    // tokens, and an explicit hard timeout so a runaway generation can't
+    // pin a slot in the API process forever.
+    const strategyCallOptions: StreamLlmChatOptions = {
+      model: modelName || undefined,
+      ...(jobLlmBaseUrl ? { llamaCppBaseUrl: jobLlmBaseUrl } : {}),
+      temperature: 0.3,
+      passDefaultStopTokens: true,
+      hardTimeoutMs: 5 * 60 * 1000,
+      chatTemplateKwargs: { enable_thinking: true },
+    };
     const stream = await streamChatResponse(
       [
         {
@@ -236,10 +252,7 @@ const generateStrategyAndUpdateJob = async (
           timestamp: Date.now(),
         },
       ],
-      {
-        model: modelName || undefined,
-        ...(jobLlmBaseUrl ? { llamaCppBaseUrl: jobLlmBaseUrl } : {}),
-      }
+      strategyCallOptions
     );
     const {
       text: rawStrategyOutput,
@@ -248,22 +261,26 @@ const generateStrategyAndUpdateJob = async (
     } = await accumulateStreamResponse(stream);
     const duration = Date.now() - startTime;
 
-    let cleanedJson = rawStrategyOutput;
-    const jsonRegex = /```json\s*([\s\S]*?)\s*```/;
-    const match = rawStrategyOutput.match(jsonRegex);
-    if (match && match[1]) {
-      cleanedJson = match[1];
-    }
-
-    const strategy: AnalysisStrategy = JSON.parse(cleanedJson);
+    // Robust JSON extraction. Strips <think> / <tool_call> XML, fences (with
+    // or without `json`), leading prose, then finds the first balanced
+    // top-level `{...}`. Throws with the raw snippet on parse failure so
+    // the user sees the actual reason (not a generic "Invalid JSON
+    // structure from LLM.").
+    const strategy =
+      parseJsonObjectFromLlm<AnalysisStrategy>(rawStrategyOutput);
     if (
       !strategy ||
       typeof strategy.intermediate_question !== 'string' ||
       typeof strategy.final_synthesis_instructions !== 'string'
     ) {
-      throw new Error('Invalid JSON structure from LLM.');
+      throw new Error(
+        `Invalid JSON structure from LLM. Raw (first 300 chars): ${rawStrategyOutput.slice(0, 300)}`
+      );
     }
 
+    // Store the raw extraction (cleanest canonical form). Workers re-parse
+    // via the same robust helper when they pick the job up.
+    const cleanedJson = JSON.stringify(strategy, null, 2);
     analysisRepository.updateJobStrategyAndSetPending(jobId, cleanedJson);
     console.log(
       `[Analysis BG ${jobId}] Successfully generated strategy and set status to 'pending'.`
@@ -288,12 +305,13 @@ const generateStrategyAndUpdateJob = async (
     // Now trigger the worker since the job is ready
     void processAnalysisJob(jobId);
   } catch (error) {
-    console.error(`[Analysis BG ${jobId}] Error generating strategy:`, error);
+    const detail = (error as Error)?.message ?? String(error);
+    console.error(`[Analysis BG ${jobId}] Error generating strategy:`, detail);
     analysisRepository.updateJobStatus(
       jobId,
       'failed',
       null,
-      'Failed to generate analysis strategy.'
+      `Failed to generate analysis strategy: ${detail}`
     );
   }
 };

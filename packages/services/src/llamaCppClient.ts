@@ -23,8 +23,32 @@ export interface StreamLlmChatOptions {
   model?: string;
   contextSize?: number;
   abortSignal?: AbortSignal;
+  /**
+   * Per-call activity-based timeout. Resets every time a chunk is received.
+   * For a hard wall-clock cap, use `hardTimeoutMs` instead.
+   */
   timeoutMs?: number;
+  /**
+   * Hard wall-clock timeout. The request is aborted once this many ms have
+   * elapsed regardless of streaming activity. Useful for long-running
+   * analysis jobs where a slow-streaming model could otherwise run for
+   * an unbounded amount of time.
+   */
+  hardTimeoutMs?: number;
+  /**
+   * Explicit stop tokens. If unset and `passDefaultStopTokens` is true, the
+   * first 4 entries of `DEFAULT_STOP_TOKENS` are used. Pass an empty array
+   * to explicitly disable stop tokens for a single call.
+   */
   stopTokens?: string[];
+  /**
+   * When true and `stopTokens` is not explicitly set, the first 4 entries of
+   * `DEFAULT_STOP_TOKENS` are forwarded to LM Studio so the model emits a
+   * hard end-of-turn signal instead of running until `max_tokens`.
+   * Defaults to false to preserve existing chat behavior; analysis paths
+   * opt in.
+   */
+  passDefaultStopTokens?: boolean;
   llamaCppBaseUrl?: string;
   /**
    * Optional API token (e.g. `Authorization: Bearer ...`) to attach to
@@ -37,12 +61,28 @@ export interface StreamLlmChatOptions {
   llmApiToken?: string | null;
   temperature?: number;
   topP?: number;
+  /**
+   * llama.cpp's native repeat_penalty. Sent through `chat_template_kwargs`
+   * (LM Studio's native channel for llama.cpp-specific params) because
+   * the OpenAI-compat `presence_penalty` field has different semantics —
+   * passing `repeatPenalty` there does NOT replicate llama.cpp behavior
+   * and is a known source of generation loops.
+   */
   repeatPenalty?: number;
   maxCompletionTokens?: number;
   /** Number of model layers to offload to GPU. not used directly per-request in llama.cpp */
   numGpuLayers?: number | null;
   think?: boolean | 'high' | 'medium' | 'low';
   thinkingBudget?: number | null;
+  /**
+   * Arbitrary LM Studio native fields to forward through
+   * `chat_template_kwargs`. Useful for `enable_thinking: true|false` and
+   * other llama.cpp-specific knobs that the OpenAI-compat body does not
+   * expose. Merged on top of any values derived from the other options
+   * (so e.g. an explicit `repeat_penalty` from `repeatPenalty` is
+   * preserved unless this option overrides it).
+   */
+  chatTemplateKwargs?: Record<string, unknown>;
 }
 
 export interface StreamResult {
@@ -119,6 +159,7 @@ export async function* streamLlmChatDetailed(
 
   const startTime = Date.now();
   const timeoutMs = options?.timeoutMs ?? 300000;
+  const hardTimeoutMs = options?.hardTimeoutMs;
   const timeoutController = new AbortController();
   // Use an activity-based timeout: resets every time we receive data
   let timeoutId: ReturnType<typeof setTimeout> | null = setTimeout(
@@ -129,6 +170,14 @@ export async function* streamLlmChatDetailed(
     if (timeoutId !== null) clearTimeout(timeoutId);
     timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs);
   };
+
+  // Optional hard wall-clock cap. Unlike the activity-based timeout above,
+  // this is NOT reset on every chunk. Useful for analysis calls where a
+  // slowly-streaming model could otherwise run for an unbounded time.
+  let hardTimeoutId: ReturnType<typeof setTimeout> | null = null;
+  if (typeof hardTimeoutMs === 'number' && hardTimeoutMs > 0) {
+    hardTimeoutId = setTimeout(() => timeoutController.abort(), hardTimeoutMs);
+  }
 
   const combinedSignal = options?.abortSignal
     ? AbortSignal.any([options.abortSignal, timeoutController.signal])
@@ -148,8 +197,16 @@ export async function* streamLlmChatDetailed(
       stream_options: { include_usage: true }, // Required to get usage on final chunk in OAI endpoints
     };
 
-    if (options?.stopTokens && options.stopTokens.length > 0) {
-      bodyPayload.stop = options.stopTokens.slice(0, 4); // Strict OpenAI standard
+    // Resolve stop tokens: explicit list wins, otherwise fall back to the
+    // default set when the caller opted in via `passDefaultStopTokens`.
+    // An explicit empty array disables stop tokens for the call.
+    const stopTokens = options?.stopTokens
+      ? options.stopTokens
+      : options?.passDefaultStopTokens
+        ? DEFAULT_STOP_TOKENS
+        : null;
+    if (stopTokens && stopTokens.length > 0) {
+      bodyPayload.stop = stopTokens.slice(0, 4); // Strict OpenAI standard
     }
 
     if (options?.temperature !== undefined)
@@ -157,13 +214,28 @@ export async function* streamLlmChatDetailed(
     if (options?.topP !== undefined) bodyPayload.top_p = options.topP;
     if (options?.maxCompletionTokens !== undefined)
       bodyPayload.max_tokens = options.maxCompletionTokens;
-    if (options?.repeatPenalty !== undefined)
-      bodyPayload.presence_penalty = options.repeatPenalty;
     if (
       options?.thinkingBudget !== undefined &&
       options?.thinkingBudget !== null
     )
       bodyPayload.reasoning_budget = options.thinkingBudget;
+
+    // llama.cpp's native repeat_penalty travels through chat_template_kwargs
+    // (LM Studio's native channel for llama.cpp-specific params). The OpenAI
+    // `presence_penalty` field has different semantics — it penalizes tokens
+    // that have ever appeared, additively — and is NOT a drop-in replacement
+    // for `repeat_penalty` (which is a multiplicative logit penalty on
+    // recently-seen tokens). Routing through chat_template_kwargs is the
+    // fix for the "model loops" symptom at temperature 0.7.
+    const chatTemplateKwargs: Record<string, unknown> = {
+      ...(options?.chatTemplateKwargs ?? {}),
+    };
+    if (options?.repeatPenalty !== undefined) {
+      chatTemplateKwargs.repeat_penalty = options.repeatPenalty;
+    }
+    if (Object.keys(chatTemplateKwargs).length > 0) {
+      bodyPayload.chat_template_kwargs = chatTemplateKwargs;
+    }
 
     // Build headers. Authorization is only attached when a non-empty token
     // is supplied; the caller (API/worker) is expected to have already
@@ -361,6 +433,10 @@ export async function* streamLlmChatDetailed(
   } finally {
     if (timeoutId !== null) clearTimeout(timeoutId);
     timeoutId = null;
+    if (hardTimeoutId !== null) {
+      clearTimeout(hardTimeoutId);
+      hardTimeoutId = null;
+    }
     // Cancel the reader to close the TCP connection to LM Studio.
     // This is essential when the consumer abandons the generator (e.g. user clicks Stop)
     // because the generator stays paused and the fetch would otherwise remain open.

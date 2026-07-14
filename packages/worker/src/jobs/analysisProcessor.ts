@@ -18,6 +18,9 @@ import type {
 import {
   streamLlmChatDetailed,
   calculateTokenCount,
+  truncateTranscriptToTokenBudget,
+  parseJsonObjectFromLlm,
+  streamWithRetry,
   type StreamResult,
   type LlmChatChunk,
 } from '@therascript/services';
@@ -386,11 +389,25 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
 
     let strategy: AnalysisStrategy | null = null;
     if (jobRecord.strategy_json) {
-      try {
-        strategy = JSON.parse(jobRecord.strategy_json);
-      } catch (e) {
-        console.error(`[Analysis Worker ${jobId}] Invalid strategy JSON.`);
+      // Use the same robust extractor the API uses for fresh strategy
+      // output, so a row written by an older buggy parser is still usable.
+      // If the row is unrecoverable, hard-fail with a useful message
+      // rather than silently degrading to the no-strategy branch.
+      const parsed = parseJsonObjectFromLlm<AnalysisStrategy>(
+        jobRecord.strategy_json
+      );
+      if (
+        !parsed ||
+        typeof parsed.intermediate_question !== 'string' ||
+        typeof parsed.final_synthesis_instructions !== 'string'
+      ) {
+        throw new Error(
+          `Stored strategy_json is malformed or missing required fields. ` +
+            `Re-create the analysis job (do not retry the worker manually). ` +
+            `Raw (first 200 chars): ${jobRecord.strategy_json.slice(0, 200)}`
+        );
       }
+      strategy = parsed;
     }
 
     // --- LOAD MODEL ---
@@ -461,11 +478,45 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
         if (!session)
           throw new Error(`Session ${summaryTask.session_id} not found.`);
 
-        const transcriptText = transcriptRepository.getTranscriptTextForSession(
-          summaryTask.session_id,
-          session.showSpeakers !== 0
+        const rawTranscriptText =
+          transcriptRepository.getTranscriptTextForSession(
+            summaryTask.session_id,
+            session.showSpeakers !== 0
+          );
+        if (!rawTranscriptText.trim()) throw new Error('Transcript is empty.');
+
+        // Truncate the transcript to a safe fraction of the map context so the
+        // model can't blow up on long sessions. tiktoken cl100k_base is only
+        // an approximation of the model's native tokenizer, so we leave
+        // generous headroom (50% of context) and the cap is reapplied at the
+        // message-construction step below. Head+tail strategy preserves the
+        // session opening + closing, which carry the most clinical signal.
+        const mapContextSize = jobRecord?.context_size ?? 8192;
+        const transcriptBudget = Math.max(
+          512,
+          Math.floor(mapContextSize * 0.5) - 512
         );
-        if (!transcriptText.trim()) throw new Error('Transcript is empty.');
+        const truncation = truncateTranscriptToTokenBudget(
+          rawTranscriptText,
+          transcriptBudget
+        );
+        if (truncation.truncated) {
+          console.log(
+            `[Analysis Worker ${jobId}] Truncated session ${summaryTask.session_id} transcript: ` +
+              `${truncation.originalTokens} -> ${truncation.finalTokens} tokens ` +
+              `(${truncation.droppedParagraphs} paragraphs dropped).`
+          );
+          publishStreamEvent(jobId, {
+            phase: 'map',
+            type: 'truncated',
+            sessionId: summaryTask.session_id,
+            summaryId: summaryTask.id,
+            originalTokens: truncation.originalTokens,
+            finalTokens: truncation.finalTokens,
+            droppedParagraphs: truncation.droppedParagraphs,
+          });
+        }
+        const transcriptText = truncation.text;
 
         let mapMessages: BackendChatMessage[];
         const userMapPhaseSystemPrompt =
@@ -550,23 +601,60 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
         hasSentMapThinkingStatus = true;
 
         const mapStartTime = Date.now();
-        // Cap map-phase completions at 25% of context size (covers thinking
-        // overhead + a concise summary without allowing runaway generation).
-        const mapContextSize = jobRecord?.context_size ?? 8192;
-        const mapMaxCompletionTokens = Math.round(mapContextSize * 0.25);
-        const mapGenerator = streamLlmChatDetailed(mapMessages, {
+        // Cap map-phase completions at 30% of context size (up from 25% — the
+        // old cap was too tight for thinking models, which would burn the
+        // whole budget on <think> and never produce content). 40% of that
+        // cap is reserved for thinking so the answer always has somewhere
+        // to live.
+        const mapMaxCompletionTokens = Math.round(mapContextSize * 0.3);
+        const mapMaxThinkingTokens = Math.round(mapMaxCompletionTokens * 0.4);
+        // Analysis default temperature is 0.3 (lower than the global 0.7) —
+        // structured extractive work like summaries benefits from less
+        // variance, and high temperature is a known loop amplifier. The
+        // user-supplied value on the job still wins.
+        const mapTemperature = jobRecord?.temperature ?? 0.3;
+
+        // Build the LLM call options once; reused across retries. We pin
+        // chat_template_kwargs.enable_thinking=true so LM Studio doesn't
+        // toggle unpredictably between calls (atlas's discipline in
+        // apps/api/src/lib/model-client.ts:146-170). We also pass the default
+        // stop tokens so the model emits a hard end-of-turn signal instead of
+        // running until max_tokens — combined with the new repeat_penalty
+        // routing, this is the core fix for the "loopy output" symptom.
+        const mapCallOptions = {
           model: jobRecord?.model_name || undefined,
           contextSize: jobRecord?.context_size || undefined,
           abortSignal: abortController.signal,
           llamaCppBaseUrl: jobLlmBaseUrl,
           llmApiToken: resolveLlmApiTokenForWorker(jobLlmBaseUrl),
-          temperature: jobRecord?.temperature ?? undefined,
+          temperature: mapTemperature,
           topP: jobRecord?.top_p ?? undefined,
           repeatPenalty: jobRecord?.repeat_penalty ?? undefined,
           numGpuLayers: jobRecord?.num_gpu_layers ?? undefined,
-          thinkingBudget: jobRecord?.thinking_budget ?? undefined,
+          thinkingBudget: jobRecord?.thinking_budget ?? mapMaxThinkingTokens,
           maxCompletionTokens: mapMaxCompletionTokens,
-        });
+          passDefaultStopTokens: true,
+          hardTimeoutMs: 15 * 60 * 1000,
+          chatTemplateKwargs: { enable_thinking: true },
+        } as const;
+
+        // Retry the initial connection (and the entire stream) on transient
+        // errors with exponential backoff + jitter. Each retry creates a
+        // fresh streamLlmChatDetailed call. We do NOT retry on user cancel —
+        // the abortSignal aborts the underlying fetch and streamWithRetry
+        // sees the AbortError immediately.
+        const mapGenerator = streamWithRetry(
+          () => streamLlmChatDetailed(mapMessages, mapCallOptions),
+          {
+            retries: 2,
+            onRetry: (err, attempt) => {
+              console.warn(
+                `[Analysis Worker ${jobId}] map session ${summaryTask.session_id} ` +
+                  `attempt ${attempt} failed: ${(err as Error)?.message ?? err}. Retrying.`
+              );
+            },
+          }
+        );
         let contentChunkCount = 0;
         let thinkingChunkCount = 0;
         const CHUNK_LOG_EVERY = 20;
@@ -844,23 +932,48 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
     hasSentReduceThinkingStatus = true;
 
     try {
-      // Cap reduce-phase completions at 40% of context size — more headroom
-      // than map since the synthesis answer is expected to be longer.
+      // Cap reduce-phase completions at 50% of context size (up from 40% —
+      // same rationale as the map bump: thinking models need more room for
+      // the actual answer). 40% of that cap is reserved for thinking.
       const reduceContextSize = jobRecord?.context_size ?? 8192;
-      const reduceMaxCompletionTokens = Math.round(reduceContextSize * 0.4);
-      const reduceGenerator = streamLlmChatDetailed(reduceMessages, {
+      const reduceMaxCompletionTokens = Math.round(reduceContextSize * 0.5);
+      const reduceMaxThinkingTokens = Math.round(
+        reduceMaxCompletionTokens * 0.4
+      );
+      // Same lower default temperature as the map phase — the reduce
+      // synthesis is a structured task that benefits from less variance.
+      const reduceTemperature = jobRecord?.temperature ?? 0.3;
+
+      const reduceCallOptions = {
         model: jobRecord?.model_name || undefined,
         contextSize: jobRecord?.context_size || undefined,
         abortSignal: reduceAbortController.signal,
         llamaCppBaseUrl: jobLlmBaseUrl,
         llmApiToken: resolveLlmApiTokenForWorker(jobLlmBaseUrl),
-        temperature: jobRecord?.temperature ?? undefined,
+        temperature: reduceTemperature,
         topP: jobRecord?.top_p ?? undefined,
         repeatPenalty: jobRecord?.repeat_penalty ?? undefined,
         numGpuLayers: jobRecord?.num_gpu_layers ?? undefined,
-        thinkingBudget: jobRecord?.thinking_budget ?? undefined,
+        thinkingBudget: jobRecord?.thinking_budget ?? reduceMaxThinkingTokens,
         maxCompletionTokens: reduceMaxCompletionTokens,
-      });
+        passDefaultStopTokens: true,
+        hardTimeoutMs: 15 * 60 * 1000,
+        chatTemplateKwargs: { enable_thinking: true },
+      } as const;
+
+      // Same retry-on-initial-connection pattern as the map phase.
+      const reduceGenerator = streamWithRetry(
+        () => streamLlmChatDetailed(reduceMessages, reduceCallOptions),
+        {
+          retries: 2,
+          onRetry: (err, attempt) => {
+            console.warn(
+              `[Analysis Worker ${jobId}] reduce attempt ${attempt} failed: ` +
+                `${(err as Error)?.message ?? err}. Retrying.`
+            );
+          },
+        }
+      );
 
       console.log(`[Analysis Worker ${jobId}] Starting reduce phase stream...`);
 

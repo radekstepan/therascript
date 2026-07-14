@@ -38,6 +38,25 @@ vi.mock('@therascript/data', () => ({
 vi.mock('@therascript/services', () => ({
   streamLlmChatDetailed: vi.fn(),
   calculateTokenCount: vi.fn(),
+  truncateTranscriptToTokenBudget: vi.fn((text: string) => ({
+    text,
+    truncated: false,
+    droppedParagraphs: 0,
+    originalTokens: 0,
+    finalTokens: 0,
+  })),
+  parseJsonObjectFromLlm: vi.fn(),
+  streamWithRetry: vi.fn(async function* (
+    factory: () => AsyncGenerator<unknown, unknown>
+  ) {
+    const inner = factory();
+    let step = await inner.next();
+    while (!step.done) {
+      yield step.value;
+      step = await inner.next();
+    }
+    return step.value;
+  }),
 }));
 
 vi.mock('../services/streamPublisher.js', () => ({

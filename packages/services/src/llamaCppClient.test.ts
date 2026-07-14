@@ -109,7 +109,7 @@ describe('streamLlmChatDetailed', () => {
     }
   });
 
-  it('passes through stop tokens (capped at 4), temperature, top_p, max_tokens, presence_penalty, reasoning_budget', async () => {
+  it('passes through stop tokens (capped at 4), temperature, top_p, max_tokens, repeat_penalty (via chat_template_kwargs), reasoning_budget', async () => {
     mockFetch.mockResolvedValue(makeSseResponse(['[DONE]']));
 
     await consume(
@@ -130,7 +130,11 @@ describe('streamLlmChatDetailed', () => {
     expect(body.temperature).toBe(0.3);
     expect(body.top_p).toBe(0.8);
     expect(body.max_tokens).toBe(256);
-    expect(body.presence_penalty).toBe(1.2);
+    // repeatPenalty is routed through chat_template_kwargs (LM Studio's
+    // native channel), not body.presence_penalty, to avoid the loop bug
+    // caused by the OpenAI field's different semantics.
+    expect(body.chat_template_kwargs).toEqual({ repeat_penalty: 1.2 });
+    expect(body.presence_penalty).toBeUndefined();
     expect(body.reasoning_budget).toBe(1024);
   });
 
@@ -145,6 +149,79 @@ describe('streamLlmChatDetailed', () => {
     const body = JSON.parse(mockFetch.mock.calls[0]![1].body);
     expect(body).not.toHaveProperty('reasoning_budget');
     expect(body).not.toHaveProperty('stop');
+  });
+
+  it('passes default stop tokens when passDefaultStopTokens is true and stopTokens is unset', async () => {
+    mockFetch.mockResolvedValue(makeSseResponse(['[DONE]']));
+    await consume(
+      streamLlmChatDetailed(messages, {
+        llamaCppBaseUrl: 'http://h:1',
+        passDefaultStopTokens: true,
+      })
+    );
+    const body = JSON.parse(mockFetch.mock.calls[0]![1].body);
+    // First 4 entries of DEFAULT_STOP_TOKENS.
+    expect(body.stop).toEqual([
+      '<end_of_turn>',
+      '<|eot_id|>',
+      '<|start_header_id|>',
+      '<|end_header_id|>',
+    ]);
+  });
+
+  it('explicit stopTokens wins over passDefaultStopTokens', async () => {
+    mockFetch.mockResolvedValue(makeSseResponse(['[DONE]']));
+    await consume(
+      streamLlmChatDetailed(messages, {
+        llamaCppBaseUrl: 'http://h:1',
+        passDefaultStopTokens: true,
+        stopTokens: ['explicit1', 'explicit2'],
+      })
+    );
+    const body = JSON.parse(mockFetch.mock.calls[0]![1].body);
+    expect(body.stop).toEqual(['explicit1', 'explicit2']);
+  });
+
+  it('explicit empty stopTokens array disables stop tokens even with passDefaultStopTokens', async () => {
+    mockFetch.mockResolvedValue(makeSseResponse(['[DONE]']));
+    await consume(
+      streamLlmChatDetailed(messages, {
+        llamaCppBaseUrl: 'http://h:1',
+        passDefaultStopTokens: true,
+        stopTokens: [],
+      })
+    );
+    const body = JSON.parse(mockFetch.mock.calls[0]![1].body);
+    expect(body).not.toHaveProperty('stop');
+  });
+
+  it('merges chatTemplateKwargs with repeatPenalty when both are provided', async () => {
+    mockFetch.mockResolvedValue(makeSseResponse(['[DONE]']));
+    await consume(
+      streamLlmChatDetailed(messages, {
+        llamaCppBaseUrl: 'http://h:1',
+        repeatPenalty: 1.3,
+        chatTemplateKwargs: { enable_thinking: true, custom_flag: 'x' },
+      })
+    );
+    const body = JSON.parse(mockFetch.mock.calls[0]![1].body);
+    expect(body.chat_template_kwargs).toEqual({
+      enable_thinking: true,
+      custom_flag: 'x',
+      repeat_penalty: 1.3,
+    });
+  });
+
+  it('omits chat_template_kwargs entirely when no relevant options are set', async () => {
+    mockFetch.mockResolvedValue(makeSseResponse(['[DONE]']));
+    await consume(
+      streamLlmChatDetailed(messages, {
+        llamaCppBaseUrl: 'http://h:1',
+        temperature: 0.5,
+      })
+    );
+    const body = JSON.parse(mockFetch.mock.calls[0]![1].body);
+    expect(body).not.toHaveProperty('chat_template_kwargs');
   });
 
   it('yields each delta.content as a content chunk and finalises on [DONE]', async () => {

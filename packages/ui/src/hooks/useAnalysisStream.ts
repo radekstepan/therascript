@@ -16,7 +16,8 @@ interface StreamEvent {
     | 'end'
     | 'error'
     | 'status'
-    | 'snapshot';
+    | 'snapshot'
+    | 'truncated';
   sessionId?: number;
   summaryId?: number;
   delta?: string;
@@ -27,6 +28,10 @@ interface StreamEvent {
   promptTokens?: number;
   completionTokens?: number;
   duration?: number;
+  // Truncation metadata (only set when type === 'truncated').
+  originalTokens?: number;
+  finalTokens?: number;
+  droppedParagraphs?: number;
   // For snapshot
   job?: any;
   summaries?: any[];
@@ -87,6 +92,15 @@ export function useAnalysisStream(jobId: number | null) {
     duration: undefined,
     tokensPerSecond: undefined,
   });
+  // Per-session transcript truncation warning, surfaced in the UI so the
+  // user knows the LLM saw a head+tail of the session rather than the
+  // full transcript. Set on `truncated` stream events.
+  const [truncationWarnings, setTruncationWarnings] = useState<
+    Record<
+      number,
+      { originalTokens: number; finalTokens: number; droppedParagraphs: number }
+    >
+  >({});
 
   const mapLogsRef = useRef<Record<number, string>>({});
   const reduceLogRef = useRef('');
@@ -337,6 +351,17 @@ export function useAnalysisStream(jobId: number | null) {
             setReducePhase((prev) => (prev !== null ? prev : 'responding'));
             updateReduceMetric(data.delta);
           }
+        } else if (data.type === 'truncated') {
+          if (data.phase === 'map' && data.summaryId != null) {
+            setTruncationWarnings((prev) => ({
+              ...prev,
+              [data.summaryId!]: {
+                originalTokens: data.originalTokens ?? 0,
+                finalTokens: data.finalTokens ?? 0,
+                droppedParagraphs: data.droppedParagraphs ?? 0,
+              },
+            }));
+          }
         } else if (data.type === 'end') {
           if (data.phase === 'map' && data.summaryId) {
             const tps =
@@ -403,6 +428,7 @@ export function useAnalysisStream(jobId: number | null) {
     reduceMetrics,
     isConnected,
     streamError,
+    truncationWarnings,
   };
 }
 
