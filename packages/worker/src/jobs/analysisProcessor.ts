@@ -292,6 +292,24 @@ export async function loadLlmModelForWorker(
  * `sessionsById` MUST be a Map; passing an array would make the
  * per-summary session lookup O(n²) and is rejected by the type.
  */
+/**
+ * Compute the `max_tokens` cap for a single map-phase LLM call.
+ *
+ * The cap is 30% of the model's loaded context window, with a hard floor
+ * of 4096 tokens (2 × 2048). The floor prevents very small context
+ * configurations from leaving so little room for completion that thinking
+ * models exhaust the budget before producing any answer text. The 30%
+ * ratio is intentionally conservative — each session's map call should be
+ * cheap relative to the full context so many sessions can be processed
+ * in sequence without running the model to its limit every time.
+ *
+ * Pure function: no I/O. Exported for unit testing.
+ */
+export function computeMapCompletionCap(contextSize: number): number {
+  const MIN_COMPLETION_TOKENS = 4096; // 2 × 2048
+  return Math.max(MIN_COMPLETION_TOKENS, Math.round(contextSize * 0.3));
+}
+
 export function assembleReducePrompt(
   successfulSummaries: IntermediateSummary[],
   sessionsById: Map<number, BackendSession>,
@@ -601,12 +619,11 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
         hasSentMapThinkingStatus = true;
 
         const mapStartTime = Date.now();
-        // Cap map-phase completions at 30% of context size (up from 25% — the
-        // old cap was too tight for thinking models, which would burn the
-        // whole budget on <think> and never produce content). 40% of that
-        // cap is reserved for thinking so the answer always has somewhere
-        // to live.
-        const mapMaxCompletionTokens = Math.round(mapContextSize * 0.3);
+        // Cap map-phase completions via the shared helper (30% of context,
+        // floor 4096). The floor prevents tiny context configurations from
+        // leaving thinking models with nowhere to write an answer. 40% of
+        // that cap is reserved for thinking so content always has headroom.
+        const mapMaxCompletionTokens = computeMapCompletionCap(mapContextSize);
         const mapMaxThinkingTokens = Math.round(mapMaxCompletionTokens * 0.4);
         // Analysis default temperature is 0.3 (lower than the global 0.7) —
         // structured extractive work like summaries benefits from less
@@ -794,7 +811,7 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
               `the model spent all available tokens reasoning (thinkingTokens=${thinkingTk}, ` +
               `completionTokens=${completionTk}, budget=${mapMaxCompletionTokens}) and produced no summary content. ` +
               `Fix: increase the context size setting (currently ${mapContextSize} tokens) so the ` +
-              `25% completion cap is large enough for both thinking and content.`;
+              `30% completion cap (floor 4096 tokens, currently ${mapMaxCompletionTokens}) is large enough for both thinking and content.`;
           } else {
             detail =
               `LLM returned an empty summary for session ${summaryTask.session_id} — ` +

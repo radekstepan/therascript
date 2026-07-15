@@ -73,6 +73,7 @@ const {
   unloadModelAtUrlForWorker,
   loadLlmModelForWorker,
   assembleReducePrompt,
+  computeMapCompletionCap,
 } = await import('./analysisProcessor.js');
 const { appSettingsRepository } = await import('@therascript/data');
 
@@ -880,5 +881,57 @@ describe('analysis worker — assembleReducePrompt (thinking-token isolation)', 
     expect(userMsg).toContain('INTERMEDIATE ANSWERS');
     expect(userMsg).toContain('Clean answer.');
     expect(userMsg).not.toContain('<think>');
+  });
+});
+
+/**
+ * computeMapCompletionCap — completion token budget for map-phase LLM calls.
+ *
+ * Contract:
+ *   - Returns 30% of the given context size, rounded to the nearest integer.
+ *   - Returns at least 4096 (2 × 2048), regardless of how small contextSize is.
+ *   - The floor avoids starving thinking models that need room for both
+ *     reasoning and answer tokens within a single max_tokens envelope.
+ */
+describe('analysis worker — computeMapCompletionCap', () => {
+  it('returns 30% of context when 30% exceeds the minimum floor', () => {
+    // 80_000 × 0.3 = 24_000 > 4096
+    expect(computeMapCompletionCap(80_000)).toBe(24_000);
+  });
+
+  it('returns the floor (4096) when 30% of context is below it', () => {
+    // 10_000 × 0.3 = 3_000 < 4096 → floor wins
+    expect(computeMapCompletionCap(10_000)).toBe(4096);
+  });
+
+  it('returns the floor for the legacy default context of 8192', () => {
+    // 8_192 × 0.3 = 2_457.6 ≈ 2458 < 4096 → floor wins
+    expect(computeMapCompletionCap(8_192)).toBe(4096);
+  });
+
+  it('returns the floor for tiny context sizes', () => {
+    expect(computeMapCompletionCap(1)).toBe(4096);
+    expect(computeMapCompletionCap(0)).toBe(4096);
+  });
+
+  it('is at or above the floor at the crossover threshold (~13654)', () => {
+    // 13_654 × 0.3 = 4_096.2 → Math.round → 4096, still at floor
+    // 13_680 × 0.3 = 4_104 → clearly above the floor
+    const atBoundary = computeMapCompletionCap(13_654);
+    const aboveFloor = computeMapCompletionCap(13_680);
+    expect(atBoundary).toBeGreaterThanOrEqual(4096);
+    expect(aboveFloor).toBeGreaterThan(4096);
+  });
+
+  it('scales correctly with a 128k context', () => {
+    // 131_072 × 0.3 = 39_321.6 → Math.round → 39322
+    expect(computeMapCompletionCap(131_072)).toBe(39_322);
+  });
+
+  it('always returns an integer', () => {
+    const cases = [8_192, 16_384, 32_768, 65_536, 80_000, 131_072];
+    for (const ctx of cases) {
+      expect(Number.isInteger(computeMapCompletionCap(ctx))).toBe(true);
+    }
   });
 });
