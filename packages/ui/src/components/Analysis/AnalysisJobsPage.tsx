@@ -554,8 +554,13 @@ const JobDetailView: React.FC<{
               Intermediate Analysis
             </Heading>
             <Grid columns="1" gap="3">
-              {job.summaries
-                .sort((a, b) => a.sessionName.localeCompare(b.sessionName))
+              {[...job.summaries]
+                .sort((a, b) => {
+                  const dateDiff =
+                    new Date(a.sessionDate).getTime() -
+                    new Date(b.sessionDate).getTime();
+                  return dateDiff !== 0 ? dateDiff : a.id - b.id;
+                })
                 .map((summary) => (
                   <IntermediateSummaryItem
                     key={summary.id}
