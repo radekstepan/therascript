@@ -822,10 +822,19 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
           );
         }
 
+        // Strip the <think>…</think> envelope before persisting so that the
+        // reduce phase only receives the model's actual answer, not its
+        // reasoning chain. Thinking tokens can be 10× the content length and
+        // were the root cause of the ~129 k-token reduce prompts observed in
+        // production. The thinking text is still forwarded to the UI via the
+        // `type: 'thinking'` stream events above.
+        const summaryTextToStore = summaryText
+          .replace(/<think>[\s\S]*?<\/think>/g, '')
+          .trim();
         analysisRepository.updateIntermediateSummary(
           summaryTask.id,
           'completed',
-          summaryText
+          summaryTextToStore
         );
         publishStreamEvent(jobId, {
           phase: 'map',
