@@ -126,7 +126,7 @@ export interface Session extends SessionMetadata {
   errorMessage?: string | null;
   showSpeakers?: number | null;
   chats: Pick<ChatSession, 'id' | 'sessionId' | 'timestamp' | 'name'>[];
-  /** Number of chats linked to the session (populated by the list endpoint). */
+  /** Number of chats with actual back-and-forth (at least one user message; populated by the list endpoint). */
   chatCount?: number | null;
 }
 

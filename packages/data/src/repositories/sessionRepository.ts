@@ -28,8 +28,10 @@ const selectAllSessionsStmt = (): DbStatement => {
 let _selectAllSessionsWithChatCountsStmt: DbStatement | null = null;
 const selectAllSessionsWithChatCountsStmt = (): DbStatement => {
   if (!_selectAllSessionsWithChatCountsStmt) {
+    // Only count chats with actual back-and-forth: at least one user message.
+    // Auto-created chats (single AI welcome message) and empty chats are excluded.
     _selectAllSessionsWithChatCountsStmt = db.prepare(
-      'SELECT s.id, s.fileName, s.clientName, s.sessionName, s.date, s.sessionType, s.therapy, s.audioPath, s.status, s.whisperJobId, s.transcriptTokenCount, s.duration, s.errorMessage, s.showSpeakers, COUNT(c.id) AS chatCount FROM sessions s LEFT JOIN chats c ON c.sessionId = s.id GROUP BY s.id ORDER BY s.date DESC, s.id DESC'
+      "SELECT s.id, s.fileName, s.clientName, s.sessionName, s.date, s.sessionType, s.therapy, s.audioPath, s.status, s.whisperJobId, s.transcriptTokenCount, s.duration, s.errorMessage, s.showSpeakers, COUNT(c.id) AS chatCount FROM sessions s LEFT JOIN chats c ON c.sessionId = s.id AND EXISTS (SELECT 1 FROM messages m WHERE m.chatId = c.id AND m.sender = 'user') GROUP BY s.id ORDER BY s.date DESC, s.id DESC"
     );
   }
   return _selectAllSessionsWithChatCountsStmt;
