@@ -1,25 +1,44 @@
 // packages/ui/src/components/SessionView/SessionView.tsx
 import React, {
   useEffect,
+  useMemo,
   useState,
   useRef,
   useCallback,
   useLayoutEffect,
 } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Flex, Box, Button, Text, Spinner } from '@radix-ui/themes';
-import { ArrowLeftIcon } from '@radix-ui/react-icons';
+import {
+  Flex,
+  Box,
+  Button,
+  IconButton,
+  Text,
+  Spinner,
+  Tooltip,
+} from '@radix-ui/themes';
+import {
+  ArrowLeftIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+} from '@radix-ui/react-icons';
 import { SessionContent } from './SessionContent';
 import { SelectActiveModelModal } from './Modals/SelectActiveModelModal';
 import {
   fetchSession,
+  fetchSessions,
   fetchTranscript,
   startSessionChat,
   fetchSessionChatDetails,
   fetchLlmStatus,
 } from '../../api/api';
+import {
+  resolveSessionOrder,
+  getSessionNeighbors,
+  type SessionNeighbor,
+} from '../../utils/sortSessions';
 import type {
   Session,
   SessionMetadata,
@@ -30,12 +49,64 @@ import type {
 import {
   activeSessionIdAtom,
   activeChatIdAtom,
+  sessionSortCriteriaAtom,
+  sessionSortDirectionAtom,
   toastMessageAtom,
   sidebarWidthAtom,
   clampedSidebarWidthAtom,
   isPersistentSidebarOpenAtom,
 } from '../../store';
 import { SessionSidebar } from './Sidebar/SessionSidebar';
+
+/**
+ * Prev/next session button with a Radix tooltip naming the target session.
+ * The span wrapper keeps the tooltip working while the button is disabled
+ * (disabled buttons don't emit pointer events, so Radix would never open
+ * the tooltip on them directly).
+ */
+function SessionNavButton({
+  direction,
+  neighbor,
+  onNavigate,
+}: {
+  direction: 'prev' | 'next';
+  neighbor: SessionNeighbor;
+  onNavigate: (sessionId: number) => void;
+}) {
+  const isPrev = direction === 'prev';
+  const Icon = isPrev ? ChevronLeftIcon : ChevronRightIcon;
+  const label = isPrev ? 'Previous session' : 'Next session';
+  const tooltipContent = neighbor.id
+    ? neighbor.name
+      ? `${label}: ${neighbor.name}`
+      : label
+    : isPrev
+      ? 'No previous session'
+      : 'No next session';
+  return (
+    <Tooltip content={tooltipContent}>
+      <span style={{ display: 'inline-flex' }}>
+        <IconButton
+          variant="ghost"
+          color="gray"
+          size="1"
+          aria-label={
+            neighbor.id && neighbor.name
+              ? `${label}: ${neighbor.name}`
+              : tooltipContent
+          }
+          data-testid={`session-${direction}-button`}
+          disabled={!neighbor.id}
+          onClick={() => {
+            if (neighbor.id) onNavigate(neighbor.id);
+          }}
+        >
+          <Icon />
+        </IconButton>
+      </span>
+    </Tooltip>
+  );
+}
 
 export function SessionView() {
   const { sessionId: sessionIdParam, chatId: chatIdParam } = useParams<{
@@ -53,6 +124,49 @@ export function SessionView() {
   const queryClient = useQueryClient();
 
   const sessionIdNum = sessionIdParam ? parseInt(sessionIdParam, 10) : null;
+  const location = useLocation();
+  const sortCriteria = useAtomValue(sessionSortCriteriaAtom);
+  const sortDirection = useAtomValue(sessionSortDirectionAtom);
+
+  // Full session list (shared cache with the tables) for prev/next order.
+  const { data: allSessions } = useQuery<Session[], Error>({
+    queryKey: ['sessions'],
+    queryFn: fetchSessions,
+    staleTime: 60 * 1000,
+  });
+
+  // Ordered session list for prev/next navigation — exact table order
+  // when arriving from SessionListTable (via router state), global sort
+  // otherwise. See resolveSessionOrder.
+  const orderedSessions = useMemo<Session[]>(() => {
+    if (!allSessions) return [];
+    const state = location.state as { sessionOrder?: unknown } | null;
+    return resolveSessionOrder(
+      allSessions,
+      sessionIdNum,
+      state?.sessionOrder,
+      sortCriteria,
+      sortDirection
+    );
+  }, [allSessions, location.state, sessionIdNum, sortCriteria, sortDirection]);
+
+  const neighbors = useMemo(
+    () => getSessionNeighbors(orderedSessions, sessionIdNum),
+    [orderedSessions, sessionIdNum]
+  );
+
+  const handleSessionNavigate = useCallback(
+    (targetId: number) => {
+      // Carry the order forward so repeated prev/next keeps walking the
+      // same list instead of falling back to the global sort.
+      // Navigating to the bare session route lets the effect below
+      // redirect to that session's latest chat automatically.
+      navigate(`/sessions/${targetId}`, {
+        state: { sessionOrder: orderedSessions.map((s) => s.id) },
+      });
+    },
+    [navigate, orderedSessions]
+  );
 
   // --- Sidebar Resizing Logic ---
   const [isResizing, setIsResizing] = useState(false);
@@ -344,8 +458,8 @@ export function SessionView() {
               borderBottom: '1px solid var(--gray-a6)',
             }}
           >
-            <Flex justify="between" align="center">
-              <Flex align="center" gap="2" style={{ minWidth: 0 }}>
+            <Flex justify="between" align="center" gap="2">
+              <Flex align="center" gap="2" style={{ minWidth: 0, flex: 1 }}>
                 <Text
                   size="2"
                   weight="bold"
@@ -356,6 +470,18 @@ export function SessionView() {
                 >
                   {displayTitle}
                 </Text>
+              </Flex>
+              <Flex align="center" gap="1" style={{ flexShrink: 0 }}>
+                <SessionNavButton
+                  direction="prev"
+                  neighbor={neighbors.prev}
+                  onNavigate={handleSessionNavigate}
+                />
+                <SessionNavButton
+                  direction="next"
+                  neighbor={neighbors.next}
+                  onNavigate={handleSessionNavigate}
+                />
               </Flex>
             </Flex>
           </Box>

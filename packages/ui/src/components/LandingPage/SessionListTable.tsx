@@ -272,15 +272,23 @@ export function SessionListTable({
 }: SessionListTableProps) {
   const navigate = useNavigate();
 
+  // The row order here IS the table's current sort (+ filters). Pass it
+  // along so SessionView prev/next can walk this exact order. Entry points
+  // without an order (sidebar, search, upload, direct URL) fall back to the
+  // globally-sorted session list inside SessionView.
+  const sessionOrder = useCallback(() => sessions.map((s) => s.id), [sessions]);
+
   const handleSessionClick = useCallback(
     (e: React.MouseEvent<HTMLTableRowElement>, sessionId: number) => {
       const target = e.target as HTMLElement;
       if (target.closest('button, [role="menu"], [role="checkbox"]')) {
         return;
       }
-      navigate(`/sessions/${sessionId}`);
+      navigate(`/sessions/${sessionId}`, {
+        state: { sessionOrder: sessionOrder() },
+      });
     },
-    [navigate]
+    [navigate, sessionOrder]
   );
 
   const handleKeyDown = useCallback(
@@ -291,10 +299,12 @@ export function SessionListTable({
           'button, [role="menu"], [role="checkbox"]'
         )
       ) {
-        navigate(`/sessions/${sessionId}`);
+        navigate(`/sessions/${sessionId}`, {
+          state: { sessionOrder: sessionOrder() },
+        });
       }
     },
-    [navigate]
+    [navigate, sessionOrder]
   );
 
   const handleRowCheckboxChange = useCallback(

@@ -19,6 +19,7 @@ import { SessionListTable } from './LandingPage/SessionListTable';
 import { EditSessionModal } from './Shared/EditSessionModal';
 import { CreateAnalysisJobModal } from './Analysis/CreateAnalysisJobModal';
 import { fetchSessions, deleteSession as deleteSessionApi } from '../api/api';
+import { sortSessions } from '../utils/sortSessions';
 import {
   sessionSortCriteriaAtom,
   sessionSortDirectionAtom,
@@ -95,67 +96,11 @@ export function SessionsPage() {
     }
   );
 
+  // Shared with LandingPage and SessionView prev/next navigation —
+  // see packages/ui/src/utils/sortSessions.ts.
   const sortedSessions = useMemo(() => {
     if (!sessions) return [];
-    const criteria = currentSortCriteria;
-    const direction = currentSortDirection;
-    const getString = (value: string | null | undefined): string => value ?? '';
-    return [...sessions].sort((a, b) => {
-      let compareResult = 0;
-      try {
-        switch (criteria) {
-          case 'sessionName':
-            const nameA = getString(a.sessionName) || getString(a.fileName);
-            const nameB = getString(b.sessionName) || getString(b.fileName);
-            compareResult = nameA.localeCompare(nameB, undefined, {
-              sensitivity: 'base',
-              usage: 'sort',
-            });
-            break;
-          case 'clientName':
-            compareResult = getString(a.clientName).localeCompare(
-              getString(b.clientName),
-              undefined,
-              { sensitivity: 'base', usage: 'sort' }
-            );
-            break;
-          case 'sessionType':
-            compareResult = getString(a.sessionType).localeCompare(
-              getString(b.sessionType),
-              undefined,
-              { sensitivity: 'base', usage: 'sort' }
-            );
-            break;
-          case 'therapy':
-            compareResult = getString(a.therapy).localeCompare(
-              getString(b.therapy),
-              undefined,
-              { sensitivity: 'base', usage: 'sort' }
-            );
-            break;
-          case 'date':
-            compareResult = getString(b.date).localeCompare(getString(a.date));
-            break;
-          case 'duration':
-            compareResult = (a.duration ?? 0) - (b.duration ?? 0);
-            break;
-          case 'transcriptTokenCount':
-            compareResult =
-              (a.transcriptTokenCount ?? 0) - (b.transcriptTokenCount ?? 0);
-            break;
-          case 'id':
-            compareResult = (a.id ?? 0) - (b.id ?? 0);
-            break;
-          default:
-            return 0;
-        }
-      } catch (e) {
-        return 0;
-      }
-      if (direction === 'desc' && criteria !== 'date') compareResult *= -1;
-      else if (direction === 'asc' && criteria === 'date') compareResult *= -1;
-      return compareResult;
-    });
+    return sortSessions(sessions, currentSortCriteria, currentSortDirection);
   }, [sessions, currentSortCriteria, currentSortDirection]);
 
   // Unique, sorted client names derived from the full session list
