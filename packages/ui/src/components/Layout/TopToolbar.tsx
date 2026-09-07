@@ -26,6 +26,7 @@ import {
 import { createStandaloneChat as createStandaloneChatApi } from '../../api/api';
 import type { StandaloneChatListItem } from '../../types';
 import { cn } from '../../utils';
+import { AppTooltip } from '../Shared/AppTooltip';
 
 export function TopToolbar() {
   const openUploadModal = useSetAtom(openUploadModalAtom);
@@ -179,18 +180,19 @@ export function TopToolbar() {
             )}
             {searchInput && !isFetchingSearch && (
               <TextField.Slot pr="2">
-                <IconButton
-                  size="1"
-                  variant="ghost"
-                  color="gray"
-                  onClick={handleClearSearch}
-                  aria-label="Clear search"
-                  title="Clear search (Esc)"
-                  type="button"
-                  className="rounded-full hover:bg-slate-200 dark:hover:bg-slate-700"
-                >
-                  <Cross1Icon />
-                </IconButton>
+                <AppTooltip content="Clear search (Esc)">
+                  <IconButton
+                    size="1"
+                    variant="ghost"
+                    color="gray"
+                    onClick={handleClearSearch}
+                    aria-label="Clear search"
+                    type="button"
+                    className="rounded-full hover:bg-slate-200 dark:hover:bg-slate-700"
+                  >
+                    <Cross1Icon />
+                  </IconButton>
+                </AppTooltip>
               </TextField.Slot>
             )}
           </TextField.Root>

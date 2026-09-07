@@ -10,6 +10,7 @@ import type {
 } from '../../../types';
 import { TranscriptParagraph } from '../../Transcription/TranscriptParagraph';
 import { EditSessionModal } from '../../Shared/EditSessionModal';
+import { AppTooltip } from '../../Shared/AppTooltip';
 import { RenameSpeakersModal } from './RenameSpeakersModal';
 import { getUniqueSpeakers } from './speakerUtils';
 import {
@@ -100,7 +101,7 @@ const renderHeaderDetail = (
 
   return (
     <Tooltip content={label}>
-      <Flex align="center" gap="1" title={label}>
+      <Flex align="center" gap="1">
         <IconComponent
           className={cn(
             'flex-shrink-0',
@@ -716,17 +717,18 @@ export function Transcription({
           </Flex>
           <Box flexShrink="0">
             <DropdownMenu.Root>
-              <DropdownMenu.Trigger>
-                <IconButton
-                  variant="ghost"
-                  color="gray"
-                  size="1"
-                  title="More Options"
-                  aria-label="Transcription options"
-                >
-                  <DotsHorizontalIcon />
-                </IconButton>
-              </DropdownMenu.Trigger>
+              <AppTooltip content="More Options">
+                <DropdownMenu.Trigger>
+                  <IconButton
+                    variant="ghost"
+                    color="gray"
+                    size="1"
+                    aria-label="Transcription options"
+                  >
+                    <DotsHorizontalIcon />
+                  </IconButton>
+                </DropdownMenu.Trigger>
+              </AppTooltip>
               <DropdownMenu.Content align="end">
                 <DropdownMenu.Item
                   onSelect={() => setIsEditSessionModalOpen(true)}

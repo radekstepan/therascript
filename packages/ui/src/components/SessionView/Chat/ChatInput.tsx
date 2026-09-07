@@ -26,6 +26,7 @@ import {
   // Callout, // No longer needed for inline prompt
 } from '@radix-ui/themes';
 import { StarredTemplatesList } from './StarredTemplatesList';
+import { AppTooltip } from '../../Shared/AppTooltip';
 import {
   currentQueryAtom,
   activeChatIdAtom,
@@ -316,17 +317,18 @@ export function ChatInput({
 
         <Flex align="start" gap="2" width="100%">
           <Box position="relative" flexShrink="0">
-            <IconButton
-              type="button"
-              variant="soft"
-              size="2"
-              title="Show Templates"
-              onClick={() => setShowTemplates((prev) => !prev)}
-              aria-label="Show templates"
-              disabled={starredButtonDisabled}
-            >
-              <StarIcon width={16} height={16} />
-            </IconButton>
+            <AppTooltip content="Show Templates">
+              <IconButton
+                type="button"
+                variant="soft"
+                size="2"
+                onClick={() => setShowTemplates((prev) => !prev)}
+                aria-label="Show templates"
+                disabled={starredButtonDisabled}
+              >
+                <StarIcon width={16} height={16} />
+              </IconButton>
+            </AppTooltip>
             {showTemplates && (
               <StarredTemplatesList
                 onSelectTemplate={handleSelectTemplate}
@@ -351,47 +353,51 @@ export function ChatInput({
             onKeyDown={handleKeyDown}
           />
           {showCancelButton ? (
-            <IconButton
-              type="button"
-              color="red"
-              variant="solid"
-              size="2"
-              onClick={handleCancelStreamClick}
-              title="Cancel response"
-              aria-label="Cancel AI response"
-              // disabled={!isAiResponding || isInlineLoadingModel} // Removed isInlineLoadingModel
-              disabled={!isAiResponding}
-            >
-              <StopIcon />
-            </IconButton>
+            <AppTooltip content="Cancel response">
+              <IconButton
+                type="button"
+                color="red"
+                variant="solid"
+                size="2"
+                onClick={handleCancelStreamClick}
+                aria-label="Cancel AI response"
+                // disabled={!isAiResponding || isInlineLoadingModel} // Removed isInlineLoadingModel
+                disabled={!isAiResponding}
+              >
+                <StopIcon />
+              </IconButton>
+            </AppTooltip>
           ) : (
-            <IconButton
-              type="button"
-              variant="solid"
-              size="2"
-              onClick={handleSubmitClick}
-              disabled={sendButtonDisabled}
-              title={
+            <AppTooltip
+              content={
                 isModelLoading
                   ? 'Model is loading…'
                   : isAiResponding
                     ? 'AI is responding...'
                     : 'Send message'
               }
-              aria-label={
-                isModelLoading
-                  ? 'Model is loading'
-                  : isAiResponding
-                    ? 'AI is responding'
-                    : 'Send message'
-              }
             >
-              {isAiResponding || isModelLoading ? (
-                <Spinner size="1" />
-              ) : (
-                <PaperPlaneIcon />
-              )}
-            </IconButton>
+              <IconButton
+                type="button"
+                variant="solid"
+                size="2"
+                onClick={handleSubmitClick}
+                disabled={sendButtonDisabled}
+                aria-label={
+                  isModelLoading
+                    ? 'Model is loading'
+                    : isAiResponding
+                      ? 'AI is responding'
+                      : 'Send message'
+                }
+              >
+                {isAiResponding || isModelLoading ? (
+                  <Spinner size="1" />
+                ) : (
+                  <PaperPlaneIcon />
+                )}
+              </IconButton>
+            </AppTooltip>
           )}
         </Flex>
         {isModelLoading && (

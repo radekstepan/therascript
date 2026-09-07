@@ -15,6 +15,7 @@ import { renameStandaloneChat as editStandaloneChatApi } from '../../api/api';
 import { toastMessageAtom } from '../../store';
 import { useSetAtom } from 'jotai';
 import { EditEntityModal } from '../Shared/EditEntityModal';
+import { AppTooltip } from '../Shared/AppTooltip';
 
 interface ChatFormState {
   name: string;
@@ -275,20 +276,21 @@ export function EditStandaloneChatModal({
                 aria-invalid={!!tagInputError}
                 aria-describedby={tagInputError ? 'tag-input-error' : undefined}
               />
-              <IconButton
-                size="2"
-                variant="soft"
-                onClick={handleAddTag}
-                disabled={
-                  isSaving ||
-                  !formState.newTagInput.trim() ||
-                  formState.tags.length >= 10
-                }
-                aria-label="Add tag"
-                title="Add tag"
-              >
-                <PlusIcon />
-              </IconButton>
+              <AppTooltip content="Add tag">
+                <IconButton
+                  size="2"
+                  variant="soft"
+                  onClick={handleAddTag}
+                  disabled={
+                    isSaving ||
+                    !formState.newTagInput.trim() ||
+                    formState.tags.length >= 10
+                  }
+                  aria-label="Add tag"
+                >
+                  <PlusIcon />
+                </IconButton>
+              </AppTooltip>
             </Flex>
             {tagInputError && (
               <Text id="tag-input-error" color="red" size="1" mt="1">

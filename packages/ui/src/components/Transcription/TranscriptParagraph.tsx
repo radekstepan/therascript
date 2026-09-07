@@ -27,6 +27,7 @@ import {
 } from '@radix-ui/react-icons';
 import { cn } from '../../utils';
 import type { TranscriptParagraphData } from '../../types';
+import { AppTooltip } from '../Shared/AppTooltip';
 
 const textStyles = {
   whiteSpace: 'pre-wrap' as const,
@@ -190,7 +191,6 @@ export function TranscriptParagraph({
                   'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
               )}
               onClick={handlePlayPauseClick}
-              title={isPlaying ? 'Pause' : 'Play'}
               aria-label={
                 isPlaying
                   ? 'Pause paragraph playback'
@@ -220,22 +220,25 @@ export function TranscriptParagraph({
         id={paragraphDomId}
       >
         {showSpeaker && paragraph.speaker && (
-          <Text
-            size="1"
-            weight="medium"
-            onClick={onSpeakerCycle}
-            title={onSpeakerCycle ? 'Click to cycle speaker' : undefined}
-            style={{
-              fontFamily: 'var(--font-mono)',
-              color: 'var(--accent-a11)',
-              display: 'block',
-              marginBottom: '2px',
-              cursor: onSpeakerCycle ? 'pointer' : 'default',
-              userSelect: 'none',
-            }}
+          <AppTooltip
+            content={onSpeakerCycle ? 'Click to cycle speaker' : undefined}
           >
-            {paragraph.speaker}
-          </Text>
+            <Text
+              size="1"
+              weight="medium"
+              onClick={onSpeakerCycle}
+              style={{
+                fontFamily: 'var(--font-mono)',
+                color: 'var(--accent-a11)',
+                display: 'block',
+                marginBottom: '2px',
+                cursor: onSpeakerCycle ? 'pointer' : 'default',
+                userSelect: 'none',
+              }}
+            >
+              {paragraph.speaker}
+            </Text>
+          </AppTooltip>
         )}
         {paragraph.text.trim() ? (
           paragraph.text
@@ -348,32 +351,34 @@ export function TranscriptParagraph({
                 disabled={isSaving}
               />
               <Flex justify="end" gap="2" mt="1">
-                <Button
-                  onClick={handleCancel}
-                  size="1"
-                  variant="soft"
-                  color="gray"
-                  title="Cancel (Esc)"
-                  disabled={isSaving}
-                >
-                  <Cross1Icon /> Cancel
-                </Button>
-                <Button
-                  onClick={handleSave}
-                  size="1"
-                  variant="solid"
-                  title="Save (Ctrl+Enter)"
-                  disabled={
-                    isSaving || editValue.trim() === paragraph.text.trim()
-                  }
-                >
-                  {isSaving ? (
-                    <UpdateIcon className="animate-spin" />
-                  ) : (
-                    <CheckIcon />
-                  )}{' '}
-                  Save
-                </Button>
+                <AppTooltip content="Cancel (Esc)">
+                  <Button
+                    onClick={handleCancel}
+                    size="1"
+                    variant="soft"
+                    color="gray"
+                    disabled={isSaving}
+                  >
+                    <Cross1Icon /> Cancel
+                  </Button>
+                </AppTooltip>
+                <AppTooltip content="Save (Ctrl+Enter)">
+                  <Button
+                    onClick={handleSave}
+                    size="1"
+                    variant="solid"
+                    disabled={
+                      isSaving || editValue.trim() === paragraph.text.trim()
+                    }
+                  >
+                    {isSaving ? (
+                      <UpdateIcon className="animate-spin" />
+                    ) : (
+                      <CheckIcon />
+                    )}{' '}
+                    Save
+                  </Button>
+                </AppTooltip>
               </Flex>
             </Flex>
           </Box>

@@ -21,6 +21,7 @@ import { TableVirtuoso } from 'react-virtuoso';
 import type { StandaloneChatListItem } from '../../types';
 import type { StandaloneChatSortCriteria, SortDirection } from '../../store';
 import { formatTimestamp } from '../../helpers';
+import { AppTooltip } from '../Shared/AppTooltip';
 
 interface StandaloneChatListTableProps {
   chats: StandaloneChatListItem[];
@@ -101,18 +102,19 @@ const ChatRowCells = React.memo(function ChatRowCells({
         onKeyDown={(e) => e.stopPropagation()}
       >
         <DropdownMenu.Root>
-          <DropdownMenu.Trigger>
-            <IconButton
-              variant="ghost"
-              color="gray"
-              size="1"
-              className="p-1 data-[state=open]:bg-[--accent-a4]"
-              aria-label="Standalone chat options"
-              title="Standalone chat options"
-            >
-              <DotsHorizontalIcon />
-            </IconButton>
-          </DropdownMenu.Trigger>
+          <AppTooltip content="Standalone chat options">
+            <DropdownMenu.Trigger>
+              <IconButton
+                variant="ghost"
+                color="gray"
+                size="1"
+                className="p-1 data-[state=open]:bg-[--accent-a4]"
+                aria-label="Standalone chat options"
+              >
+                <DotsHorizontalIcon />
+              </IconButton>
+            </DropdownMenu.Trigger>
+          </AppTooltip>
           <DropdownMenu.Content
             align="end"
             size="1"

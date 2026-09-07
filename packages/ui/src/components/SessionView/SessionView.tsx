@@ -25,6 +25,7 @@ import {
   ChevronRightIcon,
 } from '@radix-ui/react-icons';
 import { SessionContent } from './SessionContent';
+import { AppTooltip } from '../Shared/AppTooltip';
 import { SelectActiveModelModal } from './Modals/SelectActiveModelModal';
 import {
   fetchSession,
@@ -460,16 +461,17 @@ export function SessionView() {
           >
             <Flex justify="between" align="center" gap="2">
               <Flex align="center" gap="2" style={{ minWidth: 0, flex: 1 }}>
-                <Text
-                  size="2"
-                  weight="bold"
-                  truncate
-                  title={displayTitle}
-                  style={{ flexShrink: 1 }}
-                  className="text-gray-800 dark:text-gray-200"
-                >
-                  {displayTitle}
-                </Text>
+                <AppTooltip content={displayTitle}>
+                  <Text
+                    size="2"
+                    weight="bold"
+                    truncate
+                    style={{ flexShrink: 1 }}
+                    className="text-gray-800 dark:text-gray-200"
+                  >
+                    {displayTitle}
+                  </Text>
+                </AppTooltip>
               </Flex>
               <Flex align="center" gap="1" style={{ flexShrink: 0 }}>
                 <SessionNavButton

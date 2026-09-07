@@ -35,6 +35,7 @@ import type { Session, LlmStatus, Template } from '../../types';
 import { toastMessageAtom, remoteBaseUrlAtom } from '../../store';
 import { cn } from '../../utils';
 import { formatIsoDateToYMD } from '../../helpers';
+import { AppTooltip } from '../Shared/AppTooltip';
 import {
   LlmSettingsForm,
   type LlmSettingsState,
@@ -120,25 +121,28 @@ const TemplatePicker: React.FC<{
             [...userTemplates]
               .sort((a, b) => a.title.localeCompare(b.title))
               .map((template) => (
-                <Button
+                <AppTooltip
                   key={template.id}
-                  variant="ghost"
-                  onClick={() => {
-                    // This is now the only place that handles selection and closing
-                    onSelectTemplate(template.text);
-                    onClose();
-                  }}
-                  className="block w-full h-auto text-left p-2 text-sm rounded whitespace-normal justify-start"
-                  style={{
-                    whiteSpace: 'normal',
-                    justifyContent: 'flex-start',
-                    textAlign: 'left',
-                  }}
-                  title={`Insert: "${template.text.substring(0, 100)}..."`}
-                  size="2"
+                  content={`Insert: "${template.text.substring(0, 100)}..."`}
                 >
-                  {template.title}
-                </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      // This is now the only place that handles selection and closing
+                      onSelectTemplate(template.text);
+                      onClose();
+                    }}
+                    className="block w-full h-auto text-left p-2 text-sm rounded whitespace-normal justify-start"
+                    style={{
+                      whiteSpace: 'normal',
+                      justifyContent: 'flex-start',
+                      textAlign: 'left',
+                    }}
+                    size="2"
+                  >
+                    {template.title}
+                  </Button>
+                </AppTooltip>
               ))
           )}
         </Box>

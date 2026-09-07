@@ -25,6 +25,7 @@ import type { SessionSortCriteria, SortDirection } from '../../store';
 import { sessionColorMap, therapyColorMap } from '../../constants';
 import { formatIsoDateToYMD, formatDuration } from '../../helpers';
 import { cn } from '../../utils';
+import { AppTooltip } from '../Shared/AppTooltip';
 
 interface SessionListTableProps {
   sessions: Session[];
@@ -223,18 +224,19 @@ const SessionRowCells = React.memo(function SessionRowCells({
         style={cellStyle}
       >
         <DropdownMenu.Root>
-          <DropdownMenu.Trigger>
-            <IconButton
-              variant="ghost"
-              color="gray"
-              size="1"
-              className="transition-opacity data-[state=open]:opacity-100"
-              aria-label="Session options"
-              title="Session options"
-            >
-              <DotsHorizontalIcon />
-            </IconButton>
-          </DropdownMenu.Trigger>
+          <AppTooltip content="Session options">
+            <DropdownMenu.Trigger>
+              <IconButton
+                variant="ghost"
+                color="gray"
+                size="1"
+                className="transition-opacity data-[state=open]:opacity-100"
+                aria-label="Session options"
+              >
+                <DotsHorizontalIcon />
+              </IconButton>
+            </DropdownMenu.Trigger>
+          </AppTooltip>
           <DropdownMenu.Content
             align="end"
             size="1"

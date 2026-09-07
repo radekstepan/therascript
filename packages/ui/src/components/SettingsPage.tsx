@@ -228,7 +228,10 @@ export function SettingsPage() {
                 gap="2"
               >
                 {RADIX_ACCENT_COLORS.map((color: RadixAccentColor) => (
-                  <Tooltip key={color} content={capitalize(color)}>
+                  <Tooltip
+                    key={color}
+                    content={`Set accent to ${capitalize(color)}`}
+                  >
                     <Button
                       variant={currentAccent === color ? 'solid' : 'outline'}
                       color={
@@ -243,7 +246,6 @@ export function SettingsPage() {
                         alignItems: 'center',
                         justifyContent: 'center',
                       }}
-                      title={`Set accent to ${capitalize(color)}`}
                       aria-pressed={currentAccent === color}
                     >
                       {currentAccent === color ? (

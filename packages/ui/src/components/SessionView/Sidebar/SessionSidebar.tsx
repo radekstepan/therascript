@@ -13,6 +13,7 @@ import {
 } from '../../../api/api';
 import { formatTimestamp } from '../../../helpers'; // Correct helpers import path
 import type { ChatSession, Session } from '../../../types'; // Correct types import path
+import { AppTooltip } from '../../Shared/AppTooltip';
 // --- End Missing Imports ---
 
 import {
@@ -373,40 +374,42 @@ export function SessionSidebar({
             <Heading as="h3" size="2" color="gray" trim="start" weight="medium">
               Chats
             </Heading>
-            <Button
-              onClick={handleNewChatClick} // Use defined handler
-              variant="soft"
-              size="1"
-              highContrast
-              title="Start New Chat"
-              disabled={startNewChatMutation.isPending}
-            >
-              {startNewChatMutation.isPending ? (
-                <Spinner size="1" />
-              ) : (
-                <PlusCircledIcon width="16" height="16" />
-              )}
-            </Button>
+            <AppTooltip content="Start New Chat">
+              <Button
+                onClick={handleNewChatClick} // Use defined handler
+                variant="soft"
+                size="1"
+                highContrast
+                disabled={startNewChatMutation.isPending}
+              >
+                {startNewChatMutation.isPending ? (
+                  <Spinner size="1" />
+                ) : (
+                  <PlusCircledIcon width="16" height="16" />
+                )}
+              </Button>
+            </AppTooltip>
           </Flex>
         )}
 
         {/* Header (Conditional - Minimal) */}
         {hideHeader && (
           <Flex justify="end" align="center" flexShrink="0" mb="2">
-            <Button
-              onClick={handleNewChatClick} // Use defined handler
-              variant="soft"
-              size="1"
-              highContrast
-              title="Start New Chat"
-              disabled={startNewChatMutation.isPending}
-            >
-              {startNewChatMutation.isPending ? (
-                <Spinner size="1" />
-              ) : (
-                <PlusCircledIcon width="16" height="16" />
-              )}
-            </Button>
+            <AppTooltip content="Start New Chat">
+              <Button
+                onClick={handleNewChatClick} // Use defined handler
+                variant="soft"
+                size="1"
+                highContrast
+                disabled={startNewChatMutation.isPending}
+              >
+                {startNewChatMutation.isPending ? (
+                  <Spinner size="1" />
+                ) : (
+                  <PlusCircledIcon width="16" height="16" />
+                )}
+              </Button>
+            </AppTooltip>
           </Flex>
         )}
 

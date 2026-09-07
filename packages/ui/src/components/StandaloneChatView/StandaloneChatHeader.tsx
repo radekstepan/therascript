@@ -29,6 +29,7 @@ import {
   GlobeIcon,
 } from '@radix-ui/react-icons';
 import { EntitySelectorDropdown } from '../Shared/EntitySelectorDropdown';
+import { AppTooltip } from '../Shared/AppTooltip';
 import { EditStandaloneChatModal } from './EditStandaloneChatModal';
 import { fetchStandaloneChats, deleteStandaloneChat } from '../../api/api';
 import type {
@@ -274,17 +275,18 @@ export function StandaloneChatHeader({
               disabled={isLoadingAny}
             />
             <DropdownMenu.Root>
-              <DropdownMenu.Trigger>
-                <IconButton
-                  variant="ghost"
-                  color="gray"
-                  size="1"
-                  disabled={!activeChat || isLoadingAny}
-                  title="Chat Actions"
-                >
-                  <DotsHorizontalIcon />
-                </IconButton>
-              </DropdownMenu.Trigger>
+              <AppTooltip content="Chat Actions">
+                <DropdownMenu.Trigger>
+                  <IconButton
+                    variant="ghost"
+                    color="gray"
+                    size="1"
+                    disabled={!activeChat || isLoadingAny}
+                  >
+                    <DotsHorizontalIcon />
+                  </IconButton>
+                </DropdownMenu.Trigger>
+              </AppTooltip>
               <DropdownMenu.Content align="end">
                 <DropdownMenu.Item
                   onSelect={handleOpenEditModal}
@@ -416,12 +418,7 @@ export function StandaloneChatHeader({
                     style={{ minWidth: 0, maxWidth: 220 }}
                   >
                     <Spinner size="1" />
-                    <Text
-                      size="1"
-                      color="gray"
-                      truncate
-                      title={llmStatus.activeModel}
-                    >
+                    <Text size="1" color="gray" truncate>
                       {llmStatus.activeModel}
                     </Text>
                   </Flex>
@@ -444,12 +441,7 @@ export function StandaloneChatHeader({
                       height="12"
                       style={{ flexShrink: 0 }}
                     />
-                    <Text
-                      size="1"
-                      color="gray"
-                      truncate
-                      title={llmStatus.activeModel}
-                    >
+                    <Text size="1" color="gray" truncate>
                       {llmStatus.activeModel}
                     </Text>
                   </Flex>
@@ -460,25 +452,23 @@ export function StandaloneChatHeader({
                   gap="1"
                   style={{ minWidth: 0, maxWidth: 220 }}
                 >
-                  <Text
-                    size="1"
-                    color="gray"
-                    truncate
-                    title={llmStatus.activeModel}
-                  >
-                    {llmStatus.activeModel}
-                  </Text>
+                  <AppTooltip content={llmStatus.activeModel}>
+                    <Text size="1" color="gray" truncate>
+                      {llmStatus.activeModel}
+                    </Text>
+                  </AppTooltip>
                 </Flex>
               ))}
-            <Button
-              variant="soft"
-              size="1"
-              onClick={onOpenLlmModal}
-              title="Configure AI Model"
-              disabled={isLoadingAny}
-            >
-              <MixerVerticalIcon width="14" height="14" />
-            </Button>
+            <AppTooltip content="Configure AI Model">
+              <Button
+                variant="soft"
+                size="1"
+                onClick={onOpenLlmModal}
+                disabled={isLoadingAny}
+              >
+                <MixerVerticalIcon width="14" height="14" />
+              </Button>
+            </AppTooltip>
           </Flex>
         </Flex>
       </Flex>

@@ -23,6 +23,7 @@ import type {
   LlmStatus,
   UIContextUsageResponse,
 } from '../../../types';
+import { AppTooltip } from '../../Shared/AppTooltip';
 import { cn } from '../../../utils';
 import prettyBytes from 'pretty-bytes';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -328,12 +329,7 @@ export function ChatPanelHeader({
                   style={{ minWidth: 0, maxWidth: 220 }}
                 >
                   <Spinner size="1" />
-                  <Text
-                    size="1"
-                    color="gray"
-                    truncate
-                    title={llmStatus.activeModel}
-                  >
+                  <Text size="1" color="gray" truncate>
                     {llmStatus.activeModel}
                   </Text>
                 </Flex>
@@ -352,12 +348,7 @@ export function ChatPanelHeader({
                   style={{ minWidth: 0, maxWidth: 220 }}
                 >
                   <GlobeIcon width="12" height="12" style={{ flexShrink: 0 }} />
-                  <Text
-                    size="1"
-                    color="gray"
-                    truncate
-                    title={llmStatus.activeModel}
-                  >
+                  <Text size="1" color="gray" truncate>
                     {llmStatus.activeModel}
                   </Text>
                 </Flex>
@@ -368,25 +359,23 @@ export function ChatPanelHeader({
                 gap="1"
                 style={{ minWidth: 0, maxWidth: 220 }}
               >
-                <Text
-                  size="1"
-                  color="gray"
-                  truncate
-                  title={llmStatus.activeModel}
-                >
-                  {llmStatus.activeModel}
-                </Text>
+                <AppTooltip content={llmStatus.activeModel}>
+                  <Text size="1" color="gray" truncate>
+                    {llmStatus.activeModel}
+                  </Text>
+                </AppTooltip>
               </Flex>
             ))}
-          <Button
-            variant="soft"
-            size="1"
-            onClick={onOpenLlmModal}
-            title="Configure AI Model"
-            disabled={isLoadingLlmStatus}
-          >
-            <MixerVerticalIcon width="14" height="14" />
-          </Button>
+          <AppTooltip content="Configure AI Model">
+            <Button
+              variant="soft"
+              size="1"
+              onClick={onOpenLlmModal}
+              disabled={isLoadingLlmStatus}
+            >
+              <MixerVerticalIcon width="14" height="14" />
+            </Button>
+          </AppTooltip>
         </Flex>
       </Flex>
     </Box>

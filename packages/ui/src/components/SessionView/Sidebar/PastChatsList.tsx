@@ -6,6 +6,7 @@ import { ListBulletIcon } from '@radix-ui/react-icons'; // Icon for the list hea
 import { Flex, Text, Separator, Box, ScrollArea } from '@radix-ui/themes'; // Radix UI components
 import { formatTimestamp } from '../../../helpers'; // Helper for formatting timestamps
 import type { ChatSession, Session } from '../../../types'; // Type definitions
+import { AppTooltip } from '../../Shared/AppTooltip';
 
 interface PastChatsListProps {
   session: Session | null; // The current therapy session data
@@ -69,29 +70,32 @@ export function PastChatsList({
         <Box p="1">
           {/* Iterate over the other (non-active) chats */}
           {otherChats.map((chat) => (
-            <Box
+            <AppTooltip
               key={chat.id}
-              // Call the selection handler on click
-              onClick={() => onSelectChatHistory(chat.id)}
-              // Allow selection via keyboard (Enter or Space)
-              onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  onSelectChatHistory(chat.id);
-                }
-              }}
-              tabIndex={0} // Make it focusable
-              role="button" // Indicate interactivity
-              aria-label={`Switch to: ${getChatDisplayTitle(chat)}`} // Accessibility label
-              // Styling for interactive list items
-              className="block w-full p-2 rounded hover:bg-[--gray-a3] focus:outline-none focus:ring-2 focus:ring-[--accent-7] cursor-pointer"
-              title={`Switch to: ${getChatDisplayTitle(chat)}`} // Tooltip
+              content={`Switch to: ${getChatDisplayTitle(chat)}`}
             >
-              {/* Display the chat title (truncated if necessary) */}
-              <Text size="2" truncate>
-                {getChatDisplayTitle(chat)}
-              </Text>
-            </Box>
+              <Box
+                // Call the selection handler on click
+                onClick={() => onSelectChatHistory(chat.id)}
+                // Allow selection via keyboard (Enter or Space)
+                onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onSelectChatHistory(chat.id);
+                  }
+                }}
+                tabIndex={0} // Make it focusable
+                role="button" // Indicate interactivity
+                aria-label={`Switch to: ${getChatDisplayTitle(chat)}`} // Accessibility label
+                // Styling for interactive list items
+                className="block w-full p-2 rounded hover:bg-[--gray-a3] focus:outline-none focus:ring-2 focus:ring-[--accent-7] cursor-pointer"
+              >
+                {/* Display the chat title (truncated if necessary) */}
+                <Text size="2" truncate>
+                  {getChatDisplayTitle(chat)}
+                </Text>
+              </Box>
+            </AppTooltip>
           ))}
         </Box>
       </ScrollArea>

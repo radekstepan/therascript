@@ -9,6 +9,7 @@ import {
 } from '@radix-ui/react-icons';
 import { cn } from '../../utils';
 import { formatTimestamp } from '../../helpers';
+import { AppTooltip } from './AppTooltip';
 
 // Define a base interface for common properties (constraint for the generic)
 interface BaseChatItem {
@@ -70,80 +71,86 @@ export function ChatSidebarListItem<T extends BaseChatItem>({
 
   return (
     // Rest of the JSX remains the same, using `item` which is now of type T
-    <Flex
-      key={item.id}
-      align="center"
-      justify="between"
-      gap="1"
-      className={cn(
-        'w-full px-2 py-1.5 rounded-md group cursor-pointer',
-        isActive
-          ? 'bg-[--accent-a4] text-[--accent-11] font-medium'
-          : 'text-[--gray-a11] hover:bg-[--gray-a3] focus:outline-none focus:ring-2 focus:ring-[--accent-7]',
-        'transition-colors duration-150'
-      )}
-      onClick={handleItemClick}
-      onKeyDown={handleKeyDown}
-      tabIndex={0}
-      role="button"
-      aria-current={isActive ? 'page' : undefined}
-      title={getChatDisplayTitle(item)}
-    >
+    <AppTooltip content={getChatDisplayTitle(item)}>
       <Flex
+        key={item.id}
         align="center"
-        gap="2"
-        className="flex-grow pr-1"
-        style={{ minWidth: 0 }}
+        justify="between"
+        gap="1"
+        className={cn(
+          'w-full px-2 py-1.5 rounded-md group cursor-pointer',
+          isActive
+            ? 'bg-[--accent-a4] text-[--accent-11] font-medium'
+            : 'text-[--gray-a11] hover:bg-[--gray-a3] focus:outline-none focus:ring-2 focus:ring-[--accent-7]',
+          'transition-colors duration-150'
+        )}
+        onClick={handleItemClick}
+        onKeyDown={handleKeyDown}
+        tabIndex={0}
+        role="button"
+        aria-current={isActive ? 'page' : undefined}
       >
-        <ChatBubbleIcon
-          className={cn(
-            'text-[--gray-a10] flex-shrink-0',
-            isActive && 'text-[--accent-11]'
-          )}
-        />
-        <Text size="2" truncate className="flex-grow">
-          {getChatDisplayTitle(item)}
-        </Text>
-      </Flex>
-      <DropdownMenu.Root>
-        <DropdownMenu.Trigger>
-          <IconButton
-            variant="ghost"
-            color="gray"
-            size="1"
+        <Flex
+          align="center"
+          gap="2"
+          className="flex-grow pr-1"
+          style={{ minWidth: 0 }}
+        >
+          <ChatBubbleIcon
             className={cn(
-              'flex-shrink-0 p-1',
-              isActive
-                ? 'opacity-100'
-                : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
-              'data-[state=open]:opacity-100 data-[state=open]:bg-[--accent-a4] transition-opacity'
+              'text-[--gray-a10] flex-shrink-0',
+              isActive && 'text-[--accent-11]'
             )}
-            aria-label="Chat item options"
-            title="Chat item options"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-            }}
+          />
+          <Text size="2" truncate className="flex-grow">
+            {getChatDisplayTitle(item)}
+          </Text>
+        </Flex>
+        <DropdownMenu.Root>
+          <AppTooltip content="Chat item options">
+            <DropdownMenu.Trigger>
+              <IconButton
+                variant="ghost"
+                color="gray"
+                size="1"
+                className={cn(
+                  'flex-shrink-0 p-1',
+                  isActive
+                    ? 'opacity-100'
+                    : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
+                  'data-[state=open]:opacity-100 data-[state=open]:bg-[--accent-a4] transition-opacity'
+                )}
+                aria-label="Chat item options"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <DotsHorizontalIcon />
+              </IconButton>
+            </DropdownMenu.Trigger>
+          </AppTooltip>
+          <DropdownMenu.Content
+            align="end"
+            size="1"
+            onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
           >
-            <DotsHorizontalIcon />
-          </IconButton>
-        </DropdownMenu.Trigger>
-        <DropdownMenu.Content
-          align="end"
-          size="1"
-          onClick={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <DropdownMenu.Item onSelect={() => onEditRequest(item)}>
-            <Pencil1Icon width="14" height="14" className="mr-2" /> {editLabel}
-          </DropdownMenu.Item>
-          <DropdownMenu.Separator />
-          <DropdownMenu.Item color="red" onSelect={() => onDeleteRequest(item)}>
-            <TrashIcon width="14" height="14" className="mr-2" /> Delete Chat
-          </DropdownMenu.Item>
-        </DropdownMenu.Content>
-      </DropdownMenu.Root>
-    </Flex>
+            <DropdownMenu.Item onSelect={() => onEditRequest(item)}>
+              <Pencil1Icon width="14" height="14" className="mr-2" />{' '}
+              {editLabel}
+            </DropdownMenu.Item>
+            <DropdownMenu.Separator />
+            <DropdownMenu.Item
+              color="red"
+              onSelect={() => onDeleteRequest(item)}
+            >
+              <TrashIcon width="14" height="14" className="mr-2" /> Delete Chat
+            </DropdownMenu.Item>
+          </DropdownMenu.Content>
+        </DropdownMenu.Root>
+      </Flex>
+    </AppTooltip>
   );
 }

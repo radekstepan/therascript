@@ -12,6 +12,7 @@ import {
 } from '@radix-ui/themes'; // Import Callout
 import { Cross1Icon, InfoCircledIcon } from '@radix-ui/react-icons';
 import { cn } from '../../../utils'; // Utility for combining class names
+import { AppTooltip } from '../../Shared/AppTooltip';
 import type { Template } from '../../../types';
 import { fetchTemplates } from '../../../api/templates'; // API function to fetch starred messages
 
@@ -148,24 +149,27 @@ export function StarredTemplatesList({
               .map((template) => {
                 return (
                   // Button for each template
-                  <Button
+                  // Radix tooltip showing a longer preview of the message text
+                  <AppTooltip
                     key={template.id}
-                    variant="ghost"
-                    // Call the onSelectTemplate callback with the full message text when clicked
-                    onClick={() => onSelectTemplate(template.text)}
-                    // Styling for button appearance and text wrapping
-                    className="block w-full h-auto text-left p-2 text-sm rounded whitespace-normal justify-start"
-                    style={{
-                      whiteSpace: 'normal',
-                      justifyContent: 'flex-start',
-                      textAlign: 'left',
-                    }}
-                    // Tooltip showing a longer preview of the message text
-                    title={`Insert: "${template.text.substring(0, 100)}${template.text.length > 100 ? '...' : ''}"`}
-                    size="2"
+                    content={`Insert: "${template.text.substring(0, 100)}${template.text.length > 100 ? '...' : ''}"`}
                   >
-                    {template.title}
-                  </Button>
+                    <Button
+                      variant="ghost"
+                      // Call the onSelectTemplate callback with the full message text when clicked
+                      onClick={() => onSelectTemplate(template.text)}
+                      // Styling for button appearance and text wrapping
+                      className="block w-full h-auto text-left p-2 text-sm rounded whitespace-normal justify-start"
+                      style={{
+                        whiteSpace: 'normal',
+                        justifyContent: 'flex-start',
+                        textAlign: 'left',
+                      }}
+                      size="2"
+                    >
+                      {template.title}
+                    </Button>
+                  </AppTooltip>
                 );
               })
           )}

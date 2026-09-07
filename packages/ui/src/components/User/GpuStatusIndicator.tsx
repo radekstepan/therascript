@@ -6,6 +6,7 @@ import { Cpu } from 'lucide-react';
 import { fetchGpuStats, fetchLlmStatus } from '../../api/api';
 import type { GpuStats, LlmStatus } from '../../types';
 import { GpuStatusModal } from './GpuStatusModal';
+import { AppTooltip } from '../Shared/AppTooltip';
 import { cn } from '../../utils';
 import prettyBytes from 'pretty-bytes';
 
@@ -97,83 +98,87 @@ export function GpuStatusIndicator({
 
   return (
     <>
-      <button
-        title={`Runtime: ${runtimeDisplay}`}
-        onClick={handleOpenModal}
-        className={cn(
-          'flex items-center mt-2 w-full py-2 text-left text-sm hover:bg-[var(--accent-a3)] rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-8)]',
-          isSidebarOpen ? 'px-3' : 'justify-center px-0'
-        )}
-        disabled={!gpuStats && isLoadingGpu}
+      <AppTooltip
+        content={!isSidebarOpen ? `Runtime: ${runtimeDisplay}` : undefined}
+        side="right"
       >
-        <Cpu size={18} className={cn(isSidebarOpen ? 'mr-2' : 'mr-0')} />
-        {isSidebarOpen && (
-          <Flex direction="column" gap="1" style={{ flexGrow: 1 }}>
-            <Flex justify="between" align="center">
-              <Tooltip content={runtimeTooltip}>
-                <Text size="1" weight="medium">
-                  Runtime: {runtimeDisplay}
-                </Text>
-              </Tooltip>
-              {hasMetrics &&
-              summary &&
-              summary.avgTemperatureCelsius !== null ? (
-                <Text size="1">{summary.avgTemperatureCelsius}°C</Text>
-              ) : null}
-            </Flex>
-            {hasMetrics && summary ? (
-              <>
-                {summary.avgGpuUtilizationPercent !== null && (
+        <button
+          onClick={handleOpenModal}
+          className={cn(
+            'flex items-center mt-2 w-full py-2 text-left text-sm hover:bg-[var(--accent-a3)] rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-8)]',
+            isSidebarOpen ? 'px-3' : 'justify-center px-0'
+          )}
+          disabled={!gpuStats && isLoadingGpu}
+        >
+          <Cpu size={18} className={cn(isSidebarOpen ? 'mr-2' : 'mr-0')} />
+          {isSidebarOpen && (
+            <Flex direction="column" gap="1" style={{ flexGrow: 1 }}>
+              <Flex justify="between" align="center">
+                <Tooltip content={runtimeTooltip}>
+                  <Text size="1" weight="medium">
+                    Runtime: {runtimeDisplay}
+                  </Text>
+                </Tooltip>
+                {hasMetrics &&
+                summary &&
+                summary.avgTemperatureCelsius !== null ? (
+                  <Text size="1">{summary.avgTemperatureCelsius}°C</Text>
+                ) : null}
+              </Flex>
+              {hasMetrics && summary ? (
+                <>
+                  {summary.avgGpuUtilizationPercent !== null && (
+                    <Tooltip
+                      content={`GPU Utilization: ${summary.avgGpuUtilizationPercent}%`}
+                    >
+                      <Progress
+                        size="1"
+                        value={summary.avgGpuUtilizationPercent}
+                        color={getUtilColor(summary.avgGpuUtilizationPercent)}
+                      />
+                    </Tooltip>
+                  )}
                   <Tooltip
-                    content={`GPU Utilization: ${summary.avgGpuUtilizationPercent}%`}
+                    content={`${isUnifiedMemory ? 'Memory' : 'VRAM'}: ${prettyBytes(summary.totalMemoryUsedMb * 1024 * 1024)} / ${prettyBytes(summary.totalMemoryMb * 1024 * 1024)}`}
                   >
                     <Progress
                       size="1"
-                      value={summary.avgGpuUtilizationPercent}
-                      color={getUtilColor(summary.avgGpuUtilizationPercent)}
+                      value={vramUsagePercent}
+                      color={getVramColor(vramUsagePercent)}
                     />
                   </Tooltip>
-                )}
+                </>
+              ) : (
+                <Text size="1" color="gray">
+                  {runtimeKey === 'metal'
+                    ? 'Apple Metal runtime.'
+                    : runtimeKey === 'gpu'
+                      ? 'GPU metrics unavailable.'
+                      : runtimeKey === 'cpu'
+                        ? 'CPU-only runtime.'
+                        : 'Runtime data unavailable.'}
+                </Text>
+              )}
+              {!isUnifiedMemory && gpuStats?.systemMemory && (
                 <Tooltip
-                  content={`${isUnifiedMemory ? 'Memory' : 'VRAM'}: ${prettyBytes(summary.totalMemoryUsedMb * 1024 * 1024)} / ${prettyBytes(summary.totalMemoryMb * 1024 * 1024)}`}
+                  content={`System RAM: ${prettyBytes(gpuStats.systemMemory.usedMb * 1024 * 1024)} / ${prettyBytes(gpuStats.systemMemory.totalMb * 1024 * 1024)}`}
                 >
                   <Progress
                     size="1"
-                    value={vramUsagePercent}
-                    color={getVramColor(vramUsagePercent)}
+                    value={gpuStats.systemMemory.percentUsed}
+                    color={getRamColor(gpuStats.systemMemory.percentUsed)}
                   />
                 </Tooltip>
-              </>
-            ) : (
-              <Text size="1" color="gray">
-                {runtimeKey === 'metal'
-                  ? 'Apple Metal runtime.'
-                  : runtimeKey === 'gpu'
-                    ? 'GPU metrics unavailable.'
-                    : runtimeKey === 'cpu'
-                      ? 'CPU-only runtime.'
-                      : 'Runtime data unavailable.'}
-              </Text>
-            )}
-            {!isUnifiedMemory && gpuStats?.systemMemory && (
-              <Tooltip
-                content={`System RAM: ${prettyBytes(gpuStats.systemMemory.usedMb * 1024 * 1024)} / ${prettyBytes(gpuStats.systemMemory.totalMb * 1024 * 1024)}`}
-              >
-                <Progress
-                  size="1"
-                  value={gpuStats.systemMemory.percentUsed}
-                  color={getRamColor(gpuStats.systemMemory.percentUsed)}
-                />
-              </Tooltip>
-            )}
-            {error && (
-              <Text size="1" color="red">
-                {error.message}
-              </Text>
-            )}
-          </Flex>
-        )}
-      </button>
+              )}
+              {error && (
+                <Text size="1" color="red">
+                  {error.message}
+                </Text>
+              )}
+            </Flex>
+          )}
+        </button>
+      </AppTooltip>
 
       <GpuStatusModal
         isOpen={isModalOpen}

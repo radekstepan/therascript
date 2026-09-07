@@ -20,6 +20,7 @@ import {
   InfoCircledIcon,
 } from '@radix-ui/react-icons';
 import { fetchDockerStatus } from '../../api/api';
+import { AppTooltip } from '../Shared/AppTooltip';
 import type { DockerContainerStatus } from '../../types';
 import { cn } from '../../utils'; // If needed
 
@@ -138,14 +139,11 @@ export function DockerStatusModal({
                           style={{ minWidth: 0 }}
                         >
                           <Flex align="center" gap="2">
-                            <Text
-                              size="2"
-                              weight="medium"
-                              truncate
-                              title={container.name}
-                            >
-                              {container.name}
-                            </Text>
+                            <AppTooltip content={container.name}>
+                              <Text size="2" weight="medium" truncate>
+                                {container.name}
+                              </Text>
+                            </AppTooltip>
                             <Badge color={color} variant="soft" size="1">
                               <Icon
                                 width="12"
@@ -155,14 +153,11 @@ export function DockerStatusModal({
                               {container.state}
                             </Badge>
                           </Flex>
-                          <Text
-                            size="1"
-                            color="gray"
-                            truncate
-                            title={container.image}
-                          >
-                            {container.image}
-                          </Text>
+                          <AppTooltip content={container.image}>
+                            <Text size="1" color="gray" truncate>
+                              {container.image}
+                            </Text>
+                          </AppTooltip>
                         </Flex>
                         <Flex
                           direction="column"
@@ -171,17 +166,18 @@ export function DockerStatusModal({
                           flexShrink="0"
                           style={{ textAlign: 'right' }}
                         >
-                          <Text size="1" color="gray" title={container.status}>
-                            {container.status}
-                          </Text>
-                          <Text
-                            size="1"
-                            color="gray"
-                            truncate
-                            title={`Ports: ${formatPorts(container.ports)}`}
+                          <AppTooltip content={container.status}>
+                            <Text size="1" color="gray">
+                              {container.status}
+                            </Text>
+                          </AppTooltip>
+                          <AppTooltip
+                            content={`Ports: ${formatPorts(container.ports)}`}
                           >
-                            Ports: {formatPorts(container.ports)}
-                          </Text>
+                            <Text size="1" color="gray" truncate>
+                              Ports: {formatPorts(container.ports)}
+                            </Text>
+                          </AppTooltip>
                         </Flex>
                       </Flex>
                     </Box>
@@ -199,16 +195,17 @@ export function DockerStatusModal({
           </Box>
         </ScrollArea>
         <Flex gap="3" mt="4" justify="end">
-          <Button
-            type="button"
-            variant="soft"
-            color="gray"
-            onClick={() => refetch()}
-            disabled={isLoading}
-            title="Refetch container status"
-          >
-            Refresh
-          </Button>
+          <AppTooltip content="Refetch container status">
+            <Button
+              type="button"
+              variant="soft"
+              color="gray"
+              onClick={() => refetch()}
+              disabled={isLoading}
+            >
+              Refresh
+            </Button>
+          </AppTooltip>
           <Button
             ref={closeButtonRef}
             type="button"

@@ -12,6 +12,7 @@ import {
 } from '@radix-ui/themes';
 import { Cross1Icon, InfoCircledIcon } from '@radix-ui/react-icons';
 import { cn } from '../../../utils';
+import { AppTooltip } from '../../Shared/AppTooltip';
 import type { Template } from '../../../types';
 import { fetchTemplates } from '../../../api/templates';
 
@@ -134,21 +135,24 @@ export function StarredTemplatesList({
               .sort((a, b) => a.title.localeCompare(b.title))
               .map((template) => {
                 return (
-                  <Button
+                  <AppTooltip
                     key={template.id}
-                    variant="ghost"
-                    onClick={() => onSelectTemplate(template.text)}
-                    className="block w-full h-auto text-left p-2 text-sm rounded whitespace-normal justify-start"
-                    style={{
-                      whiteSpace: 'normal',
-                      justifyContent: 'flex-start',
-                      textAlign: 'left',
-                    }}
-                    title={`Insert: "${template.text.substring(0, 100)}${template.text.length > 100 ? '...' : ''}"`}
-                    size="2"
+                    content={`Insert: "${template.text.substring(0, 100)}${template.text.length > 100 ? '...' : ''}"`}
                   >
-                    {template.title}
-                  </Button>
+                    <Button
+                      variant="ghost"
+                      onClick={() => onSelectTemplate(template.text)}
+                      className="block w-full h-auto text-left p-2 text-sm rounded whitespace-normal justify-start"
+                      style={{
+                        whiteSpace: 'normal',
+                        justifyContent: 'flex-start',
+                        textAlign: 'left',
+                      }}
+                      size="2"
+                    >
+                      {template.title}
+                    </Button>
+                  </AppTooltip>
                 );
               })
           )}

@@ -31,6 +31,7 @@ import { fetchSessions } from '../../api/session';
 import { activeLlmJobsAtom } from '../../store';
 import type { AnalysisJob, Session } from '../../types';
 import { formatTimestamp } from '../../helpers';
+import { AppTooltip } from '../Shared/AppTooltip';
 
 interface JobsQueueModalProps {
   isOpen: boolean;
@@ -182,14 +183,11 @@ export function JobsQueueModal({ isOpen, onOpenChange }: JobsQueueModalProps) {
                               gap="1"
                               style={{ minWidth: 0 }}
                             >
-                              <Text
-                                size="2"
-                                weight="medium"
-                                truncate
-                                title={job.promptPreview}
-                              >
-                                {job.promptPreview}
-                              </Text>
+                              <AppTooltip content={job.promptPreview}>
+                                <Text size="2" weight="medium" truncate>
+                                  {job.promptPreview}
+                                </Text>
+                              </AppTooltip>
                               <Text size="1" color="gray">
                                 Started: {formatTimestamp(job.startedAt)}
                               </Text>
@@ -237,14 +235,11 @@ export function JobsQueueModal({ isOpen, onOpenChange }: JobsQueueModalProps) {
                               gap="1"
                               style={{ minWidth: 0 }}
                             >
-                              <Text
-                                size="2"
-                                weight="medium"
-                                truncate
-                                title={job.original_prompt}
-                              >
-                                #{job.id}: {job.short_prompt}
-                              </Text>
+                              <AppTooltip content={job.original_prompt}>
+                                <Text size="2" weight="medium" truncate>
+                                  #{job.id}: {job.short_prompt}
+                                </Text>
+                              </AppTooltip>
                               <Text size="1" color="gray">
                                 Created: {formatTimestamp(job.created_at)}
                               </Text>
@@ -290,14 +285,11 @@ export function JobsQueueModal({ isOpen, onOpenChange }: JobsQueueModalProps) {
                               gap="1"
                               style={{ minWidth: 0 }}
                             >
-                              <Text
-                                size="2"
-                                weight="medium"
-                                truncate
-                                title={session.fileName}
-                              >
-                                {session.sessionName || session.fileName}
-                              </Text>
+                              <AppTooltip content={session.fileName}>
+                                <Text size="2" weight="medium" truncate>
+                                  {session.sessionName || session.fileName}
+                                </Text>
+                              </AppTooltip>
                               <Text size="1" color="gray">
                                 Client: {session.clientName}
                               </Text>

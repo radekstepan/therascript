@@ -50,6 +50,7 @@ import type {
   AvailableModelsResponse,
 } from '../../../types';
 import prettyBytes from 'pretty-bytes';
+import { AppTooltip } from '../../Shared/AppTooltip';
 
 interface LlmManagementModalProps {
   isOpen: boolean;
@@ -412,9 +413,11 @@ export function LlmManagementModal({
           <Flex direction="column" gap="1" style={{ minWidth: 0, flexGrow: 1 }}>
             {/* Name Row */}
             <Flex>
-              <Text size="2" weight="medium" truncate title={model.name}>
-                {model.name}
-              </Text>
+              <AppTooltip content={model.name}>
+                <Text size="2" weight="medium" truncate>
+                  {model.name}
+                </Text>
+              </AppTooltip>
             </Flex>
             {/* Tags Row */}
             <Flex gap="1" wrap="wrap" align="center">
@@ -487,18 +490,19 @@ export function LlmManagementModal({
               </Badge>
             ) : (
               <DropdownMenu.Root>
-                <DropdownMenu.Trigger>
-                  <IconButton
-                    variant="ghost"
-                    color="gray"
-                    size="1"
-                    title="Model Actions"
-                    aria-label={`Actions for ${model.name}`}
-                    disabled={actionsDisabled}
-                  >
-                    <DotsHorizontalIcon />
-                  </IconButton>
-                </DropdownMenu.Trigger>
+                <AppTooltip content="Model Actions">
+                  <DropdownMenu.Trigger>
+                    <IconButton
+                      variant="ghost"
+                      color="gray"
+                      size="1"
+                      aria-label={`Actions for ${model.name}`}
+                      disabled={actionsDisabled}
+                    >
+                      <DotsHorizontalIcon />
+                    </IconButton>
+                  </DropdownMenu.Trigger>
+                </AppTooltip>
                 <DropdownMenu.Content size="1" align="end">
                   <DropdownMenu.Item
                     color="red"
@@ -551,18 +555,19 @@ export function LlmManagementModal({
               <Text as="div" size="1" weight="medium" color="gray">
                 Available Local Models
               </Text>{' '}
-              <Button
-                variant="ghost"
-                size="1"
-                onClick={() => refetchAvailableModels()}
-                disabled={isLoadingAvailable || isAnyOperationActive}
-                title="Refresh list"
-              >
-                {' '}
-                <ReloadIcon
-                  className={isLoadingAvailable ? 'animate-spin' : ''}
-                />{' '}
-              </Button>{' '}
+              <AppTooltip content="Refresh list">
+                <Button
+                  variant="ghost"
+                  size="1"
+                  onClick={() => refetchAvailableModels()}
+                  disabled={isLoadingAvailable || isAnyOperationActive}
+                >
+                  {' '}
+                  <ReloadIcon
+                    className={isLoadingAvailable ? 'animate-spin' : ''}
+                  />{' '}
+                </Button>
+              </AppTooltip>{' '}
             </Flex>
             <ScrollArea
               type="auto"
@@ -676,53 +681,59 @@ export function LlmManagementModal({
                 onKeyDown={handlePullInputKeyDown} // Add keydown handler
               />
               {isPulling || isCancelingPull ? (
-                <Button
-                  color="red"
-                  variant="soft"
-                  onClick={handleCancelPullClick}
-                  disabled={
-                    cancelPullMutation.isPending ||
-                    !pullJobId ||
-                    pullStatus?.status === 'canceling' ||
-                    pullStatus?.status === 'canceled' ||
-                    pullStatus?.status === 'completed' ||
-                    pullStatus?.status === 'failed'
-                  }
-                  title="Cancel download"
-                >
-                  {cancelPullMutation.isPending ||
-                  pullStatus?.status === 'canceling' ? (
-                    <>
-                      {' '}
-                      <Spinner size="1" /> Canceling...{' '}
-                    </>
-                  ) : (
-                    <>
-                      <StopIcon /> Cancel
-                    </>
-                  )}
-                </Button>
+                <AppTooltip content="Cancel download">
+                  <Button
+                    color="red"
+                    variant="soft"
+                    onClick={handleCancelPullClick}
+                    disabled={
+                      cancelPullMutation.isPending ||
+                      !pullJobId ||
+                      pullStatus?.status === 'canceling' ||
+                      pullStatus?.status === 'canceled' ||
+                      pullStatus?.status === 'completed' ||
+                      pullStatus?.status === 'failed'
+                    }
+                  >
+                    {cancelPullMutation.isPending ||
+                    pullStatus?.status === 'canceling' ? (
+                      <>
+                        {' '}
+                        <Spinner size="1" /> Canceling...{' '}
+                      </>
+                    ) : (
+                      <>
+                        <StopIcon /> Cancel
+                      </>
+                    )}
+                  </Button>
+                </AppTooltip>
               ) : (
-                <Button
-                  onClick={handlePullClick}
-                  disabled={!modelUrlToDownload.trim() || isAnyOperationActive}
-                  title={
+                <AppTooltip
+                  content={
                     !modelUrlToDownload.trim()
                       ? 'Enter a model URL'
                       : 'Download model'
                   }
                 >
-                  {startPullMutation.isPending ? (
-                    <>
-                      {' '}
-                      <Spinner size="1" /> Starting...{' '}
-                    </>
-                  ) : (
-                    <>
-                      <MagnifyingGlassIcon /> Download
-                    </>
-                  )}
-                </Button>
+                  <Button
+                    onClick={handlePullClick}
+                    disabled={
+                      !modelUrlToDownload.trim() || isAnyOperationActive
+                    }
+                  >
+                    {startPullMutation.isPending ? (
+                      <>
+                        {' '}
+                        <Spinner size="1" /> Starting...{' '}
+                      </>
+                    ) : (
+                      <>
+                        <MagnifyingGlassIcon /> Download
+                      </>
+                    )}
+                  </Button>
+                </AppTooltip>
               )}
             </Flex>
           </Box>

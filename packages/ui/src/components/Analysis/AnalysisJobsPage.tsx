@@ -64,6 +64,7 @@ import {
 } from '../../store';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { cn } from '../../utils';
+import { AppTooltip } from '../Shared/AppTooltip';
 import { useAnalysisStream } from '../../hooks/useAnalysisStream';
 import { MapReduceVisualization } from './MapReduceVisualization';
 
@@ -217,9 +218,11 @@ const IntermediateSummaryItem: React.FC<{
           <Flex direction="column" gap="1" style={{ minWidth: 0 }}>
             <Flex align="center" gap="2">
               <FileTextIcon className="text-[--gray-a10] flex-shrink-0" />
-              <Text weight="medium" truncate title={summary.sessionName}>
-                {summary.sessionName}
-              </Text>
+              <AppTooltip content={summary.sessionName}>
+                <Text weight="medium" truncate>
+                  {summary.sessionName}
+                </Text>
+              </AppTooltip>
             </Flex>
             <Flex align="center" gap="1" pl="1">
               <CalendarIcon className="text-[--gray-a9]" />
@@ -817,9 +820,9 @@ const JobList: React.FC<{
                       {isSummarizing && (
                         <Spinner size="1" className="flex-shrink-0" />
                       )}
-                      <Text truncate title={job.original_prompt}>
-                        {job.short_prompt}
-                      </Text>
+                      <AppTooltip content={job.original_prompt}>
+                        <Text truncate>{job.short_prompt}</Text>
+                      </AppTooltip>
                     </Flex>
                   </Table.Cell>
                   <Table.Cell>

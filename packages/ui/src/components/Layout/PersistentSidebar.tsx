@@ -58,6 +58,7 @@ import {
 import { fetchSessions } from '../../api/session';
 import { fetchStandaloneChats } from '../../api/chat';
 import { GpuStatusIndicator } from '../User/GpuStatusIndicator';
+import { AppTooltip } from '../Shared/AppTooltip';
 import type { ActiveJobCount } from '../../types';
 import { formatTimestamp, formatTimeAgo } from '../../helpers';
 
@@ -261,31 +262,35 @@ export function PersistentSidebar() {
           <ul className="space-y-1">
             {navItems.map((item) => (
               <li key={item.id}>
-                <button
-                  onClick={() => navigateTo(item.page)}
-                  title={!isSidebarOpen ? item.label : undefined}
-                  className={cn(
-                    'flex items-center w-full py-2.5 rounded-lg text-sm font-medium transition-all duration-200',
-                    'focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-8)]',
-                    isSidebarOpen ? 'px-3' : 'px-0 justify-center',
-                    isActive(item.page)
-                      ? 'bg-[var(--accent-a3)] text-[var(--accent-11)]'
-                      : 'text-[var(--gray-11)] hover:bg-[var(--gray-a3)] hover:text-[var(--gray-12)]'
-                  )}
-                  aria-current={isActive(item.page) ? 'page' : undefined}
+                <AppTooltip
+                  content={!isSidebarOpen ? item.label : undefined}
+                  side="right"
                 >
-                  <item.icon
-                    size={20}
+                  <button
+                    onClick={() => navigateTo(item.page)}
                     className={cn(
-                      isSidebarOpen ? 'mr-3' : 'mr-0',
+                      'flex items-center w-full py-2.5 rounded-lg text-sm font-medium transition-all duration-200',
+                      'focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-8)]',
+                      isSidebarOpen ? 'px-3' : 'px-0 justify-center',
                       isActive(item.page)
-                        ? 'text-[var(--accent-11)]'
-                        : 'text-[var(--gray-10)]'
+                        ? 'bg-[var(--accent-a3)] text-[var(--accent-11)]'
+                        : 'text-[var(--gray-11)] hover:bg-[var(--gray-a3)] hover:text-[var(--gray-12)]'
                     )}
-                    aria-hidden="true"
-                  />
-                  {isSidebarOpen && <span>{item.label}</span>}
-                </button>
+                    aria-current={isActive(item.page) ? 'page' : undefined}
+                  >
+                    <item.icon
+                      size={20}
+                      className={cn(
+                        isSidebarOpen ? 'mr-3' : 'mr-0',
+                        isActive(item.page)
+                          ? 'text-[var(--accent-11)]'
+                          : 'text-[var(--gray-10)]'
+                      )}
+                      aria-hidden="true"
+                    />
+                    {isSidebarOpen && <span>{item.label}</span>}
+                  </button>
+                </AppTooltip>
               </li>
             ))}
           </ul>
@@ -410,7 +415,7 @@ export function PersistentSidebar() {
               role="group"
               aria-label="Theme selection"
             >
-              <TooltipWrapper content="Light Theme">
+              <AppTooltip content="Light Theme" side="right">
                 <button
                   onClick={() => setTheme('light')}
                   className={cn(
@@ -423,8 +428,8 @@ export function PersistentSidebar() {
                 >
                   <Sun size={18} aria-hidden="true" />
                 </button>
-              </TooltipWrapper>
-              <TooltipWrapper content="Dark Theme">
+              </AppTooltip>
+              <AppTooltip content="Dark Theme" side="right">
                 <button
                   onClick={() => setTheme('dark')}
                   className={cn(
@@ -437,8 +442,8 @@ export function PersistentSidebar() {
                 >
                   <Moon size={18} aria-hidden="true" />
                 </button>
-              </TooltipWrapper>
-              <TooltipWrapper content="System Theme">
+              </AppTooltip>
+              <AppTooltip content="System Theme" side="right">
                 <button
                   onClick={() => setTheme('system')}
                   className={cn(
@@ -451,44 +456,48 @@ export function PersistentSidebar() {
                 >
                   <Laptop size={18} aria-hidden="true" />
                 </button>
-              </TooltipWrapper>
+              </AppTooltip>
             </div>
           )}
 
-          <button
-            title="Active Jobs"
-            onClick={handleJobsQueueClick}
-            className={cn(
-              'flex items-center w-full py-2 text-left text-sm hover:bg-[var(--gray-a3)] rounded-md transition-colors',
-              isSidebarOpen ? 'px-3' : 'justify-center px-0'
-            )}
+          <AppTooltip
+            content={!isSidebarOpen ? 'Active Jobs' : undefined}
+            side="right"
           >
-            <div
+            <button
+              onClick={handleJobsQueueClick}
               className={cn(
-                'relative flex items-center justify-center',
-                isSidebarOpen ? 'mr-2' : 'mr-0'
+                'flex items-center w-full py-2 text-left text-sm hover:bg-[var(--gray-a3)] rounded-md transition-colors',
+                isSidebarOpen ? 'px-3' : 'justify-center px-0'
               )}
             >
-              <Timer
-                size={18}
-                className="text-[var(--gray-11)]"
-                aria-hidden="true"
-              />
-              {!isSidebarOpen && totalActiveJobs > 0 && (
-                <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-blue-500 rounded-full animate-pulse" />
-              )}
-            </div>
-            {isSidebarOpen && (
-              <Flex align="center" justify="between" width="100%">
-                <span className="text-[var(--gray-12)]">Active Jobs</span>
-                {totalActiveJobs > 0 && (
-                  <Badge color="blue" variant="solid" radius="full" size="1">
-                    {totalActiveJobs}
-                  </Badge>
+              <div
+                className={cn(
+                  'relative flex items-center justify-center',
+                  isSidebarOpen ? 'mr-2' : 'mr-0'
                 )}
-              </Flex>
-            )}
-          </button>
+              >
+                <Timer
+                  size={18}
+                  className="text-[var(--gray-11)]"
+                  aria-hidden="true"
+                />
+                {!isSidebarOpen && totalActiveJobs > 0 && (
+                  <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-blue-500 rounded-full animate-pulse" />
+                )}
+              </div>
+              {isSidebarOpen && (
+                <Flex align="center" justify="between" width="100%">
+                  <span className="text-[var(--gray-12)]">Active Jobs</span>
+                  {totalActiveJobs > 0 && (
+                    <Badge color="blue" variant="solid" radius="full" size="1">
+                      {totalActiveJobs}
+                    </Badge>
+                  )}
+                </Flex>
+              )}
+            </button>
+          </AppTooltip>
 
           <GpuStatusIndicator isSidebarOpen={isSidebarOpen} />
 
@@ -503,27 +512,28 @@ export function PersistentSidebar() {
                 'transition-colors group'
               )}
             >
-              <button
-                title="Shutdown App"
-                onClick={handleShutdownAppClick}
-                className={cn(
-                  'flex items-center flex-grow py-2 pl-3 pr-2 text-left text-sm',
-                  'text-[var(--gray-11)] group-hover:text-red-600',
-                  'transition-colors'
-                )}
-                disabled={
-                  shutdownMutation.isPending || restartMutation.isPending
-                }
-              >
-                {shutdownMutation.isPending ? (
-                  <Spinner size="1" className="mr-2" />
-                ) : (
-                  <Power size={18} className="mr-2" aria-hidden="true" />
-                )}
-                {shutdownMutation.isPending
-                  ? 'Shutting down...'
-                  : 'Shutdown App'}
-              </button>
+              <AppTooltip content="Shutdown App">
+                <button
+                  onClick={handleShutdownAppClick}
+                  className={cn(
+                    'flex items-center flex-grow py-2 pl-3 pr-2 text-left text-sm',
+                    'text-[var(--gray-11)] group-hover:text-red-600',
+                    'transition-colors'
+                  )}
+                  disabled={
+                    shutdownMutation.isPending || restartMutation.isPending
+                  }
+                >
+                  {shutdownMutation.isPending ? (
+                    <Spinner size="1" className="mr-2" />
+                  ) : (
+                    <Power size={18} className="mr-2" aria-hidden="true" />
+                  )}
+                  {shutdownMutation.isPending
+                    ? 'Shutting down...'
+                    : 'Shutdown App'}
+                </button>
+              </AppTooltip>
 
               <DropdownMenu.Root
                 open={isPowerMenuOpen}
@@ -577,28 +587,29 @@ export function PersistentSidebar() {
             </div>
           ) : (
             <DropdownMenu.Root>
-              <DropdownMenu.Trigger>
-                <button
-                  title="Power Options"
-                  className={cn(
-                    'flex items-center justify-center w-full py-2',
-                    'border border-[var(--gray-a4)]',
-                    'text-[var(--gray-11)] hover:text-red-600',
-                    'hover:bg-red-50 dark:hover:bg-red-950/30',
-                    'hover:border-red-300 dark:hover:border-red-800',
-                    'rounded-md transition-colors cursor-pointer'
-                  )}
-                  disabled={
-                    shutdownMutation.isPending || restartMutation.isPending
-                  }
-                >
-                  {shutdownMutation.isPending || restartMutation.isPending ? (
-                    <Spinner size="1" />
-                  ) : (
-                    <Power size={18} aria-hidden="true" />
-                  )}
-                </button>
-              </DropdownMenu.Trigger>
+              <AppTooltip content="Power Options" side="right">
+                <DropdownMenu.Trigger>
+                  <button
+                    className={cn(
+                      'flex items-center justify-center w-full py-2',
+                      'border border-[var(--gray-a4)]',
+                      'text-[var(--gray-11)] hover:text-red-600',
+                      'hover:bg-red-50 dark:hover:bg-red-950/30',
+                      'hover:border-red-300 dark:hover:border-red-800',
+                      'rounded-md transition-colors cursor-pointer'
+                    )}
+                    disabled={
+                      shutdownMutation.isPending || restartMutation.isPending
+                    }
+                  >
+                    {shutdownMutation.isPending || restartMutation.isPending ? (
+                      <Spinner size="1" />
+                    ) : (
+                      <Power size={18} aria-hidden="true" />
+                    )}
+                  </button>
+                </DropdownMenu.Trigger>
+              </AppTooltip>
               <DropdownMenu.Content align="start" side="right" size="1">
                 <DropdownMenu.Item
                   onSelect={handleShutdownAppClick}
@@ -708,20 +719,3 @@ export function PersistentSidebar() {
     </>
   );
 }
-
-const TooltipWrapper: React.FC<{
-  content: string;
-  children: React.ReactNode;
-}> = ({ content, children }) => {
-  return (
-    <div className="relative group">
-      {children}
-      <div
-        className="absolute left-full ml-3 top-1/2 -translate-y-1/2 px-2 py-1 text-xs text-white bg-gray-900 dark:bg-gray-700 rounded-md opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50 shadow-md"
-        role="tooltip"
-      >
-        {content}
-      </div>
-    </div>
-  );
-};

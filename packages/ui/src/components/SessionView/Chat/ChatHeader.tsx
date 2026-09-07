@@ -4,6 +4,7 @@ import { Flex, Text, Spinner } from '@radix-ui/themes'; // Import Spinner
 // Removed useQuery and related imports
 import { formatTimestamp } from '../../../helpers';
 import type { ChatSession, Session } from '../../../types';
+import { AppTooltip } from '../../Shared/AppTooltip';
 
 interface ChatHeaderProps {
   session: Session | null; // Receive session data
@@ -56,9 +57,11 @@ export function ChatHeader({
           />
         )}
         <Flex align="center" gap="1" style={{ minWidth: 0 }}>
-          <Text weight="medium" truncate title={activeChatTitle}>
-            {activeChatTitle}
-          </Text>
+          <AppTooltip content={activeChatTitle}>
+            <Text weight="medium" truncate>
+              {activeChatTitle}
+            </Text>
+          </AppTooltip>
         </Flex>
       </Flex>
     </Flex>

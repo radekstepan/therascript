@@ -22,6 +22,7 @@ import {
   deleteStandaloneChat as deleteStandaloneChatApi, // Added delete API
 } from '../../api/api';
 import { activeChatIdAtom, toastMessageAtom } from '../../store';
+import { AppTooltip } from '../Shared/AppTooltip';
 import type { ChatSession, StandaloneChatListItem } from '../../types';
 import { cn } from '../../utils'; // cn might be needed if styling added back
 
@@ -158,24 +159,25 @@ export function StandaloneChatSidebar({
           <Heading as="h3" size="2" color="gray" trim="start" weight="medium">
             Chats
           </Heading>
-          <Button
-            onClick={handleNewChatClick}
-            variant="soft"
-            size="1"
-            highContrast
-            title="Start New Standalone Chat"
-            disabled={createStandaloneChatMutation.isPending}
-            className="transition-all duration-150"
-            style={{
-              backgroundColor: 'var(--gray-a6)',
-            }}
-          >
-            {createStandaloneChatMutation.isPending ? (
-              <Spinner size="1" />
-            ) : (
-              <PlusCircledIcon width="16" height="16" />
-            )}
-          </Button>
+          <AppTooltip content="Start New Standalone Chat">
+            <Button
+              onClick={handleNewChatClick}
+              variant="soft"
+              size="1"
+              highContrast
+              disabled={createStandaloneChatMutation.isPending}
+              className="transition-all duration-150"
+              style={{
+                backgroundColor: 'var(--gray-a6)',
+              }}
+            >
+              {createStandaloneChatMutation.isPending ? (
+                <Spinner size="1" />
+              ) : (
+                <PlusCircledIcon width="16" height="16" />
+              )}
+            </Button>
+          </AppTooltip>
         </Flex>
 
         {/* List Area */}

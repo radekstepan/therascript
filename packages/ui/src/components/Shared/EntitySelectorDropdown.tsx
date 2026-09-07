@@ -2,6 +2,7 @@
 import React from 'react';
 import { Select, Text } from '@radix-ui/themes';
 import { formatTimestamp } from '../../helpers';
+import { AppTooltip } from './AppTooltip';
 
 interface SelectableItem {
   id: number;
@@ -53,12 +54,13 @@ export function EntitySelectorDropdown<T extends SelectableItem>({
       disabled={disabled || items.length === 0}
       size="2"
     >
-      <Select.Trigger
-        placeholder={getDisplayTitle(undefined)} // This shows placeholderText
-        style={{ flexGrow: 1, minWidth: 0, maxWidth: '300px' }}
-        title={getDisplayTitle(activeItem)} // Tooltip for the active item
-        className="truncate"
-      />
+      <AppTooltip content={getDisplayTitle(activeItem)}>
+        <Select.Trigger
+          placeholder={getDisplayTitle(undefined)} // This shows placeholderText
+          style={{ flexGrow: 1, minWidth: 0, maxWidth: '300px' }}
+          className="truncate"
+        />
+      </AppTooltip>
       <Select.Content position="popper">
         {/*
           If items.length is 0, the Select.Trigger's placeholder will be shown
@@ -68,9 +70,9 @@ export function EntitySelectorDropdown<T extends SelectableItem>({
         */}
         {items.map((item) => (
           <Select.Item key={item.id} value={String(item.id)}>
-            <Text truncate title={getDisplayTitle(item)}>
-              {getDisplayTitle(item)}
-            </Text>
+            <AppTooltip content={getDisplayTitle(item)}>
+              <Text truncate>{getDisplayTitle(item)}</Text>
+            </AppTooltip>
           </Select.Item>
         ))}
       </Select.Content>
