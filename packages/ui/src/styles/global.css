@@ -481,3 +481,11 @@ button[class*='rt-IconButton']:not(:disabled):hover {
   --table-row-box-shadow: none;
 }
 /* --- End Sticky Table --- */
+
+/* --- Radix ScrollArea overflow prevention --- */
+/* Prevent ScrollArea content from expanding horizontally beyond the viewport in vertical-only scroll areas */
+.rt-ScrollAreaViewport:not(:has(.rt-ScrollAreaScrollbar[data-orientation='horizontal'])) > * {
+  max-width: 100%;
+  width: 100% !important;
+}
+

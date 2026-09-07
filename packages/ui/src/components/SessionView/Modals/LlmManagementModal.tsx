@@ -403,24 +403,53 @@ export function LlmManagementModal({
       <Box
         key={model.digest}
         p="2"
-        style={{ borderBottom: '1px solid var(--gray-a3)' }}
+        style={{
+          borderBottom: '1px solid var(--gray-a3)',
+          minWidth: 0,
+          maxWidth: '100%',
+        }}
       >
         {/* Outer Flex: Aligns Left Block and Right Block */}
-        <Flex justify="between" align="center" gap="3">
-          {' '}
-          {/* Increased gap */}
+        <Flex
+          justify="between"
+          align="center"
+          gap="3"
+          style={{ minWidth: 0, width: '100%' }}
+        >
           {/* Left Block: Name and Tags */}
-          <Flex direction="column" gap="1" style={{ minWidth: 0, flexGrow: 1 }}>
+          <Flex
+            direction="column"
+            gap="1"
+            style={{ minWidth: 0, flexGrow: 1, overflow: 'hidden' }}
+          >
             {/* Name Row */}
-            <Flex>
+            <Box style={{ minWidth: 0, maxWidth: '100%', overflow: 'hidden' }}>
               <AppTooltip content={model.name}>
-                <Text size="2" weight="medium" truncate>
+                <Text
+                  as="p"
+                  size="2"
+                  weight="medium"
+                  truncate
+                  style={{
+                    display: 'block',
+                    minWidth: 0,
+                    maxWidth: '100%',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
                   {model.name}
                 </Text>
               </AppTooltip>
-            </Flex>
+            </Box>
             {/* Tags Row */}
-            <Flex gap="1" wrap="wrap" align="center">
+            <Flex
+              gap="1"
+              wrap="wrap"
+              align="center"
+              style={{ minWidth: 0, maxWidth: '100%' }}
+            >
               {model.details?.family && (
                 <Badge variant="outline" color="gray" radius="full" size="1">
                   {model.details.family}
@@ -451,9 +480,9 @@ export function LlmManagementModal({
             </Flex>
           </Flex>
           {/* Right Block: Size Badge + Status/Actions */}
-          <Flex align="center" gap="2" flexShrink="0">
+          <Flex align="center" gap="2" flexShrink="0" style={{ flexShrink: 0 }}>
             {/* Size Badge - Use prettyBytes */}
-            <Badge variant="soft" color="gray">
+            <Badge variant="soft" color="gray" style={{ flexShrink: 0 }}>
               {prettyBytes(model.size)}
             </Badge>
 
@@ -467,10 +496,9 @@ export function LlmManagementModal({
                   minWidth: '80px',
                   justifyContent: 'center',
                   display: 'inline-flex',
+                  flexShrink: 0,
                 }}
               >
-                {' '}
-                {/* Reduced minWidth */}
                 <Spinner size="1" /> Deleting...
               </Badge>
             ) : isCurrentlyActiveAndLoaded ? (
@@ -482,10 +510,9 @@ export function LlmManagementModal({
                   minWidth: '80px',
                   justifyContent: 'center',
                   display: 'inline-flex',
+                  flexShrink: 0,
                 }}
               >
-                {' '}
-                {/* Reduced minWidth */}
                 <CheckCircledIcon /> Active
               </Badge>
             ) : (
@@ -498,6 +525,7 @@ export function LlmManagementModal({
                       size="1"
                       aria-label={`Actions for ${model.name}`}
                       disabled={actionsDisabled}
+                      style={{ flexShrink: 0 }}
                     >
                       <DotsHorizontalIcon />
                     </IconButton>
@@ -509,9 +537,8 @@ export function LlmManagementModal({
                     onSelect={() => openDeleteConfirm(model)}
                     disabled={actionsDisabled || !canDelete}
                   >
-                    {' '}
                     <TrashIcon width="14" height="14" className="mr-1" /> Delete
-                    Model...{' '}
+                    Model...
                   </DropdownMenu.Item>
                 </DropdownMenu.Content>
               </DropdownMenu.Root>
@@ -572,13 +599,17 @@ export function LlmManagementModal({
             <ScrollArea
               type="auto"
               scrollbars="vertical"
+              className="[&_.rt-ScrollAreaViewport>div]:!max-w-full [&_.rt-ScrollAreaViewport>div]:!w-full [&_.rt-ScrollAreaViewport]:!overflow-x-hidden"
               style={{
                 maxHeight: '250px',
                 border: '1px solid var(--gray-a6)',
                 borderRadius: 'var(--radius-3)',
               }}
             >
-              <Box pr="2">
+              <Box
+                pr="4"
+                style={{ width: '100%', minWidth: 0, maxWidth: '100%' }}
+              >
                 {isLoadingAvailable && (
                   <Flex align="center" justify="center" p="4">
                     <Spinner size="2" />{' '}
@@ -672,7 +703,7 @@ export function LlmManagementModal({
             <Flex gap="2">
               <TextField.Root
                 ref={downloadUrlInputRef} // Attach ref for focus
-                style={{ flexGrow: 1 }}
+                style={{ flexGrow: 1, minWidth: 0 }}
                 size="2"
                 placeholder="Enter GGUF model URL (e.g., https://huggingface.co/.../model.gguf)"
                 value={modelUrlToDownload}
@@ -685,6 +716,7 @@ export function LlmManagementModal({
                   <Button
                     color="red"
                     variant="soft"
+                    style={{ flexShrink: 0 }}
                     onClick={handleCancelPullClick}
                     disabled={
                       cancelPullMutation.isPending ||
@@ -717,6 +749,7 @@ export function LlmManagementModal({
                   }
                 >
                   <Button
+                    style={{ flexShrink: 0 }}
                     onClick={handlePullClick}
                     disabled={
                       !modelUrlToDownload.trim() || isAnyOperationActive
@@ -788,8 +821,10 @@ export function LlmManagementModal({
           <AlertDialog.Description size="2" color="gray" mt="1" mb="4">
             {' '}
             Are you sure you want to delete the model{' '}
-            <Strong>{modelToDelete?.name ?? 'this model'}</Strong> from your
-            local storage? This action cannot be undone.{' '}
+            <Strong style={{ wordBreak: 'break-word' }}>
+              {modelToDelete?.name ?? 'this model'}
+            </Strong>{' '}
+            from your local storage? This action cannot be undone.{' '}
           </AlertDialog.Description>
           {deleteModelMutation.isError && (
             <Callout.Root color="red" size="1" mb="3">
