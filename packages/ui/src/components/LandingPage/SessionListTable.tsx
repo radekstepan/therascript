@@ -2,6 +2,7 @@ import React, { useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   FileTextIcon,
+  ChatBubbleIcon,
   ChevronUpIcon,
   ChevronDownIcon,
   DotsHorizontalIcon,
@@ -80,6 +81,30 @@ const SessionRowCells = React.memo(function SessionRowCells({
   onEditSession,
   onDeleteSessionRequest,
 }: SessionRowCellsProps) {
+  const chatCount = session.chatCount ?? session.chats?.length ?? 0;
+  const hasChats = chatCount > 0;
+  const sessionIcon = (
+    <div
+      className={cn(
+        'p-1.5 rounded-md flex-shrink-0',
+        isSelected || hasChats
+          ? 'bg-[var(--accent-a4)] text-[var(--accent-11)]'
+          : 'bg-[var(--gray-a3)] text-[var(--gray-11)]'
+      )}
+      {...(hasChats
+        ? {
+            role: 'img',
+            'aria-label': `${chatCount} chat${chatCount === 1 ? '' : 's'}`,
+          }
+        : {})}
+    >
+      {hasChats ? (
+        <ChatBubbleIcon width={16} height={16} />
+      ) : (
+        <FileTextIcon width={16} height={16} />
+      )}
+    </div>
+  );
   return (
     <>
       <Table.Cell onClick={(e) => e.stopPropagation()} style={cellStyle}>
@@ -99,16 +124,13 @@ const SessionRowCells = React.memo(function SessionRowCells({
         style={{ ...cellStyle, maxWidth: 0 }}
       >
         <Flex align="center" gap="3" style={{ minWidth: 0 }}>
-          <div
-            className={cn(
-              'p-1.5 rounded-md flex-shrink-0',
-              isSelected
-                ? 'bg-[var(--accent-a4)] text-[var(--accent-11)]'
-                : 'bg-[var(--gray-a3)] text-[var(--gray-11)]'
-            )}
-          >
-            <FileTextIcon width={16} height={16} />
-          </div>
+          {hasChats ? (
+            <Tooltip content={`${chatCount} chat${chatCount === 1 ? '' : 's'}`}>
+              {sessionIcon}
+            </Tooltip>
+          ) : (
+            sessionIcon
+          )}
           <Flex direction="column" gap="0" style={{ minWidth: 0 }}>
             <Text weight="medium" size="2" truncate>
               {session.sessionName || session.fileName}

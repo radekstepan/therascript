@@ -10,7 +10,7 @@ Session CRUD operations, audio file upload, and transcript access.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `GET` | `/api/sessions` | List all sessions (metadata only) |
+| `GET` | `/api/sessions` | List all sessions (metadata + `chatCount`) |
 | `POST` | `/api/sessions/upload` | Upload audio file with metadata, run diarization readiness gate, start transcription job |
 | `GET` | `/api/sessions/:sessionId` | Get session metadata and associated chat list |
 | `PUT` | `/api/sessions/:sessionId/metadata` | Update session metadata (clientName, date, etc.) |

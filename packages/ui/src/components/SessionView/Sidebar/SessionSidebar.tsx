@@ -115,6 +115,8 @@ export function SessionSidebar({
     onSuccess: (newChat: ChatSession) => {
       // Add type annotation
       setToast('New chat started.');
+      // Refresh session lists so the chat indicator stays accurate
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
       queryClient.setQueryData<Session>(
         ['sessionMeta', sessionId],
         (oldData: Session | undefined) => {
@@ -210,6 +212,8 @@ export function SessionSidebar({
     onSuccess: (data: { message: string }, deletedChatId: number) => {
       // Add type annotations
       setToast(`Chat deleted successfully.`);
+      // Refresh session lists so the chat indicator stays accurate
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
       let nextChatId: number | null = null;
       const sessionDataBeforeDelete = queryClient.getQueryData<Session>([
         'sessionMeta',

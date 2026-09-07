@@ -80,7 +80,7 @@ const dateToIsoString = (dateString: string): string | null => {
 
 export const listSessions = ({ set }: SessionHandlerContextNoSessionData) => {
   try {
-    const sessions = sessionRepository.findAll();
+    const sessions = sessionRepository.findAllWithChatCounts();
     const sessionDTOs = sessions.map((s) => ({
       id: s.id,
       fileName: s.fileName,
@@ -96,6 +96,7 @@ export const listSessions = ({ set }: SessionHandlerContextNoSessionData) => {
       duration: s.duration,
       errorMessage: s.errorMessage,
       showSpeakers: s.showSpeakers,
+      chatCount: s.chatCount,
     }));
     set.status = 200;
     return sessionDTOs;

@@ -106,7 +106,10 @@ const SessionMetadataResponseSchema = t.Object({
   errorMessage: t.Optional(t.Union([t.String(), t.Null()])),
   showSpeakers: t.Optional(t.Union([t.Number(), t.Null()])),
 });
-const SessionListResponseItemSchema = SessionMetadataResponseSchema;
+const SessionListResponseItemSchema = t.Object({
+  ...SessionMetadataResponseSchema.properties,
+  chatCount: t.Optional(t.Number()),
+});
 const SessionChatMetadataSchema = t.Omit(
   t.Object({
     id: t.Number(),

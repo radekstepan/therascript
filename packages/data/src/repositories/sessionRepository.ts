@@ -25,6 +25,16 @@ const selectAllSessionsStmt = (): DbStatement => {
   return _selectAllSessionsStmt;
 };
 
+let _selectAllSessionsWithChatCountsStmt: DbStatement | null = null;
+const selectAllSessionsWithChatCountsStmt = (): DbStatement => {
+  if (!_selectAllSessionsWithChatCountsStmt) {
+    _selectAllSessionsWithChatCountsStmt = db.prepare(
+      'SELECT s.id, s.fileName, s.clientName, s.sessionName, s.date, s.sessionType, s.therapy, s.audioPath, s.status, s.whisperJobId, s.transcriptTokenCount, s.duration, s.errorMessage, s.showSpeakers, COUNT(c.id) AS chatCount FROM sessions s LEFT JOIN chats c ON c.sessionId = s.id GROUP BY s.id ORDER BY s.date DESC, s.id DESC'
+    );
+  }
+  return _selectAllSessionsWithChatCountsStmt;
+};
+
 let _selectSessionByIdStmt: DbStatement | null = null;
 const selectSessionByIdStmt = (): DbStatement => {
   if (!_selectSessionByIdStmt) {
@@ -140,6 +150,16 @@ export const sessionRepository = {
       return selectAllSessionsStmt().all() as BackendSession[];
     } catch (error) {
       throw new Error(`DB error fetching sessions: ${error}`);
+    }
+  },
+
+  findAllWithChatCounts: (): (BackendSession & { chatCount: number })[] => {
+    try {
+      return selectAllSessionsWithChatCountsStmt().all() as (BackendSession & {
+        chatCount: number;
+      })[];
+    } catch (error) {
+      throw new Error(`DB error fetching sessions with chat counts: ${error}`);
     }
   },
 

@@ -119,6 +119,8 @@ export interface BackendSession {
   errorMessage?: string | null;
   showSpeakers?: number | null;
   chats?: (Omit<ChatMetadata, 'tags'> & { sessionId: number })[];
+  /** Number of chats linked to the session. Populated by list endpoints only, not a DB column. */
+  chatCount?: number;
 }
 
 export type BackendSessionMetadata = Omit<
@@ -126,6 +128,7 @@ export type BackendSessionMetadata = Omit<
   | 'id'
   | 'transcriptTokenCount'
   | 'chats'
+  | 'chatCount'
   | 'fileName'
   | 'status'
   | 'whisperJobId'

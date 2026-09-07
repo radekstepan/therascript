@@ -146,6 +146,8 @@ export function SessionView() {
       return startSessionChat(sessionIdNum);
     },
     onSuccess: (newChat) => {
+      // Refresh session lists so the chat indicator stays accurate
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
       queryClient.setQueryData<Session>(
         ['sessionMeta', sessionIdNum],
         (oldData) => {

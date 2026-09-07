@@ -20,14 +20,14 @@ const ensureArrayResponse = (data: unknown, endpoint: string): any[] => {
 };
 
 /**
- * Fetches a list of all sessions (metadata only) from the backend.
+ * Fetches a list of all sessions (metadata + chat count) from the backend.
  * Makes a GET request to `/api/sessions/`.
  *
- * @returns {Promise<Session[]>} A promise resolving to an array of Session objects (with empty `chats` array).
+ * @returns {Promise<Session[]>} A promise resolving to an array of Session objects (with empty `chats` array and `chatCount` for the list view).
  * @throws {Error} If the API request fails.
  */
 export const fetchSessions = async (): Promise<Session[]> => {
-  // Backend returns an array of session metadata
+  // Backend returns an array of session metadata including chatCount
   const response = await axios.get<Omit<Session, 'chats'>[]>('/api/sessions/');
   const sessions = ensureArrayResponse(response.data, '/api/sessions/');
   // Map response to ensure the 'chats' property exists as an empty array for the UI type
