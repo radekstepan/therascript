@@ -11,6 +11,7 @@ import {
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { SessionListTable } from './SessionListTable';
 import { StandaloneChatListTable } from './StandaloneChatListTable';
+import { DashboardStats } from './DashboardStats';
 import { SearchResultList } from '../Search/SearchResultList';
 import { FilterControls } from './FilterControls';
 import {
@@ -424,6 +425,7 @@ export function LandingPage() {
           </>
         ) : (
           <>
+            <DashboardStats sessions={sessions ?? []} />
             {/* Session History Card - MOVED TO TOP */}
             <Card
               size="3"
