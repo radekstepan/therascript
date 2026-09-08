@@ -45,6 +45,7 @@ import {
 import { isPersistentSidebarOpenAtom } from './store/ui/isPersistentSidebarOpenAtom';
 import { currentPageAtom } from './store/navigation/currentPageAtom';
 import { cn } from './utils';
+import { applyFavicon, faviconHref } from './utils/favicon';
 import type { ReadinessStatus } from './types';
 import { fetchReadinessStatus } from './api/meta';
 import { RestartScreen } from './components/Layout/RestartScreen';
@@ -265,6 +266,11 @@ function App() {
   useEffect(() => {
     setIsToastVisible(!!toastMessageContent);
   }, [toastMessageContent]);
+
+  // Keep the tab icon in sync with the accent color and theme.
+  useEffect(() => {
+    applyFavicon(faviconHref(currentAccentColor, effectiveTheme));
+  }, [currentAccentColor, effectiveTheme]);
 
   const handleToastOpenChange = (open: boolean) => {
     setIsToastVisible(open);

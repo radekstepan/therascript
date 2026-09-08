@@ -1,6 +1,6 @@
 import React from 'react';
 import { Button, Card, Flex, Text } from '@radix-ui/themes';
-import { ChatBubbleIcon } from '@radix-ui/react-icons';
+import { MessageSquarePlus } from 'lucide-react';
 
 interface StartChatPromptProps {
   onStartFirstChat: () => void;
@@ -18,7 +18,7 @@ export function StartChatPrompt({
       style={{ borderStyle: 'dashed' }}
     >
       <Flex direction="column" align="center" gap="4">
-        <ChatBubbleIcon className="w-12 h-12 text-[--gray-a7]" />
+        <MessageSquarePlus className="w-12 h-12 text-[--gray-a7]" />
         <Text color="gray">
           No chats have been started for this session yet.
         </Text>
@@ -28,7 +28,7 @@ export function StartChatPrompt({
           size="2"
           disabled={isLoading} // Disable button while loading
         >
-          <ChatBubbleIcon width="16" height="16" />
+          <MessageSquarePlus size={16} />
           <Text ml="2">{isLoading ? 'Starting...' : 'Start New Chat'}</Text>
         </Button>
       </Flex>

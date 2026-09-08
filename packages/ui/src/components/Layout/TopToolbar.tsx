@@ -12,12 +12,8 @@ import {
   Spinner,
   Text,
 } from '@radix-ui/themes';
-import {
-  MagnifyingGlassIcon,
-  Cross1Icon,
-  ChatBubbleIcon,
-  PlusCircledIcon,
-} from '@radix-ui/react-icons';
+import { MagnifyingGlassIcon, Cross1Icon } from '@radix-ui/react-icons';
+import { MessageSquarePlus, AudioLines } from 'lucide-react';
 import {
   openUploadModalAtom,
   toastMessageAtom,
@@ -217,7 +213,7 @@ export function TopToolbar() {
               e.currentTarget.style.backgroundColor = 'var(--gray-a4)';
             }}
           >
-            <ChatBubbleIcon width="16" height="16" />
+            <MessageSquarePlus size={16} />
             <Text ml="2">New Chat</Text>
           </RadixButton>
           <RadixButton
@@ -233,7 +229,7 @@ export function TopToolbar() {
               e.currentTarget.style.filter = 'brightness(1)';
             }}
           >
-            <PlusCircledIcon width="16" height="16" />
+            <AudioLines size={16} />
             <Text ml="2">New Session</Text>
           </RadixButton>
         </Flex>

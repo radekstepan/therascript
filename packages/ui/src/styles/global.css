@@ -11,6 +11,14 @@
 @tailwind components;
 @tailwind utilities;
 
+/* --- Type scale (mirrors therascript-pointoni foundations) --- */
+/* body 15 · card heading 20 · page title 30 — 12/14 steps already match */
+.radix-themes {
+  --font-size-3: calc(15px * var(--scaling));
+  --font-size-4: calc(20px * var(--scaling));
+  --font-size-7: calc(30px * var(--scaling));
+}
+
 #root {
   min-height: 100vh;
   display: flex;
@@ -22,9 +30,13 @@ body {
   height: 100%;
   margin: 0;
   padding: 0;
+  /* Default type size: 15px / 1.65, matching therascript-pointoni body */
+  font-size: 15px;
+  line-height: 1.65;
   /* Modern font smoothing */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
   /* Subtle background pattern */
   background-color: var(--color-background);
   background-image:
@@ -98,9 +110,16 @@ body {
 
 /* --- Scoped Markdown Styles --- */
 /* ... (keep existing markdown styles) ... */
+h1,
+h2,
+h3,
+h4 {
+  letter-spacing: -0.02em;
+}
+
 .markdown-ai-message {
   font-size: var(--font-size-2);
-  line-height: 1.6;
+  line-height: 1.65;
   color: var(--gray-12);
 }
 .markdown-ai-message p {
@@ -223,6 +242,28 @@ button[class*='rt-IconButton'] {
   cursor: pointer;
 }
 /* --- End Button Cursor --- */
+
+/* --- Button defaults (mirrors therascript-pointoni Button) --- */
+/* Sizes sm/md: 8px radius · Size lg and up: 10px radius */
+[class*='rt-Button'] {
+  border-radius: 8px;
+  font-weight: 500;
+}
+[class*='rt-Button']:where(.rt-r-size-3, .rt-r-size-4) {
+  border-radius: 10px;
+}
+/* Primary (solid): semibold label, subtle shadow, press-down feedback */
+[class*='rt-Button']:where(.rt-variant-solid) {
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.15);
+}
+[class*='rt-Button']:where(.rt-variant-solid):where(:active:not([data-disabled])) {
+  transform: scale(0.985);
+}
+[class*='rt-IconButton'] {
+  border-radius: 8px;
+}
+/* --- End Button defaults --- */
 
 /* --- Modern UI Enhancements --- */
 

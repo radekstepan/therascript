@@ -434,7 +434,7 @@ const JobDetailView: React.FC<{
       <Flex direction="column" gap="5">
         {/* === HEADER === */}
         <Flex justify="between" align="center">
-          <Heading as="h2" size="6">
+          <Heading as="h2" size="5">
             Analysis #{job.id}
           </Heading>
           <Flex gap="3" align="center">

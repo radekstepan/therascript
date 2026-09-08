@@ -360,7 +360,7 @@ export function TemplatesPage() {
             {/* System Prompts Section */}
             <Separator my="6" size="4" />
             <Flex justify="between" align="center" mb="4">
-              <Heading as="h2" size="6">
+              <Heading as="h2" size="5">
                 <Flex align="center" gap="2">
                   <BrainCircuit /> System Prompts
                 </Flex>

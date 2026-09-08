@@ -4,9 +4,36 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Therascript</title>
+    <link id="favicon-svg" rel="icon" type="image/svg+xml" href="/favicons/indigo.svg">
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+    <script>
+      // First-paint favicon: match the stored accent + theme before the bundle loads.
+      (function () {
+        try {
+          var ACCENTS = ['gray','gold','bronze','brown','yellow','amber','orange','tomato','red','ruby','crimson','pink','plum','purple','violet','iris','indigo','blue','cyan','teal','jade','green','grass','lime','mint','sky'];
+          function stored(key, fallback) {
+            try {
+              var v = localStorage.getItem(key);
+              return v == null ? fallback : JSON.parse(v);
+            } catch (e) {
+              return fallback;
+            }
+          }
+          var accent = stored('ui-accent-color', 'indigo');
+          if (ACCENTS.indexOf(accent) === -1) accent = 'indigo';
+          var theme = stored('ui-theme', 'system');
+          var dark =
+            theme === 'dark' ||
+            (theme !== 'light' &&
+              window.matchMedia &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches);
+          var link = document.getElementById('favicon-svg');
+          if (link) link.href = '/favicons/' + accent + (dark ? '-dark' : '') + '.svg';
+        } catch (e) {}
+      })();
+    </script>
 </head>
 <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>

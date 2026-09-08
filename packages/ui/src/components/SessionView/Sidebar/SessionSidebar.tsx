@@ -19,10 +19,10 @@ import { AppTooltip } from '../../Shared/AppTooltip';
 import {
   Pencil1Icon,
   TrashIcon,
-  PlusCircledIcon,
   Cross2Icon,
   CheckIcon,
 } from '@radix-ui/react-icons';
+import { MessageSquarePlus } from 'lucide-react';
 import {
   Box,
   Flex,
@@ -386,7 +386,7 @@ export function SessionSidebar({
                 {startNewChatMutation.isPending ? (
                   <Spinner size="1" />
                 ) : (
-                  <PlusCircledIcon width="16" height="16" />
+                  <MessageSquarePlus size={16} />
                 )}
               </Button>
             </AppTooltip>
@@ -408,7 +408,7 @@ export function SessionSidebar({
                 {startNewChatMutation.isPending ? (
                   <Spinner size="1" />
                 ) : (
-                  <PlusCircledIcon width="16" height="16" />
+                  <MessageSquarePlus size={16} />
                 )}
               </Button>
             </AppTooltip>

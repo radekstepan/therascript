@@ -13,7 +13,8 @@ import {
   Spinner,
   AlertDialog, // Added AlertDialog import
 } from '@radix-ui/themes';
-import { PlusCircledIcon, TrashIcon } from '@radix-ui/react-icons'; // Added TrashIcon
+import { TrashIcon } from '@radix-ui/react-icons';
+import { MessageSquarePlus } from 'lucide-react';
 import { StandaloneChatSidebarList } from './StandaloneChatSidebarList';
 import { EditStandaloneChatModal } from './EditStandaloneChatModal';
 import {
@@ -174,7 +175,7 @@ export function StandaloneChatSidebar({
               {createStandaloneChatMutation.isPending ? (
                 <Spinner size="1" />
               ) : (
-                <PlusCircledIcon width="16" height="16" />
+                <MessageSquarePlus size={16} />
               )}
             </Button>
           </AppTooltip>

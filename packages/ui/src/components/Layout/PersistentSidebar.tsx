@@ -22,7 +22,7 @@ import {
   AlertTriangle,
   Star,
   BarChart,
-  BrainCircuit,
+  AudioLines,
   ChevronDown,
   ChevronRight,
   RefreshCw,
@@ -226,30 +226,30 @@ export function PersistentSidebar() {
         {/* Top Section */}
         <div
           className={cn(
-            'flex items-center h-16 p-4',
+            'flex items-center h-14 p-4',
             isSidebarOpen ? 'justify-between' : 'justify-center'
           )}
         >
           {isSidebarOpen && (
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-[var(--accent-9)] rounded-md flex items-center justify-center">
-                <BrainCircuit size={18} className="text-white" />
+              <div className="w-8 h-8 bg-[var(--accent-9)] rounded-lg flex items-center justify-center">
+                <AudioLines size={18} className="text-white" />
               </div>
-              <h1 className="text-lg font-bold text-[var(--gray-12)] tracking-tight">
+              <h1 className="text-[13.5px] font-bold text-[var(--gray-12)] tracking-tight">
                 Therascript
               </h1>
             </div>
           )}
           <button
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className="p-2 rounded-lg text-[var(--gray-11)] hover:bg-[var(--gray-a3)] hover:text-[var(--gray-12)] focus:outline-none transition-colors"
+            className="p-1.5 rounded-lg text-[var(--gray-11)] hover:bg-[var(--gray-a3)] hover:text-[var(--gray-12)] focus:outline-none transition-colors"
             aria-label={isSidebarOpen ? 'Close sidebar' : 'Open sidebar'}
             aria-expanded={isSidebarOpen}
           >
             {isSidebarOpen ? (
-              <PanelLeftClose size={20} aria-hidden="true" />
+              <PanelLeftClose size={16} aria-hidden="true" />
             ) : (
-              <PanelLeftOpen size={20} aria-hidden="true" />
+              <PanelLeftOpen size={16} aria-hidden="true" />
             )}
           </button>
         </div>
@@ -269,22 +269,29 @@ export function PersistentSidebar() {
                   <button
                     onClick={() => navigateTo(item.page)}
                     className={cn(
-                      'flex items-center w-full py-2.5 rounded-lg text-sm font-medium transition-all duration-200',
+                      'group relative flex items-center w-full rounded-lg text-[13px] font-medium transition-colors duration-150',
                       'focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-8)]',
-                      isSidebarOpen ? 'px-3' : 'px-0 justify-center',
+                      isSidebarOpen
+                        ? 'gap-2.5 px-2.5 py-[7px]'
+                        : 'h-10 w-10 px-0 mx-auto justify-center rounded-xl',
                       isActive(item.page)
                         ? 'bg-[var(--accent-a3)] text-[var(--accent-11)]'
                         : 'text-[var(--gray-11)] hover:bg-[var(--gray-a3)] hover:text-[var(--gray-12)]'
                     )}
                     aria-current={isActive(item.page) ? 'page' : undefined}
                   >
+                    {isActive(item.page) && (
+                      <span
+                        className="absolute left-0 top-1/2 h-[18px] w-[3px] -translate-y-1/2 rounded-r-full bg-[var(--accent-9)]"
+                        aria-hidden="true"
+                      />
+                    )}
                     <item.icon
-                      size={20}
+                      size={isSidebarOpen ? 17 : 19}
                       className={cn(
-                        isSidebarOpen ? 'mr-3' : 'mr-0',
                         isActive(item.page)
                           ? 'text-[var(--accent-11)]'
-                          : 'text-[var(--gray-10)]'
+                          : 'text-[var(--gray-10)] group-hover:text-[var(--gray-11)]'
                       )}
                       aria-hidden="true"
                     />
@@ -302,7 +309,7 @@ export function PersistentSidebar() {
                 <button
                   onClick={() => setIsSessionsExpanded(!isSessionsExpanded)}
                   className={cn(
-                    'flex items-center w-full py-1.5 text-xs font-semibold text-[var(--gray-11)] hover:text-[var(--gray-12)] transition-colors'
+                    'flex items-center w-full px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-[0.1em] text-[var(--gray-11)] hover:text-[var(--gray-12)] transition-colors'
                   )}
                 >
                   {isSessionsExpanded ? (
@@ -319,16 +326,16 @@ export function PersistentSidebar() {
                         <Link
                           to={`/sessions/${session.id}`}
                           className={cn(
-                            'block py-1.5 px-3 text-sm text-[var(--gray-11)] hover:bg-[var(--gray-a3)] hover:text-[var(--gray-12)] rounded-md transition-colors',
+                            'block py-1.5 px-2 text-[var(--gray-11)] hover:bg-[var(--gray-a3)] hover:text-[var(--gray-12)] rounded-lg transition-colors',
                             isPathActive(`/sessions/${session.id}`)
                               ? 'bg-[var(--gray-a4)] text-[var(--gray-12)]'
                               : ''
                           )}
                         >
-                          <div className="truncate">
+                          <div className="truncate text-xs font-medium text-[var(--gray-12)]">
                             {session.sessionName || session.fileName}
                           </div>
-                          <div className="text-[10px] text-[var(--gray-a10)]">
+                          <div className="text-[11px] text-[var(--gray-11)]">
                             {formatTimeAgo(session.date)}
                           </div>
                         </Link>
@@ -343,7 +350,7 @@ export function PersistentSidebar() {
                 <button
                   onClick={() => setIsChatsExpanded(!isChatsExpanded)}
                   className={cn(
-                    'flex items-center w-full py-1.5 text-xs font-semibold text-[var(--gray-11)] hover:text-[var(--gray-12)] transition-colors'
+                    'flex items-center w-full px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-[0.1em] text-[var(--gray-11)] hover:text-[var(--gray-12)] transition-colors'
                   )}
                 >
                   {isChatsExpanded ? (
@@ -360,16 +367,16 @@ export function PersistentSidebar() {
                         <Link
                           to={`/chats/${chat.id}`}
                           className={cn(
-                            'block py-1.5 px-3 text-sm text-[var(--gray-11)] hover:bg-[var(--gray-a3)] hover:text-[var(--gray-12)] rounded-md transition-colors',
+                            'block py-1.5 px-2 text-[var(--gray-11)] hover:bg-[var(--gray-a3)] hover:text-[var(--gray-12)] rounded-lg transition-colors',
                             isPathActive(`/chats/${chat.id}`)
                               ? 'bg-[var(--gray-a4)] text-[var(--gray-12)]'
                               : ''
                           )}
                         >
-                          <div className="truncate">
+                          <div className="truncate text-xs font-medium text-[var(--gray-12)]">
                             {chat.name || `Chat ${chat.id}`}
                           </div>
-                          <div className="text-[10px] text-[var(--gray-a10)]">
+                          <div className="text-[11px] text-[var(--gray-11)]">
                             {formatTimeAgo(chat.timestamp)}
                           </div>
                         </Link>
@@ -411,7 +418,7 @@ export function PersistentSidebar() {
             </div>
           ) : (
             <div
-              className="flex flex-col space-y-2 mb-2"
+              className="flex flex-col items-center space-y-1 mb-2"
               role="group"
               aria-label="Theme selection"
             >
@@ -419,7 +426,7 @@ export function PersistentSidebar() {
                 <button
                   onClick={() => setTheme('light')}
                   className={cn(
-                    'p-2 rounded-lg hover:bg-[var(--gray-a4)] transition-colors',
+                    'flex h-10 w-10 items-center justify-center rounded-xl hover:bg-[var(--gray-a4)] transition-colors',
                     effectiveTheme === 'light' && theme !== 'system'
                       ? 'text-[var(--accent-9)] bg-[var(--accent-a3)]'
                       : 'text-[var(--gray-11)]'
@@ -433,7 +440,7 @@ export function PersistentSidebar() {
                 <button
                   onClick={() => setTheme('dark')}
                   className={cn(
-                    'p-2 rounded-lg hover:bg-[var(--gray-a4)] transition-colors',
+                    'flex h-10 w-10 items-center justify-center rounded-xl hover:bg-[var(--gray-a4)] transition-colors',
                     effectiveTheme === 'dark' && theme !== 'system'
                       ? 'text-[var(--accent-9)] bg-[var(--accent-a3)]'
                       : 'text-[var(--gray-11)]'
@@ -447,7 +454,7 @@ export function PersistentSidebar() {
                 <button
                   onClick={() => setTheme('system')}
                   className={cn(
-                    'p-2 rounded-lg hover:bg-[var(--gray-a4)] transition-colors',
+                    'flex h-10 w-10 items-center justify-center rounded-xl hover:bg-[var(--gray-a4)] transition-colors',
                     theme === 'system'
                       ? 'text-[var(--accent-9)] bg-[var(--accent-a3)]'
                       : 'text-[var(--gray-11)]'
@@ -467,8 +474,8 @@ export function PersistentSidebar() {
             <button
               onClick={handleJobsQueueClick}
               className={cn(
-                'flex items-center w-full py-2 text-left text-sm hover:bg-[var(--gray-a3)] rounded-md transition-colors',
-                isSidebarOpen ? 'px-3' : 'justify-center px-0'
+                'flex items-center w-full py-2 text-left text-[13px] font-medium hover:bg-[var(--gray-a3)] rounded-lg transition-colors',
+                isSidebarOpen ? 'px-2.5' : 'justify-center px-0'
               )}
             >
               <div
@@ -505,7 +512,7 @@ export function PersistentSidebar() {
             <div
               className={cn(
                 'mt-4',
-                'flex w-full items-stretch rounded-md overflow-hidden',
+                'flex w-full items-stretch rounded-lg overflow-hidden',
                 'border border-[var(--gray-a4)]',
                 'hover:border-red-300 dark:hover:border-red-800',
                 'hover:bg-red-50/50 dark:hover:bg-red-950/20',
@@ -596,7 +603,7 @@ export function PersistentSidebar() {
                       'text-[var(--gray-11)] hover:text-red-600',
                       'hover:bg-red-50 dark:hover:bg-red-950/30',
                       'hover:border-red-300 dark:hover:border-red-800',
-                      'rounded-md transition-colors cursor-pointer'
+                      'rounded-lg transition-colors cursor-pointer'
                     )}
                     disabled={
                       shutdownMutation.isPending || restartMutation.isPending

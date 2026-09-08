@@ -52,6 +52,6 @@ const storage = createJSONStorage<AccentColorValue>(() => localStorage);
 
 export const accentColorAtom = atomWithStorage<AccentColorValue>(
   'ui-accent-color', // localStorage key
-  'teal', // Default accent color
+  'indigo', // Default accent color (matches therascript-pointoni data-accent)
   storage
 );
