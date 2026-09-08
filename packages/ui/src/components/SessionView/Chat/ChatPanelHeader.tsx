@@ -372,6 +372,7 @@ export function ChatPanelHeader({
               size="1"
               onClick={onOpenLlmModal}
               disabled={isLoadingLlmStatus}
+              aria-label="Configure AI Model"
             >
               <MixerVerticalIcon width="14" height="14" />
             </Button>

@@ -465,6 +465,7 @@ export function StandaloneChatHeader({
                 size="1"
                 onClick={onOpenLlmModal}
                 disabled={isLoadingAny}
+                aria-label="Configure AI Model"
               >
                 <MixerVerticalIcon width="14" height="14" />
               </Button>

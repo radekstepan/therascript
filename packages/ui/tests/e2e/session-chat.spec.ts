@@ -41,11 +41,11 @@ test.describe.serial('Session chat with model selection', () => {
     // Wait for the chat panel to mount. SessionView redirects to
     // /sessions/1/chats/10 once the session meta loads, and the
     // ChatPanelHeader (which contains the "Configure AI Model" button)
-    // only renders once a chat is active. `.first()` disambiguates
-    // from the second SelectActiveModelModal instance rendered inside
-    // ChatInput (its trigger is a hidden title-bearing element used
-    // for accessibility labelling).
-    const configureButton = page.getByTitle('Configure AI Model').first();
+    // only renders once a chat is active. The button carries
+    // aria-label="Configure AI Model" (ChatPanelHeader.tsx).
+    const configureButton = page
+      .getByRole('button', { name: 'Configure AI Model' })
+      .first();
     await expect(configureButton).toBeVisible();
     await configureButton.click();
 
@@ -99,12 +99,11 @@ test.describe.serial('Session chat with model selection', () => {
     await dialog.getByRole('button', { name: /Save & Load Model/ }).click();
 
     // ---- 5. Assert the model name is in the top right ------------------
-    // The ChatPanelHeader surfaces the active model name via a
-    // <Text title={activeModel}> on the right side of the panel. This
-    // is the "model name in the top right" the spec is asking for.
-    // `.first()` disambiguates from any duplicate title-bearing
-    // elements (e.g. the ChatInput's own modal trigger).
-    const modelName = page.getByTitle(SELECTED_LOCAL_MODEL).first();
+    // The ChatPanelHeader surfaces the active model name as Text on the
+    // right side of the panel. This is the "model name in the top right"
+    // the spec is asking for. `.first()` pins to the header copy (the
+    // Radix dialog portal renders any duplicates later in the DOM).
+    const modelName = page.getByText(SELECTED_LOCAL_MODEL).first();
     await expect(modelName).toBeVisible();
 
     // ---- 6. Send a message and assert the streamed response ------------

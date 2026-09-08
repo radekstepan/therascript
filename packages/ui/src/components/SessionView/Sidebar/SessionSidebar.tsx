@@ -381,6 +381,7 @@ export function SessionSidebar({
                 size="1"
                 highContrast
                 disabled={startNewChatMutation.isPending}
+                aria-label="Start New Chat"
               >
                 {startNewChatMutation.isPending ? (
                   <Spinner size="1" />
@@ -402,6 +403,7 @@ export function SessionSidebar({
                 size="1"
                 highContrast
                 disabled={startNewChatMutation.isPending}
+                aria-label="Start New Chat"
               >
                 {startNewChatMutation.isPending ? (
                   <Spinner size="1" />

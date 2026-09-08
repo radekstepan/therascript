@@ -23,21 +23,23 @@
 // in `beforeEach` via `page.evaluate`, since the MSW reset hook
 // (`/api/__e2e/reset`) only touches server-side mock state.
 import { test, expect, type Page } from '@playwright/test';
+import { gotoAndResetMocks } from './helpers';
 
 const STORAGE_KEY = 'llm-remote-base-url';
 const REMOTE_URL_FIELD_PLACEHOLDER = 'http://192.168.1.100:1234';
 const SELECTED_REMOTE_MODEL = 'gpt-4o';
 
 async function resetMocksAndStorage(page: Page) {
-  await page.goto('/');
+  await gotoAndResetMocks(page);
   await page.evaluate(async () => {
-    await fetch('/api/__e2e/reset', { method: 'POST' });
     localStorage.removeItem('llm-remote-base-url');
   });
 }
 
 async function openConfigureDialog(page: Page) {
-  const configureButton = page.getByTitle('Configure AI Model').first();
+  const configureButton = page
+    .getByRole('button', { name: 'Configure AI Model' })
+    .first();
   await expect(configureButton).toBeVisible();
   await configureButton.click();
   const dialog = page.getByRole('dialog').first();
@@ -153,8 +155,12 @@ test.describe.serial('Remote LM Studio URL persistence', () => {
     // to the atom.
     const modelCombobox = dialog.getByRole('combobox');
     await modelCombobox.click();
+    // NOTE: the MSW local catalog only offers qwen2.5-7b-instruct and
+    // mistral-7b-local (see LOCAL_MODELS in src/mocks/state.ts) — there
+    // is no 14b model to pick. Any local model serves this test's
+    // purpose (saving while in Local mode).
     await page
-      .getByRole('option', { name: /qwen2\.5-14b/i })
+      .getByRole('option', { name: /qwen2\.5-7b-instruct/i })
       .first()
       .click();
     await dialog.getByRole('button', { name: /Save & Load Model/ }).click();

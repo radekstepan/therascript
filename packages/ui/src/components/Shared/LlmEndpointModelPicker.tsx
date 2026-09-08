@@ -192,6 +192,14 @@ export const LlmEndpointModelPicker: React.FC<LlmEndpointModelPickerProps> = ({
     onModelsChange?.(models);
   }, [models, onModelsChange]);
 
+  // Tracks whether the user has manually edited the remote URL in this
+  // modal session (typing or clearing). Toggle-to-Remote pre-fills from
+  // the atom only for an untouched field — otherwise an explicit Clear
+  // would be silently resurrected from the saved value. The ref resets
+  // with the component: dialog content unmounts on close, so each modal
+  // open starts untouched.
+  const userEditedUrlRef = useRef(false);
+
   // Toggling to Remote should pre-fill the input from localStorage so the user
   // doesn't have to retype their last remote URL. Toggling to Local clears
   // the input (we don't want stale text behind a Local toggle).
@@ -208,8 +216,14 @@ export const LlmEndpointModelPicker: React.FC<LlmEndpointModelPickerProps> = ({
     // reappear once the user picks a model for the new endpoint.
     onSelectedModelChange('');
     if (goingRemote) {
-      // Only pre-fill if the user hasn't already typed something.
-      if (!remoteUrl || remoteUrl.trim().length === 0) {
+      // Only pre-fill an untouched field. An explicit user edit —
+      // including clearing the field — wins over the saved value, so a
+      // cleared field survives a Local→Remote round trip instead of
+      // being silently re-populated (e2e: remote-llm-url-persistence).
+      if (
+        (!remoteUrl || remoteUrl.trim().length === 0) &&
+        !userEditedUrlRef.current
+      ) {
         setRemoteUrl(persistedRemoteUrl || '');
       }
     } else {
@@ -231,8 +245,11 @@ export const LlmEndpointModelPicker: React.FC<LlmEndpointModelPickerProps> = ({
 
   // Typing into the remote URL input is purely local form state. The URL is
   // persisted to `remoteBaseUrlAtom` by the modal's Save handler, not here,
-  // so Cancel / Escape discard any unsaved typing.
+  // so Cancel / Escape discard any unsaved typing. Any manual edit marks
+  // the field touched so a later Local→Remote toggle won't clobber it
+  // with the saved value.
   const handleRemoteUrlChange = (next: string) => {
+    userEditedUrlRef.current = true;
     setRemoteUrl(next);
   };
 

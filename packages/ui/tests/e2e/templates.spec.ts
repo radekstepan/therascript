@@ -22,6 +22,7 @@
 // page, packages/ui/src/components/Shared/EditEntityModal.tsx for
 // the create/edit modal shape.
 import { test, expect } from '@playwright/test';
+import { gotoAndResetMocks } from './helpers';
 
 const SYSTEM_PROMPT_TITLE = 'Analyst';
 const USER_TEMPLATE_TITLE = 'CBT reframing coach';
@@ -31,10 +32,7 @@ const NEW_TEMPLATE_TEXT =
 
 test.describe.serial('Templates page CRUD', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
-    await page.evaluate(async () => {
-      await fetch('/api/__e2e/reset', { method: 'POST' });
-    });
+    await gotoAndResetMocks(page);
     await page.goto('/templates');
   });
 

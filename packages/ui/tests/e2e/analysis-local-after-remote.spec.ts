@@ -34,6 +34,7 @@
 // hook (/api/__e2e/reset) clears mockActiveBaseUrl; localStorage
 // cleanup drops the persisted remote URL from any prior spec.
 import { test, expect, type Page, type Request } from '@playwright/test';
+import { gotoAndResetMocks } from './helpers';
 
 const REMOTE_URL_FIELD_PLACEHOLDER = 'http://192.168.1.100:1234';
 const SELECTED_REMOTE_MODEL = 'gpt-4o';
@@ -45,15 +46,16 @@ const ANALYZED_PROMPT =
 const JOB_ROW_LABEL = 'Anxiety Trends Analysis';
 
 async function resetMocksAndStorage(page: Page) {
-  await page.goto('/');
+  await gotoAndResetMocks(page);
   await page.evaluate(async () => {
-    await fetch('/api/__e2e/reset', { method: 'POST' });
     localStorage.removeItem('llm-remote-base-url');
   });
 }
 
 async function openConfigureDialog(page: Page) {
-  const configureButton = page.getByTitle('Configure AI Model').first();
+  const configureButton = page
+    .getByRole('button', { name: 'Configure AI Model' })
+    .first();
   await expect(configureButton).toBeVisible();
   await configureButton.click();
   const dialog = page.getByRole('dialog').first();

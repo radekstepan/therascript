@@ -53,6 +53,7 @@
 // packages/ui/src/components/SessionView/Modals/SelectActiveModelModal.tsx
 // for the save flow.
 import { test, expect, type Page, type Request } from '@playwright/test';
+import { gotoAndResetMocks } from './helpers';
 
 const REMOTE_URL = 'http://mock-remote:1234';
 const SELECTED_REMOTE_MODEL = 'gpt-4o';
@@ -108,10 +109,7 @@ test.describe.serial('Remote LLM with API token', () => {
     // from the page context so the request goes through MSW
     // (page.request.post would hit the webpack-dev-server proxy
     // directly and ECONNREFUSED).
-    await page.goto('/');
-    await page.evaluate(async () => {
-      await fetch('/api/__e2e/reset', { method: 'POST' });
-    });
+    await gotoAndResetMocks(page);
   });
 
   test('configures a remote model with a token, chats, and the token is never cleared', async ({
@@ -137,7 +135,9 @@ test.describe.serial('Remote LLM with API token', () => {
         await expect(unloadButton).not.toBeVisible({ timeout: 5_000 });
       }
 
-      const configureButton = page.getByTitle('Configure AI Model').first();
+      const configureButton = page
+        .getByRole('button', { name: 'Configure AI Model' })
+        .first();
       await expect(configureButton).toBeVisible();
       await configureButton.click();
 
@@ -183,10 +183,10 @@ test.describe.serial('Remote LLM with API token', () => {
       await dialog.getByRole('button', { name: /Save & Load Model/ }).click();
 
       // ---- 5. Assert the dialog closed + the chat panel reflects remote
-      // The ChatPanelHeader's model-name <Text title=...> is the
+      // The ChatPanelHeader's model-name Text (its text content) is the
       // canonical handle for the active model in the header,
       // mirroring the assertion in session-chat.spec.ts:107.
-      const modelName = page.getByTitle(SELECTED_REMOTE_MODEL).first();
+      const modelName = page.getByText(SELECTED_REMOTE_MODEL).first();
       await expect(modelName).toBeVisible();
 
       // ---- 6. POST /api/llm/api-token carried the typed token ---------
@@ -231,7 +231,10 @@ test.describe.serial('Remote LLM with API token', () => {
       // presence boolean survived. We deliberately do NOT click
       // any radio / Save & Load button here; the test only
       // asserts the field's existence + placeholder.
-      await page.getByTitle('Configure AI Model').first().click();
+      await page
+        .getByRole('button', { name: 'Configure AI Model' })
+        .first()
+        .click();
       await expect(dialog.getByText('Configure AI Model')).toBeVisible();
 
       await expect(
@@ -276,7 +279,10 @@ test.describe.serial('Remote LLM with API token', () => {
       // edits (form is disabled while loaded). The Unload button
       // lives inside the dialog's LlmSettingsForm callout, so
       // re-open the dialog first.
-      await page.getByTitle('Configure AI Model').first().click();
+      await page
+        .getByRole('button', { name: 'Configure AI Model' })
+        .first()
+        .click();
       await expect(dialog.getByText('Configure AI Model')).toBeVisible();
       const unloadAgain = dialog.getByRole('button', { name: 'Unload' });
       await expect(unloadAgain).toBeVisible();

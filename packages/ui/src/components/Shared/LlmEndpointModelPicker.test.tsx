@@ -237,4 +237,36 @@ describe('LlmEndpointModelPicker — remote URL persistence', () => {
     await clickRemoteSegment(user);
     expect(getRemoteUrlField().value).toBe('');
   });
+
+  it('keeps a cleared field empty across a Local→Remote round trip without saving', async () => {
+    // Mirrors e2e remote-llm-url-persistence test 2: with a previously
+    // saved URL, clearing the field and toggling Local→Remote must not
+    // silently resurrect the saved value. The explicit Clear wins
+    // because manual edits mark the field touched.
+    localStorage.setItem(STORAGE_KEY, JSON.stringify('http://saved-host:1234'));
+
+    renderPicker();
+    await waitFor(() =>
+      expect(screen.getByTestId('atom-value').textContent).toBe(
+        '"http://saved-host:1234"'
+      )
+    );
+
+    const user = userEvent.setup();
+    await clickRemoteSegment(user);
+    const field = getRemoteUrlField();
+    expect(field.value).toBe('http://saved-host:1234');
+
+    // Explicit clear (manual edit), then a Local→Remote round trip.
+    await user.clear(field);
+    expect(field.value).toBe('');
+    await user.click(screen.getByRole('radio', { name: 'Local Machine' }));
+    await clickRemoteSegment(user);
+
+    expect(getRemoteUrlField().value).toBe('');
+    // The atom was never touched — no save happened.
+    expect(screen.getByTestId('atom-value').textContent).toBe(
+      '"http://saved-host:1234"'
+    );
+  });
 });

@@ -163,7 +163,7 @@ async function pollWhisperStatus(
   }
 }
 
-function groupSegmentsIntoParagraphs(
+export function groupSegmentsIntoParagraphs(
   segments: WhisperSegment[]
 ): StructuredTranscript {
   if (!segments || segments.length === 0) return [];

@@ -14,8 +14,11 @@ import { http, HttpResponse } from 'msw';
 import {
   e2eSessionChats,
   e2eSessions,
+  e2eSession1Transcript,
+  e2eUploadError,
   setE2eSessions,
   setE2eSessionChats,
+  setE2eSession1Transcript,
   MOCK_INTAKE_SESSION,
 } from '../state';
 
@@ -46,30 +49,49 @@ export const sessionHandlers = [
     ]);
   }),
 
+  // Stateful: PATCH /api/sessions/:id/speakers (below) mutates the
+  // speaker labels in place so speaker-rename.spec.ts can assert the
+  // refetched transcript. Reseeded by POST /api/__e2e/reset.
   http.get('/api/sessions/1/transcript', () =>
-    HttpResponse.json([
-      {
-        id: 0,
-        timestamp: 0,
-        text: 'Therapist: Hi Jane, thanks for coming in today. Can you tell me what brought you here?',
-        speaker: 'Therapist',
-      },
-      {
-        id: 1,
-        timestamp: 6000,
-        text: 'Jane: I have been feeling anxious for the past few months, especially at work.',
-        speaker: 'Jane',
-      },
-      {
-        id: 2,
-        timestamp: 14000,
-        text: 'Therapist: That sounds difficult. Let us explore that together.',
-        speaker: 'Therapist',
-      },
-    ])
+    HttpResponse.json(e2eSession1Transcript)
   ),
 
+  // PATCH /api/sessions/:id/speakers — rename speaker labels.
+  // Applies each { from, to } to the stateful session-1 transcript and
+  // returns the production confirmation message.
+  http.patch('/api/sessions/:id/speakers', async ({ request, params }) => {
+    const renames = (await request.json().catch(() => [])) as {
+      from: string;
+      to: string;
+    }[];
+    if (!Array.isArray(renames)) {
+      return HttpResponse.json(
+        { message: 'Body must be an array of { from, to } objects.' },
+        { status: 400 }
+      );
+    }
+    setE2eSession1Transcript(
+      e2eSession1Transcript.map((p) => {
+        const rename = renames.find(
+          (r) => r.from === p.speaker && r.from !== r.to
+        );
+        return rename ? { ...p, speaker: rename.to } : p;
+      })
+    );
+    return HttpResponse.json({
+      message: `Speaker labels updated for session ${params.id}.`,
+    });
+  }),
+
   http.post('/api/sessions/upload', async () => {
+    // Failure injection for upload-failure.spec.ts (e.g. the 503
+    // diarization-not-ready gate). Set via POST /api/__e2e/set-upload-error.
+    if (e2eUploadError) {
+      return HttpResponse.json(
+        { message: e2eUploadError.message },
+        { status: e2eUploadError.status }
+      );
+    }
     return HttpResponse.json(
       {
         sessionId: 3,

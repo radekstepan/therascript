@@ -24,6 +24,7 @@
 // packages/ui/src/components/Shared/EditSessionModal.tsx and
 // EditStandaloneChatModal.tsx for the modal shapes.
 import { test, expect } from '@playwright/test';
+import { gotoAndResetMocks } from './helpers';
 
 const UPDATED_SESSION_NAME = 'Intake Session (renamed)';
 const UPDATED_CLIENT_NAME = 'Jane Smith';
@@ -35,10 +36,7 @@ test.describe.serial('Session and standalone chat CRUD', () => {
     // known-good baseline. We use page.evaluate to run the fetch in
     // the page context — page.request hits the test runner's HTTP
     // client and bypasses MSW.
-    await page.goto('/');
-    await page.evaluate(async () => {
-      await fetch('/api/__e2e/reset', { method: 'POST' });
-    });
+    await gotoAndResetMocks(page);
   });
 
   test('edits a session from the row dropdown', async ({ page }) => {

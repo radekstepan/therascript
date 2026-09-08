@@ -109,7 +109,9 @@ test.describe.serial('/api/llm/status response contract', () => {
     // ---- 1. Open the Configure AI Model dialog and save a local model --
     await page.goto('/sessions/1');
 
-    const configureButton = page.getByTitle('Configure AI Model').first();
+    const configureButton = page
+      .getByRole('button', { name: 'Configure AI Model' })
+      .first();
     await expect(configureButton).toBeVisible();
     await configureButton.click();
 
@@ -160,8 +162,8 @@ test.describe.serial('/api/llm/status response contract', () => {
     await expect(chatInput).toBeEnabled();
 
     // The model name is surfaced in the chat panel header via
-    // <Text title={activeModel}>.
-    await expect(page.getByTitle(SELECTED_LOCAL_MODEL).first()).toBeVisible();
+    // the model-name Text (matched by its text content).
+    await expect(page.getByText(SELECTED_LOCAL_MODEL).first()).toBeVisible();
   });
 
   test('status returns 200 with loaded: false after unload', async ({
@@ -177,7 +179,9 @@ test.describe.serial('/api/llm/status response contract', () => {
     // page session, so the post-save Unload button is rendered.
     await page.goto('/sessions/1');
 
-    const configureButton = page.getByTitle('Configure AI Model').first();
+    const configureButton = page
+      .getByRole('button', { name: 'Configure AI Model' })
+      .first();
     await expect(configureButton).toBeVisible();
     await configureButton.click();
 
@@ -198,7 +202,10 @@ test.describe.serial('/api/llm/status response contract', () => {
     await expect(chatInput).toBeEnabled();
 
     // ---- 2. Re-open the dialog; the Unload button is now rendered -----
-    await page.getByTitle('Configure AI Model').first().click();
+    await page
+      .getByRole('button', { name: 'Configure AI Model' })
+      .first()
+      .click();
     await expect(dialog.getByText('Configure AI Model')).toBeVisible();
 
     const unloadButton = dialog.getByRole('button', { name: 'Unload' });

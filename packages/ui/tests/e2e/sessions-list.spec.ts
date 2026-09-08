@@ -28,13 +28,11 @@
 // for the filter buttons, packages/ui/src/components/LandingPage/
 // SessionListTable.tsx for the sort behavior.
 import { test, expect } from '@playwright/test';
+import { gotoAndResetMocks } from './helpers';
 
 test.describe('Sessions list filters and sort', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
-    await page.evaluate(async () => {
-      await fetch('/api/__e2e/reset', { method: 'POST' });
-    });
+    await gotoAndResetMocks(page);
     await page.goto('/sessions-list');
   });
 

@@ -238,6 +238,7 @@ export function SettingsPage() {
                         color as React.ComponentProps<typeof Button>['color']
                       }
                       onClick={() => handleAccentColorSelect(color)}
+                      aria-label={`Set accent to ${capitalize(color)}`}
                       style={{
                         width: '100%',
                         height: '36px',

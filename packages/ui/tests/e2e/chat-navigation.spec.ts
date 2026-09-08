@@ -27,13 +27,11 @@
 // packages/ui/src/components/StandaloneChatView/
 // StandaloneChatSidebarList.tsx for the standalone sidebar.
 import { test, expect } from '@playwright/test';
+import { gotoAndResetMocks } from './helpers';
 
 test.describe.serial('Chat list navigation', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
-    await page.evaluate(async () => {
-      await fetch('/api/__e2e/reset', { method: 'POST' });
-    });
+    await gotoAndResetMocks(page);
   });
 
   test('switches between the two chats of session 1', async ({ page }) => {
@@ -72,11 +70,13 @@ test.describe.serial('Chat list navigation', () => {
     await page.goto('/sessions/2');
 
     // The "Start New Chat" button is rendered as an IconButton with
-    // title="Start New Chat" (SessionSidebar.tsx:377). It sits
+    // aria-label="Start New Chat" (SessionSidebar.tsx). It sits
     // outside the <nav>, in the sidebar's header. The tabbed-layout
     // copy is also rendered but hidden on lg; `.first()` pins to
     // the visible one.
-    const startNewChat = page.getByTitle('Start New Chat').first();
+    const startNewChat = page
+      .getByRole('button', { name: 'Start New Chat' })
+      .first();
     await expect(startNewChat).toBeVisible();
 
     await startNewChat.click();

@@ -21,13 +21,11 @@
 // for the router-state order handoff, packages/ui/src/utils/sortSessions.ts
 // for the shared comparator.
 import { test, expect } from '@playwright/test';
+import { gotoAndResetMocks } from './helpers';
 
 test.describe.serial('Session prev/next navigation', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
-    await page.evaluate(async () => {
-      await fetch('/api/__e2e/reset', { method: 'POST' });
-    });
+    await gotoAndResetMocks(page);
     await page.goto('/sessions-list');
   });
 
@@ -63,9 +61,9 @@ test.describe.serial('Session prev/next navigation', () => {
       page.getByRole('tooltip', { name: 'Next session: Intake Session' })
     ).toBeVisible({ timeout: 5000 });
 
-    // Next lands on session 1, auto-redirected to its latest chat (id 11).
+    // Next lands on session 1, auto-redirected to its latest chat (id 10).
     await nextButton.click();
-    await page.waitForURL(/\/sessions\/1\/chats\/11/);
+    await page.waitForURL(/\/sessions\/1\/chats\/10/);
 
     // Last in order: prev targets Follow-up, next is disabled.
     await expect(prevButton).toBeEnabled();
@@ -89,7 +87,7 @@ test.describe.serial('Session prev/next navigation', () => {
     await expect(main.locator('th[aria-sort="ascending"]')).toBeVisible();
 
     await page.locator('tr[aria-label="Load session: Intake Session"]').click();
-    await page.waitForURL(/\/sessions\/1\/chats\/11/);
+    await page.waitForURL(/\/sessions\/1\/chats\/10/);
 
     // Neighbors are reversed relative to the desc baseline.
     const prevButton = page.getByTestId('session-prev-button');

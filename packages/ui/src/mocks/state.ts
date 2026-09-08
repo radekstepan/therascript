@@ -331,6 +331,61 @@ export let e2eTemplates: E2ETemplate[] = [
 
 export let e2eNextTemplateId = 3;
 
+// --- Session 1 transcript paragraphs (stateful for speaker-rename e2e) --
+// Mirrors TranscriptParagraphData (id/timestamp/text/speaker). The seed
+// matches the previously hardcoded GET /api/sessions/1/transcript
+// fixture so transcript-edit.spec.ts keeps passing; PATCH
+// /api/sessions/:id/speakers mutates the speaker labels in place.
+export interface E2ETranscriptParagraph {
+  id: number;
+  timestamp: number;
+  text: string;
+  speaker: string | null;
+}
+
+export const seedSession1Transcript = (): E2ETranscriptParagraph[] => [
+  {
+    id: 0,
+    timestamp: 0,
+    text: 'Therapist: Hi Jane, thanks for coming in today. Can you tell me what brought you here?',
+    speaker: 'Therapist',
+  },
+  {
+    id: 1,
+    timestamp: 6000,
+    text: 'Jane: I have been feeling anxious for the past few months, especially at work.',
+    speaker: 'Jane',
+  },
+  {
+    id: 2,
+    timestamp: 14000,
+    text: 'Therapist: That sounds difficult. Let us explore that together.',
+    speaker: 'Therapist',
+  },
+];
+
+export let e2eSession1Transcript: E2ETranscriptParagraph[] =
+  seedSession1Transcript();
+
+export const setE2eSession1Transcript = (next: E2ETranscriptParagraph[]) => {
+  e2eSession1Transcript = next;
+};
+
+// --- Upload failure injection (upload-failure.spec.ts) -----------------
+// When set, POST /api/sessions/upload responds with this status/body
+// instead of 202 (e.g. the 503 diarization-not-ready gate). Cleared by
+// `e2eMockSeed` (POST /api/__e2e/reset).
+export interface E2EUploadError {
+  status: number;
+  message: string;
+}
+
+export let e2eUploadError: E2EUploadError | null = null;
+
+export const setE2eUploadError = (next: E2EUploadError | null) => {
+  e2eUploadError = next;
+};
+
 export type E2EAnalysisJobStatus =
   | 'processing'
   | 'completed'
@@ -527,6 +582,8 @@ export const e2eMockSeed = () => {
     },
   ]);
   setE2eNextTemplateId(3);
+  setE2eSession1Transcript(seedSession1Transcript());
+  setE2eUploadError(null);
   setE2eAnalysisJobs([
     {
       id: 100,

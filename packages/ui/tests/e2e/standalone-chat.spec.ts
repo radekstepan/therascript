@@ -13,7 +13,9 @@ test.describe.serial('Standalone chat end-to-end', () => {
     await page.waitForURL('**/chats/*');
 
     // Let's set a model first so it can respond.
-    const configureButton = page.getByTitle('Configure AI Model').first();
+    const configureButton = page
+      .getByRole('button', { name: 'Configure AI Model' })
+      .first();
     await expect(configureButton).toBeVisible();
     await configureButton.click();
 

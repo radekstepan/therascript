@@ -20,16 +20,14 @@
 // for the row actions, the AlertDialog at line 1038 (cancel) and
 // line 1072 (delete).
 import { test, expect } from '@playwright/test';
+import { gotoAndResetMocks } from './helpers';
 
 const PROCESSING_JOB = 'Sleep Issues (mapping)';
 const COMPLETED_JOB = 'Client Progress (completed)';
 
 test.describe.serial('Analysis jobs list actions', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/');
-    await page.evaluate(async () => {
-      await fetch('/api/__e2e/reset', { method: 'POST' });
-    });
+    await gotoAndResetMocks(page);
     await page.goto('/analysis-jobs');
   });
 
@@ -62,7 +60,13 @@ test.describe.serial('Analysis jobs list actions', () => {
 
     // The mock transitions the row to "canceled" and the toast
     // surfaces the response message ("Job 100 cancellation requested.").
-    await expect(page.getByText(/cancellation requested/i)).toBeVisible();
+    // `.first()` pins the assertion to the first matching node (the
+    // toast is rendered once in the Toast.Root and again in the
+    // aria-live region — both are correct visually but trigger
+    // strict-mode violations).
+    await expect(
+      page.getByText(/cancellation requested/i).first()
+    ).toBeVisible();
     await expect(processingRow.getByText('canceled').first()).toBeVisible();
   });
 

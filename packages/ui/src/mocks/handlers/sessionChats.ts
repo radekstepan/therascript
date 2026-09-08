@@ -57,6 +57,26 @@ export const sessionChatsHandlers = [
     const body = (await request.json().catch(() => ({}))) as { text?: string };
     const userText = typeof body.text === 'string' ? body.text : '';
 
+    // Failure injection for session-chat-failure.spec.ts: a message
+    // containing the sentinel streams a backend `{ error }` SSE event,
+    // exercising the client's `Chat Error:` toast path.
+    if (userText.includes('__trigger_error__')) {
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({ error: 'Mock LLM failure' })}\n\n`
+            )
+          );
+          controller.close();
+        },
+      });
+      return new HttpResponse(stream, {
+        headers: { 'Content-Type': 'text/event-stream' },
+      });
+    }
+
     const userMessageId = 100 + mockMessageCounter * 2;
     const aiMessageId = 101 + mockMessageCounter * 2;
     setMockMessageCounter(mockMessageCounter + 1);
