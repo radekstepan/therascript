@@ -287,7 +287,7 @@ export default async function (job: Job<TranscriptionJobData, any, string>) {
       throw new Error(
         `Whisper job ${whisperJobId} completed without diarization — all speaker labels are null. ` +
           `This usually means pyannote model files are not cached or HF_TOKEN lacks accepted access ` +
-          `to the gated repos (pyannote/speaker-diarization-3.1 and pyannote/segmentation-3.0). ` +
+          `to the gated repo pyannote/speaker-diarization-community-1. ` +
           `Check Whisper service logs and ensure GET /diarization/check returns ready=true before uploading.`
       );
     }

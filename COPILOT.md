@@ -9,7 +9,7 @@ Use this as a fast-loading, minimal context file. It links to deeper docs.
 ## Core paths
 - API: packages/api/src/server.ts (routes in src/routes, services in src/services, repos in src/repositories)
 - Worker: packages/worker/src/index.ts (jobs in src/jobs/*)
-- Whisper: packages/whisper/src/server.ts → src/routes.ts → transcribe.py
+- Whisper: packages/whisper/src/server.ts → src/routes.ts → Python whisper_api.py (Parakeet ASR + Community-1, pipeline/ in Python)
 - ES: packages/elasticsearch-client/src/{client,mappings,searchUtils}.ts
 - DB: packages/db/src/sqliteService.ts (migrations up to version 7)
 - UI: packages/ui/src/App.tsx, api clients in packages/ui/src/api/*

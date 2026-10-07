@@ -40,7 +40,7 @@ This package contains the backend API server for the Therascript application, bu
         *   `LM_STUDIO_BASE_URL`: URL of the LM Studio service (if updated).
         *   `LM_STUDIO_MODEL`: Default/active LM Studio model.
         *   `WHISPER_API_URL`: URL of the Whisper service.
-        *   `WHISPER_MODEL`: Whisper model to use.
+        *   `WHISPER_MODEL`: Retired — the transcription service always uses Parakeet. Only read by usage logging.
         *   `DB_PATH`: Path *relative to this package directory* for the SQLite database file.
         *   `DB_UPLOADS_DIR`: Path *relative to this package directory* for storing uploaded audio files.
         *   `UPLOAD_MAX_FILE_SIZE`: Maximum allowed upload size.

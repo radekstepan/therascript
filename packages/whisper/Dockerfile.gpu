@@ -1,5 +1,7 @@
-# GPU-enabled Dockerfile for Whisper - uses NVIDIA CUDA
-FROM nvidia/cuda:12.1.0-cudnn9-runtime-ubuntu22.04
+# GPU-enabled Dockerfile for transcription - uses NVIDIA CUDA.
+# Stack: Parakeet (NeMo) ASR + pyannote Community-1 diarization.
+# Parakeet FP16 is ~1.3GB VRAM; Community-1 diarization shares the GPU.
+FROM nvidia/cuda:12.6.0-cudnn9-runtime-ubuntu22.04
 
 WORKDIR /app
 
@@ -13,12 +15,11 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-# Install PyTorch with CUDA support, then whisperx and other deps.
-# whisperx is installed with --no-deps; runtime deps are pinned in requirements.txt.
-COPY packages/whisper/requirements.txt ./
-RUN pip3 install --no-cache-dir torch==2.2.2+cu121 torchaudio==2.2.2+cu121 --index-url https://download.pytorch.org/whl/cu121 && \
-    pip3 install --no-cache-dir --no-deps whisperx==3.4.2 && \
-    pip3 install --no-cache-dir -r requirements.txt
+# Install PyTorch with CUDA support, then the pinned runtime deps.
+# torchcodec cu126 wheel required by pyannote.audio 4.x audio I/O.
+COPY packages/whisper/requirements.txt packages/whisper/constraints-cu126.txt ./
+RUN pip3 install --no-cache-dir torch==2.8.0+cu126 torchaudio==2.8.0+cu126 torchcodec==0.7.0+cu126 --index-url https://download.pytorch.org/whl/cu126 && \
+    pip3 install --no-cache-dir -c constraints-cu126.txt -r requirements.txt
 
 # Install Node.js (for the Express wrapper)
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \

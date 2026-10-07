@@ -23,10 +23,10 @@ This document details the step-by-step data flows for the core operations of the
 3.  **Job Processing (Worker)**
 
     - Worker consumes job in `transcriptionProcessor.ts`.
-    - **Action 1:** Worker sends audio path and `numSpeakers` to WhisperX Service via HTTP POST.
-    - **Action 2:** Worker polls WhisperX status endpoint until completion.
+    - **Action 1:** Worker sends audio path and `numSpeakers` to the Transcription Service via HTTP POST.
+    - **Action 2:** Worker polls the transcription status endpoint until completion.
     - **Action 3:** On success, parses JSON segments into `TranscriptParagraphData`.
-    - **Pipeline Details:** The service runs 4 stages: **ASR** (Transcription) -> **Alignment** (Phoneme-level timestamps) -> **Diarization** (Speaker ID) -> **Assignment** (Mapping speakers to text).
+    - **Pipeline Details:** The service runs 3 stages: **ASR** (Parakeet transcription with native word timestamps — no alignment stage) -> **Diarization** (Community-1, exclusive speaker stream) -> **Attribution** (mapping words to speakers). See `docs/TRANSCRIPTION_BACKENDS.md`.
 
 4.  **Persistence (Worker -> DB/ES)**
     - **SQLite:** Paragraphs inserted into `transcript_paragraphs` table (including the `speaker` column) via `transcriptRepository.ts`.

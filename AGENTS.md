@@ -26,14 +26,14 @@ Located in `packages/worker`, these agents run asynchronously to handle heavy co
 *   **Workflow:**
     1.  Receives `sessionId` and `numSpeakers` from the API after file upload.
     2.  Fetches audio path from SQLite.
-    3.  Submits audio to the **WhisperX Service** (`packages/whisper`) and polls for completion.
+    3.  Submits audio to the **Transcription Service** (`packages/whisper`: Parakeet ASR + Community-1 diarization) and polls for completion.
     4.  **Post-Processing:**
-        *   The pipeline runs 4 stages: **Transcribe** (ASR), **Align** (word-level timestamps), **Diarize** (speaker identification via Pyannote), and **Assign** (mapping speakers to text).
+        *   The pipeline runs 3 stages: **Transcribe** (Parakeet ASR with native word timestamps — no alignment stage), **Diarize** (speaker identification via pyannote Community-1, exclusive stream), and **Attribute** (mapping words to speakers via `packages/whisper/pipeline/attribution.py`).
         *   Parses enriched segments into time-stamped paragraphs, splitting on speaker changes.
         *   Calculates token counts.
         *   Indexes paragraphs into **Elasticsearch** (`therascript_transcripts`), including the `speaker` label.
         *   Creates the initial "AI" chat message in the database.
-*   **Infrastructure:** Depends on GPU availability (via WhisperX Docker container/CUDA) or CPU (int8 quantization). Requires `HF_TOKEN` for diarization model weights.
+*   **Infrastructure:** Depends on GPU availability (via transcription Docker container/CUDA) or CPU (slower). Requires `HF_TOKEN` with accepted Community-1 conditions for diarization model weights.
 
 ### Analysis Agent (The Researcher)
 *   **Type:** BullMQ Worker (`analysis-jobs`)
@@ -100,7 +100,7 @@ These operate in real-time via the API (`packages/api`) to facilitate user inter
 ### Whisper Service
 *   **Location:** `packages/whisper` (Python/FastAPI)
 *   **Role:** Audio-to-Text inference engine.
-*   **Tech:** OpenAI Whisper (running on PyTorch/CUDA).
+*   **Tech:** Parakeet TDT 0.6B v2 via NeMo (running on PyTorch/CUDA, fp32 CPU fallback with automatic device detection).
 
 ### LM Studio Service
 *   **Location:** Native System (`lms` process)

@@ -12,80 +12,10 @@ from enum import Enum
 
 import httpx
 from huggingface_hub import scan_cache_dir
-import numpy as np
-import pandas as pd
-import whisperx
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import uuid
-
-
-# ---------------------------------------------------------------------------
-# Compatibility shim for pyannote.audio 3.3.x
-# whisperx.DiarizationPipeline calls Pipeline.from_pretrained(token=...) but
-# pyannote 3.3.x still uses use_auth_token=... and returns an Annotation
-# directly (not an object with .speaker_diarization). This class replicates
-# whisperx's DiarizationPipeline interface against the installed pyannote API.
-# ---------------------------------------------------------------------------
-class _DiarizationPipeline:
-    SAMPLE_RATE = 16000
-
-    def __init__(self, token: str, device: str = "cpu"):
-        from pyannote.audio import Pipeline
-        device_obj = torch.device(device) if isinstance(device, str) else device
-        print("[WhisperManager] Loading pyannote/speaker-diarization-3.1...")
-        try:
-            self.model = Pipeline.from_pretrained(
-                "pyannote/speaker-diarization-3.1",
-                use_auth_token=token,
-            ).to(device_obj)
-        except Exception as e:
-            err_str = str(e)
-            if "401" in err_str or "403" in err_str or "gated" in err_str.lower() or "access" in err_str.lower() or "unauthorized" in err_str.lower():
-                raise RuntimeError(
-                    f"[AUTH ERROR] HF_TOKEN lacks access to pyannote/speaker-diarization-3.1 — "
-                    f"accept the model terms at https://huggingface.co/pyannote/speaker-diarization-3.1 "
-                    f"and https://huggingface.co/pyannote/segmentation-3.0 — original: {e}"
-                ) from e
-            if torch.cuda.is_available() and "out of memory" in err_str.lower():
-                raise RuntimeError(
-                    f"[CUDA OOM] Not enough VRAM to load diarization model — "
-                    f"free VRAM or use a smaller ASR model — original: {e}"
-                ) from e
-            raise
-
-    def __call__(
-        self,
-        audio,
-        num_speakers=None,
-        min_speakers=None,
-        max_speakers=None,
-        hook=None,
-    ) -> pd.DataFrame:
-        if isinstance(audio, np.ndarray):
-            audio_data = {
-                "waveform": torch.from_numpy(audio[None, :]),
-                "sample_rate": self.SAMPLE_RATE,
-            }
-        else:
-            audio_data = audio
-        call_kwargs = dict(
-            num_speakers=num_speakers,
-            min_speakers=min_speakers,
-            max_speakers=max_speakers,
-        )
-        if hook is not None:
-            call_kwargs["hook"] = hook
-        diarization = self.model(audio_data, **call_kwargs)
-        diarize_df = pd.DataFrame(
-            diarization.itertracks(yield_label=True),
-            columns=["segment", "label", "speaker"],
-        )
-        diarize_df["start"] = diarize_df["segment"].apply(lambda x: x.start)
-        diarize_df["end"] = diarize_df["segment"].apply(lambda x: x.end)
-        return diarize_df
-# ---------------------------------------------------------------------------
 
 
 # ---- Pydantic models for diarization check / prefetch endpoints ----
@@ -107,12 +37,16 @@ class DiarizationPrefetchResponse(BaseModel):
 
 # ---- Diarization cache helpers ----
 
+# pyannote Community-1 bundles segmentation/embedding/clustering sub-models.
+DIARIZATION_REQUIRED_REPOS: list[str] = [
+    "pyannote/speaker-diarization-community-1",
+]
+DIARIZATION_MODEL_ID = "pyannote/speaker-diarization-community-1"
+
+
 def _get_missing_diarization_repos() -> list[str]:
     """Return list of required diarization repos that do not have a cached revision."""
-    required_repos = [
-        "pyannote/speaker-diarization-3.1",
-        "pyannote/segmentation-3.0",
-    ]
+    required_repos = DIARIZATION_REQUIRED_REPOS
 
     def _repo_cached_in_torch_cache(repo_id: str) -> bool:
         repo_cache_name = f"models--{repo_id.replace('/', '--')}"
@@ -163,10 +97,7 @@ def _do_prefetch_diarization_sync() -> None:
     try:
         print("[WhisperAPI] Prefetch: starting Pipeline.from_pretrained to cache all sub-models...", flush=True)
         from pyannote.audio import Pipeline
-        pipeline = Pipeline.from_pretrained(
-            "pyannote/speaker-diarization-3.1",
-            use_auth_token=HF_TOKEN,
-        )
+        pipeline = Pipeline.from_pretrained(DIARIZATION_MODEL_ID, token=HF_TOKEN)
         del pipeline
         import gc as _gc
         _gc.collect()
@@ -202,7 +133,9 @@ async def _start_prefetch_if_needed() -> tuple[bool, bool]:
 
 TEMP_INPUT_DIR = os.environ.get("TEMP_INPUT_DIR", "/app/temp_inputs")
 TEMP_OUTPUT_DIR = os.environ.get("TEMP_OUTPUT_DIR", "/app/temp_outputs")
-DEFAULT_MODEL = os.environ.get("WHISPER_MODEL", "tiny")
+# NOTE: `model_name` is still accepted on /transcribe for wire compatibility
+# but ignored — ASR is always Parakeet (PARAKEET_MODEL_ID). WHISPER_MODEL is
+# retired; see README "Upgrading from WhisperX".
 MODEL_IDLE_TIMEOUT = int(os.environ.get("WHISPER_MODEL_IDLE_TIMEOUT", "300"))
 TRANSCRIBE_CONCURRENCY = int(os.environ.get("WHISPER_MAX_CONCURRENCY", "1"))
 JOB_RETENTION_SECONDS = int(os.environ.get("WHISPER_JOB_RETENTION", "3600"))
@@ -247,168 +180,124 @@ class TranscribeResponse(BaseModel):
     message: str
 
 
-class WhisperModelManager:
+# NOTE: The WhisperX model manager was removed with the legacy stack.
+# Models are now load-once singletons below (Parakeet ASR + Community-1),
+# loaded lazily on first use and freed via POST /model/unload or after
+# MODEL_IDLE_TIMEOUT seconds without jobs.
+_model_last_used: float = 0
+_active_jobs: int = 0
+_idle_unload_task = None
 
-    def __init__(self):
-        self._asr_model = None
-        self._diarize_model = None
-        self._model_name: Optional[str] = None
-        self._device: Optional[str] = None
-        self._last_used: float = 0
-        self._lock = asyncio.Lock()
-        self._idle_task: Optional[asyncio.Task] = None
-        self._active_jobs: int = 0
 
-    @property
-    def is_loaded(self) -> bool:
-        return self._asr_model is not None
+def _touch_models() -> None:
+    global _model_last_used
+    _model_last_used = datetime.now().timestamp()
 
-    @property
-    def model_name(self) -> Optional[str]:
-        return self._model_name
 
-    @property
-    def last_used(self) -> float:
-        return self._last_used
+def _job_acquire() -> None:
+    """Mark a transcription job as active; cancel any pending idle unload."""
+    # NOTE: _active_jobs is only touched on the event-loop thread
+    # (run_transcription acquire/release, _idle_unload, /model/unload), so
+    # no lock is needed. It must NOT take _models_lock: that lock is held
+    # for minutes by model loads on executor threads, and taking it here
+    # would block the event loop and freeze /health, /status and /cancel.
+    global _active_jobs, _idle_unload_task
+    _active_jobs += 1
+    if _idle_unload_task is not None and not _idle_unload_task.done():
+        _idle_unload_task.cancel()
+        _idle_unload_task = None
 
-    async def acquire_model(self, model_name: str, needs_diarization: bool = False):
-        async with self._lock:
-            # Full reload only when the ASR model name changed.
-            if self._asr_model is not None and self._model_name != model_name:
-                if self._active_jobs > 0:
-                    raise RuntimeError(f"Cannot switch models while {self._active_jobs} jobs active")
-                print(f"[WhisperManager] Switching ASR model from {self._model_name} to {model_name}")
-                await self._unload_unsafe()
 
-            if self._asr_model is None:
-                await ensure_llm_unloaded()
+def _job_release() -> None:
+    """Mark a transcription job as done; restart the idle-unload timer."""
+    # See _job_acquire: lock-free, event-loop only.
+    global _active_jobs
+    _active_jobs = max(0, _active_jobs - 1)
+    _touch_models()
+    _reset_idle_timer()
 
-                print(f"[WhisperManager] Loading ASR model '{model_name}'...")
-                start = datetime.now()
 
-                device = "cuda" if torch.cuda.is_available() else "cpu"
-                compute_type = "float16" if device == "cuda" else "int8"
-                self._device = device
+def _reset_idle_timer() -> None:
+    global _idle_unload_task
+    if MODEL_IDLE_TIMEOUT <= 0:
+        return
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        return
+    if _idle_unload_task is not None and not _idle_unload_task.done():
+        _idle_unload_task.cancel()
+    _idle_unload_task = loop.create_task(_idle_unload())
 
-                # Load ASR model.
-                # Use Silero VAD to avoid pyannote.audio 3.3.2 API incompatibility:
-                # latest whisperx passes token= to pyannote VoiceActivityDetection
-                # but 3.3.2's Inference class does not accept that kwarg.
-                self._asr_model = whisperx.load_model(
-                    model_name, device, compute_type=compute_type, vad_method="silero"
-                )
-                self._model_name = model_name
-                self._diarize_model = None
 
-                elapsed = (datetime.now() - start).total_seconds()
-                print(f"[WhisperManager] ASR model '{model_name}' loaded in {elapsed:.2f}s")
+async def _idle_unload() -> None:
+    try:
+        await asyncio.sleep(MODEL_IDLE_TIMEOUT)
+        # Lock-free read: _active_jobs only changes on this thread.
+        active = _active_jobs
+        if active == 0:
+            elapsed = datetime.now().timestamp() - _model_last_used
+            if elapsed >= MODEL_IDLE_TIMEOUT:
+                print(f"[WhisperManager] Idle timeout ({MODEL_IDLE_TIMEOUT}s), unloading...")
+                unload_models(force=True)
+    except asyncio.CancelledError:
+        pass
 
-            # Lazily attach the diarization pipeline when a job needs it.
-            # This avoids a full ASR reload when the first diarize=True job arrives
-            # after a diarize=False job has already warmed up the ASR model.
-            # Guard: do not load pyannote while other jobs are active — the pipeline
-            # constructor can take seconds and contend for GPU/CPU memory.
-            # NOTE: With the default WHISPER_MAX_CONCURRENCY=1 this branch is unreachable
-            # because jobs serialise. It only fires if concurrency is bumped AND the very
-            # first diarize=True job arrives while a diarize=False job is still running.
-            # In that scenario the client receives a retriable failure; the operator
-            # should either keep concurrency=1 or pre-warm pyannote at startup.
-            if needs_diarization and self._diarize_model is None:
-                if self._active_jobs > 0:
-                    raise RuntimeError(
-                        f"WHISPER_BUSY: Cannot load diarization pipeline while {self._active_jobs} job(s) are active. "
-                        "Retry once the active job completes."
-                    )
-                if not HF_TOKEN:
-                    raise RuntimeError(
-                        "HF_TOKEN is not set — cannot load diarization pipeline. "
-                        "Set HF_TOKEN and restart, or submit with num_speakers=0."
-                    )
-                print(f"[WhisperManager] Loading diarization pipeline lazily...")
-                self._diarize_model = _DiarizationPipeline(
-                    token=HF_TOKEN, device=self._device
-                )
-                print(f"[WhisperManager] Diarization pipeline loaded.")
 
-            self._active_jobs += 1
-            self._last_used = datetime.now().timestamp()
-            return self
+def build_model_status() -> ModelStatus:
+    # Report the device actually selected by jobs (torch visibility), not just
+    # host GPU presence. Falls back to live CUDA availability before any job ran.
+    device = _parakeet_device or ("cuda" if torch.cuda.is_available() else "cpu")
+    # Use pynvml (NVIDIA Management Library) for VRAM if available
+    vram_mb = 0
+    try:
+        import pynvml
+        pynvml.nvmlInit()
+        handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+        info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+        vram_mb = info.used / (1024 * 1024)
+        pynvml.nvmlShutdown()
+    except:
+        pass # Not NVIDIA or not available
 
-    async def release_model(self):
-        async with self._lock:
-            self._active_jobs -= 1
-            self._last_used = datetime.now().timestamp()
-            self._reset_idle_timer()
+    return ModelStatus(
+        loaded=_parakeet_model is not None,
+        model_name=PARAKEET_MODEL_ID if _parakeet_model is not None else None,
+        device=device,
+        vram_allocated_mb=vram_mb,
+        last_used=_model_last_used if _model_last_used > 0 else None,
+        idle_timeout_seconds=MODEL_IDLE_TIMEOUT,
+    )
 
-    async def unload(self) -> bool:
-        async with self._lock:
-            if self._active_jobs > 0:
-                return False
-            return await self._unload_unsafe()
 
-    async def _unload_unsafe(self) -> bool:
-        if self._asr_model is None:
+def unload_models(force: bool = False) -> bool:
+    """Free Parakeet + diarizer singletons. Returns True if anything was loaded.
+
+    Refuses while jobs are active (unless force=True, e.g. idle timeout racing
+    a just-finished job or process shutdown) so a chat-model load cannot pull
+    VRAM out from under a running transcription.
+    """
+    global _parakeet_model, _parakeet_device, _diarizer, _diarizer_device
+    # Fast refuse before taking _models_lock: the lock may be held for minutes
+    # by a model load on an executor thread, and this runs on the event loop.
+    # (_active_jobs only changes on the event loop, so the check is race-free
+    # here; force=True still takes the lock and unloads.)
+    if not force and _active_jobs > 0:
+        print(f"[WhisperManager] Unload refused — {_active_jobs} job(s) still active")
+        return False
+    with _models_lock:
+        if _parakeet_model is None and _diarizer is None:
             return False
-
-        model_name = self._model_name
-        print(f"[WhisperManager] Unloading model '{model_name}'...")
-
-        del self._asr_model
-        self._asr_model = None
-        if self._diarize_model is not None:
-            del self._diarize_model
-            self._diarize_model = None
-        self._model_name = None
-        self._device = None
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-
-        print(f"[WhisperManager] Model '{model_name}' unloaded, VRAM freed")
-        return True
-
-    def _reset_idle_timer(self):
-        if self._idle_task is not None:
-            self._idle_task.cancel()
-
-        if MODEL_IDLE_TIMEOUT > 0:
-            self._idle_task = asyncio.create_task(self._idle_unload())
-
-    async def _idle_unload(self):
-        try:
-            await asyncio.sleep(MODEL_IDLE_TIMEOUT)
-            async with self._lock:
-                if self._active_jobs == 0 and self._asr_model is not None:
-                    elapsed = datetime.now().timestamp() - self._last_used
-                    if elapsed >= MODEL_IDLE_TIMEOUT:
-                        print(f"[WhisperManager] Idle timeout ({MODEL_IDLE_TIMEOUT}s), unloading...")
-                        await self._unload_unsafe()
-        except asyncio.CancelledError:
-            pass
-
-    def get_status(self) -> ModelStatus:
-        # Use pynvml (NVIDIA Management Library) for VRAM if available
-        vram_mb = 0
-        device = "cpu"
-        try:
-            import pynvml
-            pynvml.nvmlInit()
-            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-            info = pynvml.nvmlDeviceGetMemoryInfo(handle)
-            vram_mb = info.used / (1024 * 1024)
-            pynvml.nvmlShutdown()
-            device = "cuda"
-        except:
-            pass # Not NVIDIA or not available
-
-        return ModelStatus(
-            loaded=self.is_loaded,
-            model_name=self._model_name,
-            device=device,
-            vram_allocated_mb=vram_mb,
-            last_used=self._last_used if self._last_used > 0 else None,
-            idle_timeout_seconds=MODEL_IDLE_TIMEOUT,
-        )
+        print("[WhisperManager] Unloading Parakeet + diarizer, freeing VRAM...")
+        _parakeet_model = None
+        _parakeet_device = None
+        _diarizer = None
+        _diarizer_device = None
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    print("[WhisperManager] Models unloaded, VRAM freed")
+    return True
 
 
 async def ensure_llm_unloaded() -> None:
@@ -424,8 +313,173 @@ async def ensure_llm_unloaded() -> None:
         print(f"[WhisperManager] Could not unload LLM model: {e}")
 
 
-model_manager = WhisperModelManager()
 transcribe_semaphore = asyncio.Semaphore(TRANSCRIBE_CONCURRENCY)
+
+
+# ---------------------------------------------------------------------------
+# Models: Parakeet ASR + pyannote Community-1 diarization.
+# Load-once singletons (not per request) to avoid repeated multi-GB loads.
+# ---------------------------------------------------------------------------
+try:
+    from pipeline.attribution import attribute_words, words_to_segments
+    from pipeline.backends import (
+        PARAKEET_MODEL_ID,
+        CommunityDiarizer,
+        ParakeetASRBackend,
+        TranscriptionCancelled,
+    )
+
+    _PIPELINE_AVAILABLE = True
+except Exception as _pipeline_import_error:  # pragma: no cover - import guard
+    print(f"[WhisperAPI] pipeline package unavailable: {_pipeline_import_error}")
+    _PIPELINE_AVAILABLE = False
+    PARAKEET_MODEL_ID = os.environ.get(
+        "PARAKEET_MODEL_ID", "nvidia/parakeet-tdt-0.6b-v2"
+    )
+
+    class TranscriptionCancelled(Exception):  # type: ignore[no-redef]
+        """Fallback when the pipeline package failed to import."""
+
+_models_lock = threading.Lock()
+_parakeet_model = None
+_parakeet_device: Optional[str] = None
+_diarizer = None
+_diarizer_device: Optional[str] = None
+
+
+def _require_pipeline() -> None:
+    if not _PIPELINE_AVAILABLE:
+        raise RuntimeError("Transcription pipeline package failed to import.")
+
+
+def _get_parakeet_model(device: str):
+    """Load-once Parakeet ASR singleton (thread-safe)."""
+    global _parakeet_model, _parakeet_device
+    _require_pipeline()
+    with _models_lock:
+        if _parakeet_model is None:
+            print(f"[WhisperManager] Loading Parakeet ASR ({PARAKEET_MODEL_ID})...")
+            start = datetime.now()
+            _parakeet_model = ParakeetASRBackend(device=device)
+            _parakeet_device = device
+            elapsed = (datetime.now() - start).total_seconds()
+            print(f"[WhisperManager] Parakeet ASR loaded in {elapsed:.2f}s")
+        _touch_models()
+        return _parakeet_model
+
+
+def _get_diarizer(device: str):
+    """Load-once Community-1 diarizer singleton (thread-safe)."""
+    global _diarizer, _diarizer_device
+    _require_pipeline()
+    if not HF_TOKEN:
+        raise RuntimeError(
+            "HF_TOKEN is not set — cannot load diarization pipeline. "
+            "Set HF_TOKEN and restart, or submit with num_speakers=0."
+        )
+    with _models_lock:
+        if _diarizer is None:
+            print("[WhisperManager] Loading diarizer 'pyannote/speaker-diarization-community-1'...")
+            _diarizer = CommunityDiarizer(token=HF_TOKEN, device=device)
+            _diarizer_device = device
+            print("[WhisperManager] Diarizer loaded.")
+        _touch_models()
+        return _diarizer
+
+
+def load_audio_16k(file_path: str):
+    """Load any ffmpeg-decodable audio as float32 mono at 16kHz.
+
+    Decodes via ffmpeg so container formats libsndfile cannot open
+    (m4a/aac/mp4/webm/mov/avi/mkv/flv/mpeg) work the same as wav/flac/ogg.
+    Falls back to soundfile only if ffmpeg fails.
+    """
+    import numpy as _np
+
+    cmd = [
+        "ffmpeg", "-v", "error",
+        "-i", file_path,
+        "-f", "f32le", "-ac", "1", "-ar", "16000",
+        "-",
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, check=True)
+        if result.stdout:
+            return _np.frombuffer(result.stdout, dtype=_np.float32).copy()
+        raise ValueError("ffmpeg decoded 0 bytes")
+    except Exception as ffmpeg_err:
+        detail = str(ffmpeg_err)
+        stderr = getattr(ffmpeg_err, "stderr", None)
+        if stderr:
+            try:
+                stderr_text = stderr.decode().strip() if isinstance(stderr, bytes) else str(stderr).strip()
+            except Exception:
+                stderr_text = ""
+            if stderr_text:
+                detail = f"{detail} | ffmpeg stderr: {stderr_text}"
+        print(f"[Whisper] ffmpeg decode failed ({detail}), falling back to soundfile")
+        import soundfile as sf
+
+        data, sr = sf.read(file_path, dtype="float32", always_2d=False)
+        if data.ndim > 1:
+            data = data.mean(axis=-1)
+        if sr != 16000:
+            import torch
+            import torchaudio.functional as F
+
+            tensor = torch.from_numpy(data).unsqueeze(0)
+            tensor = F.resample(tensor, sr, 16000)
+            data = tensor.squeeze(0).numpy()
+        return data
+
+
+def run_pipeline(
+    audio,
+    num_speakers: int,
+    diarize: bool,
+    device: str,
+    on_stage=None,
+    is_cancelled=None,
+) -> tuple[list, str]:
+    """Run Parakeet ASR + Community-1 diarization + attribution.
+
+    Returns (segments_out, language) in the wire format:
+    [{start, end, text, speaker}]. ``num_speakers`` is the user's selection
+    passed straight through (never hard-coded). ``on_stage`` (optional)
+    receives "transcribing" / "diarizing" / "attributing" as each phase
+    starts so progress reporting tracks the real work. ``is_cancelled``
+    (optional) aborts between ASR chunks; diarization itself is one
+    uninterruptible call.
+    """
+    if on_stage is not None:
+        on_stage("transcribing")
+    print("[Whisper] Transcribing with Parakeet (native word timestamps, no alignment)...")
+    asr = _get_parakeet_model(device)
+    words, language = asr.transcribe(audio, is_cancelled=is_cancelled)
+
+    print(f"[Whisper] {len(words)} words, language={language}")
+    if diarize:
+        if on_stage is not None:
+            on_stage("diarizing")
+        print(f"[Whisper] Diarizing with Community-1 (num_speakers={num_speakers}, exclusive segments)...")
+        diarizer = _get_diarizer(device)
+        segments = diarizer.diarize(audio, num_speakers=num_speakers)
+        print(f"[Whisper] {len(segments)} diarization segments")
+        if on_stage is not None:
+            on_stage("attributing")
+        attributed = attribute_words(words, segments)
+        n_unknown = sum(1 for w in attributed if w.speaker is None)
+        if n_unknown:
+            print(f"[Whisper] {n_unknown}/{len(attributed)} words without speaker (gaps/edges)")
+    else:
+        print("[Whisper] Diarization disabled — words unattributed")
+        from pipeline.schema import AttributedWord as _AW
+
+        attributed = [
+            _AW(text=w.text, start=w.start, end=w.end, speaker=None) for w in words
+        ]
+    segments_out = words_to_segments(attributed)
+    return segments_out, language
 
 jobs: Dict[str, JobStatus] = {}
 cancel_flags: Dict[str, bool] = {}
@@ -460,7 +514,15 @@ async def cleanup_old_jobs():
             print(f"[Whisper] Cleaned up old job {job_id}")
 
 
-async def run_transcription(job_id: str, input_path: str, model_name: str, num_speakers: int, diarize: bool = False):
+async def run_transcription(
+    job_id: str,
+    input_path: str,
+    model_name: str,
+    num_speakers: int,
+    diarize: bool = False,
+):
+    # NOTE: `model_name` is accepted for wire compatibility but ignored —
+    # ASR is always Parakeet. See README "Upgrading from WhisperX".
     job = jobs.get(job_id)
     if not job:
         return
@@ -469,233 +531,138 @@ async def run_transcription(job_id: str, input_path: str, model_name: str, num_s
 
     try:
         async with transcribe_semaphore:
-            job.status = JobStatusState.model_loading
-            job.message = f"Loading model '{model_name}'..."
-            job.start_time = datetime.now().timestamp()
+            _job_acquire()
+            try:
+                job.status = JobStatusState.model_loading
+                job.message = "Loading transcription models..."
+                job.start_time = datetime.now().timestamp()
 
-            if cancel_flags.get(job_id):
-                job.status = JobStatusState.canceled
-                job.message = "Canceled before model load"
-                return
+                if cancel_flags.get(job_id):
+                    job.status = JobStatusState.canceled
+                    job.message = "Canceled before model load"
+                    job.end_time = datetime.now().timestamp()
+                    return
 
-            duration = get_audio_duration(input_path)
-            if duration <= 0:
-                raise ValueError("Could not determine audio duration")
-            job.duration = duration
+                duration = get_audio_duration(input_path)
+                if duration <= 0:
+                    raise ValueError("Could not determine audio duration")
+                job.duration = duration
 
-            manager = await model_manager.acquire_model(model_name, needs_diarization=diarize)
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                print(f"[Whisper] Job {job_id}: using device={device}")
 
-            if cancel_flags.get(job_id):
-                job.status = JobStatusState.canceled
-                job.message = "Canceled after model load"
-                return
-
-            job.status = JobStatusState.transcribing
-            job.message = "Transcribing audio..."
-            job.progress = 1.0
-
-            last_stage = ["transcribing"]
-            stage_start_time = [datetime.now().timestamp()]
-            align_progress = [0.0]  # 0.0..1.0, updated per batch during alignment
-            align_total_segs = [0]   # total segment count, set before batching starts
-            diarize_progress = [0.0]  # 0.0..1.0, updated via pyannote hook
-
-            # Progress ranges depend on whether diarization is enabled
-            if diarize:
-                stage_progress_range = {
-                    "transcribing":  (1.0,  55.0),
-                    "loading_align": (55.0, 62.0),
-                    "aligning":      (62.0, 72.0),
-                    "diarizing":     (72.0, 88.0),
-                    "assigning":     (88.0, 95.0),
-                }
-            else:
-                stage_progress_range = {
-                    "transcribing":  (1.0,  60.0),
-                    "loading_align": (60.0, 68.0),
-                    "aligning":      (68.0, 95.0),
-                }
-
-            def transcribe_sync():
-                # Step 1: Transcribe
-                print(f"[Whisper] Job {job_id}: Step 1/4 - Transcribing (duration={duration:.1f}s, model={model_name})...", flush=True)
-                audio = whisperx.load_audio(input_path)
-                result = manager._asr_model.transcribe(audio, batch_size=16, print_progress=True, verbose=True)
-                detected_language = result.get("language", "en")
-                segments = result.get("segments", [])
-                print(f"[Whisper] Job {job_id}: Transcription done - language={detected_language}, segments={len(segments)}", flush=True)
-                for i, seg in enumerate(segments):
-                    speaker_tag = f"[{seg.get('speaker', '?')}] " if seg.get("speaker") else ""
-                    print(f"[Whisper] Job {job_id}:   seg {i+1:03d} [{seg.get('start',0):.2f}s-{seg.get('end',0):.2f}s] {speaker_tag}{seg.get('text','').strip()}", flush=True)
-
-                # Step 2: Align (word-level timestamps) — batched for progress visibility
-                align_segs_input = result["segments"]
-                total_align_segs = len(align_segs_input)
-                align_total_segs[0] = total_align_segs
-                ALIGN_BATCH = 20
-                # Sub-stage: loading alignment model (time-based progress)
-                last_stage[0] = "loading_align"
-                stage_start_time[0] = datetime.now().timestamp()
-                print(f"[Whisper] Job {job_id}: Step 2/4 - Loading alignment model for language '{detected_language}'...", flush=True)
-                align_model, metadata = whisperx.load_align_model(
-                    language_code=detected_language, device=manager._device
-                )
-                # Sub-stage: running alignment batches (batch-based progress)
-                last_stage[0] = "aligning"
-                stage_start_time[0] = datetime.now().timestamp()
-                print(f"[Whisper] Job {job_id}: Aligning {total_align_segs} segments in batches of {ALIGN_BATCH}...", flush=True)
-                aligned_segments = []
-                aligned_word_segments = []
-                for batch_start in range(0, total_align_segs, ALIGN_BATCH):
-                    batch = align_segs_input[batch_start:batch_start + ALIGN_BATCH]
-                    batch_result = whisperx.align(
-                        batch, align_model, metadata, audio,
-                        manager._device, return_char_alignments=False
+                # Free LLM VRAM for transcription models; fail fast when
+                # diarization was requested but HF_TOKEN is missing.
+                await ensure_llm_unloaded()
+                if diarize and not HF_TOKEN:
+                    raise RuntimeError(
+                        "HF_TOKEN is not set — cannot load diarization pipeline. "
+                        "Set HF_TOKEN and restart, or submit with num_speakers=0."
                     )
-                    aligned_segments.extend(batch_result.get("segments", []))
-                    aligned_word_segments.extend(batch_result.get("word_segments", []))
-                    done = min(batch_start + ALIGN_BATCH, total_align_segs)
-                    align_progress[0] = done / total_align_segs if total_align_segs > 0 else 1.0
-                    elapsed_align = datetime.now().timestamp() - stage_start_time[0]
-                    print(f"[Whisper] Job {job_id}:   aligned {done}/{total_align_segs} segments ({align_progress[0]*100:.0f}%, {elapsed_align:.1f}s)", flush=True)
-                result = {"segments": aligned_segments, "word_segments": aligned_word_segments}
-                print(f"[Whisper] Job {job_id}: Alignment done - {len(aligned_segments)} segments", flush=True)
-                # Free alignment model immediately
-                del align_model
-                gc.collect()
-                if manager._device == "cuda":
-                    torch.cuda.empty_cache()
 
-                # Step 3: Diarize (optional — only runs when diarize=True)
+                if cancel_flags.get(job_id):
+                    job.status = JobStatusState.canceled
+                    job.message = "Canceled before transcription"
+                    job.end_time = datetime.now().timestamp()
+                    return
+
+                job.status = JobStatusState.transcribing
+                job.message = "Transcribing audio..."
+                job.progress = 1.0
+
+                last_stage = ["transcribing"]
+                stage_start_time = [datetime.now().timestamp()]
+
+                def _on_stage(stage: str) -> None:
+                    last_stage[0] = stage
+                    stage_start_time[0] = datetime.now().timestamp()
+
+                # Parakeet emits word timestamps natively — no alignment stage.
                 if diarize:
-                    if manager._diarize_model is None:
-                        raise RuntimeError("Diarization model is not loaded — cannot proceed without speaker diarization.")
-
-                    last_stage[0] = "diarizing"
-                    stage_start_time[0] = datetime.now().timestamp()
-                    diarize_progress[0] = 0.0
-                    print(f"[Whisper] Job {job_id}: Step 3/4 - Diarizing with {num_speakers} speakers...", flush=True)
-
-                    # pyannote hook: maps sub-step names → fractional progress
-                    # Steps (approximate): segmentation ~30%, embedding ~80%, clustering ~95%
-                    _DIARIZE_STEP_FRACTIONS = {
-                        "segmentation": 0.30,
-                        "speaker embedding": 0.75,
-                        "embeddings": 0.75,
-                        "clustering": 0.90,
-                        "discrete diarization": 0.92,
-                        "diarization": 0.97,
+                    stage_progress_range = {
+                        "transcribing": (1.0, 60.0),
+                        "diarizing":    (60.0, 88.0),
+                        "attributing":  (88.0, 95.0),
                     }
-                    def _diarize_hook(step_name=None, *args, **kwargs):
-                        if step_name is None and args:
-                            step_name = args[0]
-                        name = str(step_name).lower() if step_name else ""
-                        for key, frac in _DIARIZE_STEP_FRACTIONS.items():
-                            if key in name:
-                                diarize_progress[0] = frac
-                                print(f"[Whisper] Job {job_id}: diarize hook '{name}' → {frac*100:.0f}%", flush=True)
-                                break
+                else:
+                    stage_progress_range = {
+                        "transcribing": (1.0, 95.0),
+                    }
 
-                    diarize_segments = manager._diarize_model(
-                        audio,
-                        min_speakers=num_speakers,
-                        max_speakers=num_speakers,
-                        hook=_diarize_hook,
+                def transcribe_sync():
+                    print(f"[Whisper] Job {job_id}: Transcribing (duration={duration:.1f}s, asr={PARAKEET_MODEL_ID})...", flush=True)
+                    print(f"[Whisper] Job {job_id}: NOTE Parakeet ASR is English-only; non-English audio will transcribe poorly.", flush=True)
+                    audio = load_audio_16k(input_path)
+                    segments_out, language = run_pipeline(
+                        audio, num_speakers, diarize, device,
+                        on_stage=_on_stage,
+                        is_cancelled=lambda: cancel_flags.get(job_id, False),
                     )
-                    # Step 4: Assign speakers to segments
-                    last_stage[0] = "assigning"
-                    stage_start_time[0] = datetime.now().timestamp()
-                    print(f"[Whisper] Job {job_id}: Step 4/4 - Assigning speakers...", flush=True)
-                    result = whisperx.assign_word_speakers(diarize_segments, result)
-                    # Log each final segment with speaker label
-                    final_segs = result.get("segments", [])
-                    print(f"[Whisper] Job {job_id}: Speaker assignment done - {len(final_segs)} segments", flush=True)
-                    for i, seg in enumerate(final_segs):
+                    print(f"[Whisper] Job {job_id}: Done - {len(segments_out)} segments, language={language}", flush=True)
+                    for i, seg in enumerate(segments_out):
                         speaker_tag = f"[{seg.get('speaker', 'UNKNOWN')}] "
                         print(f"[Whisper] Job {job_id}:   seg {i+1:03d} [{seg.get('start',0):.2f}s-{seg.get('end',0):.2f}s] {speaker_tag}{seg.get('text','').strip()}", flush=True)
-                else:
-                    print(f"[Whisper] Job {job_id}: Skipping diarization (diarize=False). Steps 3-4 omitted (Diarize + Assign).", flush=True)
+                    return {"segments": segments_out, "language": language}
 
-                segments_out = []
-                for seg in result.get("segments", []):
-                    segments_out.append({
-                        "start": seg.get("start", 0),
-                        "end": seg.get("end", 0),
-                        "text": seg.get("text", "").strip(),
-                        "speaker": seg.get("speaker") if diarize else None,
-                    })
+                # Run transcription in background and update progress periodically
+                loop = asyncio.get_event_loop()
+                transcription_task = loop.run_in_executor(None, transcribe_sync)
 
-                return {
-                    "segments": segments_out,
-                    "language": detected_language,
+                # Rough time budget per stage for interpolation (seconds).
+                # CPU Community-1 diarization is typically 1–3× realtime.
+                stage_time_budget = {
+                    "transcribing":  max(duration * 0.05, 30),
+                    "diarizing":     max(duration * 2.5, 60),   # pessimistic CPU estimate
+                    "attributing":   5,
                 }
 
-            # Run transcription in background and update progress periodically
-            loop = asyncio.get_event_loop()
-            transcription_task = loop.run_in_executor(None, transcribe_sync)
-
-            # Rough time budget per stage for interpolation (seconds)
-            # Used as fallback when hook-based progress isn't available.
-            # CPU pyannote diarization is typically 1–3× realtime.
-            stage_time_budget = {
-                "transcribing":  max(duration * 0.05, 30),
-                "loading_align": 20,
-                "aligning":      max(duration * 0.02, 10),
-                "diarizing":     max(duration * 2.5, 60),   # pessimistic CPU estimate
-                "assigning":     5,
-            }
-
-            while not transcription_task.done():
-                await asyncio.sleep(1.0)
-                stage = last_stage[0]
-                elapsed_stage = datetime.now().timestamp() - stage_start_time[0]
-                elapsed_total = datetime.now().timestamp() - job.start_time
-                p_start, p_end = stage_progress_range.get(stage, (1.0, 55.0))
-                if stage == "aligning":
-                    # Use actual batch completion ratio
-                    fraction = min(align_progress[0], 0.99)
-                    n = align_total_segs[0]
-                    done_segs = round(align_progress[0] * n)
-                    job.message = f"Aligning {done_segs}/{n} segments ({elapsed_total:.0f}s elapsed)"
-                    job.progress = round(p_start + fraction * (p_end - p_start), 1)
-                    continue
-                elif stage == "diarizing" and diarize_progress[0] > 0:
-                    # Hook gave us real sub-step progress — use it
-                    fraction = min(diarize_progress[0], 0.99)
-                else:
+                while not transcription_task.done():
+                    await asyncio.sleep(1.0)
+                    stage = last_stage[0]
+                    elapsed_stage = datetime.now().timestamp() - stage_start_time[0]
+                    elapsed_total = datetime.now().timestamp() - job.start_time
+                    p_start, p_end = stage_progress_range.get(stage, (1.0, 60.0))
                     budget = stage_time_budget.get(stage, 60)
                     fraction = min(elapsed_stage / budget, 0.95)
-                stage_labels = {
-                    "transcribing":  "Transcribing audio",
-                    "loading_align": "Loading alignment model",
-                    "diarizing":     "Diarizing speakers",
-                    "assigning":     "Assigning speakers",
+                    stage_labels = {
+                        "transcribing":  "Transcribing audio",
+                        "diarizing":     "Diarizing speakers",
+                        "attributing":   "Attributing speakers",
+                    }
+                    job.progress = round(p_start + fraction * (p_end - p_start), 1)
+                    job.message = f"{stage_labels.get(stage, stage)} ({elapsed_total:.0f}s elapsed)"
+
+                result = await transcription_task
+
+                if cancel_flags.get(job_id):
+                    job.status = JobStatusState.canceled
+                    job.message = "Canceled during transcription"
+                    job.end_time = datetime.now().timestamp()
+                    return
+
+                with open(output_path, "w") as f:
+                    json.dump(result, f, indent=2)
+
+                job.status = JobStatusState.completed
+                job.progress = 100.0
+                job.result = {
+                    "segments": result.get("segments", []),
+                    "language": result.get("language", "en"),
                 }
-                job.progress = round(p_start + fraction * (p_end - p_start), 1)
-                job.message = f"{stage_labels.get(stage, stage)} ({elapsed_total:.0f}s elapsed)"
-
-            result = await transcription_task
-
-            if cancel_flags.get(job_id):
-                job.status = JobStatusState.canceled
-                job.message = "Canceled during transcription"
-                return
-
-            with open(output_path, "w") as f:
-                json.dump(result, f, indent=2)
-
-            job.status = JobStatusState.completed
-            job.progress = 100.0
-            job.result = {
-                "segments": result.get("segments", []),
-                "language": result.get("language", "en"),
-            }
-            job.message = "Transcription completed"
-            job.end_time = datetime.now().timestamp()
-            elapsed = job.end_time - job.start_time
-            print(f"[Whisper] Job {job_id}: DONE in {elapsed:.1f}s — {len(result.get('segments', []))} segments, language={result.get('language', '?')}")
+                job.message = "Transcription completed"
+                job.end_time = datetime.now().timestamp()
+                elapsed = job.end_time - job.start_time
+                print(f"[Whisper] Job {job_id}: DONE in {elapsed:.1f}s — {len(result.get('segments', []))} segments, language={result.get('language', '?')}")
+            finally:
+                _job_release()
 
     except Exception as e:
+        if cancel_flags.get(job_id) or isinstance(e, TranscriptionCancelled):
+            job.status = JobStatusState.canceled
+            job.message = "Canceled during transcription"
+            job.end_time = datetime.now().timestamp()
+            print(f"[Whisper] Job {job_id} canceled during transcription")
+            return
         err_str = str(e)
         # Prefix well-known failure categories so callers can surface them clearly.
         if err_str.startswith("[CUDA OOM]") or (torch.cuda.is_available() and "out of memory" in err_str.lower()):
@@ -718,14 +685,22 @@ async def run_transcription(job_id: str, input_path: str, model_name: str, num_s
             print(f"[Whisper] Cleanup error: {e}")
 
         cancel_flags.pop(job_id, None)
-        await model_manager.release_model()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     os.makedirs(TEMP_INPUT_DIR, exist_ok=True)
     os.makedirs(TEMP_OUTPUT_DIR, exist_ok=True)
-    print(f"[Whisper API] Ready. Model idle timeout: {MODEL_IDLE_TIMEOUT}s")
+    print("[Whisper API] Ready. Stack: Parakeet-TDT-0.6B-v2 ASR + pyannote Community-1 diarization.")
+    # Device selection is automatic (torch.cuda.is_available()); the effective
+    # choice comes from the image (CUDA torch wheels) + GPU device reservation.
+    if torch.cuda.is_available():
+        try:
+            print(f"[Whisper API] CUDA available — GPU: {torch.cuda.get_device_name(0)}")
+        except Exception:
+            print("[Whisper API] CUDA available.")
+    else:
+        print("[Whisper API] CUDA not available — running on CPU (slow; GPU image recommended).")
     cleanup_task = asyncio.create_task(cleanup_old_jobs())
     # Startup pre-warm: if HF_TOKEN is set and models are not cached, start downloading in background.
     if HF_TOKEN:
@@ -738,12 +713,14 @@ async def lifespan(app: FastAPI):
         print("[WhisperAPI] Startup: HF_TOKEN not set — diarization prefetch skipped.", flush=True)
     yield
     cleanup_task.cancel()
-    await model_manager.unload()
+    if _idle_unload_task is not None and not _idle_unload_task.done():
+        _idle_unload_task.cancel()
+    unload_models(force=True)
 
 
 app = FastAPI(
-    title="Whisper Transcription Service",
-    version="2.0.0",
+    title="Therascript Transcription Service",
+    version="3.0.0",
     lifespan=lifespan,
 )
 
@@ -755,14 +732,15 @@ async def root():
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "model_loaded": model_manager.is_loaded}
+    return {"status": "healthy", "model_loaded": _parakeet_model is not None}
 
 
 @app.post("/transcribe", response_model=TranscribeResponse)
 async def transcribe(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    model_name: str = Form(DEFAULT_MODEL),
+    # Accepted for wire compatibility but ignored — ASR is always Parakeet.
+    model_name: str = Form("parakeet-tdt-0.6b-v2"),
     # 0 disables diarization; >=2 enables it with that many speakers.
     num_speakers: int = Form(0),
 ):
@@ -783,9 +761,12 @@ async def transcribe(
     jobs[job_id] = job
     cancel_flags[job_id] = False
 
-    background_tasks.add_task(run_transcription, job_id, input_path, model_name, num_speakers, diarize)
+    background_tasks.add_task(
+        run_transcription, job_id, input_path, model_name, num_speakers,
+        diarize,
+    )
 
-    print(f"[Whisper] Queued job {job_id} for {file.filename} with model '{model_name}', num_speakers={num_speakers}, diarize={diarize}")
+    print(f"[Whisper] Queued job {job_id} for {file.filename} with num_speakers={num_speakers}, diarize={diarize}")
     return TranscribeResponse(job_id=job_id, message="Transcription job queued.")
 
 
@@ -815,17 +796,23 @@ async def cancel_job(job_id: str):
 
 @app.post("/model/unload")
 async def unload_model():
-    was_loaded = await model_manager.unload()
+    was_loaded = unload_models()
+    if was_loaded:
+        message = "Model unloaded, VRAM freed"
+    elif _active_jobs > 0:
+        message = "No model was unloaded — jobs still active"
+    else:
+        message = "No model was loaded"
     return {
         "success": True,
         "was_loaded": was_loaded,
-        "message": "Model unloaded, VRAM freed" if was_loaded else "No model was loaded or jobs still active",
+        "message": message,
     }
 
 
 @app.get("/model/status", response_model=ModelStatus)
 async def get_model_status():
-    return model_manager.get_status()
+    return build_model_status()
 
 
 @app.get("/diarization/check", response_model=DiarizationCheckResponse)

@@ -60,7 +60,7 @@ router.post(
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded.' });
     }
-    const model_name = req.body.model_name || 'tiny';
+    const model_name = req.body.model_name || 'parakeet-tdt-0.6b-v2';
     const num_speakers = parseInt(req.body.num_speakers || '2', 10);
     const input_path = req.file.path;
 

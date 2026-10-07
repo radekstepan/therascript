@@ -31,7 +31,7 @@ This document provides a detailed breakdown of the monorepo's package structure,
 
 ### Responsibilities
 - **Job Consumption:** Consumes jobs from Redis queues (`transcription-jobs`, `analysis-jobs`).
-- **Transcription Processing:** Coordinates file handling and status polling with WhisperX, validates diarization readiness, and enforces speaker-labeled output (`src/jobs/transcriptionProcessor.ts`).
+- **Transcription Processing:** Coordinates file handling and status polling with the transcription service, validates diarization readiness, and enforces speaker-labeled output (`src/jobs/transcriptionProcessor.ts`).
 - **Analysis Execution:** Executes MapReduce strategies using LM Studio to analyze multiple sessions (`src/jobs/analysisProcessor.ts`).
 - **Data Indexing:** Pushes processed transcripts (including `speaker`) and analysis results to Elasticsearch.
 
@@ -67,16 +67,16 @@ This document provides a detailed breakdown of the monorepo's package structure,
 
 ### Responsibilities
 - **Audio Transcoding:** Accepts audio files via HTTP.
-- **Inference Pipeline:** Runs WhisperX ASR + alignment + pyannote diarization + speaker assignment.
+- **Inference Pipeline:** Runs Parakeet ASR (native word timestamps) + Community-1 diarization + word→speaker attribution (`pipeline/`).
 - **Readiness/Prefetch:** Exposes diarization readiness and prefetch endpoints (`GET /diarization/check`, `POST /diarization/prefetch`).
 - **Status Reporting:** Exposes endpoints to poll job status and retrieve speaker-labeled JSON results.
 
 ### Key Libraries
 - **`fastapi` / `uvicorn`**: Python web server.
-- **`whisperx`**: ASR + alignment pipeline.
-- **`pyannote.audio`**: Speaker diarization.
+- **`nemo_toolkit[asr]`**: Parakeet TDT 0.6B v2 ASR.
+- **`pyannote.audio`**: Community-1 speaker diarization.
 - **`huggingface_hub`**: Diarization model cache inspection.
-- **`torch`**: PyTorch framework (CUDA on GPU, int8 compute on CPU path).
+- **`torch`**: PyTorch framework (CUDA on GPU, fp32 CPU fallback; device auto-detected per job).
 - **`ffmpeg`**: System dependency for audio processing.
 
 ## 5. Shared Utilities

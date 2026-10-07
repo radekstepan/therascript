@@ -21,7 +21,7 @@ Purpose: ElysiaJS HTTP API server for sessions, chat, search, jobs, and service 
 - `ELASTICSEARCH_URL` (default http://localhost:9200)
 - `REDIS_HOST`, `REDIS_PORT`
 - `WHISPER_API_URL` (default http://localhost:8000)
-- `WHISPER_MODEL`
+- `WHISPER_MODEL` (retired by the transcription service; usage logging only)
 
 ## Data & Dependencies
 - SQLite via `@therascript/db`; migrations auto-run on boot

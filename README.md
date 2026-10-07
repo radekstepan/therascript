@@ -136,10 +136,68 @@ Before you begin, ensure you have the following installed:
 
 3.  **Hugging Face Account & Token (for Diarization):**
     *   Create an account at [huggingface.co](https://huggingface.co).
-    *   Explicitly accept the user agreements for [`pyannote/speaker-diarization-3.1`](https://huggingface.co/pyannote/speaker-diarization-3.1) and [`pyannote/segmentation-3.0`](https://huggingface.co/pyannote/segmentation-3.0).
+    *   Explicitly accept the user conditions for [`pyannote/speaker-diarization-community-1`](https://huggingface.co/pyannote/speaker-diarization-community-1) (contact-info prompt, auto-accept — no manual approval).
     *   Generate a Hugging Face Access Token (`HF_TOKEN`) with `read` permissions.
-    *   Add `HF_TOKEN=hf_xxxxx` to the root `.env` file used by Docker Compose (this is what the Whisper container reads).
+    *   Add `HF_TOKEN=hf_xxxxx` to the root `.env` file used by Docker Compose (this is what the transcription container reads).
     *   If you also keep `HF_TOKEN` in `.env.api.*` / `.env.worker.*`, keep the value identical to avoid environment drift during debugging.
+
+## Upgrading from WhisperX
+
+If your checkout predates the Parakeet + Community-1 cutover, the old
+WhisperX / pyannote 3.1 code path is gone. `git pull` and follow these steps
+— existing sessions, transcripts, chats, and settings are untouched (only the
+transcription container changes).
+
+1.  **Pull and refresh dependencies:**
+    ```bash
+    git pull
+    nvm use
+    yarn install
+    yarn build
+    yarn build:whisper
+    ```
+2.  **Accept the new diarization model conditions:**
+    *   Visit [`pyannote/speaker-diarization-community-1`](https://huggingface.co/pyannote/speaker-diarization-community-1) while logged in and accept the user conditions. Your existing `HF_TOKEN` works as long as it has `read` permission — no new token needed.
+    *   The old 3.1 / `segmentation-3.0` agreements are no longer required.
+3.  **Update environment (root `.env` used by Docker Compose):**
+    *   Remove `ASR_BACKEND` / `DIARIZATION_BACKEND` if you added them during the transition — they no longer exist.
+    *   `WHISPER_MODEL` is retired (the service always uses Parakeet); you can remove it. `model_name` sent by older worker code is accepted but ignored.
+    *   Optional tuning (defaults shown):
+        ```
+        PARAKEET_MODEL_ID=nvidia/parakeet-tdt-0.6b-v2
+        PARAKEET_CHUNK_SEC=600
+        ```
+4.  **Rebuild the transcription image from scratch** (Python 3.11, torch 2.8,
+    CUDA 12.6 base — a `--build` alone may reuse stale layers, so prune the old image):
+    ```bash
+    docker compose down
+    docker rmi therascript/whisper:cpu therascript/whisper:gpu 2>/dev/null; true
+    docker compose up -d --build            # CPU
+    # or: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build  # GPU
+    ```
+    First startup downloads ~2.5GB Parakeet weights plus the Community-1
+    pipeline into the `hf_cache` / `torch_cache` volumes (one-time;
+    inference itself stays local — audio never leaves your host).
+    CPU vs GPU needs no configuration — the service auto-detects CUDA
+    (details and VRAM budget in `docs/TRANSCRIPTION_BACKENDS.md` → CPU vs GPU).
+5.  **Verify readiness before uploading:**
+    ```bash
+    curl http://localhost:8000/diarization/check
+    ```
+    Expect `hf_token_set: true, ready: true`. If `ready: false`, trigger the
+    download and re-check in a few minutes:
+    ```bash
+    curl -X POST http://localhost:8000/diarization/prefetch
+    ```
+6.  **Re-transcribe?** Existing transcripts remain valid and are **not**
+    automatically redone. To get Parakeet-quality text plus better speaker
+    attribution on an old session, delete it and re-upload the audio
+    (speaker-count dropdown behavior is unchanged).
+
+    Troubleshooting:
+    *   `401/403` or "gated" errors → you skipped step 2 (accept conditions on the model page with the same account that owns `HF_TOKEN`).
+    *   CUDA OOM on first job → the service unloads the LLM automatically before transcribing; if it persists, your GPU is too small to co-host — transcribe while no chat/analysis job is running.
+    *   Route-level 404s after rebuild → `packages/whisper/dist` is stale; rerun `yarn build:whisper` on the host and rebuild with `--force-recreate`.
 
 ## Running the Application
 

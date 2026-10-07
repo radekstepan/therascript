@@ -1,8 +1,13 @@
-FROM python:3.10-slim
+# CPU Dockerfile for the transcription service.
+# Stack: Parakeet (NeMo) ASR + pyannote Community-1 diarization.
+# Parakeet runs on CPU but is slow; GPU image recommended for production.
+# NOTE: torchcodec 0.7.0 has no linux/aarch64 wheel, so on Apple Silicon this
+# image must be built for linux/amd64 (see `platform:` in docker-compose.yml).
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies (ffmpeg is required by whisperx)
+# Install system dependencies (ffmpeg is required by torchcodec audio I/O)
 RUN apt-get update && apt-get install -y \
     curl \
     ffmpeg \
@@ -10,15 +15,12 @@ RUN apt-get update && apt-get install -y \
     supervisor \
     && rm -rf /var/lib/apt/lists/*
 
-# Install PyTorch CPU first.
-# whisperx is installed with --no-deps because its transitive dep pyannote-audio>=4.0.0
-# requires torchcodec which has no aarch64 Linux wheel (Apple Silicon / ARM Docker).
-# We pin pyannote.audio==3.3.2 (last release without torchcodec) in requirements.txt
-# and list whisperx's other deps there explicitly.
-COPY packages/whisper/requirements.txt ./
-RUN pip3 install --no-cache-dir torch==2.2.2 torchaudio==2.2.2 --index-url https://download.pytorch.org/whl/cpu && \
-    pip3 install --no-cache-dir --no-deps whisperx==3.4.2 && \
-    pip3 install --no-cache-dir -r requirements.txt
+# Install PyTorch CPU first, then the pinned runtime deps
+# (pyannote.audio 4.x, NeMo for Parakeet). The constraints file keeps the
+# second install from replacing the CPU torch build with a generic wheel.
+COPY packages/whisper/requirements.txt packages/whisper/constraints-cpu.txt ./
+RUN pip3 install --no-cache-dir torch==2.8.0 torchaudio==2.8.0 torchcodec==0.7.0 --index-url https://download.pytorch.org/whl/cpu && \
+    pip3 install --no-cache-dir -c constraints-cpu.txt -r requirements.txt
 
 # Install Node.js (for the Express wrapper)
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \

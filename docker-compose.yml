@@ -7,6 +7,10 @@
 services:
   # Whisper Transcription Service (CPU mode - default)
   whisper:
+    # torchcodec 0.7.0 ships no linux/aarch64 wheel, so the CPU image cannot
+    # build natively on Apple Silicon — pin amd64 (emulated) instead of a
+    # doomed source build.
+    platform: linux/amd64
     build:
       context: .
       dockerfile: packages/whisper/Dockerfile
@@ -20,6 +24,9 @@ services:
       - torch_cache:/root/.cache/torch
     environment:
       - HF_TOKEN=${HF_TOKEN:-}
+      - PARAKEET_MODEL_ID=${PARAKEET_MODEL_ID:-nvidia/parakeet-tdt-0.6b-v2}
+      - PARAKEET_CHUNK_SEC=${PARAKEET_CHUNK_SEC:-600}
+      - PARAKEET_CHUNK_OVERLAP_SEC=${PARAKEET_CHUNK_OVERLAP_SEC:-10}
     restart: unless-stopped
     healthcheck:
       test: [ 'CMD', 'curl', '--fail', 'http://localhost:8000/health' ]

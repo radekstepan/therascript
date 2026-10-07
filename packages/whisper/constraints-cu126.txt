@@ -1,0 +1,9 @@
+# Pinned PyTorch builds for the GPU transcription image (Dockerfile.gpu,
+# CUDA 12.6). Passed to pip as `-c constraints-cu126.txt` so later lines in
+# requirements.txt (nemo_toolkit, pyannote.audio) can never silently replace
+# the cu126 build with a generic PyPI wheel. If a future dependency needs a
+# newer torch, the image build must fail loudly here instead of shipping a
+# broken runtime — bump these pins and Dockerfile.gpu together.
+torch==2.8.0+cu126
+torchaudio==2.8.0+cu126
+torchcodec==0.7.0+cu126

@@ -4,7 +4,7 @@ This document provides a high-level overview of Therascript's architecture, incl
 
 ## High-Level Overview
 
-Therascript is a **monorepo** containing 10 packages that work together to provide therapy session transcription (WhisperX + diarization) and AI-powered analysis. The system runs as three main processes backed by four Dockerized services.
+Therascript is a **monorepo** containing 10 packages that work together to provide therapy session transcription (Parakeet ASR + Community-1 diarization) and AI-powered analysis. The system runs as three main processes backed by four Dockerized services.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
@@ -78,7 +78,7 @@ packages/
 └── External Service Wrappers
      ├── llama/                  # LM Studio native inference backend setup (lms CLI required)
 
-     ├── whisper/                # Python FastAPI WhisperX service
+     ├── whisper/                # Python FastAPI transcription service (Parakeet + Community-1)
      └── elasticsearch-manager/  # ES container management
 ```
 
@@ -105,7 +105,7 @@ packages/
 |---------|------------|---------|
 | `packages/llama` | lms CLI (native) | LM Studio headless engine — native on all platforms (macOS/Linux/Windows) |
 
-| `packages/whisper` | Python/FastAPI | Audio transcription + diarization service (WhisperX + pyannote) |
+| `packages/whisper` | Python/FastAPI | Audio transcription + diarization service (Parakeet + Community-1) |
 | `packages/elasticsearch-manager` | dockerode | ES container health and management |
 
 ## Infrastructure Layer
@@ -150,9 +150,9 @@ packages/
 │         LM Studio                │           Whisper                │
 │        (port 1234)               │         (port 8000)              │
 ├──────────────────────────────────┼──────────────────────────────────┤
-│ • LLM inference                  │ • ASR + alignment + diarization  │
-│ • Model management               │ • WhisperX + pyannote pipeline   │
-│   (pull, load, unload, delete)   │ • GPU acceleration (CUDA) / CPU int8 │
+│ • LLM inference                  │ • ASR + diarization + attribution│
+│ • Model management               │ • Parakeet + Community-1 pipeline│
+│   (pull, load, unload, delete)   │ • GPU acceleration (CUDA) / CPU fp32 │
 │ • Streaming responses            │ • Status polling + readiness checks │
 │ • Context window management      │                                  │
 └──────────────────────────────────┴──────────────────────────────────┘
@@ -242,7 +242,7 @@ Worker                    Redis                       API                      U
 │  UI  │───►│ API │───►│ Redis │───►│ Worker │───►│ Whisper │───►│ SQLite │
 └──────┘    └─────┘    └───────┘    └────────┘    └─────────┘    │   ES   │
                                                                  └────────┘
-1. Upload audio + readiness check   2. Queue job (numSpeakers)   3. Process   4. Transcribe + align + diarize   5. Store with speaker labels
+ 1. Upload audio + readiness check   2. Queue job (numSpeakers)   3. Process   4. Transcribe + diarize + attribute   5. Store with speaker labels
 ```
 
 ### Chat Pipeline (RAG)
@@ -343,7 +343,7 @@ The `<think>…</think>` envelope is stripped before the emptiness guard so a th
 | **Search** | Elasticsearch 8.x |
 | **Job Queue** | Redis + BullMQ |
 | **LLM** | LM Studio (Llama, Mistral, Gemma) |
-| **Transcription** | WhisperX + pyannote (PyTorch/CUDA or CPU int8) |
+| **Transcription** | Parakeet (NeMo) + pyannote Community-1 (PyTorch/CUDA or CPU) |
 | **Containerization** | Docker, Docker Compose |
 | **Monorepo** | Turborepo, Yarn Workspaces |
 

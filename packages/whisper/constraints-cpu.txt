@@ -1,0 +1,9 @@
+# Pinned PyTorch builds for the CPU transcription image (Dockerfile).
+# Passed to pip as `-c constraints-cpu.txt` so later lines in
+# requirements.txt (nemo_toolkit, pyannote.audio) can never silently replace
+# the CPU build with a generic PyPI wheel. If a future dependency needs a
+# newer torch, the image build must fail loudly here instead of shipping a
+# broken runtime — bump these pins and the Dockerfile together.
+torch==2.8.0
+torchaudio==2.8.0
+torchcodec==0.7.0

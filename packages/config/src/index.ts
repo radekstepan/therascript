@@ -97,7 +97,9 @@ const config = {
   },
   whisper: {
     apiUrl: getEnvVar('WHISPER_API_URL', 'http://localhost:8000'),
-    model: getEnvVar('WHISPER_MODEL', 'tiny'),
+    // Retired by the transcription service (always Parakeet now); kept for
+    // usage logging which groups historical calls by model label.
+    model: getEnvVar('WHISPER_MODEL', 'parakeet-tdt-0.6b-v2'),
     inactivityTimeoutMs: parseIntEnvVar(
       'WHISPER_INACTIVITY_TIMEOUT_MS',
       30 * 60 * 1000 // 30 minutes of no progress
