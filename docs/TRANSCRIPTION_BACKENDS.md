@@ -18,7 +18,15 @@ audio → Parakeet TDT 0.6B v2 (NeMo, native word timestamps, no alignment)
   alignment stage. Long audio is chunked at `PARAKEET_CHUNK_SEC` (default
   600s) with `PARAKEET_CHUNK_OVERLAP_SEC` (default 10s) overlap; words in the
   overlap are deduplicated by midpoint region and timestamps are
-  offset-merged. A cancel flag is polled at chunk boundaries.
+  offset-merged. A cancel flag is polled at chunk boundaries. Per-chunk
+  progress (`completed/total`, with a `(0, total)` report on entry) drives
+  the transcribing-stage bar wherever chunks exist; model loads report as
+  an explicit "Loading model" stage (1–8%) and the remaining blind windows
+  (single-chunk audio, diarization) use time interpolation with
+  device-calibrated budgets (CPU figures measured live: ASR ~0.7× audio
+  duration, diarization ~1.8×). The displayed value is
+  `max(interpolated, real)` pinned to a never-decreasing peak, so the bar
+  can neither freeze at a misleading value nor dip backwards.
 - **Diarization:** `pyannote/speaker-diarization-community-1` (CC-BY-4.0,
   soft-gated: accept conditions on Hugging Face + READ token for first
   download). Words are attributed against the **exclusive** stream (one

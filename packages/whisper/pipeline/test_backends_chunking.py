@@ -114,6 +114,56 @@ def test_cancelled_before_or_during_chunks():
         _restore_defaults()
 
 
+def test_progress_callback_reports_monotonic_fractions():
+    b, _ = _make_backend(chunk_sec=6.0, overlap_sec=1.0)
+    events = []
+    try:
+        audio = list(range(int(15 * SR)))  # 15 s -> 3 chunks
+        words, _ = b.transcribe(audio, on_progress=lambda c, t: events.append((c, t)))
+    finally:
+        _restore_defaults()
+    assert events == [(0, 3), (1, 3), (2, 3), (3, 3)]
+    assert len(words) == 1500
+
+
+def test_progress_callback_single_chunk():
+    b, _ = _make_backend(chunk_sec=6.0, overlap_sec=1.0)
+    events = []
+    try:
+        audio = list(range(int(2 * SR)))
+        words, _ = b.transcribe(audio, on_progress=lambda c, t: events.append((c, t)))
+    finally:
+        _restore_defaults()
+    assert events == [(0, 1), (1, 1)]
+    assert len(words) == 200
+
+
+def test_progress_callback_stops_at_cancellation():
+    # Cancel once two events exist (entry + first chunk): the second chunk
+    # must raise before reporting, so no further events appear.
+    b, _ = _make_backend(chunk_sec=6.0, overlap_sec=1.0)
+    events = []
+    try:
+        audio = list(range(int(15 * SR)))
+
+        def on_progress(completed, total):
+            events.append((completed, total))
+
+        try:
+            b.transcribe(
+                audio,
+                is_cancelled=lambda: len(events) >= 2,
+                on_progress=on_progress,
+            )
+        except TranscriptionCancelled:
+            pass
+        else:
+            raise AssertionError("expected TranscriptionCancelled")
+    finally:
+        _restore_defaults()
+    assert events == [(0, 3), (1, 3)]
+
+
 if __name__ == "__main__":
     import traceback
 

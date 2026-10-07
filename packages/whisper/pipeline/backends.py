@@ -51,12 +51,21 @@ class ASRBackend(ABC):
 
     @abstractmethod
     def transcribe(
-        self, audio: Any, is_cancelled: Optional[Callable[[], bool]] = None
+        self,
+        audio: Any,
+        is_cancelled: Optional[Callable[[], bool]] = None,
+        on_progress: Optional[Callable[[int, int], None]] = None,
     ) -> tuple[List[Word], str]:
         """Return (words, detected_language). Audio is float32 mono at 16kHz.
 
         ``is_cancelled`` is polled at chunk boundaries; when it returns True
         the backend raises TranscriptionCancelled.
+
+        ``on_progress`` (optional) receives ``(completed_chunks, total_chunks)``
+        after each successfully transcribed chunk, so callers can report real
+        (not time-interpolated) progress. Backends emit ``(0, total)`` on entry
+        so callers can distinguish "transcription started" from "no signal
+        yet". Single-chunk audio reports (0, 1) then (1, 1).
         """
 
 
@@ -142,6 +151,7 @@ class ParakeetASRBackend(ASRBackend):
         self,
         audio: Any,
         is_cancelled: Optional[Callable[[], bool]] = None,
+        on_progress: Optional[Callable[[int, int], None]] = None,
     ) -> tuple[List[Word], str]:
         # Parakeet is English-only; language is fixed, not detected.
         chunk_len = int(PARAKEET_CHUNK_SEC * PARAKEET_SAMPLE_RATE)
@@ -151,7 +161,12 @@ class ParakeetASRBackend(ASRBackend):
         if len(audio) <= chunk_len:
             if is_cancelled is not None and is_cancelled():
                 raise TranscriptionCancelled("cancelled before transcription")
-            return self._transcribe_chunk(audio), "en"
+            if on_progress is not None:
+                on_progress(0, 1)
+            words = self._transcribe_chunk(audio)
+            if on_progress is not None:
+                on_progress(1, 1)
+            return words, "en"
         stride = chunk_len - overlap_len
         positions = list(range(0, len(audio), stride))
         # Drop a trailing chunk when the previous chunk already reaches the
@@ -164,6 +179,8 @@ class ParakeetASRBackend(ASRBackend):
         n_chunks = len(positions)
         half_overlap_sec = (overlap_len / PARAKEET_SAMPLE_RATE) / 2.0
         words: List[Word] = []
+        if on_progress is not None:
+            on_progress(0, n_chunks)
         for i, start in enumerate(positions):
             if is_cancelled is not None and is_cancelled():
                 raise TranscriptionCancelled(
@@ -191,6 +208,8 @@ class ParakeetASRBackend(ASRBackend):
                         confidence=w.confidence,
                     )
                 )
+            if on_progress is not None:
+                on_progress(i + 1, n_chunks)
         return words, "en"
 
 

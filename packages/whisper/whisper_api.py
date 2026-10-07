@@ -440,29 +440,41 @@ def run_pipeline(
     device: str,
     on_stage=None,
     is_cancelled=None,
+    on_transcribe_progress=None,
 ) -> tuple[list, str]:
     """Run Parakeet ASR + Community-1 diarization + attribution.
 
     Returns (segments_out, language) in the wire format:
     [{start, end, text, speaker}]. ``num_speakers`` is the user's selection
     passed straight through (never hard-coded). ``on_stage`` (optional)
-    receives "transcribing" / "diarizing" / "attributing" as each phase
-    starts so progress reporting tracks the real work. ``is_cancelled``
+    receives "model_loading" / "transcribing" / "diarizing" / "attributing"
+    as each phase starts so progress reporting tracks the real work (model
+    loads are their own stage so a cold load never masquerades as
+    transcription). ``is_cancelled``
     (optional) aborts between ASR chunks; diarization itself is one
-    uninterruptible call.
+    uninterruptible call. ``on_transcribe_progress`` (optional) receives
+    ``(completed_chunks, total_chunks)`` after each ASR chunk for real
+    (non-interpolated) progress reporting.
     """
     if on_stage is not None:
-        on_stage("transcribing")
+        on_stage("model_loading")
     print("[Whisper] Transcribing with Parakeet (native word timestamps, no alignment)...")
     asr = _get_parakeet_model(device)
-    words, language = asr.transcribe(audio, is_cancelled=is_cancelled)
+    if on_stage is not None:
+        on_stage("transcribing")
+    words, language = asr.transcribe(
+        audio, is_cancelled=is_cancelled, on_progress=on_transcribe_progress
+    )
 
     print(f"[Whisper] {len(words)} words, language={language}")
     if diarize:
         if on_stage is not None:
+            on_stage("model_loading")
+        print("[Whisper] Loading Community-1 diarizer...")
+        diarizer = _get_diarizer(device)
+        if on_stage is not None:
             on_stage("diarizing")
         print(f"[Whisper] Diarizing with Community-1 (num_speakers={num_speakers}, exclusive segments)...")
-        diarizer = _get_diarizer(device)
         segments = diarizer.diarize(audio, num_speakers=num_speakers)
         print(f"[Whisper] {len(segments)} diarization segments")
         if on_stage is not None:
@@ -570,23 +582,46 @@ async def run_transcription(
                 job.message = "Transcribing audio..."
                 job.progress = 1.0
 
-                last_stage = ["transcribing"]
+                last_stage = ["model_loading"]
                 stage_start_time = [datetime.now().timestamp()]
+                # Displayed progress never moves backwards (e.g. when the
+                # diarizer load re-enters the model_loading stage after
+                # transcribing already reached ~60%).
+                _progress_peak = [1.0]
 
                 def _on_stage(stage: str) -> None:
                     last_stage[0] = stage
                     stage_start_time[0] = datetime.now().timestamp()
 
+                # Real (non-interpolated) ASR progress: reported per completed
+                # audio chunk from the executor thread. The callback only
+                # touches this lock-guarded state — `job` itself is mutated
+                # on the event loop below.
+                import threading as _threading
+
+                _chunk_lock = _threading.Lock()
+                _chunk_done = [0]
+                _chunk_total = [0]
+
+                def _on_transcribe_progress(completed: int, total: int) -> None:
+                    with _chunk_lock:
+                        _chunk_done[0] = completed
+                        _chunk_total[0] = total
+
                 # Parakeet emits word timestamps natively — no alignment stage.
+                # Model loads are their own stage so a cold load never
+                # masquerades as transcription progress.
                 if diarize:
                     stage_progress_range = {
-                        "transcribing": (1.0, 60.0),
+                        "model_loading": (1.0, 8.0),
+                        "transcribing": (8.0, 60.0),
                         "diarizing":    (60.0, 88.0),
                         "attributing":  (88.0, 95.0),
                     }
                 else:
                     stage_progress_range = {
-                        "transcribing": (1.0, 95.0),
+                        "model_loading": (1.0, 8.0),
+                        "transcribing": (8.0, 95.0),
                     }
 
                 def transcribe_sync():
@@ -597,6 +632,7 @@ async def run_transcription(
                         audio, num_speakers, diarize, device,
                         on_stage=_on_stage,
                         is_cancelled=lambda: cancel_flags.get(job_id, False),
+                        on_transcribe_progress=_on_transcribe_progress,
                     )
                     print(f"[Whisper] Job {job_id}: Done - {len(segments_out)} segments, language={language}", flush=True)
                     for i, seg in enumerate(segments_out):
@@ -608,13 +644,25 @@ async def run_transcription(
                 loop = asyncio.get_event_loop()
                 transcription_task = loop.run_in_executor(None, transcribe_sync)
 
-                # Rough time budget per stage for interpolation (seconds).
-                # CPU Community-1 diarization is typically 1–3× realtime.
-                stage_time_budget = {
-                    "transcribing":  max(duration * 0.05, 30),
-                    "diarizing":     max(duration * 2.5, 60),   # pessimistic CPU estimate
-                    "attributing":   5,
-                }
+                # Time budgets per stage for interpolation (seconds). CPU
+                # figures are calibrated from live runs on this stack (250s
+                # audio: ~150s ASR incl. cold load, ~390s diarization incl.
+                # cold load); GPU keeps the original optimistic constants —
+                # no GPU measurements exist yet.
+                if device == "cuda":
+                    stage_time_budget = {
+                        "model_loading":  60,
+                        "transcribing":   max(duration * 0.05, 30),
+                        "diarizing":      max(duration * 2.5, 60),
+                        "attributing":    5,
+                    }
+                else:
+                    stage_time_budget = {
+                        "model_loading":  120,
+                        "transcribing":   max(duration * 0.7, 30),
+                        "diarizing":      max(duration * 1.8, 60),
+                        "attributing":    5,
+                    }
 
                 while not transcription_task.done():
                     await asyncio.sleep(1.0)
@@ -623,13 +671,29 @@ async def run_transcription(
                     elapsed_total = datetime.now().timestamp() - job.start_time
                     p_start, p_end = stage_progress_range.get(stage, (1.0, 60.0))
                     budget = stage_time_budget.get(stage, 60)
-                    fraction = min(elapsed_stage / budget, 0.95)
+                    interp = min(elapsed_stage / budget, 0.95)
+                    if stage == "transcribing":
+                        with _chunk_lock:
+                            chunk_done, chunk_total = _chunk_done[0], _chunk_total[0]
+                        real = min(chunk_done / chunk_total, 1.0) if chunk_total > 0 else 0.0
+                        # max() of two non-decreasing signals: real chunk
+                        # steps when they run ahead, calibrated interpolation
+                        # otherwise (e.g. single-chunk audio). The bar can
+                        # never run ahead of reality and dip back down.
+                        fraction = max(interp, real)
+                    else:
+                        fraction = interp
                     stage_labels = {
+                        "model_loading":   "Loading model",
                         "transcribing":  "Transcribing audio",
                         "diarizing":     "Diarizing speakers",
                         "attributing":   "Attributing speakers",
                     }
                     job.progress = round(p_start + fraction * (p_end - p_start), 1)
+                    if job.progress < _progress_peak[0]:
+                        job.progress = _progress_peak[0]
+                    else:
+                        _progress_peak[0] = job.progress
                     job.message = f"{stage_labels.get(stage, stage)} ({elapsed_total:.0f}s elapsed)"
 
                 result = await transcription_task
