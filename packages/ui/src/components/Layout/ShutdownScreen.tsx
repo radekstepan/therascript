@@ -1,6 +1,6 @@
 // packages/ui/src/components/Layout/ShutdownScreen.tsx
 import React, { useEffect, useState } from 'react';
-import { Power, BrainCircuit, Check } from 'lucide-react';
+import { Power, AudioLines, Check } from 'lucide-react';
 import { cn } from '../../utils';
 
 const STEPS = [
@@ -58,10 +58,9 @@ export function ShutdownScreen() {
       >
         {/* Branding */}
         <div className="flex items-center gap-2">
-          <BrainCircuit
-            size={16}
-            className="text-slate-500 dark:text-slate-500"
-          />
+          <div className="w-6 h-6 bg-[var(--accent-9)] rounded-md flex items-center justify-center">
+            <AudioLines size={14} className="text-white" />
+          </div>
           <span className="text-slate-500 dark:text-slate-500 text-xs font-semibold tracking-[0.2em] uppercase">
             Therascript
           </span>

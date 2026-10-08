@@ -226,10 +226,20 @@ export function PersistentSidebar() {
         {/* Top Section */}
         <div
           className={cn(
-            'flex items-center h-14 p-4',
-            isSidebarOpen ? 'justify-between' : 'justify-center'
+            'flex items-center p-4',
+            isSidebarOpen
+              ? 'flex-row h-14 justify-between'
+              : 'flex-col h-auto justify-center gap-3'
           )}
         >
+          {!isSidebarOpen && (
+            <div
+              className="w-8 h-8 bg-[var(--accent-9)] rounded-lg flex items-center justify-center"
+              aria-hidden="true"
+            >
+              <AudioLines size={18} className="text-white" />
+            </div>
+          )}
           {isSidebarOpen && (
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 bg-[var(--accent-9)] rounded-lg flex items-center justify-center">

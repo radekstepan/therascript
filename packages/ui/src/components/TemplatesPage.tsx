@@ -25,7 +25,7 @@ import {
   TrashIcon,
   InfoCircledIcon,
 } from '@radix-ui/react-icons';
-import { BrainCircuit } from 'lucide-react';
+import { AudioLines } from 'lucide-react';
 import { toastMessageAtom } from '../store';
 import type { Template } from '../types';
 import {
@@ -362,7 +362,7 @@ export function TemplatesPage() {
             <Flex justify="between" align="center" mb="4">
               <Heading as="h2" size="5">
                 <Flex align="center" gap="2">
-                  <BrainCircuit /> System Prompts
+                  <AudioLines /> System Prompts
                 </Flex>
               </Heading>
             </Flex>

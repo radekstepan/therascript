@@ -1,6 +1,6 @@
 // packages/ui/src/components/Layout/RestartScreen.tsx
 import React, { useEffect, useState } from 'react';
-import { RefreshCw, BrainCircuit, Check } from 'lucide-react';
+import { RefreshCw, AudioLines, Check } from 'lucide-react';
 import { cn } from '../../utils';
 
 const STEPS = [
@@ -39,10 +39,9 @@ function ProgressScreen({ step }: { step: number }) {
   return (
     <div className="flex flex-col items-center gap-8">
       <div className="flex items-center gap-2">
-        <BrainCircuit
-          size={16}
-          className="text-slate-500 dark:text-slate-500"
-        />
+        <div className="w-6 h-6 bg-[var(--accent-9)] rounded-md flex items-center justify-center">
+          <AudioLines size={14} className="text-white" />
+        </div>
         <span className="text-slate-500 dark:text-slate-500 text-xs font-semibold tracking-[0.2em] uppercase">
           Therascript
         </span>
