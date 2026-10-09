@@ -13,6 +13,7 @@ import {
   writeReadiness,
   type ReadinessShape,
 } from '../state';
+import { resetE2ePullJobs } from './llm';
 
 export const e2eHandlers = [
   // Failure injection for POST /api/sessions/upload
@@ -31,6 +32,7 @@ export const e2eHandlers = [
   }),
   http.post('/api/__e2e/reset', () => {
     e2eMockSeed();
+    resetE2ePullJobs();
     return HttpResponse.json({ ok: true });
   }),
   http.post('/api/__e2e/set-ready', async ({ request }) => {

@@ -177,6 +177,15 @@ export const LOCAL_MODELS = [
   localModelDetails('mistral-7b-local'),
 ];
 
+// --- Mutable local-model catalog (llm-pull-delete.spec.ts) --------------
+// `available-models` serves this list so POST /api/llm/delete-model can
+// remove entries observably. Reseeded by `e2eMockSeed`.
+export let e2eLocalModels = [...LOCAL_MODELS];
+
+export const setE2eLocalModels = (next: typeof LOCAL_MODELS) => {
+  e2eLocalModels = next;
+};
+
 export const REMOTE_MODELS = [
   {
     ...localModelDetails('gpt-4o'),
@@ -584,6 +593,7 @@ export const e2eMockSeed = () => {
   setE2eNextTemplateId(3);
   setE2eSession1Transcript(seedSession1Transcript());
   setE2eUploadError(null);
+  setE2eLocalModels([...LOCAL_MODELS]);
   setE2eAnalysisJobs([
     {
       id: 100,

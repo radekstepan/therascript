@@ -23,31 +23,48 @@ import {
 } from '../state';
 
 export const sessionHandlers = [
-  // Structured transcript paragraphs for the intake session. Small but
-  // non-empty so the Transcription panel renders content and the
-  // transcript token count is plausibly non-zero.
-  http.patch('/api/sessions/1/transcript', async () => {
-    return HttpResponse.json([
-      {
-        id: 0,
-        timestamp: 0,
-        text: 'Therapist: Hi Jane, thanks for coming in today. Can you tell me what brought you here?',
-        speaker: 'Therapist',
-      },
-      {
-        id: 1,
-        timestamp: 6000,
-        text: 'Jane: I have been feeling VERY anxious for the past few months, especially at work.',
-        speaker: 'Jane',
-      },
-      {
-        id: 2,
-        timestamp: 14000,
-        text: 'Therapist: That sounds difficult. Let us explore that together.',
-        speaker: 'Therapist',
-      },
-    ]);
+  // Stateful transcript edit: PATCH /api/sessions/1/transcript applies
+  // { paragraphIndex, newText } (matched by paragraph id) to the
+  // seed transcript and returns the full updated array, mirroring
+  // updateTranscriptParagraph(). Reseeded by POST /api/__e2e/reset.
+  http.patch('/api/sessions/1/transcript', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      paragraphIndex?: number;
+      newText?: string;
+    };
+    if (
+      typeof body.paragraphIndex === 'number' &&
+      typeof body.newText === 'string'
+    ) {
+      setE2eSession1Transcript(
+        e2eSession1Transcript.map((p) =>
+          p.id === body.paragraphIndex ? { ...p, text: body.newText! } : p
+        )
+      );
+    }
+    return HttpResponse.json(e2eSession1Transcript);
   }),
+
+  // Stateful paragraph delete: DELETE
+  // /api/sessions/:id/transcript/:paragraphIndex removes the paragraph
+  // (matched by id) and returns the full updated array, mirroring
+  // deleteTranscriptParagraph(). Owned by transcript-delete.spec.ts.
+  http.delete(
+    '/api/sessions/:sessionId/transcript/:paragraphIndex',
+    ({ params }) => {
+      const paragraphIndex = parseInt(params.paragraphIndex as string, 10);
+      if (!e2eSession1Transcript.some((p) => p.id === paragraphIndex)) {
+        return HttpResponse.json(
+          { message: `Paragraph ${paragraphIndex} not found.` },
+          { status: 404 }
+        );
+      }
+      setE2eSession1Transcript(
+        e2eSession1Transcript.filter((p) => p.id !== paragraphIndex)
+      );
+      return HttpResponse.json(e2eSession1Transcript);
+    }
+  ),
 
   // Stateful: PATCH /api/sessions/:id/speakers (below) mutates the
   // speaker labels in place so speaker-rename.spec.ts can assert the

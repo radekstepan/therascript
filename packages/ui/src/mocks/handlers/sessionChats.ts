@@ -10,11 +10,31 @@ import { http, HttpResponse } from 'msw';
 import {
   MOCK_CHAT_ID,
   appendMockChatMessages,
+  e2eSessionChats,
   mockActiveModel,
   mockChatMessages,
   mockMessageCounter,
+  setE2eSessionChats,
   setMockMessageCounter,
 } from '../state';
+
+// Delay (ms) before the `__slow__` sentinel stream emits its final
+// chunks. Long enough for chat-stop.spec.ts to observe the Cancel
+// button and click it before the stream completes on its own.
+const SLOW_STREAM_TAIL_DELAY_MS = 8000;
+
+const sseResponse = (
+  stream: ReadableStream<Uint8Array>,
+  userMessageId?: number
+) =>
+  new HttpResponse(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      ...(userMessageId !== undefined
+        ? { 'X-User-Message-Id': String(userMessageId) }
+        : {}),
+    },
+  });
 
 export const sessionChatsHandlers = [
   // Context-usage snapshot for the active chat. Non-zero prompt/percent
@@ -75,6 +95,71 @@ export const sessionChatsHandlers = [
       return new HttpResponse(stream, {
         headers: { 'Content-Type': 'text/event-stream' },
       });
+    }
+
+    // Slow-stream injection for chat-stop.spec.ts: a message
+    // containing the sentinel emits the opening chunks immediately,
+    // then holds the stream open for SLOW_STREAM_TAIL_DELAY_MS before
+    // emitting the tail. The client abort (STOP button) cancels the
+    // detached timer via the stream's cancel callback. The user
+    // message + partial AI text are persisted (like the happy path)
+    // so the post-stream refetch — which the client always fires —
+    // restores the turn instead of wiping it, mirroring the real
+    // backend that saves the user message on receipt.
+    if (userText.includes('__slow__')) {
+      const userMessageId = 100 + mockMessageCounter * 2;
+      const aiMessageId = 101 + mockMessageCounter * 2;
+      setMockMessageCounter(mockMessageCounter + 1);
+      const timestamp = Date.now();
+      appendMockChatMessages([
+        {
+          id: userMessageId,
+          chatId: MOCK_CHAT_ID,
+          sender: 'user',
+          text: userText,
+          timestamp,
+        },
+        {
+          id: aiMessageId,
+          chatId: MOCK_CHAT_ID,
+          sender: 'ai',
+          text: 'Hello ',
+          timestamp: timestamp + 1,
+        },
+      ]);
+      const encoder = new TextEncoder();
+      const sse = (payload: unknown) =>
+        encoder.encode(`data: ${JSON.stringify(payload)}\n\n`);
+      let tailTimer: ReturnType<typeof setTimeout> | null = null;
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(sse({ status: 'thinking' }));
+          controller.enqueue(sse({ status: 'responding' }));
+          controller.enqueue(sse({ chunk: 'Hello ' }));
+          tailTimer = setTimeout(() => {
+            try {
+              controller.enqueue(sse({ chunk: 'from the slow mock LLM' }));
+              controller.enqueue(
+                sse({
+                  done: true,
+                  completionTokens: 24,
+                  thinkingTokens: 0,
+                  duration: SLOW_STREAM_TAIL_DELAY_MS,
+                  isTruncated: false,
+                })
+              );
+              controller.close();
+            } catch {
+              // Client aborted mid-stream; the cancel callback below
+              // already cleared the timer — ignore the late enqueue.
+            }
+          }, SLOW_STREAM_TAIL_DELAY_MS);
+        },
+        cancel() {
+          if (tailTimer) clearTimeout(tailTimer);
+        },
+      });
+      return sseResponse(stream, userMessageId);
     }
 
     const userMessageId = 100 + mockMessageCounter * 2;
@@ -187,4 +272,50 @@ export const sessionChatsHandlers = [
       thresholds: { warnAt: 0.6, dangerAt: 0.85 },
     })
   ),
+
+  // PATCH /api/sessions/:sessionId/chats/:chatId/name — rename a
+  // session chat. Mutates `e2eSessionChats` so the sidebar re-renders
+  // with the new name. Owned by session-chat-manage.spec.ts.
+  http.patch(
+    '/api/sessions/:sessionId/chats/:chatId/name',
+    async ({ request, params }) => {
+      const sessionId = parseInt(params.sessionId as string, 10);
+      const chatId = parseInt(params.chatId as string, 10);
+      const body = (await request.json().catch(() => ({}))) as {
+        name?: string | null;
+      };
+      const existing = e2eSessionChats[sessionId] || [];
+      const chat = existing.find((c) => c.id === chatId);
+      if (!chat) {
+        return HttpResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+      const nextName =
+        typeof body.name === 'string' && body.name.length > 0
+          ? body.name
+          : null;
+      setE2eSessionChats({
+        ...e2eSessionChats,
+        [sessionId]: existing.map((c) =>
+          c.id === chatId ? { ...c, name: nextName } : c
+        ),
+      });
+      return HttpResponse.json({ ...chat, name: nextName });
+    }
+  ),
+
+  // DELETE /api/sessions/:sessionId/chats/:chatId — delete a session
+  // chat. Removes it from `e2eSessionChats`. Owned by
+  // session-chat-manage.spec.ts.
+  http.delete('/api/sessions/:sessionId/chats/:chatId', ({ params }) => {
+    const sessionId = parseInt(params.sessionId as string, 10);
+    const chatId = parseInt(params.chatId as string, 10);
+    const existing = e2eSessionChats[sessionId] || [];
+    setE2eSessionChats({
+      ...e2eSessionChats,
+      [sessionId]: existing.filter((c) => c.id !== chatId),
+    });
+    return HttpResponse.json({
+      message: `Session chat ${chatId} deleted.`,
+    });
+  }),
 ];

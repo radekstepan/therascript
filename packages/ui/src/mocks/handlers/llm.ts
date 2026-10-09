@@ -11,31 +11,55 @@
 // (remote URL + token end-to-end).
 import { http, HttpResponse } from 'msw';
 import {
-  LOCAL_MODELS,
   MOCK_LOCAL_DEFAULT_BASE_URL,
   REMOTE_MODELS,
+  e2eLocalModels,
   localModelDetails,
   mockActiveBaseUrl,
   mockActiveModel,
   mockLlmApiToken,
   mockModelLoaded,
+  setE2eLocalModels,
   setMockActiveBaseUrl,
   setMockActiveModel,
   setMockLlmApiToken,
   setMockModelLoaded,
 } from '../state';
 
+// --- Model-pull job state machine (llm-pull-delete.spec.ts) -------------
+// POST /api/llm/pull-model creates a job; GET
+// /api/llm/pull-status/:jobId returns `downloading` for the first two
+// polls (progress 42) then `completed`, unless POST
+// /api/llm/cancel-pull/:jobId flips it to `canceled`. Reset via
+// POST /api/__e2e/reset (see e2e.ts).
+interface E2EPullJob {
+  jobId: string;
+  modelName: string;
+  polls: number;
+  canceled: boolean;
+}
+
+let e2ePullJobs: Record<string, E2EPullJob> = {};
+let e2ePullCounter = 0;
+
+export const resetE2ePullJobs = () => {
+  e2ePullJobs = {};
+  e2ePullCounter = 0;
+};
+
 export const llmHandlers = [
   // /api/llm/available-models branches on the baseUrl query param
   // so the LlmEndpointModelPicker can render disjoint local and
   // remote lists. The chat e2e spec asserts that the two lists
-  // differ.
+  // differ. The local list is served from the mutable
+  // `e2eLocalModels` so POST /api/llm/delete-model removals are
+  // observable (llm-pull-delete.spec.ts).
   http.get('/api/llm/available-models', ({ request }) => {
     const url = new URL(request.url);
     const baseUrl = url.searchParams.get('baseUrl');
     const isLocal = !baseUrl || baseUrl === MOCK_LOCAL_DEFAULT_BASE_URL;
     return HttpResponse.json({
-      models: isLocal ? LOCAL_MODELS : REMOTE_MODELS,
+      models: isLocal ? e2eLocalModels : REMOTE_MODELS,
     });
   }),
 
@@ -135,6 +159,99 @@ export const llmHandlers = [
       defaultBaseUrl: MOCK_LOCAL_DEFAULT_BASE_URL,
       isRemoteBaseUrl: effectiveBaseUrl !== MOCK_LOCAL_DEFAULT_BASE_URL,
       hasRemoteApiToken: !!mockLlmApiToken,
+    });
+  }),
+
+  // POST /api/llm/pull-model — start a mock download job. Returns
+  // 202 + jobId (the client throws unless status is 202 with a
+  // jobId). Owned by llm-pull-delete.spec.ts.
+  http.post('/api/llm/pull-model', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      modelUrl?: string;
+    };
+    e2ePullCounter += 1;
+    const jobId = `e2e-pull-${e2ePullCounter}`;
+    const rawUrl = typeof body.modelUrl === 'string' ? body.modelUrl : '';
+    const modelName =
+      rawUrl.split('/').filter(Boolean).pop() || 'mock-model.gguf';
+    e2ePullJobs[jobId] = { jobId, modelName, polls: 0, canceled: false };
+    return HttpResponse.json(
+      { jobId, message: `Download job started for ${modelName}.` },
+      { status: 202 }
+    );
+  }),
+
+  // GET /api/llm/pull-status/:jobId — `downloading` (progress 42) for
+  // the first two polls, then `completed`; `canceled` once
+  // POST /api/llm/cancel-pull/:jobId flips the job. The shape mirrors
+  // UIDownloadJobStatus (see src/api/llm.ts + types.ts).
+  http.get('/api/llm/pull-status/:jobId', ({ params }) => {
+    const job = e2ePullJobs[params.jobId as string];
+    if (!job) {
+      return HttpResponse.json(
+        { message: `Download job ${params.jobId} not found.` },
+        { status: 404 }
+      );
+    }
+    if (job.canceled) {
+      return HttpResponse.json({
+        jobId: job.jobId,
+        modelName: job.modelName,
+        status: 'canceled',
+        progress: 0,
+        message: 'Download canceled.',
+        error: null,
+      });
+    }
+    job.polls += 1;
+    if (job.polls <= 2) {
+      return HttpResponse.json({
+        jobId: job.jobId,
+        modelName: job.modelName,
+        status: 'downloading',
+        progress: 42,
+        message: `Downloading ${job.modelName}... 42%`,
+        error: null,
+      });
+    }
+    return HttpResponse.json({
+      jobId: job.jobId,
+      modelName: job.modelName,
+      status: 'completed',
+      progress: 100,
+      message: `Download complete for ${job.modelName}.`,
+      error: null,
+    });
+  }),
+
+  // POST /api/llm/cancel-pull/:jobId — flip the job to `canceled` so
+  // the next status poll reports it and the modal toasts.
+  http.post('/api/llm/cancel-pull/:jobId', ({ params }) => {
+    const job = e2ePullJobs[params.jobId as string];
+    if (!job) {
+      return HttpResponse.json(
+        { message: `Download job ${params.jobId} not found.` },
+        { status: 404 }
+      );
+    }
+    job.canceled = true;
+    return HttpResponse.json({ message: 'Pull job canceled.' });
+  }),
+
+  // POST /api/llm/delete-model — remove the model from the mutable
+  // local catalog so the next available-models fetch no longer lists
+  // it. The modal also optimistically patches its query cache.
+  http.post('/api/llm/delete-model', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      modelName?: string;
+    };
+    if (typeof body.modelName === 'string') {
+      setE2eLocalModels(
+        e2eLocalModels.filter((m) => m.name !== body.modelName)
+      );
+    }
+    return HttpResponse.json({
+      message: `Model ${body.modelName} deleted.`,
     });
   }),
 ];

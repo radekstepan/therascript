@@ -37,4 +37,41 @@ export const systemHandlers = [
       errors: [],
     })
   ),
+
+  // Docker container status + logs. DockerStatusModal.tsx is currently
+  // not mounted anywhere in the UI (orphan), so system-status.spec.ts
+  // covers these endpoints via page-context fetch, asserting the
+  // contract the modal will consume once wired up.
+  http.get('/api/docker/status', () =>
+    HttpResponse.json({
+      containers: [
+        {
+          id: 'e2e-whisper-id',
+          name: 'therascript_whisper_service',
+          image: 'therascript-whisper:latest',
+          state: 'running',
+          status: 'Up 2 hours',
+          ports: [
+            { IP: '0.0.0.0', PublicPort: 8000, PrivatePort: 8000, Type: 'tcp' },
+          ],
+        },
+        {
+          id: 'e2e-es-id',
+          name: 'therascript_elasticsearch',
+          image: 'elasticsearch:8.x',
+          state: 'running',
+          status: 'Up 2 hours (healthy)',
+          ports: [
+            { IP: '0.0.0.0', PublicPort: 9200, PrivatePort: 9200, Type: 'tcp' },
+          ],
+        },
+      ],
+    })
+  ),
+
+  http.get('/api/docker/logs/:containerName', ({ params }) =>
+    HttpResponse.json({
+      logs: `[mock] recent logs for ${params.containerName}\nline 1: service healthy`,
+    })
+  ),
 ];
