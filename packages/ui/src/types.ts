@@ -201,6 +201,24 @@ export interface LlmStatus {
    * clear it without re-entering the original value.
    */
   hasRemoteApiToken?: boolean;
+  /**
+   * Last background model-load attempt. `set-model` returns before the
+   * load finishes, so without this the UI can only infer "loading" from
+   * `loaded: false` — and a failed load looks identical to a slow one.
+   * Optional for tolerance of stale/cached responses; missing means idle.
+   */
+  loadState?: LlmLoadState;
+}
+
+/** Mirrors the backend `LoadAttemptState` from `loadAttemptTracker`. */
+export interface LlmLoadState {
+  status: 'idle' | 'loading' | 'failed';
+  /** Model key the last attempt targeted; null when idle/never attempted. */
+  modelName: string | null;
+  /** Human-readable failure reason; non-null only when failed. */
+  error: string | null;
+  /** ISO timestamp of the last transition; null when never attempted. */
+  attemptedAt: string | null;
 }
 export interface AvailableModelsResponse {
   models: LlmModelInfo[];

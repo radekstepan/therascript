@@ -30,6 +30,7 @@ import type { LlmModelInfo } from '@therascript/domain';
 
 const {
   LlmModelInfoSchema,
+  LlmLoadStateSchema,
   LlmStatusResponseSchema,
   AvailableModelsResponseSchema,
 } = llmResponseSchemas;
@@ -81,6 +82,12 @@ const sampleStatusResponse = {
   defaultBaseUrl: 'http://localhost:1234',
   isRemoteBaseUrl: true,
   hasRemoteApiToken: false,
+  loadState: {
+    status: 'idle',
+    modelName: null,
+    error: null,
+    attemptedAt: null,
+  },
 };
 
 // --- Tests --------------------------------------------------------------
@@ -164,5 +171,42 @@ describe('llmRoutes response schemas', () => {
     const broken = { ...sampleModelInfo };
     delete (broken as Record<string, unknown>).name;
     expect(Value.Check(LlmModelInfoSchema, broken)).toBe(false);
+  });
+
+  it('accepts a status payload carrying a failed load attempt', () => {
+    // The background load in `loadLlmModel` records failures in the
+    // tracker; the status handler spreads that snapshot into every
+    // response so the UI can render the reason instead of spinning.
+    const failed = {
+      ...sampleStatusResponse,
+      loaded: false,
+      loadState: {
+        status: 'failed',
+        modelName: 'qwen3.6-27b-mtp',
+        error:
+          "Failed to load model 'qwen3.6-27b-mtp' via LM Studio API: No LM Runtime found for model format 'gguf'!",
+        attemptedAt: '2026-10-18T21:14:09.000Z',
+      },
+    };
+    expect(Value.Check(LlmStatusResponseSchema, failed)).toBe(true);
+  });
+
+  it('rejects a status payload missing the required loadState', () => {
+    // `loadState` is required (the tracker always returns a snapshot,
+    // defaulting to idle). A handler that forgets to include it must
+    // fail loudly here rather than 422 at runtime.
+    const broken = { ...sampleStatusResponse };
+    delete (broken as Record<string, unknown>).loadState;
+    expect(Value.Check(LlmStatusResponseSchema, broken)).toBe(false);
+  });
+
+  it('rejects a loadState with an unknown status value', () => {
+    const broken = {
+      status: 'crashed',
+      modelName: 'qwen3.6-27b-mtp',
+      error: 'boom',
+      attemptedAt: null,
+    };
+    expect(Value.Check(LlmLoadStateSchema, broken)).toBe(false);
   });
 });

@@ -35,6 +35,7 @@ import {
   hasActiveApiToken,
   setActiveApiToken,
 } from '../services/activeModelService.js';
+import { getLastLoadAttempt } from '../services/loadAttemptTracker.js';
 import type {
   LlmModelInfo,
   ModelDownloadJobStatus,
@@ -81,6 +82,20 @@ const LlmModelInfoSchema = t.Object({
 const AvailableModelsResponseSchema = t.Object({
   models: t.Array(LlmModelInfoSchema),
 });
+// Last background model-load attempt, from `loadAttemptTracker`. Always
+// present: `set-model` fires the load without awaiting it, so this is the
+// only channel through which a load failure (or in-progress load) reaches
+// the UI's status poll. `error` is non-null only when `status` is 'failed'.
+const LlmLoadStateSchema = t.Object({
+  status: t.Union([
+    t.Literal('idle'),
+    t.Literal('loading'),
+    t.Literal('failed'),
+  ]),
+  modelName: t.Union([t.String(), t.Null()]),
+  error: t.Union([t.String(), t.Null()]),
+  attemptedAt: t.Union([t.String(), t.Null()]),
+});
 const LlmStatusResponseSchema = t.Object({
   status: t.Union([t.Literal('available'), t.Literal('unavailable')]),
   activeModel: t.String(),
@@ -104,6 +119,7 @@ const LlmStatusResponseSchema = t.Object({
   defaultBaseUrl: t.String(),
   isRemoteBaseUrl: t.Boolean(),
   hasRemoteApiToken: t.Boolean(),
+  loadState: LlmLoadStateSchema,
 });
 const SetModelBodySchema = t.Object({
   modelName: t.String({ minLength: 1, error: 'Model name is required.' }),
@@ -658,6 +674,7 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
                 defaultBaseUrl,
                 isRemoteBaseUrl,
                 hasRemoteApiToken,
+                loadState: getLastLoadAttempt(),
               };
             } else {
               const loadedModelInfo = loadedModelResult as LlmModelInfo | null;
@@ -686,6 +703,7 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
                 defaultBaseUrl,
                 isRemoteBaseUrl,
                 hasRemoteApiToken,
+                loadState: getLastLoadAttempt(),
               };
             }
           } catch (error: any) {
@@ -829,12 +847,14 @@ export const llmResponseSchemas: {
   LlmModelInfoSchema: TSchema;
   LlmModelDetailSchema: TSchema;
   LlmModelArchitectureSchema: TSchema;
+  LlmLoadStateSchema: TSchema;
   LlmStatusResponseSchema: TSchema;
   AvailableModelsResponseSchema: TSchema;
 } = {
   LlmModelInfoSchema: LlmModelInfoSchema as unknown as TSchema,
   LlmModelDetailSchema: LlmModelDetailSchema as unknown as TSchema,
   LlmModelArchitectureSchema: LlmModelArchitectureSchema as unknown as TSchema,
+  LlmLoadStateSchema: LlmLoadStateSchema as unknown as TSchema,
   LlmStatusResponseSchema: LlmStatusResponseSchema as unknown as TSchema,
   AvailableModelsResponseSchema:
     AvailableModelsResponseSchema as unknown as TSchema,

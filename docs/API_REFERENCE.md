@@ -138,6 +138,29 @@ The presence boolean is also surfaced on `GET /api/llm/status` as
 "Enter API token (optional)") without ever pulling the credential back
 to the client.
 
+### Load attempt state
+
+`POST /api/llm/set-model` returns immediately while the model load runs
+in the background, so `GET /api/llm/status` also returns the last load
+attempt as `loadState` — the only channel through which a background
+load failure reaches the UI:
+
+```json
+{
+  "status": "failed",
+  "modelName": "qwen3.5-2b",
+  "error": "Failed to load model 'qwen3.5-2b' via LM Studio API: ...",
+  "attemptedAt": "2026-10-18T21:14:09.000Z"
+}
+```
+
+`status` is `idle` (no attempt yet, or the last attempt succeeded —
+loaded truth comes from LM Studio itself), `loading` (attempt in
+flight), or `failed` with a human-readable `error` (usually LM Studio's
+own message, e.g. `No LM Runtime found for model format 'gguf'`). A new
+attempt overwrites the previous record. The state is process-local: a
+server restart resets it to idle.
+
 Behaviour:
 
 - The token is persisted in `app_settings.llm_api_token` and survives

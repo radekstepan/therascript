@@ -100,7 +100,8 @@ export function ChatInput({
     enabled: !disabled,
   });
 
-  const { isModelReady, isModelLoading } = useLlmModelState(llmStatus);
+  const { isModelReady, isModelLoading, loadFailed, loadError } =
+    useLlmModelState(llmStatus);
 
   // No longer need setModelAndLoadMutation as SelectActiveModelModal handles setting/loading
   // const setModelAndLoadMutation = useMutation(...);
@@ -180,6 +181,15 @@ export function ChatInput({
     // do NOT open the modal — the user already initiated the load.
     if (isModelLoading) {
       setToastMessageAtom('Model is still loading, please wait…');
+      return false;
+    }
+
+    // The load finished but failed: surface the backend's reason instead
+    // of falling through to the send path below.
+    if (loadFailed) {
+      setToastMessageAtom(
+        `Model failed to load: ${loadError ?? 'unknown error'}`
+      );
       return false;
     }
 

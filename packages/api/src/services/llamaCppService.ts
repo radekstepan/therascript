@@ -49,6 +49,11 @@ import {
   markUnloaded as trackerMarkUnloaded,
 } from './loadedModelsTracker.js';
 import {
+  markLoadStarted,
+  markLoadSucceeded,
+  markLoadFailed,
+} from './loadAttemptTracker.js';
+import {
   streamLlmChatDetailed,
   LlmChatChunk,
   LlmConnectionError,
@@ -724,6 +729,10 @@ export const loadLlmModel = async (
   const targetUrl = resolveLlmBaseUrl(baseUrlOverride);
   const isRemote = isRemoteLlmBaseUrl(targetUrl);
 
+  // Record the attempt so GET /api/llm/status can surface in-progress
+  // and failed loads to the UI (set-model fires this fire-and-forget).
+  markLoadStarted(modelPath);
+
   // Free any Whisper ASR model from VRAM so the chat load has room.
   // Symmetric to the LM Studio unload the transcription service performs
   // before submitting a job. Runs for both local and remote URLs so the
@@ -749,7 +758,15 @@ export const loadLlmModel = async (
   // Only start/restart the local LM Studio runtime when targeting the local default.
   // For remote URLs we assume the user has already started their server.
   if (!isRemote) {
-    await runtime.restartWithModel(modelPath);
+    try {
+      await runtime.restartWithModel(modelPath);
+    } catch (err: any) {
+      // Startup failures (daemon/server not responsive) must surface
+      // the same way as load rejections below — the UI only learns
+      // about background failures through the tracker.
+      markLoadFailed(modelPath, err.message ?? String(err));
+      throw err;
+    }
   } else {
     console.log(
       `[LlmService] Skipping local runtime restart for remote base URL: ${targetUrl}`
@@ -833,10 +850,11 @@ export const loadLlmModel = async (
     const detail = err.response?.data
       ? JSON.stringify(err.response.data)
       : err.message;
-    throw new InternalServerError(
-      `Failed to load model '${modelPath}' via LM Studio API: ${detail}`
-    );
+    const message = `Failed to load model '${modelPath}' via LM Studio API: ${detail}`;
+    markLoadFailed(modelPath, message);
+    throw new InternalServerError(message);
   }
+  markLoadSucceeded();
 };
 
 /**

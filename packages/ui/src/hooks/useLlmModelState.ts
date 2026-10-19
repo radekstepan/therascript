@@ -6,6 +6,10 @@ export interface LlmModelState {
   hasActiveModel: boolean;
   isModelLoading: boolean;
   isModelReady: boolean;
+  /** True when the last load attempt for the active model failed. */
+  loadFailed: boolean;
+  /** Human-readable failure reason when loadFailed, else null. */
+  loadError: string | null;
 }
 
 export function useLlmModelState(
@@ -17,11 +21,25 @@ export function useLlmModelState(
     const loaded = !!llmStatus?.loaded;
     const checked = llmStatus?.modelChecked;
     const isModelReady = hasActive && loaded && checked === active;
-    const isModelLoading = hasActive && (!loaded || checked !== active);
+    // A failure only applies when it targets the currently active model,
+    // so a stale record can never alarm about a model already replaced.
+    // Missing loadState (stale response) means no known failure.
+    const load = llmStatus?.loadState;
+    const loadFailed =
+      hasActive && load?.status === 'failed' && load.modelName === active;
+    const loadError = loadFailed
+      ? (load?.error ?? 'Model failed to load.')
+      : null;
+    // A failed load is terminal, not in-progress: report not-loading so
+    // callers stop spinning and render the error instead.
+    const isModelLoading =
+      hasActive && !loadFailed && (!loaded || checked !== active);
     return {
       hasActiveModel: hasActive,
       isModelLoading,
       isModelReady,
+      loadFailed,
+      loadError,
     };
   }, [llmStatus]);
 }

@@ -58,7 +58,7 @@ export function ChatPanelHeader({
   const isActiveModelLoaded =
     isLoaded && llmStatus?.modelChecked === llmStatus?.activeModel;
   const configuredContextSize = llmStatus?.configuredContextSize;
-  const { isModelLoading } = useLlmModelState(llmStatus);
+  const { isModelLoading, loadFailed, loadError } = useLlmModelState(llmStatus);
 
   const totalTokens = (latestPromptTokens ?? 0) + (latestCompletionTokens ?? 0);
 
@@ -321,7 +321,27 @@ export function ChatPanelHeader({
         <Flex align="center" gap="2">
           {llmStatus?.activeModel &&
             llmStatus.activeModel !== 'default' &&
-            (isModelLoading ? (
+            (loadFailed ? (
+              <Tooltip
+                content={`Failed to load ${llmStatus.activeModel}: ${loadError ?? 'unknown error'}`}
+              >
+                <Flex
+                  align="center"
+                  gap="1"
+                  style={{ minWidth: 0, maxWidth: 220 }}
+                >
+                  <ExclamationTriangleIcon
+                    width="14"
+                    height="14"
+                    className="text-red-600"
+                    style={{ flexShrink: 0 }}
+                  />
+                  <Text size="1" color="red" truncate>
+                    Load failed
+                  </Text>
+                </Flex>
+              </Tooltip>
+            ) : isModelLoading ? (
               <Tooltip content={`Loading model: ${llmStatus.activeModel}…`}>
                 <Flex
                   align="center"

@@ -27,6 +27,7 @@ import {
   LightningBoltIcon,
   ArchiveIcon, // <-- Keep ArchiveIcon for tokens
   GlobeIcon,
+  ExclamationTriangleIcon,
 } from '@radix-ui/react-icons';
 import { EntitySelectorDropdown } from '../Shared/EntitySelectorDropdown';
 import { AppTooltip } from '../Shared/AppTooltip';
@@ -128,7 +129,7 @@ export function StandaloneChatHeader({
     llmStatus?.details?.name === llmStatus?.activeModel
       ? llmStatus?.details?.defaultContextSize
       : null;
-  const { isModelLoading } = useLlmModelState(llmStatus);
+  const { isModelLoading, loadFailed, loadError } = useLlmModelState(llmStatus);
 
   // --- CALCULATE VRAM USAGE STRING ---
   let vramUsageString = '';
@@ -410,7 +411,27 @@ export function StandaloneChatHeader({
             )}
             {llmStatus?.activeModel &&
               llmStatus.activeModel !== 'default' &&
-              (isModelLoading ? (
+              (loadFailed ? (
+                <Tooltip
+                  content={`Failed to load ${llmStatus.activeModel}: ${loadError ?? 'unknown error'}`}
+                >
+                  <Flex
+                    align="center"
+                    gap="1"
+                    style={{ minWidth: 0, maxWidth: 220 }}
+                  >
+                    <ExclamationTriangleIcon
+                      width="14"
+                      height="14"
+                      className="text-red-600"
+                      style={{ flexShrink: 0 }}
+                    />
+                    <Text size="1" color="red" truncate>
+                      Load failed
+                    </Text>
+                  </Flex>
+                </Tooltip>
+              ) : isModelLoading ? (
                 <Tooltip content={`Loading model: ${llmStatus.activeModel}…`}>
                   <Flex
                     align="center"

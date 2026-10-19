@@ -159,6 +159,12 @@ export const llmHandlers = [
       defaultBaseUrl: MOCK_LOCAL_DEFAULT_BASE_URL,
       isRemoteBaseUrl: effectiveBaseUrl !== MOCK_LOCAL_DEFAULT_BASE_URL,
       hasRemoteApiToken: !!mockLlmApiToken,
+      loadState: {
+        status: 'idle',
+        modelName: null,
+        error: null,
+        attemptedAt: null,
+      },
     });
   }),
 
