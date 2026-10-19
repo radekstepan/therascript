@@ -905,9 +905,18 @@ export const ensureModelLoaded = async (
   await loadLlmModel(modelPath, requiredContextSize, baseUrlOverride);
 };
 
+/**
+ * Unload all loaded LLM instances on the target URL. When nothing is
+ * loaded, this is a no-op that reports idleness — it deliberately does
+ * NOT stop the server/daemon unless `stopWhenIdle` is set. A redundant
+ * unload (double-clicked Unload button, STOP retry after a first success)
+ * must never destroy the whole LLM service; only callers that explicitly
+ * want the world stopped (e.g. the transcription VRAM handoff) opt in.
+ */
 export const unloadActiveModel = async (
   baseUrlOverride?: string | null,
-  resetBaseUrl?: boolean
+  resetBaseUrl?: boolean,
+  stopWhenIdle = false
 ): Promise<string> => {
   const targetUrl = resolveLlmBaseUrl(baseUrlOverride);
   const isRemote = isRemoteLlmBaseUrl(targetUrl);
@@ -964,8 +973,10 @@ export const unloadActiveModel = async (
     return `${unloadedCount} model instance(s) unloaded successfully.`;
   }
 
-  // Fallback: stop the local server via runtime. Skip for remote URLs.
-  if (!isRemote && runtime.stop) {
+  // Fallback: stop the local server via runtime. Skip for remote URLs,
+  // and only when the caller explicitly opted in — a no-op unload must
+  // never take down the service (see docstring).
+  if (!isRemote && runtime.stop && stopWhenIdle) {
     await runtime.stop();
     return 'LM Studio server stopped (no models were loaded).';
   }
@@ -1178,9 +1189,15 @@ export const checkModelStatus = async (
     // The destructive reset lives in `syncModelStateOnBoot`, which runs once
     // at server startup and never on a per-request path.
 
-    // Now check if OUR requested model is the one loaded
+    // Now check if OUR requested model is the one loaded. The key must
+    // match AND have at least one loaded instance: the status route maps
+    // a non-null return to `loaded: true`, so returning catalog info for
+    // an unloaded model would report "loaded" forever and make Unload
+    // unobservable in the UI.
     const target = res.data.models.find(
-      (m) => m.key === modelPath || m.publisher + '/' + m.key === modelPath
+      (m) =>
+        (m.key === modelPath || m.publisher + '/' + m.key === modelPath) &&
+        m.loaded_instances.length > 0
     );
 
     if (!target) return null;

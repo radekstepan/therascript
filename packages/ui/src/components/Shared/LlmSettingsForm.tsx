@@ -13,7 +13,9 @@
 // The parent owns `state` and updates it via the `onChange` updater
 // (compatible with React's `useState` setter signature).
 import React, { useMemo, useEffect } from 'react';
+import { useSetAtom } from 'jotai';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
+import { toastMessageAtom } from '../../store';
 import {
   Flex,
   Text,
@@ -96,13 +98,19 @@ export function LlmSettingsForm({
     refetchInterval: 10000,
   });
 
+  const setToast = useSetAtom(toastMessageAtom);
+
   const unloadMutation = useMutation({
     mutationFn: unloadLlmModel,
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['llmStatus'] });
+      // Unload used to be silent on success, which read as "nothing
+      // happened" and invited double-clicks. Confirm visibly so one
+      // click is enough.
+      setToast(data.message || 'Model unloaded.');
     },
     onError: (err: Error) => {
-      console.error(`Failed to unload model: ${err.message}`);
+      setToast(`Failed to unload model: ${err.message}`);
     },
   });
 

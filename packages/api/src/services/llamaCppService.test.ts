@@ -742,7 +742,14 @@ describe('llamaCppService', () => {
       expect(setActiveModelName).not.toHaveBeenCalled();
     });
 
-    it('returns model info when model is available but not loaded', async () => {
+    it('returns null when the model is available but not loaded', async () => {
+      // Regression: this used to return catalog info for a key match
+      // with zero loaded instances, and the status route maps non-null
+      // to `loaded: true` — so the UI reported "loaded" forever and an
+      // Unload never became visible. Only a matched key WITH instances
+      // counts as loaded. Settings must still be left alone: the user
+      // may have the model staged (or just unloaded it); the boot sync
+      // owns destructive resets.
       // First call for isLlmApiResponsive, second for actual data
       mockAxiosGet
         .mockResolvedValueOnce({ status: 200, data: { models: [] } })
@@ -767,11 +774,7 @@ describe('llamaCppService', () => {
         });
 
       const result = await checkModelStatus('meta/llama-3-8b');
-      expect(result).not.toBeNull();
-      expect(result!.name).toBe('meta/llama-3-8b');
-      expect(result!.size_vram).toBeUndefined();
-      // No destructive reset when the target is available but not loaded.
-      // The user may have it staged; the boot sync decides.
+      expect(result).toBeNull();
       expect(clearModelAndContext).not.toHaveBeenCalled();
       expect(setActiveModelName).not.toHaveBeenCalled();
     });
@@ -1340,12 +1343,28 @@ describe('llamaCppService', () => {
       expect(setActiveBaseUrl).not.toHaveBeenCalled();
     });
 
-    it('falls back to runtime.stop() when nothing was loaded locally', async () => {
+    it('does not stop the runtime when nothing was loaded locally (default)', async () => {
+      // A redundant unload (double-clicked Unload button, STOP retry
+      // after a first success) must be a no-op report, never a
+      // stop-the-world. See unloadActiveModel docstring.
       mockRuntime.stop?.mockClear();
 
       mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
 
       const message = await unloadActiveModel();
+
+      expect(mockRuntime.stop).not.toHaveBeenCalled();
+      expect(message).toBe('No models were loaded.');
+    });
+
+    it('falls back to runtime.stop() when nothing was loaded locally and stopWhenIdle is set', async () => {
+      // Opt-in preserved for callers that explicitly want LM Studio
+      // fully down (e.g. the transcription VRAM handoff).
+      mockRuntime.stop?.mockClear();
+
+      mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
+
+      const message = await unloadActiveModel(undefined, undefined, true);
 
       expect(mockRuntime.stop).toHaveBeenCalled();
       expect(message).toBe('LM Studio server stopped (no models were loaded).');

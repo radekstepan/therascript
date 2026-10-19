@@ -31,9 +31,15 @@ export function useLlmModelState(
       ? (load?.error ?? 'Model failed to load.')
       : null;
     // A failed load is terminal, not in-progress: report not-loading so
-    // callers stop spinning and render the error instead.
+    // callers stop spinning and render the error instead. Likewise, an
+    // explicit idle with nothing loaded is settled (e.g. right after an
+    // Unload) — render the plain "not loaded" state, not a spinner. A
+    // missing loadState (stale response) keeps the old inference.
     const isModelLoading =
-      hasActive && !loadFailed && (!loaded || checked !== active);
+      hasActive &&
+      !loadFailed &&
+      load?.status !== 'idle' &&
+      (!loaded || checked !== active);
     return {
       hasActiveModel: hasActive,
       isModelLoading,

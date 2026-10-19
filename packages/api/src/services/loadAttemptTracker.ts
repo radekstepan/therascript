@@ -3,7 +3,7 @@
  * single load the UI cares about (the active model). The `/api/llm/set-model`
  * route fires `loadLlmModel` without awaiting it, so without this tracker a
  * background failure is visible only in the server console while the UI
- * polls `/api/llm/status` forever showing an infinite "loading" spinner.
+ * status poll carries no trace of what went wrong.
  *
  * Lifecycle (driven exclusively from `loadLlmModel` in llamaCppService.ts):
  *   - attempt start   -> `{ status: 'loading', modelName, error: null }`

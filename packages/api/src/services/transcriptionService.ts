@@ -47,7 +47,9 @@ export async function startTranscriptionJob(
     `[TranscriptionService] Attempting to unload LM Studio model to ensure VRAM availability for Whisper...`
   );
   try {
-    await unloadActiveModel();
+    // stopWhenIdle: the transcription VRAM handoff wants LM Studio fully
+    // down (not just model-free) before the Whisper job claims the GPU.
+    await unloadActiveModel(undefined, undefined, true);
     // Give a short pause for VRAM to actually be reclaimed by the OS/Driver
     await new Promise((resolve) => setTimeout(resolve, 1000));
     console.log('[TranscriptionService] LM Studio unload request completed.');

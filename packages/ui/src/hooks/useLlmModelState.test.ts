@@ -100,6 +100,16 @@ describe('useLlmModelState', () => {
     expect(result.current.isModelLoading).toBe(true);
   });
 
+  it('reports settled (not loading) when explicitly idle with nothing loaded', () => {
+    // Post-unload state: the backend reports loaded=false and an idle
+    // tracker. This must render the plain "not loaded" state — a
+    // spinner here would spin forever with nothing in flight.
+    const { result } = renderHook(() => useLlmModelState(makeStatus()));
+    expect(result.current.isModelLoading).toBe(false);
+    expect(result.current.isModelReady).toBe(false);
+    expect(result.current.loadFailed).toBe(false);
+  });
+
   it('treats a missing loadState as no known failure (stale responses)', () => {
     const status = makeStatus();
     delete status.loadState;
