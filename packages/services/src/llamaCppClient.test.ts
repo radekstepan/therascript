@@ -581,3 +581,126 @@ describe('streamLlmChatDetailed — Authorization header', () => {
     expect(readHeaders()['Authorization']).toBe('Bearer sk-abc-123');
   });
 });
+
+describe('streamLlmChatDetailed stored-reasoning isolation', () => {
+  let mockFetchReasoning: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    mockFetchReasoning = vi.fn();
+    vi.stubGlobal('fetch', mockFetchReasoning);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const readBody = () => {
+    expect(mockFetchReasoning).toHaveBeenCalledTimes(1);
+    return JSON.parse(mockFetchReasoning.mock.calls[0]![1].body);
+  };
+
+  const historyWithThinking: BackendChatMessage[] = [
+    {
+      id: 1,
+      chatId: 1,
+      sender: 'user',
+      text: 'Summarize the opening.',
+      timestamp: 0,
+    },
+    {
+      id: 2,
+      chatId: 1,
+      sender: 'ai',
+      text: '<think>Let me recall the opening.</think>The session opened with a check-in.',
+      timestamp: 1,
+    },
+    { id: 3, chatId: 1, sender: 'user', text: 'Any homework?', timestamp: 2 },
+  ];
+
+  it('strips stored think reasoning from assistant turns but keeps visible answers', async () => {
+    mockFetchReasoning.mockResolvedValue(makeSseResponse(['[DONE]']));
+    await consume(
+      streamLlmChatDetailed(historyWithThinking, {
+        llamaCppBaseUrl: 'http://h:1',
+      })
+    );
+    const body = readBody();
+    const combined = JSON.stringify(body.messages);
+    expect(combined).not.toContain('<think>');
+    expect(combined).not.toContain('Let me recall the opening.');
+    expect(combined).toContain('The session opened with a check-in.');
+    expect(combined).toContain('Summarize the opening.');
+    expect(combined).toContain('Any homework?');
+  });
+
+  it('omits reasoning-only assistant turns and merges the surrounding user questions', async () => {
+    mockFetchReasoning.mockResolvedValue(makeSseResponse(['[DONE]']));
+    await consume(
+      streamLlmChatDetailed(
+        [
+          { id: 1, chatId: 1, sender: 'user', text: 'Q1', timestamp: 0 },
+          {
+            id: 2,
+            chatId: 1,
+            sender: 'ai',
+            text: '<think>reasoning only</think>',
+            timestamp: 1,
+          },
+          { id: 3, chatId: 1, sender: 'user', text: 'Q2', timestamp: 2 },
+        ],
+        { llamaCppBaseUrl: 'http://h:1' }
+      )
+    );
+    const body = readBody();
+    expect(body.messages).toHaveLength(1);
+    expect(body.messages[0].role).toBe('user');
+    expect(body.messages[0].content).toContain('Q1');
+    expect(body.messages[0].content).toContain('Q2');
+    expect(body.messages[0].content).not.toContain('reasoning only');
+  });
+
+  it('leaves user and system text verbatim, including literal quoted tags', async () => {
+    mockFetchReasoning.mockResolvedValue(makeSseResponse(['[DONE]']));
+    const quoted = 'Patient said: <think>not a tag</think> literally';
+    await consume(
+      streamLlmChatDetailed(
+        [
+          {
+            id: 1,
+            chatId: 1,
+            sender: 'system',
+            text: 'Be helpful.',
+            timestamp: 0,
+          },
+          { id: 2, chatId: 1, sender: 'user', text: quoted, timestamp: 1 },
+        ],
+        { llamaCppBaseUrl: 'http://h:1' }
+      )
+    );
+    const body = readBody();
+    expect(body.messages).toEqual([
+      { role: 'system', content: 'Be helpful.' },
+      { role: 'user', content: quoted },
+    ]);
+  });
+
+  it('does not mutate the caller-provided message objects', async () => {
+    mockFetchReasoning.mockResolvedValue(makeSseResponse(['[DONE]']));
+    const aiMsg: BackendChatMessage = {
+      id: 2,
+      chatId: 1,
+      sender: 'ai',
+      text: '<think>r</think>Answer',
+      timestamp: 1,
+    };
+    const input: BackendChatMessage[] = [
+      { id: 1, chatId: 1, sender: 'user', text: 'Q', timestamp: 0 },
+      aiMsg,
+    ];
+    await consume(
+      streamLlmChatDetailed(input, { llamaCppBaseUrl: 'http://h:1' })
+    );
+    expect(aiMsg.text).toBe('<think>r</think>Answer');
+    expect(input).toHaveLength(2);
+  });
+});

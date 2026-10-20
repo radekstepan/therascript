@@ -104,6 +104,13 @@ describe('helpers.extractJsonObject', () => {
     expect(JSON.parse(out.json)).toEqual({ a: 6 });
   });
 
+  it('strips an unclosed <think> block before extracting (interrupted response)', () => {
+    const text = '{"a": 7}<think>trailing reasoning without end';
+    const out = extractJsonObject(text);
+    expect(out.complete).toBe(true);
+    expect(JSON.parse(out.json)).toEqual({ a: 7 });
+  });
+
   it('is string-aware: ignores braces inside JSON strings', () => {
     const text = '{"a": "this { is not nested }", "b": 7}';
     const out = extractJsonObject(text);

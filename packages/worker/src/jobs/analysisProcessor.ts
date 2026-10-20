@@ -21,6 +21,7 @@ import {
   truncateTranscriptToTokenBudget,
   parseJsonObjectFromLlm,
   streamWithRetry,
+  extractVisibleAnswer,
   type StreamResult,
   type LlmChatChunk,
 } from '@therascript/services';
@@ -320,6 +321,9 @@ export function assembleReducePrompt(
     .map((summary) => ({
       summary,
       session: sessionsById.get(summary.session_id),
+      // Clean each stored summary before embedding: legacy/imported rows may
+      // still contain <think> reasoning, which must never reach the prompt.
+      visibleAnswer: extractVisibleAnswer(summary.summary_text ?? '').trim(),
     }))
     .filter(
       (
@@ -327,7 +331,8 @@ export function assembleReducePrompt(
       ): item is {
         summary: IntermediateSummary;
         session: BackendSession;
-      } => !!item.session
+        visibleAnswer: string;
+      } => !!item.session && item.visibleAnswer.length > 0
     )
     .sort((a, b) => {
       const dateDiff =
@@ -338,8 +343,8 @@ export function assembleReducePrompt(
     });
 
   const intermediateSummariesText = enrichedSummaries
-    .map(({ summary, session }) => {
-      return `--- Analysis from Session "${session.sessionName || session.fileName}" ---\n${summary.summary_text}`;
+    .map(({ session, visibleAnswer }) => {
+      return `--- Analysis from Session "${session.sessionName || session.fileName}" ---\n${visibleAnswer}`;
     })
     .join('\n\n');
 
@@ -788,13 +793,10 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
           thinkingBuffer = '';
         }
 
-        // Strip the <think>…</think> envelope when checking for emptiness so a
+        // Extract the visible answer when checking for emptiness so a
         // thinking-only output (model thought but produced no answer text)
-        // doesn't get rejected.
-        const strippedMap = summaryText.replace(
-          /<think>[\s\S]*?<\/think>/g,
-          ''
-        );
+        // is correctly rejected via the existing failure semantics below.
+        const strippedMap = extractVisibleAnswer(summaryText);
         if (!strippedMap.trim()) {
           const promptTk = mapStreamResult.promptTokens ?? 0;
           const completionTk = mapStreamResult.completionTokens ?? 0;
@@ -839,15 +841,13 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
           );
         }
 
-        // Strip the <think>…</think> envelope before persisting so that the
-        // reduce phase only receives the model's actual answer, not its
-        // reasoning chain. Thinking tokens can be 10× the content length and
-        // were the root cause of the ~129 k-token reduce prompts observed in
+        // Extract the visible answer before persisting so that the reduce
+        // phase only receives the model's actual answer, not its reasoning
+        // chain. Thinking tokens can be 10× the content length and were the
+        // root cause of the ~129 k-token reduce prompts observed in
         // production. The thinking text is still forwarded to the UI via the
         // `type: 'thinking'` stream events above.
-        const summaryTextToStore = summaryText
-          .replace(/<think>[\s\S]*?<\/think>/g, '')
-          .trim();
+        const summaryTextToStore = extractVisibleAnswer(summaryText).trim();
         analysisRepository.updateIntermediateSummary(
           summaryTask.id,
           'completed',
@@ -909,19 +909,38 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
     if (successfulSummaries.length === 0)
       throw new Error('No summaries were successfully generated.');
 
+    // Reasoning-only summaries (legacy/imported rows whose visible answer is
+    // empty) are unusable input: exclude them so the reduce phase never
+    // synthesizes from reasoning and never claims coverage of their sessions.
+    // Uses the existing failure semantics when nothing usable remains.
+    const usableSummaries = successfulSummaries.filter(
+      (s: IntermediateSummary) =>
+        extractVisibleAnswer(s.summary_text ?? '').trim().length > 0
+    );
+    if (usableSummaries.length === 0) {
+      throw new Error(
+        'No usable summaries were generated (all completed summaries contain only reasoning with no visible answer).'
+      );
+    }
+    if (usableSummaries.length < successfulSummaries.length) {
+      console.warn(
+        `[Analysis Worker ${jobId}] Excluding ${successfulSummaries.length - usableSummaries.length} reasoning-only summaries from the reduce prompt.`
+      );
+    }
+
     // Pre-load the underlying sessions in one pass and hand them to the
     // pure helper. The DB already returned summaries in date order, but
     // assembleReducePrompt re-sorts as defense-in-depth so the
     // "oldest → newest" contract survives any future caller that bypasses
     // the repository helper.
     const sessionsById = new Map<number, BackendSession>();
-    for (const summary of successfulSummaries) {
+    for (const summary of usableSummaries) {
       const session = sessionRepository.findById(summary.session_id);
       if (session) sessionsById.set(session.id, session);
     }
 
     const reduceMessages = assembleReducePrompt(
-      successfulSummaries,
+      usableSummaries,
       sessionsById,
       jobRecord?.original_prompt ?? '',
       strategy
@@ -1133,9 +1152,10 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
       reduceThinkingBuffer = '';
     }
 
-    // Strip the <think>…</think> envelope when checking for emptiness so a
-    // thinking-only output doesn't get rejected.
-    const strippedReduce = finalResult.replace(/<think>[\s\S]*?<\/think>/g, '');
+    // Extract the visible answer when checking for emptiness so a
+    // thinking-only output is correctly rejected via the existing failure
+    // semantics below.
+    const strippedReduce = extractVisibleAnswer(finalResult);
     if (!strippedReduce.trim()) {
       const detail = `LLM returned an empty final result (model=${jobRecord?.model_name ?? 'unknown'}, promptTokens=${reduceStreamResult.promptTokens ?? 0}, completionTokens=${reduceStreamResult.completionTokens ?? 0}, thinkingTokens=${reduceStreamResult.thinkingTokens ?? 0}, durationMs=${reduceDuration}).`;
       console.error(`[Analysis Worker ${jobId}] ${detail}`);

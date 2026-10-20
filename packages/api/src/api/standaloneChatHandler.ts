@@ -29,7 +29,7 @@ import {
   bulkIndexDocuments,
 } from '@therascript/elasticsearch-client';
 import config from '@therascript/config';
-import { cleanLlmOutput } from '@therascript/services';
+import { cleanLlmOutput, prepareLlmChatMessages } from '@therascript/services';
 import {
   computeContextUsageForChat,
   recommendContextSize,
@@ -247,8 +247,10 @@ export const addStandaloneChatMessage = async ({
       { once: true }
     );
 
+    const streamMessages = prepareLlmChatMessages(currentMessages);
+
     const llmStream = await streamChatResponse(
-      currentMessages,
+      streamMessages,
       configured == null && recommendedContext != null
         ? {
             contextSize: recommendedContext,

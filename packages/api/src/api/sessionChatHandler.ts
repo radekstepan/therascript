@@ -31,7 +31,7 @@ import {
   deleteByQuery,
 } from '@therascript/elasticsearch-client';
 import config from '@therascript/config';
-import { cleanLlmOutput } from '@therascript/services';
+import { cleanLlmOutput, prepareLlmChatMessages } from '@therascript/services';
 import {
   computeContextUsageForChat,
   recommendContextSize,
@@ -206,11 +206,11 @@ export const addSessionChatMessage = async ({
       text: combinedUserMessageText,
     };
 
-    const streamMessages = [
+    const streamMessages = prepareLlmChatMessages([
       systemPromptMsg,
       ...previousHistory,
       combinedUserMessage,
-    ];
+    ]);
 
     const configured = getConfiguredContextSize();
     const recommendedContext = recommendContextSize({

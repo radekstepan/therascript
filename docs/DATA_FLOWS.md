@@ -73,6 +73,7 @@ This document details the step-by-step data flows for the core operations of the
 
     - API streams the assembled context (System Prompt + Transcript + History + User Msg) to LM Studio.
     - **File:** `packages/api/src/services/llamaCppService.ts` -> `streamChatResponse`.
+    - **Stored-reasoning isolation:** before sending, chat history is passed through `prepareLlmChatMessages` (`packages/services/src/thinking.ts`), which extracts visible answers from assistant turns via `extractVisibleAnswer`, drops reasoning-only turns, and merges adjacent user turns. The same safeguard runs again inside `streamLlmChatDetailed` so every caller (chat, analysis, future flows) is covered. Stored `<think>…</think>` reasoning is for display/debugging only; only visible answers may be reused as prompt context. User/system text (transcripts, questions) always passes through verbatim.
 
 4.  **Response Streaming (API -> UI)**
 
@@ -110,6 +111,7 @@ This document details the step-by-step data flows for the core operations of the
     - **Output:** Generates final answer using the LLM.
     - **Completion Token Cap:** Capped at **40% of `context_size`** — more headroom than Map since the synthesis answer is expected to be longer (e.g. 13,107 tokens on a 32k context).
     - **Storage:** Updates `analysis_jobs` with `final_result` and `status: completed`.
+    - **Stored-reasoning isolation:** `assembleReducePrompt` extracts the visible answer from every stored summary via the shared `extractVisibleAnswer` helper before embedding it, so legacy/imported rows with `<think>` reasoning need no migration. Reasoning-only summaries are excluded (their sessions are not claimed); if none remain usable the job fails with the existing failure semantics instead of synthesizing from reasoning.
 
 4.  **Thinking Token Streaming**
 
@@ -268,4 +270,3 @@ Flow:
 5. The UI's `ReadinessOverlay` (`App.tsx:50`) appears the moment `/api/status/readiness` starts failing, and disappears once the new API comes back healthy. There is no separate "Restarting" screen — the existing "System Initializing" overlay is reused.
 
 The `currentProcess !== devProcess` guard in the concurrently event handlers is the safety net that prevents a stale `close` event from the old process from triggering cleanup during the restart window.
-

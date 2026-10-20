@@ -1,9 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock dependencies used inside contextUsageService
-vi.mock('@therascript/services', () => ({
-  calculateTokenCount: (s: string) => (s ? s.length : 0),
-}));
+vi.mock('@therascript/services', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@therascript/services')>();
+  return {
+    calculateTokenCount: (s: string) => (s ? s.length : 0),
+    // Use the real preparation helper: the tests below verify estimates
+    // reflect the same sanitized history inference sends.
+    prepareLlmChatMessages: actual.prepareLlmChatMessages,
+    extractVisibleAnswer: actual.extractVisibleAnswer,
+  };
+});
 vi.mock('./activeModelService.js', () => ({
   getActiveModel: () => 'test-model',
   getConfiguredContextSize: () => null,
@@ -84,5 +91,47 @@ describe('contextUsageService.computeContextUsageForChat', () => {
     expect(res.model.effectiveContextSize).toBe(8192);
     expect(res.totals.remainingForPrompt).toBe(8192 - expectedPrompt);
     expect(res.totals.remainingForOutput).toBe(8192 - expectedPrompt - 512);
+  });
+
+  it('excludes stored reasoning from the history estimate', async () => {
+    const withThinking = await computeContextUsageForChat({
+      isStandalone: true,
+      messages: [
+        { sender: 'user', text: 'hi', timestamp: 0 },
+        {
+          sender: 'ai',
+          text: '<think>very long internal reasoning chain</think>hello',
+          timestamp: 1,
+        },
+      ] as any,
+    });
+    const clean = await computeContextUsageForChat({
+      isStandalone: true,
+      messages: [
+        { sender: 'user', text: 'hi', timestamp: 0 },
+        { sender: 'ai', text: 'hello', timestamp: 1 },
+      ] as any,
+    });
+    // Same estimate whether or not stored reasoning is present.
+    expect(withThinking.breakdown.chatHistoryTokens).toBe(
+      clean.breakdown.chatHistoryTokens
+    );
+    expect(withThinking.totals.promptTokens).toBe(clean.totals.promptTokens);
+  });
+
+  it('drops reasoning-only assistant turns and leading welcome messages from the estimate', async () => {
+    const res = await computeContextUsageForChat({
+      isStandalone: true,
+      messages: [
+        { sender: 'ai', text: 'Welcome! Ask me anything.', timestamp: 0 },
+        { sender: 'user', text: 'Q1', timestamp: 1 },
+        { sender: 'ai', text: '<think>reasoning only</think>', timestamp: 2 },
+        { sender: 'user', text: 'Q2', timestamp: 3 },
+      ] as any,
+    });
+    // Welcome + reasoning-only turn removed; Q1 and Q2 merged into one turn.
+    // Merged text: 'Q1\n\n---\n\nQ2' with the 'user: ' prefix.
+    const expectedChatHistory = 'user: Q1\n\n---\n\nQ2';
+    expect(res.breakdown.chatHistoryTokens).toBe(expectedChatHistory.length);
   });
 });

@@ -1,4 +1,5 @@
 import type { BackendChatMessage } from '@therascript/domain';
+import { prepareLlmChatMessages } from './thinking.js';
 
 export const DEFAULT_STOP_TOKENS = [
   '<end_of_turn>',
@@ -187,9 +188,13 @@ export async function* streamLlmChatDetailed(
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 
   try {
+    // Idempotent safeguard: strip stored reasoning from assistant turns for
+    // every caller (including future ones). User/system text is source
+    // material and passes through verbatim.
+    const preparedMessages = prepareLlmChatMessages(messages);
     const bodyPayload: any = {
       model: options?.model || 'default',
-      messages: messages.map((m) => ({
+      messages: preparedMessages.map((m) => ({
         role: mapSenderToRole(m.sender),
         content: m.text,
       })),

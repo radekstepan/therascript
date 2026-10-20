@@ -1,6 +1,9 @@
 // packages/api/src/services/contextUsageService.ts
 
-import { calculateTokenCount } from '@therascript/services';
+import {
+  calculateTokenCount,
+  prepareLlmChatMessages,
+} from '@therascript/services';
 import {
   getActiveModel,
   getConfiguredContextSize,
@@ -119,9 +122,28 @@ export async function computeContextUsageForChat(options: {
       typeof transcriptCount === 'number' ? transcriptCount : null;
   }
 
-  // Chat history tokens: include user/ai turns (exclude system unless they are explicit system messages already counted)
-  const nonSystemMessages = messages.filter((m) => m.sender !== 'system');
-  const chatHistoryCombined = nonSystemMessages
+  // Chat history tokens: count the same prepared history inference sends —
+  // visible answers only (no stored reasoning), reasoning-only assistant
+  // turns removed, leading welcome messages dropped, adjacent user turns
+  // merged. Mirror the session speaker-stripping so estimation cannot drift
+  // from the constructed prompt.
+  const stripSpeakers = !isStandalone && sessionData?.showSpeakers === 0;
+  const nonSystemMessages = messages
+    .filter((m) => m.sender !== 'system')
+    .map((msg) => {
+      if (stripSpeakers && msg.sender === 'ai') {
+        return {
+          ...msg,
+          text: msg.text.replace(
+            /((?:SPEAKER_\d+)|(?:[A-Z][A-Za-z]+)):\s/g,
+            ''
+          ),
+        };
+      }
+      return msg;
+    });
+  const preparedHistory = prepareLlmChatMessages(nonSystemMessages);
+  const chatHistoryCombined = preparedHistory
     .map((m) => `${m.sender}: ${m.text}`)
     .join('\n');
   const chatHistoryTokens = calculateTokenCount(chatHistoryCombined);

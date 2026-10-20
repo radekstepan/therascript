@@ -1,4 +1,5 @@
 import type { BackendSession } from '@therascript/domain';
+import { extractVisibleAnswer } from './thinking.js';
 
 export const isNodeError = (error: unknown): error is NodeJS.ErrnoException => {
   return error instanceof Error && 'code' in error;
@@ -76,8 +77,7 @@ export interface ExtractedJson {
  * `apps/api/src/lib/json-mode.ts:154-200`.
  */
 export function extractJsonObject(text: string): ExtractedJson {
-  const cleaned = text
-    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+  const cleaned = extractVisibleAnswer(text)
     .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
     .trim();
 

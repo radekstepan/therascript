@@ -33,3 +33,8 @@ export {
   LlmModelNotFoundError,
   LlmTimeoutError,
 } from './llamaCppClient.js';
+export {
+  extractVisibleAnswer,
+  prepareLlmChatMessages,
+  MERGED_USER_TURN_SEPARATOR,
+} from './thinking.js';

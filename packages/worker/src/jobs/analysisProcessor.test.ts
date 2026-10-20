@@ -35,29 +35,35 @@ vi.mock('@therascript/data', () => ({
   },
 }));
 
-vi.mock('@therascript/services', () => ({
-  streamLlmChatDetailed: vi.fn(),
-  calculateTokenCount: vi.fn(),
-  truncateTranscriptToTokenBudget: vi.fn((text: string) => ({
-    text,
-    truncated: false,
-    droppedParagraphs: 0,
-    originalTokens: 0,
-    finalTokens: 0,
-  })),
-  parseJsonObjectFromLlm: vi.fn(),
-  streamWithRetry: vi.fn(async function* (
-    factory: () => AsyncGenerator<unknown, unknown>
-  ) {
-    const inner = factory();
-    let step = await inner.next();
-    while (!step.done) {
-      yield step.value;
-      step = await inner.next();
-    }
-    return step.value;
-  }),
-}));
+vi.mock('@therascript/services', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@therascript/services')>();
+  return {
+    streamLlmChatDetailed: vi.fn(),
+    calculateTokenCount: vi.fn(),
+    truncateTranscriptToTokenBudget: vi.fn((text: string) => ({
+      text,
+      truncated: false,
+      droppedParagraphs: 0,
+      originalTokens: 0,
+      finalTokens: 0,
+    })),
+    parseJsonObjectFromLlm: vi.fn(),
+    streamWithRetry: vi.fn(async function* (
+      factory: () => AsyncGenerator<unknown, unknown>
+    ) {
+      const inner = factory();
+      let step = await inner.next();
+      while (!step.done) {
+        yield step.value;
+        step = await inner.next();
+      }
+      return step.value;
+    }),
+    // Use the real answer-extraction helper: the reduce-prompt tests below
+    // verify its integration with legacy/imported summaries.
+    extractVisibleAnswer: actual.extractVisibleAnswer,
+  };
+});
 
 vi.mock('../services/streamPublisher.js', () => ({
   publishStreamEvent: vi.fn(),
@@ -725,11 +731,11 @@ describe('analysis worker — assembleReducePrompt (chronological ordering)', ()
  * every reduce call forwarded the model's entire reasoning chain as input
  * context — observed as ~129 k-token prompts for a 20-session reduce.
  *
- * The fix strips thinking before DB persistence. These tests verify the
- * contract from the `assembleReducePrompt` side (using pre-stripped
- * summary_text, as the caller now provides) and document the expected
- * surface in a way that will catch any regression if the stripping is
- * accidentally removed or moved.
+ * Defense in depth: thinking is stripped before DB persistence (map phase)
+ * AND `assembleReducePrompt` extracts the visible answer from every stored
+ * summary before embedding it. The second layer handles legacy/imported
+ * rows that were written before the persistence fix, without a migration.
+ * These tests verify the `assembleReducePrompt` side of that contract.
  */
 describe('analysis worker — assembleReducePrompt (thinking-token isolation)', () => {
   const makeSession = (
@@ -790,11 +796,9 @@ describe('analysis worker — assembleReducePrompt (thinking-token isolation)', 
     expect(text).not.toContain('</think>');
   });
 
-  it('still exposes <think> content if a caller (incorrectly) passes un-stripped summary_text — documents regression surface', () => {
-    // This test documents the OLD bug: if the stripping at the persistence
-    // site were reverted, the reduce prompt would again contain raw thinking.
-    // It is intentionally testing that assembleReducePrompt is NOT the
-    // stripping site — the fix must live at the persistence layer.
+  it('removes <think> content from legacy/imported summaries stored un-stripped', () => {
+    // Legacy/imported rows may still contain raw thinking. assembleReducePrompt
+    // must extract the visible answer itself so no migration is required.
     const thinkingContent = 'long internal reasoning chain...';
     const answerContent = 'Concise clinical answer.';
     const rawText = `<think>${thinkingContent}</think>${answerContent}`;
@@ -810,36 +814,65 @@ describe('analysis worker — assembleReducePrompt (thinking-token isolation)', 
     );
 
     const text = userTextOf(messages);
-    // assembleReducePrompt itself does NOT strip — stripping must happen
-    // before the summary_text is written to the DB.
-    expect(text).toContain(thinkingContent);
+    expect(text).not.toContain(thinkingContent);
+    expect(text).not.toContain('<think>');
+    expect(text).not.toContain('</think>');
     expect(text).toContain(answerContent);
   });
 
-  it('handles summaries with only thinking and no answer content gracefully', () => {
-    // Edge-case: if stripping is applied by the caller, an all-thinking
-    // response results in an empty string. assembleReducePrompt must
-    // tolerate that without throwing.
+  it('excludes reasoning-only summaries so their sessions are not claimed', () => {
+    // A summary with no visible answer is unusable input: it must not throw,
+    // must not leak reasoning, and must not render a session block that
+    // would imply coverage of that session.
     const sessions = [makeSession(1, '2024-01-01')];
-    const summaries = [makeSummary(1, 1, '')]; // stripped → empty
+    const summaries = [makeSummary(1, 1, '<think>only reasoning</think>')];
 
-    expect(() =>
-      assembleReducePrompt(summaries, sessionsByIdFromList(sessions), 'q', null)
+    let messages;
+    expect(
+      () =>
+        (messages = assembleReducePrompt(
+          summaries,
+          sessionsByIdFromList(sessions),
+          'q',
+          null
+        ))
     ).not.toThrow();
+
+    const text = userTextOf(messages!);
+    expect(text).not.toContain('only reasoning');
+    expect(text).not.toContain('--- Analysis from Session');
+  });
+
+  it('handles unclosed thinking blocks in imported summaries', () => {
+    const sessions = [makeSession(1, '2024-01-01')];
+    const summaries = [
+      makeSummary(1, 1, 'Visible answer.<think>interrupted reasoning'),
+    ];
+
+    const messages = assembleReducePrompt(
+      summaries,
+      sessionsByIdFromList(sessions),
+      'q',
+      null
+    );
+
+    const text = userTextOf(messages);
+    expect(text).toContain('Visible answer.');
+    expect(text).not.toContain('interrupted reasoning');
+    expect(text).not.toContain('<think>');
   });
 
   it('strips thinking from multiple sessions so none pollutes the reduce prompt', () => {
-    // Simulate what correctly-stripped DB rows look like for N sessions.
+    // Legacy rows with embedded thinking across N sessions.
     const sessions = [
       makeSession(1, '2024-01-01', 'January'),
       makeSession(2, '2024-02-01', 'February'),
       makeSession(3, '2024-03-01', 'March'),
     ];
-    // Post-fix: summary_text only contains the answer, no <think> wrapper.
     const summaries = [
-      makeSummary(1, 1, 'Jan answer.'),
-      makeSummary(2, 2, 'Feb answer.'),
-      makeSummary(3, 3, 'Mar answer.'),
+      makeSummary(1, 1, '<think>jan reasoning</think>Jan answer.'),
+      makeSummary(2, 2, '<THINK>feb reasoning</THINK>Feb answer.'),
+      makeSummary(3, 3, 'Mar answer.<think>mar reasoning'),
     ];
 
     const messages = assembleReducePrompt(
@@ -853,6 +886,9 @@ describe('analysis worker — assembleReducePrompt (thinking-token isolation)', 
     expect(text).toContain('Jan answer.');
     expect(text).toContain('Feb answer.');
     expect(text).toContain('Mar answer.');
+    expect(text).not.toContain('jan reasoning');
+    expect(text).not.toContain('feb reasoning');
+    expect(text).not.toContain('mar reasoning');
     expect(text).not.toContain('<think>');
     expect(text).not.toContain('</think>');
     // Sanity: all three session headers are present.
