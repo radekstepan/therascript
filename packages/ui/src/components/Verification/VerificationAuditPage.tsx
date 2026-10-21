@@ -22,7 +22,7 @@ import {
   Spinner,
 } from '@radix-ui/themes';
 import { ExclamationTriangleIcon, Cross2Icon } from '@radix-ui/react-icons';
-import { ShieldCheck, Play, Trash2, Wifi, WifiOff } from 'lucide-react';
+import { ShieldCheck, Play, Trash2 } from 'lucide-react';
 import {
   cancelVerificationJob,
   fetchVerificationJobs,
@@ -46,11 +46,9 @@ function isActiveJob(job: VerificationJob): boolean {
 function LiveJobBanner({ job }: { job: VerificationJob }) {
   const queryClient = useQueryClient();
   const setToast = useSetAtom(toastMessageAtom);
-  const {
-    job: liveJob,
-    isConnected,
-    streamError,
-  } = useVerificationStream(job.id, { enabled: isActiveJob(job) });
+  const { job: liveJob, streamError } = useVerificationStream(job.id, {
+    enabled: isActiveJob(job),
+  });
   const display = liveJob ?? job;
   const pct =
     display.total_messages > 0
@@ -76,19 +74,6 @@ function LiveJobBanner({ job }: { job: VerificationJob }) {
           <Flex align="center" gap="2">
             <Spinner size="2" />
             <Heading size="3">Audit #{display.id} in progress</Heading>
-            {isConnected ? (
-              <Badge color="green" variant="soft" size="1">
-                <Flex align="center" gap="1">
-                  <Wifi size={11} /> Live
-                </Flex>
-              </Badge>
-            ) : (
-              <Badge color="gray" variant="soft" size="1">
-                <Flex align="center" gap="1">
-                  <WifiOff size={11} /> Connecting…
-                </Flex>
-              </Badge>
-            )}
           </Flex>
           <Button
             size="2"

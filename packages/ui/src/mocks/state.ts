@@ -395,6 +395,56 @@ export const setE2eUploadError = (next: E2EUploadError | null) => {
   e2eUploadError = next;
 };
 
+// --- Verification jobs list (verification-live-banner.spec.ts) -----------
+// Mirrors `VerificationJob` in api/verification.ts. Defaults to [] so
+// the /verification dashboard renders without a live banner; specs
+// that need the banner POST a job list to
+// /api/__e2e/set-verification-jobs. Reseeded to [] by `e2eMockSeed`
+// (POST /api/__e2e/reset).
+export type E2EVerificationJobStatus =
+  | 'pending'
+  | 'processing'
+  | 'completed'
+  | 'failed'
+  | 'canceled';
+
+export type E2EVerificationJobScope =
+  | 'all_unverified'
+  | 'all_force'
+  | 'selected_sessions'
+  | 'single_chat';
+
+export interface E2EVerificationJob {
+  id: number;
+  status: E2EVerificationJobStatus;
+  scope: E2EVerificationJobScope;
+  session_ids_json: string | null;
+  chat_id: number | null;
+  skip_verified: boolean;
+  total_messages: number;
+  processed_messages: number;
+  total_statements: number;
+  flagged_statements: number;
+  omissions_count: number;
+  created_at: number;
+  completed_at: number | null;
+  error_message: string | null;
+  model_name: string | null;
+  context_size: number | null;
+  thinking_budget: number | null;
+  temperature: number | null;
+  top_p: number | null;
+  repeat_penalty: number | null;
+  num_gpu_layers: number | null;
+  llm_base_url: string | null;
+}
+
+export let e2eVerificationJobs: E2EVerificationJob[] = [];
+
+export const setE2eVerificationJobs = (next: E2EVerificationJob[]) => {
+  e2eVerificationJobs = next;
+};
+
 export type E2EAnalysisJobStatus =
   | 'processing'
   | 'completed'
@@ -593,6 +643,7 @@ export const e2eMockSeed = () => {
   setE2eNextTemplateId(3);
   setE2eSession1Transcript(seedSession1Transcript());
   setE2eUploadError(null);
+  setE2eVerificationJobs([]);
   setE2eLocalModels([...LOCAL_MODELS]);
   setE2eAnalysisJobs([
     {

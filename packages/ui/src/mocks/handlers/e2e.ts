@@ -10,7 +10,9 @@ import {
   e2eMockSeed,
   readReadiness,
   setE2eUploadError,
+  setE2eVerificationJobs,
   writeReadiness,
+  type E2EVerificationJob,
   type ReadinessShape,
 } from '../state';
 import { resetE2ePullJobs } from './llm';
@@ -33,6 +35,15 @@ export const e2eHandlers = [
   http.post('/api/__e2e/reset', () => {
     e2eMockSeed();
     resetE2ePullJobs();
+    return HttpResponse.json({ ok: true });
+  }),
+  // Job-list injection for GET /api/verification/jobs
+  // (verification-live-banner.spec.ts). Body: { jobs } or {} to clear.
+  http.post('/api/__e2e/set-verification-jobs', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      jobs?: E2EVerificationJob[];
+    };
+    setE2eVerificationJobs(Array.isArray(body.jobs) ? body.jobs : []);
     return HttpResponse.json({ ok: true });
   }),
   http.post('/api/__e2e/set-ready', async ({ request }) => {

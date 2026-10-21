@@ -10,9 +10,11 @@
 //
 // Owned spec files: verification-coverage.spec.ts,
 // verification-chart-padding.spec.ts,
-// verification-model-accuracy-scroll.spec.ts.
+// verification-model-accuracy-scroll.spec.ts,
+// verification-live-banner.spec.ts.
 import { http, HttpResponse } from 'msw';
 import type { VerificationGlobalStats } from '../../api/verification';
+import { e2eVerificationJobs } from '../state';
 
 const STATS_FIXTURE: VerificationGlobalStats = {
   totalMessagesAudited: 4,
@@ -104,7 +106,9 @@ const STATS_FIXTURE: VerificationGlobalStats = {
 };
 
 export const verificationHandlers = [
-  http.get('/api/verification/jobs', () => HttpResponse.json([])),
+  http.get('/api/verification/jobs', () =>
+    HttpResponse.json(e2eVerificationJobs)
+  ),
   http.get('/api/verification/stats', () => HttpResponse.json(STATS_FIXTURE)),
   http.get('/api/verification/statements', () =>
     HttpResponse.json({ items: [], total: 0, limit: 50, offset: 0 })
