@@ -2,11 +2,11 @@
 // packages/ui/src/components/SessionView/Chat/ChatMessageBubble.test.tsx
 //
 // Regression test for the "Judge Verdict" -> "Fact Check" rename: the
-// inline highlight tooltips and the hallucination badge tooltip that
+// inline highlight tooltips and the severity link tooltip that
 // open the verdict modal must point at the "Fact Check".
 import React from 'react';
-import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import { Theme } from '@radix-ui/themes';
 import { ChatMessageBubble } from './ChatMessageBubble';
 import type { ChatMessage } from '../../../types';
@@ -161,5 +161,229 @@ describe('ChatMessageBubble verified toggle', () => {
     );
     expect(marks).toContain(SUPPORTED_QUOTE);
     expect(marks).toContain(FABRICATED_QUOTE);
+  });
+});
+
+describe('ChatMessageBubble note footer', () => {
+  const S1 = 'The client takes sertraline daily.';
+  const S2 = 'The client owns three cats.';
+  const FOOTER_TEXT = `${S1} ${S2}`;
+
+  const PARTIAL: VerifiedStatement = {
+    ...STATEMENT,
+    id: 31,
+    statement_index: 0,
+    exact_quote: S1,
+    normalized_claim: S1,
+    start_char: 0,
+    end_char: S1.length,
+    verdict: 'partially_supported',
+    severity: 'medium',
+    confidence: 0.61,
+    reasoning: 'Only part of the claim is confirmed.',
+  };
+  const OMISSION: VerifiedStatement = {
+    ...STATEMENT,
+    id: 32,
+    statement_index: 1,
+    kind: 'omission',
+    exact_quote: '',
+    normalized_claim: 'Missed medication history.',
+    start_char: null,
+    end_char: null,
+    verdict: 'omission',
+    severity: 'medium',
+    confidence: 0.7,
+    reasoning: 'The note never answers the dosage question.',
+  };
+  const FABRICATED: VerifiedStatement = {
+    ...STATEMENT,
+    id: 33,
+    statement_index: 2,
+    exact_quote: S2,
+    normalized_claim: S2,
+    start_char: S1.length + 1,
+    end_char: FOOTER_TEXT.length,
+  };
+
+  function renderFooteredBubble(
+    verification: MessageVerification,
+    onStatementClick: (
+      messageId: number,
+      statement: VerifiedStatement
+    ) => void = () => {},
+    message: ChatMessage = { ...MESSAGE, text: FOOTER_TEXT }
+  ) {
+    return render(
+      <Theme>
+        <ChatMessageBubble
+          message={message}
+          isCurrentlyStreaming={false}
+          isAiResponding={false}
+          renderMd={false}
+          onStarClick={() => {}}
+          onCopyClick={() => {}}
+          verification={verification}
+          onStatementClick={onStatementClick}
+        />
+      </Theme>
+    );
+  }
+
+  it('shows only the highest-severity label as a link into the Fact Check', () => {
+    const onStatementClick = vi.fn();
+    renderFooteredBubble(
+      {
+        ...VERIFICATION,
+        total_claims: 4,
+        partial_claims: 2,
+        fabricated_claims: 1,
+        omissions_count: 1,
+        // Deliberately not first: the link must target by verdict severity.
+        statements: [PARTIAL, OMISSION, FABRICATED],
+      },
+      onStatementClick
+    );
+
+    const row = screen.getByTestId('note-metrics-row');
+    const links = within(row).getAllByRole('link');
+    expect(links).toHaveLength(1);
+    expect(links[0]?.textContent).toBe('1 Hallucination / Contradiction');
+
+    // Lower-severity labels and the model-name chip are gone.
+    expect(screen.queryByText(/Partially supported/)).toBeNull();
+    expect(screen.queryByText(/Omission/)).toBeNull();
+    expect(screen.queryByText('author-model')).toBeNull();
+    expect(screen.queryByText('judge-model')).toBeNull();
+
+    fireEvent.click(links[0]!);
+    expect(onStatementClick).toHaveBeenCalledTimes(1);
+    expect(onStatementClick).toHaveBeenCalledWith(MESSAGE.id, FABRICATED);
+  });
+
+  it.each([
+    {
+      name: 'partial outranks omission',
+      counts: { partial_claims: 2, omissions_count: 1 },
+      statements: [OMISSION, PARTIAL],
+      label: '2 Partially supported',
+      targetId: PARTIAL.id,
+    },
+    {
+      name: 'omission-only',
+      counts: { omissions_count: 3 },
+      statements: [OMISSION],
+      label: '3 Omissions detected',
+      targetId: OMISSION.id,
+    },
+    {
+      name: 'clean note stays a verified link',
+      counts: { total_claims: 2, supported_claims: 2 },
+      statements: [
+        {
+          ...PARTIAL,
+          verdict: 'supported' as const,
+          severity: 'none' as const,
+        },
+      ],
+      label: '✓ Verified (2/2 claims)',
+      targetId: PARTIAL.id,
+    },
+  ])('$name', ({ counts, statements, label, targetId }) => {
+    const onStatementClick = vi.fn();
+    renderFooteredBubble(
+      {
+        ...VERIFICATION,
+        total_claims: 0,
+        supported_claims: 0,
+        partial_claims: 0,
+        contradicted_claims: 0,
+        fabricated_claims: 0,
+        omissions_count: 0,
+        ...counts,
+        statements,
+      },
+      onStatementClick
+    );
+
+    const link = screen.getByRole('link', { name: label });
+    fireEvent.click(link);
+    expect(onStatementClick).toHaveBeenCalledTimes(1);
+    const [, statement] = onStatementClick.mock.calls[0]!;
+    expect(statement.id).toBe(targetId);
+  });
+
+  it('places the label right-aligned in the same row as the tokens display', () => {
+    renderFooteredBubble(
+      { ...VERIFICATION, statements: [STATEMENT] },
+      () => {},
+      { ...MESSAGE, completionTokens: 120, duration: 2000 }
+    );
+
+    const row = screen.getByTestId('note-metrics-row');
+    expect(within(row).getByText('120 tokens (60.0 tokens/s)')).not.toBeNull();
+    const link = within(row).getByRole('link', {
+      name: '1 Hallucination / Contradiction',
+    });
+    expect(link.classList.contains('text-right')).toBe(true);
+    // justify-between pushes the tokens left and the label right.
+    expect(row.className).toContain('space-between');
+  });
+
+  it('cannot overflow past the note edge at narrow widths', () => {
+    const { container } = render(
+      <Theme>
+        <div style={{ width: 200 }}>
+          <ChatMessageBubble
+            message={{ ...MESSAGE, completionTokens: 120, duration: 2000 }}
+            isCurrentlyStreaming={false}
+            isAiResponding={false}
+            renderMd={false}
+            onStarClick={() => {}}
+            onCopyClick={() => {}}
+            verification={VERIFICATION}
+            onStatementClick={() => {}}
+          />
+        </div>
+      </Theme>
+    );
+
+    const row = screen.getByTestId('note-metrics-row');
+    // The row shares the note bubble's max-width constraint...
+    const constrained = Array.from(container.querySelectorAll('div')).filter(
+      (el) => el.classList.contains('max-w-[90%]')
+    );
+    expect(constrained.length).toBeGreaterThanOrEqual(2);
+    for (const cls of ['max-w-[90%]', 'md:max-w-[85%]', 'lg:max-w-[75%]']) {
+      expect(row.classList.contains(cls)).toBe(true);
+      for (const el of constrained)
+        expect(el.classList.contains(cls)).toBe(true);
+    }
+    // ...and both cells shrink with ellipsis instead of overflowing.
+    const tokensCell = within(row).getByText(/tokens/).parentElement!;
+    expect(tokensCell.className).toContain('min-w-0');
+    const link = within(row).getByRole('link');
+    expect(link.parentElement!.className).toContain('min-w-0');
+    expect(link.classList.contains('truncate')).toBe(true);
+    expect(link.textContent).toBe('1 Hallucination / Contradiction');
+  });
+
+  it('renders the severity as plain text without a modal entry point', () => {
+    render(
+      <Theme>
+        <ChatMessageBubble
+          message={MESSAGE}
+          isCurrentlyStreaming={false}
+          isAiResponding={false}
+          renderMd={false}
+          onStarClick={() => {}}
+          onCopyClick={() => {}}
+          verification={VERIFICATION}
+        />
+      </Theme>
+    );
+
+    expect(screen.queryByRole('link')).toBeNull();
+    expect(screen.getByText('1 Hallucination / Contradiction')).not.toBeNull();
   });
 });

@@ -1,6 +1,6 @@
 // packages/ui/src/components/SessionView/Chat/ChatMessageBubble.tsx
 import React, { useCallback, useMemo, useRef } from 'react';
-import { Badge, Box, Flex, Text, Spinner, Callout } from '@radix-ui/themes';
+import { Box, Flex, Link, Text, Spinner, Callout } from '@radix-ui/themes';
 import {
   StarIcon,
   CopyIcon,
@@ -254,7 +254,7 @@ export function ChatMessageBubble({
     });
   };
 
-  // Footer badge counts.
+  // Footer severity counts.
   const showVerificationFooter =
     !isUser &&
     !isCurrentlyStreaming &&
@@ -271,30 +271,43 @@ export function ChatMessageBubble({
   const supportedCount = showVerificationFooter
     ? verification.supported_claims
     : 0;
-  const isFullyClean =
-    showVerificationFooter &&
-    hallucinationCount === 0 &&
-    partialCount === 0 &&
-    omissionCount === 0;
 
-  const firstOmission = useMemo(
+  // The footer shows ONE label for the highest severity present (red
+  // hallucinations/contradictions outrank amber partials and omissions,
+  // which outrank the clean "Verified" state).
+  const footerSeverity: { color: 'red' | 'amber' | 'green'; text: string } =
+    hallucinationCount > 0
+      ? {
+          color: 'red',
+          text: `${hallucinationCount} Hallucination${hallucinationCount === 1 ? '' : 's'} / Contradiction${hallucinationCount === 1 ? '' : 's'}`,
+        }
+      : partialCount > 0
+        ? { color: 'amber', text: `${partialCount} Partially supported` }
+        : omissionCount > 0
+          ? {
+              color: 'amber',
+              text: `${omissionCount} Omission${omissionCount === 1 ? '' : 's'} detected`,
+            }
+          : {
+              color: 'green',
+              text: `✓ Verified (${supportedCount}/${totalClaims} claims)`,
+            };
+
+  // Modal entry point for the footer link: the most severe statement,
+  // mirroring the ?highlightMsg deep-link priority in ChatMessages.
+  const topIssueStatement = useMemo(
     () =>
       verificationStatements.find(
-        (s) => s.kind === 'omission' || s.verdict === 'omission'
-      ) ?? null,
-    [verificationStatements]
-  );
-  const firstIssue = useMemo(
-    () =>
-      verificationStatements.find(
-        (s) => s.verdict === 'contradicted' || s.verdict === 'fabricated'
+        (s) => s.verdict === 'fabricated' || s.verdict === 'contradicted'
       ) ??
       verificationStatements.find((s) => s.verdict === 'partially_supported') ??
+      verificationStatements.find(
+        (s) => s.kind === 'omission' || s.verdict === 'omission'
+      ) ??
+      verificationStatements[0] ??
       null,
     [verificationStatements]
   );
-
-  const authoredModel = verification?.authored_model ?? message.model ?? null;
 
   const handleCopy = () => {
     if (message.sender === 'ai' && renderMd && markdownContainerRef.current) {
@@ -488,132 +501,63 @@ export function ChatMessageBubble({
         </Box>
       )}
 
-      {/* Metrics Row - only for AI messages */}
-      {!isUser && displayMetrics && (
+      {/* Metrics + verification row — only for AI messages. The severity
+          label sits right-aligned in the same row as the tokens display.
+          The row shares the note bubble's max-width and both cells truncate,
+          so the label can never overflow past the note's right edge. */}
+      {!isUser && (displayMetrics || showVerificationFooter) && (
         <Flex
           mt="1"
           width="100%"
-          justify="start"
-          className="text-[var(--gray-9)]"
-        >
-          <Text size="1">
-            {isCurrentlyStreaming && displayTokensPerSecond !== null
-              ? `~${(tokensPerSecond ?? 0).toFixed(1)} tokens/s`
-              : (() => {
-                  const thinking = message.thinkingTokens ?? 0;
-                  const response = message.completionTokens ?? 0;
-                  if (thinking > 0) {
-                    return `${thinking} thinking + ${response} response tokens (${displayTokensPerSecond!.toFixed(1)} tokens/s)`;
-                  }
-                  return `${response} tokens (${displayTokensPerSecond!.toFixed(1)} tokens/s)`;
-                })()}
-          </Text>
-        </Flex>
-      )}
-
-      {/* Verification footer — only for verified AI messages */}
-      {showVerificationFooter && (
-        <Flex
-          mt="1"
-          width="100%"
-          justify="start"
+          justify="between"
           align="center"
           gap="2"
-          wrap="wrap"
+          className="max-w-[90%] md:max-w-[85%] lg:max-w-[75%]"
+          data-testid="note-metrics-row"
         >
-          {isFullyClean ? (
-            <Badge color="green" variant="soft" size="1">
-              ✓ Verified ({supportedCount}/{totalClaims} claims)
-            </Badge>
-          ) : (
-            <>
-              {hallucinationCount > 0 && (
-                <Badge
-                  color="red"
-                  variant="soft"
+          <Box className="min-w-0 flex-1 text-[var(--gray-9)]">
+            {displayMetrics && (
+              <Text size="1" className="block truncate">
+                {isCurrentlyStreaming && displayTokensPerSecond !== null
+                  ? `~${(tokensPerSecond ?? 0).toFixed(1)} tokens/s`
+                  : (() => {
+                      const thinking = message.thinkingTokens ?? 0;
+                      const response = message.completionTokens ?? 0;
+                      if (thinking > 0) {
+                        return `${thinking} thinking + ${response} response tokens (${displayTokensPerSecond!.toFixed(1)} tokens/s)`;
+                      }
+                      return `${response} tokens (${displayTokensPerSecond!.toFixed(1)} tokens/s)`;
+                    })()}
+              </Text>
+            )}
+          </Box>
+          {showVerificationFooter && (
+            <Box className="min-w-0">
+              {topIssueStatement != null && onStatementClick != null ? (
+                <Link
                   size="1"
-                  className="cursor-pointer hover:brightness-95 transition"
-                  role={firstIssue ? 'button' : undefined}
-                  tabIndex={firstIssue ? 0 : undefined}
+                  color={footerSeverity.color}
+                  href="#"
                   title="Open the Fact Check"
-                  onClick={
-                    firstIssue
-                      ? (event: React.MouseEvent) => {
-                          event.stopPropagation();
-                          onStatementClick?.(message.id, firstIssue);
-                        }
-                      : undefined
-                  }
-                  onKeyDown={
-                    firstIssue
-                      ? (event: React.KeyboardEvent) => {
-                          if (event.key === 'Enter' || event.key === ' ') {
-                            event.preventDefault();
-                            onStatementClick?.(message.id, firstIssue);
-                          }
-                        }
-                      : undefined
-                  }
+                  className="block truncate text-right"
+                  onClick={(event: React.MouseEvent) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onStatementClick(message.id, topIssueStatement);
+                  }}
                 >
-                  {hallucinationCount} Hallucination
-                  {hallucinationCount === 1 ? '' : 's'} / Contradiction
-                  {hallucinationCount === 1 ? '' : 's'}
-                </Badge>
-              )}
-              {partialCount > 0 && (
-                <Badge color="amber" variant="soft" size="1">
-                  {partialCount} Partially supported
-                </Badge>
-              )}
-              {omissionCount > 0 && (
-                <Badge
-                  color="amber"
-                  variant="soft"
+                  {footerSeverity.text}
+                </Link>
+              ) : (
+                <Text
                   size="1"
-                  className="cursor-pointer hover:brightness-95 transition"
-                  role={firstOmission ? 'button' : undefined}
-                  tabIndex={firstOmission ? 0 : undefined}
-                  title="Omissions have no in-text highlight — click to see what was missed"
-                  onClick={
-                    firstOmission
-                      ? (event: React.MouseEvent) => {
-                          event.stopPropagation();
-                          onStatementClick?.(message.id, firstOmission);
-                        }
-                      : undefined
-                  }
-                  onKeyDown={
-                    firstOmission
-                      ? (event: React.KeyboardEvent) => {
-                          if (event.key === 'Enter' || event.key === ' ') {
-                            event.preventDefault();
-                            onStatementClick?.(message.id, firstOmission);
-                          }
-                        }
-                      : undefined
-                  }
+                  color={footerSeverity.color}
+                  className="block truncate text-right"
                 >
-                  {omissionCount} Omission{omissionCount === 1 ? '' : 's'}{' '}
-                  detected
-                </Badge>
+                  {footerSeverity.text}
+                </Text>
               )}
-            </>
-          )}
-          {authoredModel != null && authoredModel !== '' && (
-            <Badge
-              color="gray"
-              variant="soft"
-              size="1"
-              title={`Authored by ${authoredModel}`}
-              style={{
-                maxWidth: 220,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {authoredModel}
-            </Badge>
+            </Box>
           )}
         </Flex>
       )}
