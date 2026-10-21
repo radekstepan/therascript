@@ -9,7 +9,8 @@
 // exercise the jump-to-transcript navigation from the Coverage tab.
 //
 // Owned spec files: verification-coverage.spec.ts,
-// verification-chart-padding.spec.ts.
+// verification-chart-padding.spec.ts,
+// verification-model-accuracy-scroll.spec.ts.
 import { http, HttpResponse } from 'msw';
 import type { VerificationGlobalStats } from '../../api/verification';
 

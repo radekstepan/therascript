@@ -88,8 +88,15 @@ export function ModelAccuracyCard({ stats }: { stats: ModelAccuracyStat[] }) {
             ))}
           </Flex>
 
+          {/* Single horizontal scroll owner: the outer div. A plain
+              table (not Table.Root, which mounts its own inner
+              ScrollArea and a second scrollbar) carries the min-width
+              itself — the repo's rt-sticky-table pattern. */}
           <div style={{ overflowX: 'auto' }}>
-            <Table.Root size="1" style={{ minWidth: '720px' }}>
+            <table
+              className="rt-TableRootTable rt-sticky-table size-1"
+              style={{ minWidth: '720px' }}
+            >
               <Table.Header>
                 <Table.Row>
                   <Table.ColumnHeaderCell>Model</Table.ColumnHeaderCell>
@@ -170,7 +177,7 @@ export function ModelAccuracyCard({ stats }: { stats: ModelAccuracyStat[] }) {
                   </Table.Row>
                 ))}
               </Table.Body>
-            </Table.Root>
+            </table>
           </div>
         </>
       )}
