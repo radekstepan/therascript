@@ -10,7 +10,7 @@ import {
 import {
   StarIcon,
   PaperPlaneIcon,
-  StopIcon,
+  Cross2Icon,
   // ReloadIcon, // No longer needed for inline prompt
   // ExclamationTriangleIcon, // No longer needed for inline prompt
   InfoCircledIcon,
@@ -374,7 +374,7 @@ export function ChatInput({
                 // disabled={!isAiResponding || isInlineLoadingModel} // Removed isInlineLoadingModel
                 disabled={!isAiResponding}
               >
-                <StopIcon />
+                <Cross2Icon />
               </IconButton>
             </AppTooltip>
           ) : (

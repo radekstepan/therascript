@@ -34,7 +34,7 @@ import {
   CrossCircledIcon,
   DotsHorizontalIcon,
   TrashIcon,
-  StopIcon,
+  Cross2Icon,
   ChevronUpIcon,
   ChevronDownIcon,
   FileTextIcon,
@@ -444,7 +444,7 @@ const JobDetailView: React.FC<{
                 color="orange"
                 onClick={() => onCancelRequest(job)}
               >
-                <StopIcon /> Cancel Job
+                <Cross2Icon /> Cancel Job
               </Button>
             )}
             {isDeletable && (
@@ -856,7 +856,7 @@ const JobList: React.FC<{
                           disabled={!isCancellable}
                           color="orange"
                         >
-                          <StopIcon width="14" height="14" className="mr-2" />{' '}
+                          <Cross2Icon width="14" height="14" className="mr-2" />{' '}
                           Cancel Job
                         </DropdownMenu.Item>
                         <DropdownMenu.Separator />
@@ -1069,7 +1069,7 @@ export function AnalysisJobsPage() {
                 onClick={handleConfirmCancel}
                 disabled={cancelMutation.isPending}
               >
-                {cancelMutation.isPending ? <Spinner /> : <StopIcon />}
+                {cancelMutation.isPending ? <Spinner /> : <Cross2Icon />}
                 <Text ml="1">Confirm Cancel</Text>
               </Button>
             </AlertDialog.Action>

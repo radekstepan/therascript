@@ -21,7 +21,7 @@ import {
   AlertDialog,
   Spinner,
 } from '@radix-ui/themes';
-import { ExclamationTriangleIcon, StopIcon } from '@radix-ui/react-icons';
+import { ExclamationTriangleIcon, Cross2Icon } from '@radix-ui/react-icons';
 import { ShieldCheck, Play, Trash2, Wifi, WifiOff } from 'lucide-react';
 import {
   cancelVerificationJob,
@@ -97,7 +97,7 @@ function LiveJobBanner({ job }: { job: VerificationJob }) {
             disabled={cancelMutation.isPending}
             onClick={() => cancelMutation.mutate(display.id)}
           >
-            <StopIcon />{' '}
+            <Cross2Icon />{' '}
             {cancelMutation.isPending ? 'Canceling…' : 'Cancel Job'}
           </Button>
         </Flex>

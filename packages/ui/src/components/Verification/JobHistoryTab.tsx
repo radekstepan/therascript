@@ -16,7 +16,7 @@ import {
   Callout,
   Progress,
 } from '@radix-ui/themes';
-import { ExclamationTriangleIcon, StopIcon } from '@radix-ui/react-icons';
+import { ExclamationTriangleIcon, Cross2Icon } from '@radix-ui/react-icons';
 import { History } from 'lucide-react';
 import {
   cancelVerificationJob,
@@ -245,7 +245,7 @@ export function JobHistoryTab() {
                       disabled={cancelMutation.isPending}
                       onClick={() => cancelMutation.mutate(job.id)}
                     >
-                      <StopIcon /> Cancel
+                      <Cross2Icon /> Cancel
                     </Button>
                   ) : (
                     <Text size="1" color="gray">

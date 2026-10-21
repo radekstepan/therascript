@@ -26,7 +26,6 @@ import {
   CheckCircledIcon,
   ReloadIcon,
   ExclamationTriangleIcon,
-  StopIcon,
   MagnifyingGlassIcon,
   LightningBoltIcon,
   DotsHorizontalIcon,
@@ -735,7 +734,7 @@ export function LlmManagementModal({
                       </>
                     ) : (
                       <>
-                        <StopIcon /> Cancel
+                        <Cross2Icon /> Cancel
                       </>
                     )}
                   </Button>
