@@ -2,6 +2,7 @@
 //
 // Per-transcript verification coverage with 1-click audit / re-audit.
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { Flex, Text, Table, Badge, Button, Card } from '@radix-ui/themes';
 import { ShieldCheck, RotateCcw, FolderSearch } from 'lucide-react';
 import type { SessionVerificationSummary } from '../../api/verification';
@@ -67,9 +68,17 @@ export function CoverageTab({
             return (
               <Table.Row key={session.sessionId}>
                 <Table.RowHeaderCell>
-                  <Text size="2" weight="medium">
-                    {session.sessionName}
-                  </Text>
+                  <Link
+                    to={`/sessions/${session.sessionId}`}
+                    title="Open session transcript"
+                    aria-label={`Open transcript for ${session.sessionName}`}
+                    className="hover:underline"
+                    style={{ color: 'var(--accent-11)' }}
+                  >
+                    <Text size="2" weight="medium">
+                      {session.sessionName}
+                    </Text>
+                  </Link>
                 </Table.RowHeaderCell>
                 <Table.Cell>{session.clientName}</Table.Cell>
                 <Table.Cell>

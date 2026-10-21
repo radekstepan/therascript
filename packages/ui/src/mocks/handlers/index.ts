@@ -17,6 +17,7 @@ import { systemHandlers } from './system';
 import { templatesHandlers } from './templates';
 import { transcriptionHandlers } from './transcription';
 import { usageHandlers } from './usage';
+import { verificationHandlers } from './verification';
 
 export const handlers = [
   // --- Domain handlers (order matches the original handlers.ts) ----
@@ -42,9 +43,11 @@ export const handlers = [
   ...transcriptionHandlers,
   // 10. System: gpu-stats / jobs / admin.
   ...systemHandlers,
-  // 11. Readiness: must be late because most pages fire it on mount.
+  // 11. Verification dashboard: jobs / stats / statements.
+  ...verificationHandlers,
+  // 12. Readiness: must be late because most pages fire it on mount.
   ...readinessHandlers,
-  // 12. e2e test hooks: register last so production code never hits
+  // 13. e2e test hooks: register last so production code never hits
   //     them; if a real /api/__e2e/* path is added to production,
   //     these no-op endpoints would shadow it.
   ...e2eHandlers,
