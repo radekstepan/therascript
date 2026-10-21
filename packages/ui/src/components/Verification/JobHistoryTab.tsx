@@ -185,11 +185,29 @@ export function JobHistoryTab() {
                     color={statusBadgeColor(job.status)}
                     variant="soft"
                     size="1"
+                    title={
+                      job.error_message ??
+                      (job.status === 'failed'
+                        ? 'The audit run failed'
+                        : `Job ${job.status}`)
+                    }
                   >
                     {job.status}
                   </Badge>
                   {job.error_message && (
-                    <Text size="1" color="red" as="p" mt="1">
+                    <Text
+                      size="1"
+                      color="red"
+                      as="p"
+                      mt="1"
+                      title={job.error_message}
+                      style={{
+                        maxWidth: '260px',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
                       {job.error_message}
                     </Text>
                   )}

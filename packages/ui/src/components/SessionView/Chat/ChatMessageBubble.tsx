@@ -1,11 +1,21 @@
 // packages/ui/src/components/SessionView/Chat/ChatMessageBubble.tsx
 import React, { useCallback, useMemo, useRef } from 'react';
-import { Box, Flex, Link, Text, Spinner, Callout } from '@radix-ui/themes';
+import {
+  Box,
+  Flex,
+  Link,
+  Text,
+  Spinner,
+  Callout,
+  Badge,
+  Button,
+} from '@radix-ui/themes';
 import {
   StarIcon,
   CopyIcon,
   ExclamationTriangleIcon,
 } from '@radix-ui/react-icons';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
@@ -16,6 +26,7 @@ import type {
   MessageVerification,
   VerifiedStatement,
 } from '../../../api/verification';
+import { deleteMessageVerification } from '../../../api/verification';
 import {
   VERIFIED_MARK_CLASS,
   getVerdictLabel,
@@ -254,12 +265,39 @@ export function ChatMessageBubble({
     });
   };
 
+  const queryClient = useQueryClient();
+
+  // Clearing a failed verification returns the message to the
+  // unverified pool so the next audit retries it.
+  const clearVerificationMutation = useMutation({
+    mutationFn: () => deleteMessageVerification(message.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['chatVerifications'] });
+      queryClient.invalidateQueries({ queryKey: ['verificationStats'] });
+    },
+    onError: (error: Error) => {
+      console.error(
+        `[ChatMessageBubble] Failed to clear verification for message ${message.id}:`,
+        error
+      );
+    },
+  });
+
   // Footer severity counts.
   const showVerificationFooter =
     !isUser &&
     !isCurrentlyStreaming &&
     verification != null &&
     verification.status === 'completed';
+  const showFailedFooter =
+    !isUser &&
+    !isCurrentlyStreaming &&
+    verification != null &&
+    verification.status === 'failed';
+  const failedTooltip =
+    verification?.status === 'failed'
+      ? (verification.error_message ?? 'Verification failed for this message')
+      : null;
   const hallucinationCount = showVerificationFooter
     ? verification.contradicted_claims + verification.fabricated_claims
     : 0;
@@ -505,62 +543,95 @@ export function ChatMessageBubble({
           label sits right-aligned in the same row as the tokens display.
           The row shares the note bubble's max-width and both cells truncate,
           so the label can never overflow past the note's right edge. */}
-      {!isUser && (displayMetrics || showVerificationFooter) && (
-        <Flex
-          mt="1"
-          width="100%"
-          justify="between"
-          align="center"
-          gap="2"
-          className="max-w-[90%] md:max-w-[85%] lg:max-w-[75%]"
-          data-testid="note-metrics-row"
-        >
-          <Box className="min-w-0 flex-1 text-[var(--gray-9)]">
-            {displayMetrics && (
-              <Text size="1" className="block truncate">
-                {isCurrentlyStreaming && displayTokensPerSecond !== null
-                  ? `~${(tokensPerSecond ?? 0).toFixed(1)} tokens/s`
-                  : (() => {
-                      const thinking = message.thinkingTokens ?? 0;
-                      const response = message.completionTokens ?? 0;
-                      if (thinking > 0) {
-                        return `${thinking} thinking + ${response} response tokens (${displayTokensPerSecond!.toFixed(1)} tokens/s)`;
-                      }
-                      return `${response} tokens (${displayTokensPerSecond!.toFixed(1)} tokens/s)`;
-                    })()}
-              </Text>
-            )}
-          </Box>
-          {showVerificationFooter && (
-            <Box className="min-w-0">
-              {topIssueStatement != null && onStatementClick != null ? (
-                <Link
-                  size="1"
-                  color={footerSeverity.color}
-                  href="#"
-                  title="Open the Fact Check"
-                  className="block truncate text-right"
-                  onClick={(event: React.MouseEvent) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    onStatementClick(message.id, topIssueStatement);
-                  }}
-                >
-                  {footerSeverity.text}
-                </Link>
-              ) : (
-                <Text
-                  size="1"
-                  color={footerSeverity.color}
-                  className="block truncate text-right"
-                >
-                  {footerSeverity.text}
+      {!isUser &&
+        (displayMetrics || showVerificationFooter || showFailedFooter) && (
+          <Flex
+            mt="1"
+            width="100%"
+            justify="between"
+            align="center"
+            gap="2"
+            className="max-w-[90%] md:max-w-[85%] lg:max-w-[75%]"
+            data-testid="note-metrics-row"
+          >
+            <Box className="min-w-0 flex-1 text-[var(--gray-9)]">
+              {displayMetrics && (
+                <Text size="1" className="block truncate">
+                  {isCurrentlyStreaming && displayTokensPerSecond !== null
+                    ? `~${(tokensPerSecond ?? 0).toFixed(1)} tokens/s`
+                    : (() => {
+                        const thinking = message.thinkingTokens ?? 0;
+                        const response = message.completionTokens ?? 0;
+                        if (thinking > 0) {
+                          return `${thinking} thinking + ${response} response tokens (${displayTokensPerSecond!.toFixed(1)} tokens/s)`;
+                        }
+                        return `${response} tokens (${displayTokensPerSecond!.toFixed(1)} tokens/s)`;
+                      })()}
                 </Text>
               )}
             </Box>
-          )}
-        </Flex>
-      )}
+            {showVerificationFooter && (
+              <Box className="min-w-0">
+                {topIssueStatement != null && onStatementClick != null ? (
+                  <Link
+                    size="1"
+                    color={footerSeverity.color}
+                    href="#"
+                    title="Open the Fact Check"
+                    className="block truncate text-right"
+                    onClick={(event: React.MouseEvent) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onStatementClick(message.id, topIssueStatement);
+                    }}
+                  >
+                    {footerSeverity.text}
+                  </Link>
+                ) : (
+                  <Text
+                    size="1"
+                    color={footerSeverity.color}
+                    className="block truncate text-right"
+                  >
+                    {footerSeverity.text}
+                  </Text>
+                )}
+              </Box>
+            )}
+            {showFailedFooter && failedTooltip !== null && (
+              <Box className="min-w-0">
+                <Flex align="center" justify="end" gap="1">
+                  <Badge
+                    color="red"
+                    variant="soft"
+                    size="1"
+                    title={failedTooltip}
+                    style={{ flexShrink: 0 }}
+                  >
+                    Fact-check failed
+                  </Badge>
+                  <Button
+                    size="1"
+                    variant="ghost"
+                    color="red"
+                    disabled={clearVerificationMutation.isPending}
+                    title="Clear this failed verification so the next audit retries the message"
+                    onClick={() => clearVerificationMutation.mutate()}
+                  >
+                    {clearVerificationMutation.isPending
+                      ? 'Clearing…'
+                      : 'Clear'}
+                  </Button>
+                </Flex>
+                {clearVerificationMutation.isError && (
+                  <Text size="1" color="red" className="block text-right">
+                    Couldn&apos;t clear — try again.
+                  </Text>
+                )}
+              </Box>
+            )}
+          </Flex>
+        )}
 
       {/* Action Row */}
       {(showCopyButton || isUser) && (

@@ -108,6 +108,7 @@ export interface SingleChatVerifyOverrides {
   topP?: number;
   repeatPenalty?: number;
   numGpuLayers?: number | null;
+  baseUrl?: string;
 }
 
 /** Trigger a single-chat verification job from the chat header. */
@@ -122,6 +123,12 @@ export const triggerSingleChatVerification = async (
   );
   return response.data;
 };
+
+/**
+ * Backwards-compatible alias for {@link triggerSingleChatVerification}
+ * (previously a duplicate implementation of the same endpoint).
+ */
+export const verifySingleChat = triggerSingleChatVerification;
 
 // ---------------------------------------------------------------------------
 // Dashboard-level DTOs + client for `/api/verification/*` (VerificationAuditPage).
@@ -203,6 +210,8 @@ export interface SessionVerificationSummary {
   date: string;
   totalAiMessages: number;
   verifiedAiMessages: number;
+  /** Messages whose latest verification attempt ended with status = 'failed'. */
+  failedAiMessages?: number;
   isFullyVerified: boolean;
   flaggedIssues: number;
   averageAccuracy: number | null;
@@ -218,6 +227,8 @@ export interface VerificationGlobalStats {
   fabricatedClaims: number;
   omissions: number;
   unverifiedMessagesCount: number;
+  /** Messages whose latest verification attempt ended with status = 'failed'. */
+  failedMessagesCount?: number;
   byModel: ModelAccuracyStat[];
   overTime: VerificationTimepointStat[];
   sessionsSummary: SessionVerificationSummary[];
@@ -393,21 +404,5 @@ export const resetVerifications = async (): Promise<{
   deletedVerifications: number;
 }> => {
   const response = await axios.delete('/api/verification/reset');
-  return response.data;
-};
-
-/**
- * Triggers a quick single-chat verification job (dashboard-level alias
- * accepting the full job payload overrides, including baseUrl).
- */
-export const verifySingleChat = async (
-  sessionId: number,
-  chatId: number,
-  overrides?: Partial<CreateVerificationJobPayload>
-): Promise<{ jobId: number }> => {
-  const response = await axios.post(
-    `/api/sessions/${sessionId}/chats/${chatId}/verify`,
-    overrides ?? {}
-  );
   return response.data;
 };

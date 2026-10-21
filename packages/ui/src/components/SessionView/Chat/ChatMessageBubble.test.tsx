@@ -5,8 +5,15 @@
 // inline highlight tooltips and the severity link tooltip that
 // open the verdict modal must point at the "Fact Check".
 import React from 'react';
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import {
+  render,
+  screen,
+  fireEvent,
+  within,
+  waitFor,
+} from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Theme } from '@radix-ui/themes';
 import { ChatMessageBubble } from './ChatMessageBubble';
 import type { ChatMessage } from '../../../types';
@@ -14,6 +21,38 @@ import type {
   MessageVerification,
   VerifiedStatement,
 } from '../../../api/verification';
+
+const { mockDeleteMessageVerification } = vi.hoisted(() => ({
+  mockDeleteMessageVerification: vi.fn(),
+}));
+
+vi.mock('../../../api/verification', async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import('../../../api/verification')>();
+  return {
+    ...original,
+    deleteMessageVerification: mockDeleteMessageVerification,
+  };
+});
+
+beforeEach(() => {
+  mockDeleteMessageVerification.mockReset();
+  mockDeleteMessageVerification.mockResolvedValue({ message: 'cleared' });
+});
+
+// The bubble clears failed verifications through react-query, so every
+// render needs a client (fresh per test to avoid cache leakage).
+function renderWithClient(ui: React.ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, gcTime: 0 },
+      mutations: { retry: false },
+    },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
+  );
+}
 
 const TEXT = 'The client takes sertraline daily.';
 
@@ -70,7 +109,7 @@ const MESSAGE: ChatMessage = {
 };
 
 function renderBubble() {
-  return render(
+  return renderWithClient(
     <Theme>
       <ChatMessageBubble
         message={MESSAGE}
@@ -134,7 +173,7 @@ describe('ChatMessageBubble verified toggle', () => {
   };
 
   it('has no show/hide-verified toggle and always highlights supported claims', () => {
-    const { container } = render(
+    const { container } = renderWithClient(
       <Theme>
         <ChatMessageBubble
           message={{ ...MESSAGE, text: MIXED_TEXT }}
@@ -214,7 +253,7 @@ describe('ChatMessageBubble note footer', () => {
     ) => void = () => {},
     message: ChatMessage = { ...MESSAGE, text: FOOTER_TEXT }
   ) {
-    return render(
+    return renderWithClient(
       <Theme>
         <ChatMessageBubble
           message={message}
@@ -331,7 +370,7 @@ describe('ChatMessageBubble note footer', () => {
   });
 
   it('cannot overflow past the note edge at narrow widths', () => {
-    const { container } = render(
+    const { container } = renderWithClient(
       <Theme>
         <div style={{ width: 200 }}>
           <ChatMessageBubble
@@ -369,7 +408,7 @@ describe('ChatMessageBubble note footer', () => {
   });
 
   it('renders the severity as plain text without a modal entry point', () => {
-    render(
+    renderWithClient(
       <Theme>
         <ChatMessageBubble
           message={MESSAGE}
@@ -385,5 +424,66 @@ describe('ChatMessageBubble note footer', () => {
 
     expect(screen.queryByRole('link')).toBeNull();
     expect(screen.getByText('1 Hallucination / Contradiction')).not.toBeNull();
+  });
+});
+
+describe('ChatMessageBubble failed verification', () => {
+  const FAILED: MessageVerification = {
+    ...VERIFICATION,
+    status: 'failed',
+    total_claims: 0,
+    supported_claims: 0,
+    fabricated_claims: 0,
+    statements: [],
+    error_message: 'Judge LLM timed out after 3 attempts',
+  };
+
+  function renderFailedBubble(verification: MessageVerification = FAILED) {
+    return renderWithClient(
+      <Theme>
+        <ChatMessageBubble
+          message={MESSAGE}
+          isCurrentlyStreaming={false}
+          isAiResponding={false}
+          renderMd={false}
+          onStarClick={() => {}}
+          onCopyClick={() => {}}
+          verification={verification}
+          onStatementClick={() => {}}
+        />
+      </Theme>
+    );
+  }
+
+  it('renders the Fact-check failed badge with the error tooltip', () => {
+    const { container } = renderFailedBubble();
+
+    const badge = screen.getByText('Fact-check failed');
+    expect(badge.getAttribute('title')).toBe(
+      'Judge LLM timed out after 3 attempts'
+    );
+    // Failed messages have no verdicts: no highlights, no severity link.
+    expect(container.querySelector('mark')).toBeNull();
+    expect(screen.queryByRole('link')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Clear' })).not.toBeNull();
+  });
+
+  it('falls back to a generic tooltip when error_message is null', () => {
+    renderFailedBubble({ ...FAILED, error_message: null });
+
+    expect(screen.getByText('Fact-check failed').getAttribute('title')).toBe(
+      'Verification failed for this message'
+    );
+  });
+
+  it('calls deleteMessageVerification when Clear is clicked', async () => {
+    renderFailedBubble();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+
+    await waitFor(() => {
+      expect(mockDeleteMessageVerification).toHaveBeenCalledTimes(1);
+    });
+    expect(mockDeleteMessageVerification).toHaveBeenCalledWith(MESSAGE.id);
   });
 });

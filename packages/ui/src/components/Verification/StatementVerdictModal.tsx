@@ -26,11 +26,14 @@ import {
   InfoCircledIcon,
   PersonIcon,
   QuoteIcon,
+  TrashIcon,
 } from '@radix-ui/react-icons';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type {
   StatementSeverity,
   VerifiedStatement,
 } from '../../api/verification';
+import { deleteMessageVerification } from '../../api/verification';
 import {
   formatEvidenceTimestamp,
   getVerdictBadgeColor,
@@ -50,6 +53,11 @@ export interface StatementVerdictModalProps {
   summaryAssessment?: string | null;
   /** Therapist's prompt — shown as context for omissions. */
   userQuestion?: string | null;
+  /**
+   * Owning chat message id. Enables the "Clear Verification" footer
+   * action (delete + invalidate + close) so the message can be re-audited.
+   */
+  messageId?: number | null;
 }
 
 function getSeverityBadgeColor(
@@ -84,7 +92,29 @@ export function StatementVerdictModal({
   verifiedAt,
   summaryAssessment,
   userQuestion,
+  messageId,
 }: StatementVerdictModalProps) {
+  const queryClient = useQueryClient();
+
+  const clearMutation = useMutation({
+    mutationFn: () => {
+      if (messageId === undefined || messageId === null) {
+        throw new Error('Message id missing for clear verification.');
+      }
+      return deleteMessageVerification(messageId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['chatVerifications'] });
+      queryClient.invalidateQueries({ queryKey: ['verificationStats'] });
+      onOpenChange(false);
+    },
+    onError: (error: Error) => {
+      console.error(
+        `[StatementVerdictModal] Failed to clear verification for message ${messageId}:`,
+        error
+      );
+    },
+  });
   const sorted = useMemo(
     () =>
       [...statements].sort((a, b) => {
@@ -340,12 +370,14 @@ export function StatementVerdictModal({
                       }}
                     >
                       <Flex align="center" gap="2" wrap="wrap" mb="2">
-                        {item.speaker != null && item.speaker !== '' && (
-                          <Badge color="blue" variant="soft" size="1">
-                            <PersonIcon />
-                            {item.speaker}
-                          </Badge>
-                        )}
+                        {item.speaker != null &&
+                          item.speaker.trim() !== '' &&
+                          item.speaker.trim().toUpperCase() !== 'UNKNOWN' && (
+                            <Badge color="blue" variant="soft" size="1">
+                              <PersonIcon />
+                              {item.speaker}
+                            </Badge>
+                          )}
                         <Badge
                           color="gray"
                           variant="soft"
@@ -412,14 +444,42 @@ export function StatementVerdictModal({
           </ScrollArea>
         )}
 
-        {sorted.length > 1 && (
-          <Flex justify="between" mt="4">
-            <Button size="2" variant="soft" color="gray" onClick={goPrev}>
-              <ChevronLeftIcon /> Prev
-            </Button>
-            <Button size="2" variant="soft" color="gray" onClick={goNext}>
-              Next <ChevronRightIcon />
-            </Button>
+        {(sorted.length > 1 || messageId != null) && (
+          <Flex justify="between" align="center" mt="4" gap="2" wrap="wrap">
+            {messageId != null ? (
+              <Flex direction="column" gap="1" align="start">
+                <Button
+                  size="2"
+                  variant="soft"
+                  color="red"
+                  disabled={clearMutation.isPending}
+                  onClick={() => clearMutation.mutate()}
+                  title="Delete this verification so the message can be re-audited"
+                >
+                  <TrashIcon />{' '}
+                  {clearMutation.isPending ? 'Clearing…' : 'Clear Verification'}
+                </Button>
+                {clearMutation.isError && (
+                  <Text size="1" color="red">
+                    Couldn&apos;t clear — try again.
+                  </Text>
+                )}
+              </Flex>
+            ) : (
+              <Box />
+            )}
+            {sorted.length > 1 ? (
+              <Flex gap="2">
+                <Button size="2" variant="soft" color="gray" onClick={goPrev}>
+                  <ChevronLeftIcon /> Prev
+                </Button>
+                <Button size="2" variant="soft" color="gray" onClick={goNext}>
+                  Next <ChevronRightIcon />
+                </Button>
+              </Flex>
+            ) : (
+              <Box />
+            )}
           </Flex>
         )}
       </Dialog.Content>

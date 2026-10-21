@@ -387,6 +387,7 @@ export function ChatMessages({
         verifiedAt={activeVerification?.verified_at ?? null}
         summaryAssessment={activeVerification?.summary_assessment ?? null}
         userQuestion={activeUserQuestion}
+        messageId={activeVerification?.message_id ?? null}
       />
 
       <EditEntityModal

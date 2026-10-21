@@ -12,11 +12,17 @@ export function CoverageTab({
   sessions,
   onAuditSession,
   auditDisabled = false,
+  onVerifySession,
 }: {
   sessions: SessionVerificationSummary[];
   onAuditSession: (sessionId: number) => void;
   /** True while an audit job is running (mirrors the header button). */
   auditDisabled?: boolean;
+  /**
+   * One-click retry for failed messages (runs with skipVerified: true).
+   * When omitted, no retry button is rendered.
+   */
+  onVerifySession?: (sessionId: number) => void;
 }) {
   if (sessions.length === 0) {
     return (
@@ -102,10 +108,22 @@ export function CoverageTab({
                   )}
                 </Table.Cell>
                 <Table.Cell justify="end">
-                  <Text size="2">
-                    {session.verifiedAiMessages} / {session.totalAiMessages}{' '}
-                    msgs
-                  </Text>
+                  <Flex direction="column" align="end" gap="1">
+                    <Text size="2">
+                      {session.verifiedAiMessages} / {session.totalAiMessages}{' '}
+                      msgs
+                    </Text>
+                    {(session.failedAiMessages ?? 0) > 0 && (
+                      <Badge
+                        color="red"
+                        variant="soft"
+                        size="1"
+                        title={`${session.failedAiMessages} message${session.failedAiMessages === 1 ? '' : 's'} failed verification (LLM error). Retry to re-audit ${session.failedAiMessages === 1 ? 'it' : 'them'}.`}
+                      >
+                        {session.failedAiMessages} failed
+                      </Badge>
+                    )}
+                  </Flex>
                 </Table.Cell>
                 <Table.Cell justify="end">
                   {session.averageAccuracy === null ? (
@@ -140,25 +158,45 @@ export function CoverageTab({
                   )}
                 </Table.Cell>
                 <Table.Cell justify="end">
-                  <Button
-                    size="1"
-                    variant="soft"
-                    disabled={auditDisabled}
-                    title={
-                      auditDisabled ? 'An audit is already running' : undefined
-                    }
-                    onClick={() => onAuditSession(session.sessionId)}
-                  >
-                    {status === 'verified' ? (
-                      <>
-                        <RotateCcw size={12} /> Re-audit
-                      </>
-                    ) : (
-                      <>
-                        <ShieldCheck size={12} /> Audit session
-                      </>
+                  <Flex gap="1" justify="end" wrap="wrap">
+                    {(session.failedAiMessages ?? 0) > 0 && onVerifySession && (
+                      <Button
+                        size="1"
+                        variant="soft"
+                        color="red"
+                        disabled={auditDisabled}
+                        title={
+                          auditDisabled
+                            ? 'An audit is already running'
+                            : `Retry the ${session.failedAiMessages} failed message${session.failedAiMessages === 1 ? '' : 's'} (skips already-verified ones)`
+                        }
+                        onClick={() => onVerifySession(session.sessionId)}
+                      >
+                        <RotateCcw size={12} /> Retry Failed
+                      </Button>
                     )}
-                  </Button>
+                    <Button
+                      size="1"
+                      variant="soft"
+                      disabled={auditDisabled}
+                      title={
+                        auditDisabled
+                          ? 'An audit is already running'
+                          : undefined
+                      }
+                      onClick={() => onAuditSession(session.sessionId)}
+                    >
+                      {status === 'verified' ? (
+                        <>
+                          <RotateCcw size={12} /> Re-audit
+                        </>
+                      ) : (
+                        <>
+                          <ShieldCheck size={12} /> Audit session
+                        </>
+                      )}
+                    </Button>
+                  </Flex>
                 </Table.Cell>
               </Table.Row>
             );
