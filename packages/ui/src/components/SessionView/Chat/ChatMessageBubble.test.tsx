@@ -6,7 +6,7 @@
 // open the verdict modal must point at the "Fact Check".
 import React from 'react';
 import { describe, it, expect } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { Theme } from '@radix-ui/themes';
 import { ChatMessageBubble } from './ChatMessageBubble';
 import type { ChatMessage } from '../../../types';
@@ -101,5 +101,65 @@ describe('ChatMessageBubble verification entry points', () => {
     for (const title of titles) {
       expect(title).not.toContain('Judge');
     }
+  });
+});
+
+describe('ChatMessageBubble verified toggle', () => {
+  const SUPPORTED_QUOTE = 'The client takes sertraline daily.';
+  const FABRICATED_QUOTE = 'The client owns three cats.';
+  const MIXED_TEXT = `${SUPPORTED_QUOTE} ${FABRICATED_QUOTE}`;
+
+  const SUPPORTED: VerifiedStatement = {
+    ...STATEMENT,
+    id: 21,
+    statement_index: 0,
+    exact_quote: SUPPORTED_QUOTE,
+    normalized_claim: SUPPORTED_QUOTE,
+    start_char: 0,
+    end_char: SUPPORTED_QUOTE.length,
+    verdict: 'supported',
+    severity: 'none',
+    confidence: 0.98,
+    reasoning: 'Confirmed by the session transcript.',
+  };
+
+  const FABRICATED: VerifiedStatement = {
+    ...STATEMENT,
+    id: 22,
+    statement_index: 1,
+    exact_quote: FABRICATED_QUOTE,
+    normalized_claim: FABRICATED_QUOTE,
+    start_char: SUPPORTED_QUOTE.length + 1,
+    end_char: MIXED_TEXT.length,
+  };
+
+  it('has no show/hide-verified toggle and always highlights supported claims', () => {
+    const { container } = render(
+      <Theme>
+        <ChatMessageBubble
+          message={{ ...MESSAGE, text: MIXED_TEXT }}
+          isCurrentlyStreaming={false}
+          isAiResponding={false}
+          renderMd={false}
+          onStarClick={() => {}}
+          onCopyClick={() => {}}
+          verification={{
+            ...VERIFICATION,
+            total_claims: 2,
+            supported_claims: 1,
+            fabricated_claims: 1,
+            statements: [SUPPORTED, FABRICATED],
+          }}
+          onStatementClick={() => {}}
+        />
+      </Theme>
+    );
+
+    expect(screen.queryByRole('button', { name: /verified/i })).toBeNull();
+    const marks = Array.from(container.querySelectorAll('mark')).map(
+      (mark) => mark.textContent
+    );
+    expect(marks).toContain(SUPPORTED_QUOTE);
+    expect(marks).toContain(FABRICATED_QUOTE);
   });
 });

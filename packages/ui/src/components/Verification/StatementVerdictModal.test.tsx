@@ -53,3 +53,41 @@ describe('StatementVerdictModal title', () => {
     expect(screen.queryByText('Judge Verdict')).toBeNull();
   });
 });
+
+describe('StatementVerdictModal top steppers', () => {
+  const SECOND: VerifiedStatement = {
+    ...STATEMENT,
+    id: 12,
+    statement_index: 1,
+    exact_quote: 'The client attends weekly sessions.',
+    normalized_claim: 'The client attends weekly sessions.',
+    verdict: 'supported',
+    severity: 'none',
+  };
+
+  it('renders no top prev/next steppers for multi-statement messages', async () => {
+    render(
+      <Theme>
+        <StatementVerdictModal
+          open
+          onOpenChange={() => {}}
+          statements={[STATEMENT, SECOND]}
+          initialStatementId={STATEMENT.id}
+          authoredModel="author-model"
+          judgeModel="judge-model"
+          verifiedAt={Date.now()}
+        />
+      </Theme>
+    );
+
+    expect(await screen.findByText('Fact Check')).toBeTruthy();
+    expect(
+      screen.queryByRole('button', { name: 'Previous statement' })
+    ).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Next statement' })).toBeNull();
+    // Close affordance and bottom Prev/Next navigation are retained.
+    expect(screen.getByRole('button', { name: 'Close' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Prev' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Next' })).toBeTruthy();
+  });
+});

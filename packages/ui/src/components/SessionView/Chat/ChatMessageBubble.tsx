@@ -1,14 +1,6 @@
 // packages/ui/src/components/SessionView/Chat/ChatMessageBubble.tsx
-import React, { useCallback, useMemo, useRef, useState } from 'react';
-import {
-  Badge,
-  Box,
-  Button,
-  Flex,
-  Text,
-  Spinner,
-  Callout,
-} from '@radix-ui/themes';
+import React, { useCallback, useMemo, useRef } from 'react';
+import { Badge, Box, Flex, Text, Spinner, Callout } from '@radix-ui/themes';
 import {
   StarIcon,
   CopyIcon,
@@ -130,8 +122,6 @@ export function ChatMessageBubble({
     displayText.trim() !== '' || showThinkingMarquee || showWaitingIndicator;
 
   // --- Verification highlighting -------------------------------------------
-  const [showSupported, setShowSupported] = useState(false);
-
   const verificationStatements: VerifiedStatement[] = useMemo(
     () =>
       verification?.status === 'completed' && !isCurrentlyStreaming
@@ -146,16 +136,11 @@ export function ChatMessageBubble({
   );
 
   // Inline highlights cover claims only (omissions have no in-text span).
-  // Supported claims stay clean unless the "show verified" toggle is on.
+  // All verified claims stay highlighted, including supported ones.
   const highlightable: HighlightableStatement[] = useMemo(
     () =>
       verificationStatements
-        .filter(
-          (s) =>
-            s.kind === 'claim' &&
-            s.exact_quote.trim() !== '' &&
-            (showSupported || s.verdict !== 'supported')
-        )
+        .filter((s) => s.kind === 'claim' && s.exact_quote.trim() !== '')
         .map((s) => ({
           id: s.id,
           exact_quote: s.exact_quote,
@@ -163,7 +148,7 @@ export function ChatMessageBubble({
           end_char: s.end_char,
           verdict: s.verdict,
         })),
-    [verificationStatements, showSupported]
+    [verificationStatements]
   );
 
   const handleMarkActivate = useCallback(
@@ -629,21 +614,6 @@ export function ChatMessageBubble({
             >
               {authoredModel}
             </Badge>
-          )}
-          {supportedCount > 0 && !isFullyClean && (
-            <Button
-              size="1"
-              variant="ghost"
-              color="gray"
-              onClick={() => setShowSupported((prev) => !prev)}
-              title={
-                showSupported
-                  ? 'Hide supported-claim underlines'
-                  : 'Underline supported claims too'
-              }
-            >
-              {showSupported ? 'Hide verified' : 'Show verified'}
-            </Button>
           )}
         </Flex>
       )}

@@ -173,37 +173,6 @@ export function StatementVerdictModal({
             </Dialog.Description>
           </Box>
           <Flex align="center" gap="1" style={{ flexShrink: 0 }}>
-            {sorted.length > 1 && (
-              <>
-                <IconButton
-                  size="2"
-                  variant="ghost"
-                  color="gray"
-                  onClick={goPrev}
-                  aria-label="Previous statement"
-                  title="Previous statement (←)"
-                >
-                  <ChevronLeftIcon />
-                </IconButton>
-                <Text
-                  size="2"
-                  color="gray"
-                  style={{ minWidth: 44, textAlign: 'center', flexShrink: 0 }}
-                >
-                  {selectedIndex + 1} / {sorted.length}
-                </Text>
-                <IconButton
-                  size="2"
-                  variant="ghost"
-                  color="gray"
-                  onClick={goNext}
-                  aria-label="Next statement"
-                  title="Next statement (→)"
-                >
-                  <ChevronRightIcon />
-                </IconButton>
-              </>
-            )}
             <Dialog.Close>
               <IconButton
                 size="2"
