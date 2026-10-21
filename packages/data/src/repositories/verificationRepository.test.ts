@@ -316,6 +316,12 @@ describe('findCandidateMessagesForVerification', () => {
     const otherChat = insertChat(otherSession);
     insertMessage({
       chatId: otherChat,
+      sender: 'user',
+      text: 'Other question?',
+      timestamp: T0 + 7900,
+    });
+    insertMessage({
+      chatId: otherChat,
       sender: 'ai',
       text: 'Other answer.',
       timestamp: T0 + 8000,
@@ -341,6 +347,43 @@ describe('findCandidateMessagesForVerification', () => {
       }
     );
     expect(limited).toHaveLength(1);
+  });
+
+  it('skips ai messages with no preceding user message (default/welcome-only chats)', () => {
+    const sessionId = insertSession('NoChat');
+    const welcomeChat = insertChat(sessionId);
+    insertMessage({
+      chatId: welcomeChat,
+      sender: 'ai',
+      text: 'Session "NoChat" has been transcribed and is ready for analysis.',
+      timestamp: T0,
+      completionTokens: null,
+    });
+    insertMessage({
+      chatId: welcomeChat,
+      sender: 'ai',
+      text: 'Stray answer with no question.',
+      timestamp: T0 + 1000,
+    });
+    // AI message preceding the user message is not a response to it.
+    const reversedChat = insertChat(sessionId);
+    insertMessage({
+      chatId: reversedChat,
+      sender: 'ai',
+      text: 'Answer before question.',
+      timestamp: T0 + 2000,
+    });
+    insertMessage({
+      chatId: reversedChat,
+      sender: 'user',
+      text: 'Late question.',
+      timestamp: T0 + 3000,
+    });
+    const candidates =
+      verificationRepository.findCandidateMessagesForVerification({
+        scope: 'all_unverified',
+      });
+    expect(candidates).toHaveLength(0);
   });
 });
 
@@ -515,6 +558,12 @@ describe('findVerificationsBySessionId', () => {
   it('returns stats plus chronological breakdown', () => {
     const sessionId = insertSession('S1');
     const chatId = insertChat(sessionId);
+    insertMessage({
+      chatId,
+      sender: 'user',
+      text: 'Question?',
+      timestamp: T0 - 1000,
+    });
     const m1 = insertMessage({
       chatId,
       sender: 'ai',
@@ -564,6 +613,12 @@ describe('getGlobalVerificationAnalytics', () => {
   const seedAnalytics = () => {
     const s1 = insertSession('S1', 'completed', '2024-05-10');
     const c1 = insertChat(s1);
+    insertMessage({
+      chatId: c1,
+      sender: 'user',
+      text: 'Question one?',
+      timestamp: T0 - 1000,
+    });
     const m1 = insertMessage({
       chatId: c1,
       sender: 'ai',
@@ -580,6 +635,12 @@ describe('getGlobalVerificationAnalytics', () => {
     });
     const s2 = insertSession('S2', 'completed', '2024-05-11');
     const c2 = insertChat(s2);
+    insertMessage({
+      chatId: c2,
+      sender: 'user',
+      text: 'Question two?',
+      timestamp: T0 - 1000,
+    });
     const m3 = insertMessage({
       chatId: c2,
       sender: 'ai',
@@ -651,6 +712,35 @@ describe('getGlobalVerificationAnalytics', () => {
     expect(summaryS1?.isFullyVerified).toBe(true);
     expect(summaryS2?.isFullyVerified).toBe(false);
     expect(summaryS2?.averageAccuracy).toBeNull();
+  });
+
+  it('excludes sessions with no user messages from sessionsSummary', () => {
+    const empty = insertSession('Empty');
+    const emptyChat = insertChat(empty);
+    insertMessage({
+      chatId: emptyChat,
+      sender: 'ai',
+      text: 'Session "Empty" has been transcribed and is ready for analysis.',
+      timestamp: T0,
+      completionTokens: null,
+    });
+    const active = insertSession('Active');
+    const activeChat = insertChat(active);
+    insertMessage({
+      chatId: activeChat,
+      sender: 'user',
+      text: 'How is the patient sleeping?',
+      timestamp: T0,
+    });
+    insertMessage({
+      chatId: activeChat,
+      sender: 'ai',
+      text: 'The patient sleeps well.',
+      timestamp: T0 + 1000,
+    });
+    const stats = verificationRepository.getGlobalVerificationAnalytics();
+    expect(stats.sessionsSummary.map((s) => s.sessionId)).toEqual([active]);
+    expect(stats.unverifiedMessagesCount).toBe(1);
   });
 
   it('prefers authored_model over messages.model and honors filters', () => {

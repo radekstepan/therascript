@@ -149,11 +149,17 @@ const WELCOME_MESSAGE_LIKE_PATTERN =
   'Session "%" has been transcribed and is ready for analysis.';
 
 // Shared filter (aliased on `m`) for AI messages that are eligible for
-// verification: non-empty text, excluding the automatic welcome message.
+// verification: non-empty text, excluding the automatic welcome message,
+// and only when the message answers a preceding user message in the same
+// chat (welcome-only / default chats with no user turn are never audited).
 const VERIFIABLE_AI_MESSAGE_FILTER = `
   m.sender = 'ai'
   AND TRIM(m.text) <> ''
   AND NOT (m.completionTokens IS NULL AND m.text LIKE '${WELCOME_MESSAGE_LIKE_PATTERN}')
+  AND EXISTS (
+    SELECT 1 FROM messages u
+    WHERE u.chatId = m.chatId AND u.sender = 'user' AND u.id < m.id
+  )
 `;
 
 const FLAGGED_VERDICTS: StatementVerdict[] = [
@@ -843,6 +849,11 @@ export const verificationRepository = {
                  WHERE mv2.session_id = s.id AND mv2.status = 'completed') AS averageAccuracy
          FROM sessions s
          WHERE s.status = 'completed' ${sessionFilter}
+           AND EXISTS (
+             SELECT 1 FROM messages m
+             INNER JOIN chats c ON c.id = m.chatId
+             WHERE c.sessionId = s.id AND ${VERIFIABLE_AI_MESSAGE_FILTER}
+           )
          ORDER BY s.date DESC, s.id DESC`,
         ...sessionParams
       );
