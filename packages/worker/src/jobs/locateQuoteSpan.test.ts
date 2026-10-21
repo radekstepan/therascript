@@ -123,11 +123,24 @@ describe('locateQuoteSpan — anchor pass', () => {
   it('locates a long quote with a slightly altered middle', () => {
     const head = text.slice(0, 60);
     const tail = text.slice(-60);
-    // Simulate the Judge lightly paraphrasing the middle of a long quote.
-    const quote = `${head} ... various hardships ... ${tail}`;
+    // Simulate the Judge lightly paraphrasing the middle of a long quote
+    // (no ellipsis: pure anchor pass over a short gap).
+    const quote = `${head} various hardships ${tail}`;
     const span = locateQuoteSpan(text, quote);
     expect(span.startChar).toBe(0);
     expect(span.endChar).toBe(text.length);
+  });
+
+  it('returns the longest clause for ellipsis-spliced quotes over a wide gap', () => {
+    const head = text.slice(0, 60);
+    const tail = text.slice(-60);
+    // The spliced clauses sit ~130 chars apart: spanning them would swallow
+    // (and block) unrelated inner statements, so the longest clause wins.
+    const quote = `${head} ... various hardships ... ${tail}`;
+    expect(locateQuoteSpan(text, quote)).toEqual({
+      startChar: 0,
+      endChar: 60,
+    });
   });
 
   it('rejects anchors whose tail falls outside the bounded window', () => {
