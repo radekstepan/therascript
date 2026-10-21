@@ -31,6 +31,7 @@ import {
   markLoaded as trackerMarkLoaded,
   markUnloaded as trackerMarkUnloaded,
 } from './loadedModelsTracker.js';
+import { runWithLlmWorkerLock } from '../llmWorkerMutex.js';
 
 /**
  * Read the globally stored remote LLM API token. Worker-local counterpart
@@ -429,7 +430,9 @@ export function assembleReducePrompt(
   ];
 }
 
-export default async function (job: Job<AnalysisJobData, any, string>) {
+export async function processAnalysisJob(
+  job: Job<AnalysisJobData, any, string>
+) {
   const validationResult = safeValidateAnalysisJob(job.data);
   if (!validationResult.success) {
     const error = new Error(
@@ -1289,4 +1292,13 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
     }
     throw error;
   }
+}
+
+/**
+ * BullMQ processor entry: serialized against verification jobs via the
+ * shared LLM worker mutex so the two queues never load/unload models
+ * concurrently.
+ */
+export default async function (job: Job<AnalysisJobData, any, string>) {
+  return runWithLlmWorkerLock(() => processAnalysisJob(job));
 }

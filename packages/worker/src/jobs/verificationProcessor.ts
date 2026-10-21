@@ -6,6 +6,7 @@ import {
   transcriptRepository,
   usageRepository,
   templateRepository,
+  sessionRepository,
   type VerificationCandidateMessage,
   type VerificationStatementInput,
 } from '@therascript/data';
@@ -21,6 +22,7 @@ import type {
 import {
   streamLlmChatDetailed,
   calculateTokenCount,
+  extractJsonObject,
   parseJsonObjectFromLlm,
   streamWithRetry,
   extractVisibleAnswer,
@@ -29,6 +31,7 @@ import {
 } from '@therascript/services';
 import config from '@therascript/config';
 import { publishVerificationEvent } from '../services/streamPublisher.js';
+import { runWithLlmWorkerLock } from '../llmWorkerMutex.js';
 import {
   loadLlmModelForWorker,
   loadLlmApiTokenForWorker,
@@ -42,10 +45,15 @@ export const VERIFICATION_USAGE_SOURCE = 'verification_judge';
 /** Fallback judge prompt when the `system_verification_judge` template row is
  *  missing (fresh/legacy DBs seed it on startup, so this is defense-in-depth).
  *  Mirrors the seeded template's JSON contract. */
-const FALLBACK_JUDGE_SYSTEM_PROMPT = `You are an expert fact-verification judge auditing an AI-generated therapy chat response against the ground-truth session transcript. You will be given:
-1. GROUND-TRUTH SESSION TRANSCRIPT: Paragraphs formatted as [P#<index> MM:SS] <SPEAKER>: <text>.
+export const DEFAULT_VERIFICATION_JUDGE_PROMPT = `You are an expert fact-verification judge auditing an AI-generated therapy chat response against the ground-truth session transcript. You will be given:
+1. GROUND-TRUTH SESSION TRANSCRIPT: Paragraphs formatted as [P#<index> MM:SS] <SPEAKER>: <text>. Some transcripts have no speaker diarization; those paragraphs are formatted as [P#<index> MM:SS] <text> with no speaker label.
 2. THERAPIST'S PROMPT / QUESTION: The user message the AI was answering.
 3. AI RESPONSE TO AUDIT: The visible text of the AI message to verify.
+
+EVIDENCE CITATION RULES (must follow exactly):
+- "paragraphIndex" MUST be the exact integer <index> copied from the cited paragraph's [P#<index> MM:SS] label. Never invent or guess an index.
+- "timestampMs" should be your best estimate in milliseconds for the cited paragraph (the MM:SS label is minutes:seconds); it will be corrected against ground truth.
+- "speaker" MUST be null when the cited paragraph shows no speaker label. Only copy a speaker label that literally appears after the [P#<index> MM:SS] tag; never copy speaker names from these instructions or examples.
 
 Your tasks:
 1. Extract every distinct factual or clinical statement/claim made in the AI Response about the session, client, therapist, symptoms, events, quotes, or interventions.
@@ -137,6 +145,19 @@ function findAllOccurrences(haystack: string, needle: string): number[] {
 
 const MARKDOWN_STRIP_CHARS = new Set(['*', '_', '`', '~']);
 
+/** Single/double/curly quote variants, all normalized to `'`. */
+const QUOTE_NORMALIZE_CHARS = new Set([
+  '"',
+  "'",
+  '\u201C',
+  '\u201D',
+  '\u2018',
+  '\u2019',
+]);
+
+/** Typographic dashes, normalized to `-`. */
+const DASH_NORMALIZE_CHARS = new Set(['\u2013', '\u2014']);
+
 interface NormalizedText {
   normalized: string;
   /** normalized[i] was produced from original[map[i]]. */
@@ -145,8 +166,10 @@ interface NormalizedText {
 
 /**
  * Lowercase + collapse whitespace runs / strip inline markdown chars while
- * keeping an index map back to the original string. Leading/trailing
- * whitespace is trimmed (map entries dropped accordingly).
+ * keeping an index map back to the original string. Quote variants collapse
+ * to `'` and typographic dashes to `-` (1-to-1, map-preserving); inline
+ * markdown tokens are dropped. Leading/trailing whitespace is trimmed (map
+ * entries dropped accordingly).
  */
 export function normalizeTextWithMap(text: string): NormalizedText {
   let normalized = '';
@@ -164,7 +187,10 @@ export function normalizeTextWithMap(text: string): NormalizedText {
       map.push(i);
     }
     pendingSpace = false;
-    normalized += ch.toLowerCase();
+    let out = ch;
+    if (QUOTE_NORMALIZE_CHARS.has(ch)) out = "'";
+    else if (DASH_NORMALIZE_CHARS.has(ch)) out = '-';
+    normalized += out.toLowerCase();
     map.push(i);
   }
   if (normalized.endsWith(' ')) {
@@ -174,20 +200,68 @@ export function normalizeTextWithMap(text: string): NormalizedText {
   return { normalized, map };
 }
 
+/** Matching outer quotation-mark pairs the Judge LLM tends to add. */
+const OUTER_QUOTE_PAIRS: Record<string, string> = {
+  '"': '"',
+  "'": "'",
+  '\u201C': '\u201D',
+  '\u2018': '\u2019',
+};
+
+const LEADING_ELLIPSIS_RE = /^(?:\.{2,}|…+)\s*/;
+const TRAILING_ELLIPSIS_RE = /\s*(?:\.{2,}|…+)$/;
+const MID_QUOTE_ELLIPSIS_RE = /(?:\.{3,}|…+)/;
+
+/**
+ * Clean a Judge-supplied `exact_quote` before span resolution: trim, strip
+ * matching outer quotation marks (`"..."`, `'...'`, `"..."`, `'...'`) and
+ * strip leading/trailing ellipses (`...`, `…`). Handles either order
+ * (`"...text..."` and `..."text"...`).
+ */
+export function cleanExactQuote(exactQuote: string): string {
+  let cleaned = exactQuote.trim();
+  for (let pass = 0; pass < 2; pass++) {
+    cleaned = cleaned
+      .replace(LEADING_ELLIPSIS_RE, '')
+      .replace(TRAILING_ELLIPSIS_RE, '')
+      .trim();
+    if (cleaned.length >= 2) {
+      const first = cleaned[0];
+      const last = cleaned[cleaned.length - 1];
+      if (OUTER_QUOTE_PAIRS[first] === last) {
+        cleaned = cleaned.slice(1, -1).trim();
+      }
+    }
+  }
+  return cleaned;
+}
+
 const ANCHOR_LEN = 35;
 const MIN_ANCHOR_QUOTE_LEN = 40;
-const ANCHOR_WINDOW_SLACK = 150;
+const ANCHOR_WINDOW_SLACK = 80;
+
+/** Minimum trimmed length for an ellipsis-separated clause to be usable. */
+const MIN_SUBSTANTIVE_CLAUSE_LEN = 12;
+/** Max normalized-char gap between spliced clauses to span them as one. */
+const MAX_CLAUSE_SPAN_GAP = 80;
 
 /**
  * Deterministically locate `exactQuote` inside `visibleMessageText`.
  *
  * LLMs reliably copy a verbatim phrase but cannot count characters, so the
  * Judge returns quotes — never offsets — and this pure helper resolves them:
+ *   0. Quote cleaning: strip outer quotation marks and leading/trailing
+ *      ellipses the Judge tends to add.
  *   1. Exact match pass (`indexOf`, preferring ranges that don't overlap
  *      `usedRanges` when the same phrase appears multiple times).
- *   2. Case-insensitive / whitespace- + markdown-normalized pass with an
- *      index map back to the original string.
- *   3. Substring anchor pass for slightly truncated long quotes: the first
+ *   2. Case-insensitive / whitespace- + markdown-normalized pass (quote
+ *      variants and dashes normalized) with an index map back to the
+ *      original string.
+ *   3. Mid-quote ellipsis pass: quotes spliced with `...`/`…` are split into
+ *      clauses; adjacent clauses within a single sentence/clause window are
+ *      spanned, otherwise the longest matching clause wins (so a wide span
+ *      never swallows — and blocks — unrelated inner statements).
+ *   4. Substring anchor pass for slightly truncated long quotes: the first
  *      and last 35 chars must both match within a bounded window.
  *
  * Returns null offsets when nothing matches. Callers push successful spans
@@ -200,19 +274,21 @@ export function locateQuoteSpan(
   usedRanges: Array<[number, number]> = []
 ): QuoteSpan {
   if (!visibleMessageText || !exactQuote) return { ...NULL_SPAN };
+  const cleanedQuote = cleanExactQuote(exactQuote);
+  if (!cleanedQuote) return { ...NULL_SPAN };
 
   // Pass 1: exact match.
-  const exactHits = findAllOccurrences(visibleMessageText, exactQuote);
+  const exactHits = findAllOccurrences(visibleMessageText, cleanedQuote);
   const freeExact = exactHits.find((idx) =>
-    isSpanFree(idx, idx + exactQuote.length, usedRanges)
+    isSpanFree(idx, idx + cleanedQuote.length, usedRanges)
   );
   if (freeExact !== undefined) {
-    return { startChar: freeExact, endChar: freeExact + exactQuote.length };
+    return { startChar: freeExact, endChar: freeExact + cleanedQuote.length };
   }
 
   // Pass 2: normalized match.
   const textNorm = normalizeTextWithMap(visibleMessageText);
-  const quoteNorm = normalizeTextWithMap(exactQuote);
+  const quoteNorm = normalizeTextWithMap(cleanedQuote);
   if (quoteNorm.normalized.length > 0 && textNorm.normalized.length > 0) {
     const normHits = findAllOccurrences(
       textNorm.normalized,
@@ -226,7 +302,19 @@ export function locateQuoteSpan(
       }
     }
 
-    // Pass 3: anchor pass for long, slightly truncated quotes.
+    // Pass 3: mid-quote ellipsis clause pass. Only reached when the literal
+    // `...`/`…` is absent from the message text (Pass 2 failed), i.e. the
+    // Judge spliced clauses or skipped a middle clause.
+    if (MID_QUOTE_ELLIPSIS_RE.test(cleanedQuote)) {
+      const ellipsisSpan = locateEllipsisClauseSpan(
+        textNorm,
+        cleanedQuote,
+        usedRanges
+      );
+      if (ellipsisSpan) return ellipsisSpan;
+    }
+
+    // Pass 4: anchor pass for long, slightly truncated quotes.
     if (quoteNorm.normalized.length >= MIN_ANCHOR_QUOTE_LEN) {
       const head = quoteNorm.normalized.slice(0, ANCHOR_LEN);
       const tail = quoteNorm.normalized.slice(-ANCHOR_LEN);
@@ -245,6 +333,150 @@ export function locateQuoteSpan(
   }
 
   return { ...NULL_SPAN };
+}
+
+interface MatchedClause {
+  /** Start/end offsets in normalized-text coordinates. */
+  normStart: number;
+  normEnd: number;
+  normLength: number;
+}
+
+/**
+ * Resolve a quote containing mid-quote `...`/`…` against normalized message
+ * text. Splits into substantive clauses (>= 12 chars), anchors on the first
+ * matching clause, and spans forward while each subsequent clause appears
+ * within `MAX_CLAUSE_SPAN_GAP` chars; otherwise returns the longest matching
+ * clause so `usedRanges` does not swallow unrelated intermediate sentences.
+ * Returns null when no substantive clause matches (caller falls through to
+ * the anchor pass).
+ */
+function locateEllipsisClauseSpan(
+  textNorm: NormalizedText,
+  cleanedQuote: string,
+  usedRanges: Array<[number, number]>
+): QuoteSpan | null {
+  const clauses = cleanedQuote
+    .split(MID_QUOTE_ELLIPSIS_RE)
+    .map((c) => c.trim())
+    .filter((c) => c.length >= MIN_SUBSTANTIVE_CLAUSE_LEN);
+  if (clauses.length === 0) return null;
+
+  const toOrigSpan = (normStart: number, normEnd: number): QuoteSpan => ({
+    startChar: textNorm.map[normStart],
+    endChar: textNorm.map[normEnd - 1] + 1,
+  });
+
+  // First free occurrence of each substantive clause, in quote order.
+  const matched: (MatchedClause | null)[] = clauses.map((clause) => {
+    const clauseNorm = normalizeTextWithMap(clause).normalized;
+    if (!clauseNorm) return null;
+    for (const hit of findAllOccurrences(textNorm.normalized, clauseNorm)) {
+      const span = toOrigSpan(hit, hit + clauseNorm.length);
+      if (
+        span.startChar !== null &&
+        span.endChar !== null &&
+        isSpanFree(span.startChar, span.endChar, usedRanges)
+      ) {
+        return {
+          normStart: hit,
+          normEnd: hit + clauseNorm.length,
+          normLength: clauseNorm.length,
+        };
+      }
+    }
+    return null;
+  });
+
+  const first = matched[0];
+  if (!first) {
+    // First clause unmatched: fall back to the longest matching clause.
+    return longestMatchedClauseSpan(textNorm, matched, usedRanges);
+  }
+
+  // Extend across subsequent clauses while each lands within one
+  // sentence/clause window of the previous clause end. Each subsequent
+  // clause is (re-)searched at/after the current span end so repeated
+  // phrases earlier in the message cannot derail chaining.
+  let spanEnd = first.normEnd;
+  let extended = false;
+  for (let i = 1; i < clauses.length; i++) {
+    const clauseNorm = normalizeTextWithMap(clauses[i]).normalized;
+    if (!clauseNorm) break;
+    let chained: MatchedClause | null = null;
+    for (const hit of findAllOccurrences(textNorm.normalized, clauseNorm)) {
+      if (hit < spanEnd) continue;
+      if (hit - spanEnd > MAX_CLAUSE_SPAN_GAP) break;
+      const span = toOrigSpan(hit, hit + clauseNorm.length);
+      if (
+        span.startChar !== null &&
+        span.endChar !== null &&
+        isSpanFree(span.startChar, span.endChar, usedRanges)
+      ) {
+        chained = {
+          normStart: hit,
+          normEnd: hit + clauseNorm.length,
+          normLength: clauseNorm.length,
+        };
+        break;
+      }
+    }
+    if (!chained) break;
+    spanEnd = chained.normEnd;
+    extended = true;
+  }
+  if (extended) {
+    const span = toOrigSpan(first.normStart, spanEnd);
+    if (
+      span.startChar !== null &&
+      span.endChar !== null &&
+      isSpanFree(span.startChar, span.endChar, usedRanges)
+    ) {
+      return span;
+    }
+    // Spanned range blocked (e.g. an inner statement claimed first):
+    // degrade to the longest matching clause.
+  }
+  const longest = longestMatchedClauseSpan(textNorm, matched, usedRanges);
+  if (longest) return longest;
+  // Every matching clause is blocked; report the anchor's span only if free
+  // (already verified above via the clause-level checks, but re-check the
+  // exact span for safety).
+  const anchor = toOrigSpan(first.normStart, first.normEnd);
+  if (
+    anchor.startChar !== null &&
+    anchor.endChar !== null &&
+    isSpanFree(anchor.startChar, anchor.endChar, usedRanges)
+  ) {
+    return anchor;
+  }
+  return null;
+}
+
+/** Longest free matching clause (ties resolve to the earliest clause). */
+function longestMatchedClauseSpan(
+  textNorm: NormalizedText,
+  matched: (MatchedClause | null)[],
+  usedRanges: Array<[number, number]>
+): QuoteSpan | null {
+  let best: MatchedClause | null = null;
+  for (const m of matched) {
+    if (!m) continue;
+    if (!best || m.normLength > best.normLength) best = m;
+  }
+  if (!best) return null;
+  const span: QuoteSpan = {
+    startChar: textNorm.map[best.normStart],
+    endChar: textNorm.map[best.normEnd - 1] + 1,
+  };
+  if (
+    span.startChar !== null &&
+    span.endChar !== null &&
+    isSpanFree(span.startChar, span.endChar, usedRanges)
+  ) {
+    return span;
+  }
+  return null;
 }
 
 /**
@@ -271,18 +503,35 @@ export function formatTimestampMmSs(timestampMs: number | null): string {
   return `${mm}:${ss}`;
 }
 
-/** `[P#<index> MM:SS] <SPEAKER>: <text>` — the citation format the Judge prompt promises. */
+/**
+ * `[P#<index> MM:SS] <SPEAKER>: <text>` — the citation format the Judge
+ * prompt promises. The speaker label is included only when `showSpeakers`
+ * is true and the paragraph carries a real (non-`UNKNOWN`) label; otherwise
+ * the paragraph renders as `[P#<index> MM:SS] <text>` so the Judge cannot
+ * copy a fabricated speaker.
+ */
 export function formatTranscriptParagraph(
-  paragraph: TranscriptParagraphData
+  paragraph: TranscriptParagraphData,
+  showSpeakers = true
 ): string {
-  const speaker = paragraph.speaker?.trim() || 'UNKNOWN';
-  return `[P#${paragraph.id} ${formatTimestampMmSs(paragraph.timestamp)}] ${speaker}: ${paragraph.text}`;
+  const rawSpeaker = paragraph.speaker?.trim() ?? '';
+  const labeled =
+    showSpeakers &&
+    rawSpeaker.length > 0 &&
+    rawSpeaker.toUpperCase() !== 'UNKNOWN';
+  const prefix = `[P#${paragraph.id} ${formatTimestampMmSs(paragraph.timestamp)}]`;
+  return labeled
+    ? `${prefix} ${rawSpeaker}: ${paragraph.text}`
+    : `${prefix} ${paragraph.text}`;
 }
 
 export function formatTranscriptForJudge(
-  paragraphs: TranscriptParagraphData[]
+  paragraphs: TranscriptParagraphData[],
+  showSpeakers = true
 ): string {
-  return paragraphs.map(formatTranscriptParagraph).join('\n');
+  return paragraphs
+    .map((p) => formatTranscriptParagraph(p, showSpeakers))
+    .join('\n');
 }
 
 /** Token estimate that survives a missing tokenizer (chars/4 fallback). */
@@ -322,9 +571,10 @@ export function selectJudgeTranscriptContext(
   paragraphs: TranscriptParagraphData[],
   queryText: string,
   tokenBudget: number,
-  countTokens: (text: string) => number = estimateTokens
+  countTokens: (text: string) => number = estimateTokens,
+  showSpeakers = true
 ): JudgeTranscriptContext {
-  const fullText = formatTranscriptForJudge(paragraphs);
+  const fullText = formatTranscriptForJudge(paragraphs, showSpeakers);
   if (paragraphs.length === 0) {
     return {
       text: '',
@@ -356,7 +606,7 @@ export function selectJudgeTranscriptContext(
   const selected = new Set<number>();
   let usedTokens = 0;
   const lineTokens = paragraphs.map((p) =>
-    countTokens(formatTranscriptParagraph(p))
+    countTokens(formatTranscriptParagraph(p, showSpeakers))
   );
   for (const { order } of scored) {
     const triple = [order - 1, order, order + 1].filter(
@@ -375,7 +625,9 @@ export function selectJudgeTranscriptContext(
 
   const ordered = [...selected].sort((a, b) => a - b);
   const text =
-    ordered.map((i) => formatTranscriptParagraph(paragraphs[i])).join('\n') +
+    ordered
+      .map((i) => formatTranscriptParagraph(paragraphs[i], showSpeakers))
+      .join('\n') +
     OMITTED_PARAGRAPHS_MARKER(paragraphs.length - ordered.length);
   return {
     text,
@@ -458,7 +710,10 @@ function asConfidence(value: unknown): number {
     : 1.0;
 }
 
-function normalizeEvidence(raw: unknown): TranscriptEvidenceItem[] {
+function normalizeEvidence(
+  raw: unknown,
+  hydration?: EvidenceHydrationOptions
+): TranscriptEvidenceItem[] {
   if (!Array.isArray(raw)) return [];
   const items: TranscriptEvidenceItem[] = [];
   for (const entry of raw) {
@@ -466,14 +721,81 @@ function normalizeEvidence(raw: unknown): TranscriptEvidenceItem[] {
     const e = entry as RawJudgeEvidence;
     const quote = asOptionalString(e.quote);
     if (!quote) continue;
-    items.push({
+    const item: TranscriptEvidenceItem = {
       paragraphIndex: asNonNegativeIntOrNull(e.paragraphIndex),
       timestampMs: asNonNegativeIntOrNull(e.timestampMs),
       speaker: asOptionalString(e.speaker),
       quote,
-    });
+    };
+    items.push(hydration ? hydrateEvidenceItem(item, hydration) : item);
   }
   return items;
+}
+
+/** Ground-truth context used to validate Judge-supplied evidence items. */
+export interface EvidenceHydrationOptions {
+  /** Session transcript paragraphs keyed by paragraph index (`p.id`). */
+  paragraphsById: Map<number, TranscriptParagraphData>;
+  /** Session `showSpeakers` flag; falsy forces hydrated `speaker` to null. */
+  showSpeakers?: boolean;
+}
+
+/**
+ * Locate the transcript paragraph containing `quote` (normalized,
+ * quote-cleaned comparison). Used when the Judge omits `paragraphIndex` or
+ * cites an out-of-bounds index.
+ */
+export function findParagraphByQuote(
+  paragraphsById: Map<number, TranscriptParagraphData>,
+  quote: string
+): TranscriptParagraphData | null {
+  const needle = normalizeTextWithMap(cleanExactQuote(quote)).normalized;
+  if (!needle) return null;
+  for (const para of paragraphsById.values()) {
+    if (normalizeTextWithMap(para.text).normalized.includes(needle)) {
+      return para;
+    }
+  }
+  return null;
+}
+
+/**
+ * Hydrate one Judge evidence item against ground-truth transcript
+ * paragraphs. The Judge only sees `[P#<index> MM:SS]` labels, so its
+ * `timestampMs`/`speaker` values are estimates at best — always overwrite
+ * them from the matched paragraph, and null out citations that match no
+ * paragraph in this session.
+ */
+export function hydrateEvidenceItem(
+  item: TranscriptEvidenceItem,
+  options: EvidenceHydrationOptions
+): TranscriptEvidenceItem {
+  const showSpeakers = options.showSpeakers ?? true;
+  let para: TranscriptParagraphData | null = null;
+  if (
+    item.paragraphIndex !== null &&
+    options.paragraphsById.has(item.paragraphIndex)
+  ) {
+    para = options.paragraphsById.get(item.paragraphIndex) ?? null;
+  } else {
+    para = findParagraphByQuote(options.paragraphsById, item.quote);
+  }
+  if (!para) {
+    return { ...item, paragraphIndex: null, timestampMs: null, speaker: null };
+  }
+  const rawSpeaker = para.speaker?.trim() ?? '';
+  const speaker =
+    showSpeakers &&
+    rawSpeaker.length > 0 &&
+    rawSpeaker.toUpperCase() !== 'UNKNOWN'
+      ? rawSpeaker
+      : null;
+  return {
+    paragraphIndex: para.id,
+    timestampMs: para.timestamp,
+    speaker,
+    quote: item.quote,
+  };
 }
 
 export interface NormalizedJudgeResult {
@@ -499,10 +821,14 @@ export interface NormalizedJudgeResult {
 /**
  * Coerce raw Judge JSON into the persistence shape. Unknown claim verdicts
  * degrade to `partially_supported` (flagged, never silently trusted);
- * claims without any usable quote text are dropped.
+ * claims without any usable quote text are dropped. When `hydration` is
+ * provided, every evidence item is validated against the ground-truth
+ * transcript paragraphs (timestamps/speakers overwritten, unmatchable
+ * citations nulled).
  */
 export function normalizeJudgeOutput(
-  raw: RawJudgeOutput | null
+  raw: RawJudgeOutput | null,
+  hydration?: EvidenceHydrationOptions
 ): NormalizedJudgeResult {
   const summaryAssessment =
     raw && typeof raw.summary_assessment === 'string'
@@ -533,7 +859,7 @@ export function normalizeJudgeOutput(
       severity,
       confidence: asConfidence(c.confidence),
       reasoning: asNonEmptyString(c.reasoning, 'No reasoning provided.'),
-      evidence: normalizeEvidence(c.evidence),
+      evidence: normalizeEvidence(c.evidence, hydration),
     });
   }
 
@@ -551,11 +877,213 @@ export function normalizeJudgeOutput(
       severity: severity === 'none' ? 'low' : severity,
       confidence: asConfidence(o.confidence),
       reasoning: asNonEmptyString(o.reasoning, 'No reasoning provided.'),
-      evidence: normalizeEvidence(o.evidence),
+      evidence: normalizeEvidence(o.evidence, hydration),
     });
   }
 
   return { summaryAssessment, claims, omissions };
+}
+
+/** Deterministic default sampling temperature for Judge verdicts. */
+export const JUDGE_DEFAULT_TEMPERATURE = 0.3;
+
+/** Low-variance temperature for the single JSON-repair retry attempt. */
+export const JUDGE_RETRY_TEMPERATURE = 0.1;
+
+/**
+ * Hard ceiling for the Judge's thinking budget. An unrestricted budget
+ * (`-1`) lets reasoning models spend the entire completion allowance inside
+ * `<think>` and emit no JSON at all; 2048 thinking tokens are plenty for a
+ * per-message verdict while leaving room for the JSON payload.
+ */
+export const JUDGE_MAX_THINKING_BUDGET = 2048;
+
+/** Reminder appended to the Judge user message on the JSON-repair retry. */
+export const JUDGE_RETRY_REMINDER =
+  '\n\nIMPORTANT REMINDER: Your previous response was not valid JSON. ' +
+  'Respond with ONLY a valid JSON object matching the required schema. ' +
+  'Properly escape all double quotes and newlines inside string values ' +
+  '(use \\" and \\n), and do not include trailing commas, markdown fences, or commentary.';
+
+/**
+ * Resolve the effective Judge thinking budget: the shared `-1`-clamp first
+ * (unrestricted/unset becomes the phase cap, `0` stays disabled), then the
+ * Judge-specific hard ceiling so reasoning models cannot consume the whole
+ * completion allowance inside `<think>`.
+ *
+ * Pure function: no I/O. Exported for unit testing.
+ */
+export function resolveJudgeThinkingBudget(
+  configuredBudget: number | null | undefined,
+  maxThinkingCap: number
+): number {
+  return Math.min(
+    resolveEffectiveThinkingBudget(configuredBudget, maxThinkingCap),
+    JUDGE_MAX_THINKING_BUDGET
+  );
+}
+
+const JSON_CONTROL_ESCAPES: Record<number, string> = {
+  8: '\\b',
+  9: '\\t',
+  10: '\\n',
+  12: '\\f',
+  13: '\\r',
+};
+
+/**
+ * Repair the two JSON defects Judge LLMs produce most often:
+ *
+ *   1. Raw control characters (`0x00`–`0x1F`, e.g. literal newlines/tabs)
+ *      inside string literals — escaped to `\n`, `\t`, … or `\uXXXX`.
+ *   2. Trailing commas before `}` or `]` — dropped.
+ *
+ * Both passes are string-aware (respect `\"` escapes) so commas and control
+ * characters that are legitimately part of a string value are preserved.
+ * Pure function: no I/O. Exported for unit testing.
+ */
+export function sanitizeJsonForParse(json: string): string {
+  // Pass 1: escape raw control characters inside string literals.
+  let escaped = '';
+  let inString = false;
+  let isEscaped = false;
+  for (let i = 0; i < json.length; i++) {
+    const ch = json[i];
+    if (isEscaped) {
+      escaped += ch;
+      isEscaped = false;
+      continue;
+    }
+    if (inString) {
+      if (ch === '\\') {
+        escaped += ch;
+        isEscaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        escaped += ch;
+        inString = false;
+        continue;
+      }
+      const code = ch.charCodeAt(0);
+      if (code < 0x20) {
+        escaped +=
+          JSON_CONTROL_ESCAPES[code] ??
+          `\\u${code.toString(16).padStart(4, '0')}`;
+        continue;
+      }
+      escaped += ch;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    escaped += ch;
+  }
+
+  // Pass 2: drop trailing commas before `}` / `]` outside strings.
+  let stripped = '';
+  inString = false;
+  isEscaped = false;
+  for (let i = 0; i < escaped.length; i++) {
+    const ch = escaped[i];
+    if (isEscaped) {
+      stripped += ch;
+      isEscaped = false;
+      continue;
+    }
+    if (inString) {
+      stripped += ch;
+      if (ch === '\\') isEscaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      stripped += ch;
+      inString = true;
+      continue;
+    }
+    if (ch === ',') {
+      let j = i + 1;
+      while (j < escaped.length && /\s/.test(escaped[j])) j++;
+      if (j < escaped.length && (escaped[j] === '}' || escaped[j] === ']')) {
+        continue; // Trailing comma — skip it (and keep the whitespace scan).
+      }
+    }
+    stripped += ch;
+  }
+  return stripped;
+}
+
+/**
+ * Parse one Judge LLM response into a JSON object with a sanitizing
+ * fallback: when the strict parse throws (unescaped control characters,
+ * trailing commas), the extracted candidate is sanitized and re-parsed
+ * once. Returns `null` for truncated/empty output and unrecoverable syntax
+ * errors — the caller decides whether to retry with thinking disabled.
+ */
+export function parseJudgeJson<T = unknown>(rawOutput: string): T | null {
+  try {
+    const parsed = parseJsonObjectFromLlm<T>(rawOutput);
+    if (parsed != null) return parsed;
+    // Incomplete/truncated (or empty): nothing a sanitizer could repair.
+    return null;
+  } catch {
+    // Strict parse failed — fall through to the sanitized re-parse.
+  }
+  try {
+    const extracted = extractJsonObject(rawOutput);
+    if (!extracted.complete || !extracted.json.trim()) return null;
+    return JSON.parse(sanitizeJsonForParse(extracted.json)) as T;
+  } catch {
+    return null;
+  }
+}
+
+const TRIVIAL_GREETING_PATTERNS: RegExp[] = [
+  /^(?:hi|hey|hello|greetings|good\s+(?:morning|afternoon|evening))\b/i,
+  /how can i help/i,
+  /what would you like to know/i,
+  /how may i (?:help|assist)/i,
+  /what can i (?:do|help)/i,
+  /let me know/i,
+  /(?:happy to help|glad to (?:help|assist)|feel free to ask)/i,
+  /is there anything (?:else )?i can/i,
+];
+
+const TRIVIAL_QUOTE_CHARS = new Set(['"', "'", '“', '”', '‘', '’']);
+
+/** List-item markers (`- foo`, `* foo`, `1. foo`) at a line start. */
+const TRIVIAL_LIST_ITEM_RE = /(^|\n)\s*(?:[-*+]|\d+[.)])\s+\S/;
+
+/** Inline Markdown that never appears in a plain conversational greeting. */
+const TRIVIAL_MARKDOWN_RE = /[*`_~#|]/;
+
+const THINK_BLOCK_RE = /<think>[\s\S]*?(?:<\/think>|$)/gi;
+
+/**
+ * Fast-path predicate for trivial conversational messages (short greetings
+ * such as "Hello! How can I help you ...?") that carry no factual claims
+ * and would waste a full Judge call to return `0 claims`.
+ *
+ * A message is trivial when, after stripping `<think>` blocks, it is short
+ * (`<= 120` chars and `<= 20` words), contains no digits, no quote
+ * characters, no bullet points / Markdown lists, and matches a common
+ * greeting/prompt pattern. Anything factual (numbers, quotes, lists, or
+ * simply no greeting pattern) still goes to the Judge.
+ *
+ * Pure function: no I/O. Exported for unit testing.
+ */
+export function isTrivialConversationalMessage(text: string): boolean {
+  const stripped = text.replace(THINK_BLOCK_RE, '').trim();
+  if (!stripped) return false;
+  if (stripped.length > 120) return false;
+  if (stripped.split(/\s+/).filter(Boolean).length > 20) return false;
+  if (/\d/.test(stripped)) return false;
+  for (const ch of stripped) {
+    if (TRIVIAL_QUOTE_CHARS.has(ch)) return false;
+  }
+  if (TRIVIAL_LIST_ITEM_RE.test(stripped)) return false;
+  if (TRIVIAL_MARKDOWN_RE.test(stripped)) return false;
+  return TRIVIAL_GREETING_PATTERNS.some((re) => re.test(stripped));
 }
 
 /** Worker-side remote-token gate (mirrors analysisProcessor's private helper). */
@@ -582,7 +1110,124 @@ interface SessionTranscriptCache {
   paragraphs: StructuredTranscript;
 }
 
-export default async function (job: Job<VerificationJobData, any, string>) {
+interface JudgeStreamAttempt {
+  rawOutput: string;
+  streamResult: StreamResult;
+  durationMs: number;
+  canceled: boolean;
+}
+
+/**
+ * Run one Judge LLM stream attempt (initial call or JSON-repair retry).
+ * Accumulates `<think>` + content chunks into `rawOutput`, polls
+ * `isCanceled` mid-stream, and reports usage via `streamResult`.
+ * Usage logging is the caller's job so it happens immediately after *every*
+ * attempt — even ones whose output later fails JSON parsing.
+ */
+async function runJudgeStreamAttempt(options: {
+  jobId: number;
+  messageId: number;
+  judgeMessages: BackendChatMessage[];
+  modelName: string | null | undefined;
+  baseUrl: string;
+  temperature: number;
+  topP: number | null | undefined;
+  repeatPenalty: number | null | undefined;
+  numGpuLayers: number | null | undefined;
+  thinkingBudget: number;
+  maxCompletionTokens: number;
+  isCanceled: () => boolean;
+}): Promise<JudgeStreamAttempt> {
+  const {
+    jobId,
+    messageId,
+    judgeMessages,
+    modelName,
+    baseUrl,
+    temperature,
+    topP,
+    repeatPenalty,
+    numGpuLayers,
+    thinkingBudget,
+    maxCompletionTokens,
+    isCanceled,
+  } = options;
+  const abortController = new AbortController();
+  let lastCancelCheck = Date.now();
+  let rawOutput = '';
+  let streamResult: StreamResult = {};
+  const attemptStartTime = Date.now();
+
+  const generator = streamWithRetry(
+    () =>
+      streamLlmChatDetailed(judgeMessages, {
+        model: modelName || undefined,
+        abortSignal: abortController.signal,
+        llamaCppBaseUrl: baseUrl,
+        llmApiToken: resolveJudgeApiToken(baseUrl),
+        temperature,
+        topP: topP ?? undefined,
+        repeatPenalty: repeatPenalty ?? undefined,
+        numGpuLayers: numGpuLayers ?? undefined,
+        thinkingBudget,
+        maxCompletionTokens,
+        passDefaultStopTokens: true,
+        hardTimeoutMs: 15 * 60 * 1000,
+        chatTemplateKwargs: {
+          enable_thinking: thinkingBudget !== 0,
+        },
+      }),
+    {
+      retries: 2,
+      onRetry: (err, attempt) => {
+        console.warn(
+          `[Verification Worker ${jobId}] judge message ${messageId} ` +
+            `attempt ${attempt} failed: ${(err as Error)?.message ?? err}. Retrying.`
+        );
+      },
+    }
+  );
+
+  let hasOpenThinkingBlock = false;
+  let iterResult = await generator.next();
+  while (!iterResult.done) {
+    const chunk: LlmChatChunk = iterResult.value;
+    const thinkingChunk = chunk.thinking ?? '';
+    const contentChunk = chunk.content ?? '';
+    if (thinkingChunk) {
+      if (!hasOpenThinkingBlock) {
+        rawOutput += '<think>';
+        hasOpenThinkingBlock = true;
+      }
+      rawOutput += thinkingChunk;
+    }
+    if (contentChunk) {
+      if (hasOpenThinkingBlock) {
+        rawOutput += '</think>';
+        hasOpenThinkingBlock = false;
+      }
+      rawOutput += contentChunk;
+    }
+    if (Date.now() - lastCancelCheck > 500) {
+      lastCancelCheck = Date.now();
+      if (isCanceled()) {
+        abortController.abort();
+        break;
+      }
+    }
+    iterResult = await generator.next();
+  }
+  if (hasOpenThinkingBlock) {
+    rawOutput += '</think>';
+  }
+  streamResult = (iterResult.value as StreamResult) ?? {};
+  const durationMs = Date.now() - attemptStartTime;
+  return { rawOutput, streamResult, durationMs, canceled: isCanceled() };
+}
+
+export async function processVerificationJob(
+  job: Job<VerificationJobData, any, string>
+) {
   const jobId = (job.data as VerificationJobData | undefined)?.jobId;
   if (typeof jobId !== 'number' || !Number.isInteger(jobId) || jobId <= 0) {
     throw new Error(
@@ -616,7 +1261,7 @@ export default async function (job: Job<VerificationJobData, any, string>) {
       VERIFICATION_JUDGE_TEMPLATE_TITLE
     );
     const judgeSystemPrompt =
-      judgeTemplate?.text?.trim() || FALLBACK_JUDGE_SYSTEM_PROMPT;
+      judgeTemplate?.text?.trim() || DEFAULT_VERIFICATION_JUDGE_PROMPT;
     if (!judgeTemplate?.text?.trim()) {
       console.warn(
         `[Verification Worker ${jobId}] '${VERIFICATION_JUDGE_TEMPLATE_TITLE}' template missing; using built-in fallback prompt.`
@@ -713,11 +1358,14 @@ export default async function (job: Job<VerificationJobData, any, string>) {
     // thinking reserve and low-variance default temperature.
     const maxCompletionTokens = Math.max(4096, Math.round(contextSize * 0.3));
     const maxThinkingTokens = Math.round(maxCompletionTokens * 0.4);
-    const effectiveThinkingBudget = resolveEffectiveThinkingBudget(
+    // The Judge budget is hard-capped (2048) on top of the shared `-1`
+    // clamp so reasoning models cannot burn the whole completion allowance
+    // inside `<think>` before emitting JSON.
+    const effectiveThinkingBudget = resolveJudgeThinkingBudget(
       jobRecord.thinking_budget,
       maxThinkingTokens
     );
-    const temperature = jobRecord.temperature ?? 0.3;
+    const temperature = jobRecord.temperature ?? JUDGE_DEFAULT_TEMPERATURE;
 
     const transcriptCache = new Map<number, SessionTranscriptCache>();
     const getSessionParagraphs = (sessionId: number): StructuredTranscript => {
@@ -727,6 +1375,27 @@ export default async function (job: Job<VerificationJobData, any, string>) {
         transcriptRepository.findParagraphsBySessionId(sessionId);
       transcriptCache.set(sessionId, { paragraphs });
       return paragraphs;
+    };
+
+    // Per-session speaker-label visibility (sessions.showSpeakers): when a
+    // session has no diarization the Judge must see unlabeled paragraphs and
+    // hydrated evidence carries speaker: null.
+    const showSpeakersCache = new Map<number, boolean>();
+    const getSessionShowSpeakers = (sessionId: number): boolean => {
+      const cached = showSpeakersCache.get(sessionId);
+      if (cached !== undefined) return cached;
+      let show = true;
+      try {
+        const session = sessionRepository.findById(sessionId);
+        show = session?.showSpeakers !== 0;
+      } catch (err) {
+        console.warn(
+          `[Verification Worker ${jobId}] Failed to load session ${sessionId}; assuming showSpeakers=true:`,
+          err
+        );
+      }
+      showSpeakersCache.set(sessionId, show);
+      return show;
     };
 
     let processed = 0;
@@ -770,6 +1439,13 @@ export default async function (job: Job<VerificationJobData, any, string>) {
       const sessionId = candidate.sessionId;
       const authoredModel = candidate.model ?? null;
 
+      // Token/duration accumulators across the initial Judge call + the
+      // single JSON-repair retry. Declared outside `try` so the failure
+      // path persists actual usage instead of nulls.
+      let accPromptTokens = 0;
+      let accCompletionTokens = 0;
+      let accDurationMs = 0;
+
       try {
         const visibleAnswer = extractVisibleAnswer(candidate.text ?? '').trim();
         const paragraphs = getSessionParagraphs(sessionId);
@@ -807,6 +1483,40 @@ export default async function (job: Job<VerificationJobData, any, string>) {
           continue;
         }
 
+        // Trivial conversational greeting: no factual claims possible, so
+        // skip the Judge call entirely (zero tokens, instant clean row).
+        if (isTrivialConversationalMessage(visibleAnswer)) {
+          verificationRepository.saveMessageVerificationResult({
+            messageId,
+            chatId,
+            sessionId,
+            verificationJobId: jobId,
+            authoredModel,
+            judgeModel,
+            accuracyScore: 1.0,
+            summaryAssessment:
+              'Trivial conversational message; no factual claims to verify.',
+            promptTokens: 0,
+            completionTokens: 0,
+            durationMs: 0,
+            statements: [],
+          });
+          processed++;
+          await job.updateProgress(
+            Math.round((processed / candidates.length) * 100)
+          );
+          publishProgress();
+          publishVerificationEvent(jobId, {
+            type: 'message_verified',
+            messageId,
+            chatId,
+            sessionId,
+            accuracyScore: 1.0,
+            totalClaims: 0,
+          });
+          continue;
+        }
+
         // Transcript context budgeting: reserve the completion cap plus the
         // prompt overhead (system prompt + question + answer + margin) so the
         // Judge call never overflows its context window.
@@ -824,10 +1534,13 @@ export default async function (job: Job<VerificationJobData, any, string>) {
           512,
           contextSize - maxCompletionTokens - overheadTokens
         );
+        const showSpeakers = getSessionShowSpeakers(sessionId);
         const transcriptContext = selectJudgeTranscriptContext(
           paragraphs,
           `${userQuestion ?? ''}\n${visibleAnswer}`,
-          transcriptBudget
+          transcriptBudget,
+          estimateTokens,
+          showSpeakers
         );
         if (transcriptContext.truncated) {
           console.log(
@@ -857,81 +1570,11 @@ export default async function (job: Job<VerificationJobData, any, string>) {
           },
         ];
 
-        const abortController = new AbortController();
-        let lastCancelCheck = Date.now();
-        let rawOutput = '';
-        let streamResult: StreamResult = {};
-        const judgeStartTime = Date.now();
-
-        const generator = streamWithRetry(
-          () =>
-            streamLlmChatDetailed(judgeMessages, {
-              model: jobRecord?.model_name || undefined,
-              abortSignal: abortController.signal,
-              llamaCppBaseUrl: judgeBaseUrl,
-              llmApiToken: resolveJudgeApiToken(judgeBaseUrl),
-              temperature,
-              topP: jobRecord?.top_p ?? undefined,
-              repeatPenalty: jobRecord?.repeat_penalty ?? undefined,
-              numGpuLayers: jobRecord?.num_gpu_layers ?? undefined,
-              thinkingBudget: effectiveThinkingBudget,
-              maxCompletionTokens,
-              passDefaultStopTokens: true,
-              hardTimeoutMs: 15 * 60 * 1000,
-              chatTemplateKwargs: {
-                enable_thinking: effectiveThinkingBudget !== 0,
-              },
-            }),
-          {
-            retries: 2,
-            onRetry: (err, attempt) => {
-              console.warn(
-                `[Verification Worker ${jobId}] judge message ${messageId} ` +
-                  `attempt ${attempt} failed: ${(err as Error)?.message ?? err}. Retrying.`
-              );
-            },
-          }
-        );
-
-        let hasOpenThinkingBlock = false;
-        let iterResult = await generator.next();
-        while (!iterResult.done) {
-          const chunk: LlmChatChunk = iterResult.value;
-          const thinkingChunk = chunk.thinking ?? '';
-          const contentChunk = chunk.content ?? '';
-          if (thinkingChunk) {
-            if (!hasOpenThinkingBlock) {
-              rawOutput += '<think>';
-              hasOpenThinkingBlock = true;
-            }
-            rawOutput += thinkingChunk;
-          }
-          if (contentChunk) {
-            if (hasOpenThinkingBlock) {
-              rawOutput += '</think>';
-              hasOpenThinkingBlock = false;
-            }
-            rawOutput += contentChunk;
-          }
-          if (Date.now() - lastCancelCheck > 500) {
-            lastCancelCheck = Date.now();
-            const fresh = verificationRepository.findVerificationJobById(jobId);
-            if (!fresh || fresh.status === 'canceled') {
-              abortController.abort();
-              break;
-            }
-          }
-          iterResult = await generator.next();
-        }
-        if (hasOpenThinkingBlock) {
-          rawOutput += '</think>';
-        }
-        streamResult = (iterResult.value as StreamResult) ?? {};
-        const judgeDuration = Date.now() - judgeStartTime;
-
-        const canceledMidStream =
-          verificationRepository.findVerificationJobById(jobId);
-        if (!canceledMidStream || canceledMidStream.status === 'canceled') {
+        const isCanceled = (): boolean => {
+          const fresh = verificationRepository.findVerificationJobById(jobId);
+          return !fresh || fresh.status === 'canceled';
+        };
+        const finishCanceled = async (): Promise<void> => {
           await job.updateProgress(100);
           verificationRepository.updateJobStatus(jobId, 'canceled');
           publishVerificationEvent(jobId, {
@@ -941,16 +1584,109 @@ export default async function (job: Job<VerificationJobData, any, string>) {
             totalMessages: candidates.length,
             processedMessages: processed,
           });
+        };
+        // Log usage immediately after each LLM call (before JSON parsing)
+        // and accumulate across attempts so failed rows carry real metrics.
+        const recordAttemptUsage = (
+          attemptResult: StreamResult,
+          durationMs: number
+        ): void => {
+          accPromptTokens += attemptResult.promptTokens ?? 0;
+          accCompletionTokens += attemptResult.completionTokens ?? 0;
+          accDurationMs += durationMs;
+          try {
+            usageRepository.insertUsageLog({
+              type: 'llm',
+              source: VERIFICATION_USAGE_SOURCE,
+              model: judgeModel,
+              promptTokens: attemptResult.promptTokens,
+              completionTokens: attemptResult.completionTokens,
+              duration: durationMs,
+            });
+          } catch (err) {
+            console.warn(
+              `[Verification Worker ${jobId}] Failed to log usage for message ${messageId}:`,
+              err
+            );
+          }
+        };
+
+        const firstAttempt = await runJudgeStreamAttempt({
+          jobId,
+          messageId,
+          judgeMessages,
+          modelName: jobRecord?.model_name,
+          baseUrl: judgeBaseUrl,
+          temperature,
+          topP: jobRecord?.top_p,
+          repeatPenalty: jobRecord?.repeat_penalty,
+          numGpuLayers: jobRecord?.num_gpu_layers,
+          thinkingBudget: effectiveThinkingBudget,
+          maxCompletionTokens,
+          isCanceled,
+        });
+        recordAttemptUsage(firstAttempt.streamResult, firstAttempt.durationMs);
+
+        if (firstAttempt.canceled) {
+          await finishCanceled();
           return;
         }
 
-        const parsed = parseJsonObjectFromLlm<RawJudgeOutput>(rawOutput);
+        let parsed = parseJudgeJson<RawJudgeOutput>(firstAttempt.rawOutput);
+        if (!parsed && !isCanceled()) {
+          // One repair retry with thinking disabled and low-variance
+          // sampling: reasoning output is the usual reason the first call
+          // produced truncated/unparseable JSON.
+          console.warn(
+            `[Verification Worker ${jobId}] Judge output for message ${messageId} ` +
+              `failed JSON parsing; retrying once with thinking disabled.`
+          );
+          const retryMessages: BackendChatMessage[] = [
+            judgeMessages[0],
+            {
+              ...judgeMessages[1],
+              text: `${judgeMessages[1].text}${JUDGE_RETRY_REMINDER}`,
+            },
+          ];
+          const retryAttempt = await runJudgeStreamAttempt({
+            jobId,
+            messageId,
+            judgeMessages: retryMessages,
+            modelName: jobRecord?.model_name,
+            baseUrl: judgeBaseUrl,
+            temperature: JUDGE_RETRY_TEMPERATURE,
+            topP: jobRecord?.top_p,
+            repeatPenalty: jobRecord?.repeat_penalty,
+            numGpuLayers: jobRecord?.num_gpu_layers,
+            thinkingBudget: 0,
+            maxCompletionTokens,
+            isCanceled,
+          });
+          recordAttemptUsage(
+            retryAttempt.streamResult,
+            retryAttempt.durationMs
+          );
+
+          if (retryAttempt.canceled) {
+            await finishCanceled();
+            return;
+          }
+          parsed = parseJudgeJson<RawJudgeOutput>(retryAttempt.rawOutput);
+        }
         if (!parsed) {
           throw new Error(
             'Judge LLM did not return valid JSON (empty or unparseable output).'
           );
         }
-        const normalized = normalizeJudgeOutput(parsed);
+        // Hydrate Judge evidence against ground-truth transcript paragraphs:
+        // overwrite hallucinated timestampMs/speaker from the DB row.
+        const paragraphsById = new Map<number, TranscriptParagraphData>(
+          paragraphs.map((p) => [p.id, p])
+        );
+        const normalized = normalizeJudgeOutput(parsed, {
+          paragraphsById,
+          showSpeakers,
+        });
 
         const usedRanges: Array<[number, number]> = [];
         const statements: VerificationStatementInput[] = [];
@@ -1028,27 +1764,11 @@ export default async function (job: Job<VerificationJobData, any, string>) {
           omissionsCount,
           accuracyScore,
           summaryAssessment: normalized.summaryAssessment,
-          promptTokens: streamResult.promptTokens ?? null,
-          completionTokens: streamResult.completionTokens ?? null,
-          durationMs: judgeDuration,
+          promptTokens: accPromptTokens,
+          completionTokens: accCompletionTokens,
+          durationMs: accDurationMs,
           statements,
         });
-
-        try {
-          usageRepository.insertUsageLog({
-            type: 'llm',
-            source: VERIFICATION_USAGE_SOURCE,
-            model: judgeModel,
-            promptTokens: streamResult.promptTokens,
-            completionTokens: streamResult.completionTokens,
-            duration: judgeDuration,
-          });
-        } catch (err) {
-          console.warn(
-            `[Verification Worker ${jobId}] Failed to log usage for message ${messageId}:`,
-            err
-          );
-        }
 
         processed++;
         await job.updateProgress(
@@ -1089,6 +1809,9 @@ export default async function (job: Job<VerificationJobData, any, string>) {
             judgeModel,
             status: 'failed',
             errorMessage: messageError?.message ?? String(messageError),
+            promptTokens: accPromptTokens,
+            completionTokens: accCompletionTokens,
+            durationMs: accDurationMs,
             statements: [],
           });
         } catch (persistError) {
@@ -1169,4 +1892,12 @@ export default async function (job: Job<VerificationJobData, any, string>) {
       );
     }
   }
+}
+
+/**
+ * BullMQ processor entry: serialized against analysis jobs via the shared
+ * LLM worker mutex so the two queues never load/unload models concurrently.
+ */
+export default async function (job: Job<VerificationJobData, any, string>) {
+  return runWithLlmWorkerLock(() => processVerificationJob(job));
 }

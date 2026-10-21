@@ -53,6 +53,12 @@ interface StartVerificationModalProps {
 
 type ModalScope = 'all_unverified' | 'all_force' | 'selected_sessions';
 
+// Judge LLM defaults: deterministic sampling plus a bounded thinking budget
+// so reasoning models cannot burn the whole completion allowance inside
+// `<think>` (unrestricted `-1` caused 85s/msg latency and truncated JSON).
+const JUDGE_DEFAULT_TEMPERATURE = 0.3;
+const JUDGE_DEFAULT_THINKING_BUDGET = 1024;
+
 const SCOPE_OPTIONS: {
   value: ModalScope;
   title: string;
@@ -99,11 +105,11 @@ export function StartVerificationModal({
     isRemote: false,
     remoteUrl: '',
     apiToken: '',
-    temperature: 0.7,
+    temperature: JUDGE_DEFAULT_TEMPERATURE,
     topP: 0.9,
     repeatPenalty: 1.1,
     numGpuLayers: undefined,
-    thinkingBudget: -1,
+    thinkingBudget: JUDGE_DEFAULT_THINKING_BUDGET,
   });
 
   const { data: llmStatus } = useQuery<LlmStatus, Error>({
@@ -149,14 +155,18 @@ export function StartVerificationModal({
       remoteUrl:
         (llmStatus.isRemoteBaseUrl ? llmStatus.activeBaseUrl : '') ?? '',
       apiToken: '',
-      temperature: llmStatus.configuredTemperature ?? 0.7,
+      temperature: JUDGE_DEFAULT_TEMPERATURE,
       topP: llmStatus.configuredTopP ?? 0.9,
       repeatPenalty: llmStatus.configuredRepeatPenalty ?? 1.1,
       numGpuLayers:
         llmStatus.configuredNumGpuLayers != null
           ? llmStatus.configuredNumGpuLayers
           : undefined,
-      thinkingBudget: llmStatus.configuredThinkingBudget ?? -1,
+      thinkingBudget:
+        llmStatus.configuredThinkingBudget == null ||
+        llmStatus.configuredThinkingBudget < 0
+          ? JUDGE_DEFAULT_THINKING_BUDGET
+          : llmStatus.configuredThinkingBudget,
     });
   }, [isOpen, llmStatus, initialScope, initialSessionIds]);
 
