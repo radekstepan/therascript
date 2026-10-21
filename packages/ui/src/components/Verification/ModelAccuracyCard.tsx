@@ -155,7 +155,7 @@ export function ModelAccuracyCard({ stats }: { stats: ModelAccuracyStat[] }) {
                             : undefined
                         }
                       >
-                        {(stat.fabricationRate * 100).toFixed(1)}%
+                        {stat.fabricationRate.toFixed(1)}%
                       </Text>
                     </Table.Cell>
                     <Table.Cell justify="end">
@@ -168,7 +168,7 @@ export function ModelAccuracyCard({ stats }: { stats: ModelAccuracyStat[] }) {
                             : undefined
                         }
                       >
-                        {(stat.contradictionRate * 100).toFixed(1)}%
+                        {stat.contradictionRate.toFixed(1)}%
                       </Text>
                     </Table.Cell>
                     <Table.Cell justify="end">

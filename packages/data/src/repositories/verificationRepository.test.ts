@@ -758,6 +758,73 @@ describe('getGlobalVerificationAnalytics', () => {
     expect(dated.totalMessagesAudited).toBe(1);
     expect(dated.overTime.map((t) => t.date)).toEqual(['2024-05-11']);
   });
+
+  it('pools per-model rates across messages instead of summing percentages', () => {
+    // 7 messages x 1 fabricated + 1 contradicted of 4 claims each.
+    // Pooled: 7/28*100 = 25%. Summing per-message percentages
+    // (25% x 7) would give 175% — the >100% bug.
+    const sessionId = insertSession('S1');
+    const chatId = insertChat(sessionId);
+    for (let i = 0; i < 7; i++) {
+      const msgId = insertMessage({
+        chatId,
+        sender: 'ai',
+        text: `Audited response ${i}.`,
+        timestamp: T0 + i * 1000,
+        model: 'pool-model',
+      });
+      verificationRepository.saveMessageVerificationResult({
+        messageId: msgId,
+        chatId,
+        sessionId,
+        authoredModel: 'pool-model',
+        judgeModel: 'judge-1',
+        totalClaims: 4,
+        supportedClaims: 2,
+        contradictedClaims: 1,
+        fabricatedClaims: 1,
+        accuracyScore: 0.5,
+      });
+    }
+    const stats = verificationRepository.getGlobalVerificationAnalytics();
+    const pooled = stats.byModel.find((m) => m.model === 'pool-model');
+    expect(pooled?.messagesAudited).toBe(7);
+    expect(pooled?.totalClaims).toBe(28);
+    expect(pooled?.fabricationRate).toBeCloseTo(25);
+    expect(pooled?.contradictionRate).toBeCloseTo(25);
+    for (const stat of stats.byModel) {
+      expect(stat.fabricationRate).toBeGreaterThanOrEqual(0);
+      expect(stat.fabricationRate).toBeLessThanOrEqual(100);
+      expect(stat.contradictionRate).toBeGreaterThanOrEqual(0);
+      expect(stat.contradictionRate).toBeLessThanOrEqual(100);
+    }
+  });
+
+  it('returns zero rates (not NaN) for models with no claims', () => {
+    const sessionId = insertSession('S1');
+    const chatId = insertChat(sessionId);
+    const msgId = insertMessage({
+      chatId,
+      sender: 'ai',
+      text: 'Claim-free response.',
+      timestamp: T0,
+      model: 'empty-model',
+    });
+    verificationRepository.saveMessageVerificationResult({
+      messageId: msgId,
+      chatId,
+      sessionId,
+      authoredModel: 'empty-model',
+      judgeModel: 'judge-1',
+      totalClaims: 0,
+      accuracyScore: 1,
+    });
+    const stats = verificationRepository.getGlobalVerificationAnalytics();
+    const empty = stats.byModel.find((m) => m.model === 'empty-model');
+    expect(empty?.fabricationRate).toBe(0);
+    expect(empty?.contradictionRate).toBe(0);
+    expect(empty?.accuracyPercent).toBe(100);
+  });
 });
 
 describe('findFlaggedStatements', () => {

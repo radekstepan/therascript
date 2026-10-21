@@ -35,7 +35,7 @@ function makeStat(partial: Partial<ModelAccuracyStat>): ModelAccuracyStat {
     omissions: 0,
     accuracyPercent: 87.5,
     fabricationRate: 0,
-    contradictionRate: 0.125,
+    contradictionRate: 12.5,
     omissionsPerMessage: 0,
     averageAccuracyScore: 87.5,
     ...partial,
@@ -119,5 +119,59 @@ describe('ModelAccuracyCard single horizontal scroller', () => {
     }
     expect(scrollers).toHaveLength(1);
     expect(scrollers[0]).toBe(table.parentElement);
+  });
+});
+
+describe('ModelAccuracyCard rate scales', () => {
+  // Backend contract (verificationRepository.getGlobalVerificationAnalytics):
+  // fabricationRate/contradictionRate arrive pooled and percent-scaled
+  // (fabricated/total*100), like accuracyPercent — e.g. 1 fabricated
+  // claim of 28 audited claims is 3.571, not 0.03571. The card must
+  // render them as-is; multiplying by 100 again shows 357.1%.
+  const POOLED_RATE = (1 / 28) * 100; // 3.571...
+
+  it('renders pooled percent-scale rates without re-scaling', () => {
+    renderCard([
+      makeStat({
+        model: 'pool-model',
+        messagesAudited: 7,
+        totalClaims: 28,
+        supportedClaims: 26,
+        contradictedClaims: 1,
+        fabricatedClaims: 1,
+        accuracyPercent: 92.9,
+        fabricationRate: POOLED_RATE,
+        contradictionRate: POOLED_RATE,
+      }),
+    ]);
+    // Both the Fabricated and Contradicted columns show 3.6%.
+    expect(screen.getAllByText('3.6%')).toHaveLength(2);
+    // Pre-fix double-scaling symptom: 3.571 * 100 = 357.1%.
+    expect(screen.queryByText('357.1%')).toBeNull();
+  });
+
+  it('never renders a fabricated/contradicted rate above 100%', () => {
+    renderCard([
+      makeStat({
+        model: 'pool-model',
+        messagesAudited: 7,
+        totalClaims: 28,
+        supportedClaims: 26,
+        contradictedClaims: 1,
+        fabricatedClaims: 1,
+        accuracyPercent: 92.9,
+        fabricationRate: POOLED_RATE,
+        contradictionRate: POOLED_RATE,
+      }),
+    ]);
+    const table = screen.getByRole('table');
+    const percents = within(table as HTMLElement)
+      .getAllByText(/^[0-9.]+%$/)
+      .map((el) => parseFloat(el.textContent ?? ''));
+    expect(percents.length).toBeGreaterThan(0);
+    for (const pct of percents) {
+      expect(pct).toBeGreaterThanOrEqual(0);
+      expect(pct).toBeLessThanOrEqual(100);
+    }
   });
 });

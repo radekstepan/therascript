@@ -406,7 +406,9 @@ export interface ModelAccuracyStat {
   fabricatedClaims: number;
   omissions: number;
   accuracyPercent: number;
+  /** Pooled percent-scale rate (fabricated/total*100), like accuracyPercent. */
   fabricationRate: number;
+  /** Pooled percent-scale rate (contradicted/total*100), like accuracyPercent. */
   contradictionRate: number;
   omissionsPerMessage: number;
   averageAccuracyScore: number;
