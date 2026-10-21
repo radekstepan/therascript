@@ -9,7 +9,7 @@ import {
   type MessageSource,
 } from '@therascript/elasticsearch-client';
 import config from '@therascript/config';
-import { db, schema } from '@therascript/db';
+import { db, SYSTEM_PROMPT_TEMPLATES } from '@therascript/db';
 import {
   sessionRepository,
   transcriptRepository,
@@ -17,7 +17,13 @@ import {
   messageRepository,
   templateRepository,
   analysisRepository,
+  verificationRepository,
 } from '@therascript/data';
+import {
+  verificationJobSchema,
+  messageVerificationSchema,
+  verifiedStatementSchema,
+} from '@therascript/domain';
 import { InternalServerError } from '../errors.js';
 import type {
   BackendSession,
@@ -177,68 +183,35 @@ export async function resetAllDataService(): Promise<ResetResult> {
   }
   try {
     db.transaction(() => {
-      // Drop new tables first due to foreign key constraints
-      db.exec('DROP TABLE IF EXISTS intermediate_summaries');
-      db.exec('DROP TABLE IF EXISTS analysis_job_sessions');
-      db.exec('DROP TABLE IF EXISTS analysis_jobs');
-      // Drop old tables
-      db.exec('DROP TABLE IF EXISTS messages');
-      db.exec('DROP TABLE IF EXISTS chats');
-      db.exec('DROP TABLE IF EXISTS transcript_paragraphs');
-      db.exec('DROP TABLE IF EXISTS sessions');
-      db.exec('DROP TABLE IF EXISTS templates');
+      // Wipe user data children-first (foreign keys are ON). Tables are
+      // never dropped, so the full migration-built schema — including the
+      // verification tables, app_settings, and system templates — stays
+      // intact and queryable after a reset, and user_version is untouched.
+      db.exec('DELETE FROM verified_statements');
+      db.exec('DELETE FROM message_verifications');
+      db.exec('DELETE FROM verification_jobs');
+      db.exec('DELETE FROM intermediate_summaries');
+      db.exec('DELETE FROM analysis_job_sessions');
+      db.exec('DELETE FROM analysis_jobs');
+      db.exec('DELETE FROM messages');
+      db.exec('DELETE FROM chats');
+      db.exec('DELETE FROM transcript_paragraphs');
+      db.exec('DELETE FROM sessions');
+      db.exec('DELETE FROM usage_logs');
+      // Delete only non-system templates; seeded system prompts
+      // (system_prompt, system_verification_judge, ...) survive a reset.
+      const systemTitles = Object.values(SYSTEM_PROMPT_TEMPLATES).map(
+        (t) => t.title
+      );
+      const placeholders = systemTitles.map(() => '?').join(', ');
+      db.prepare(
+        `DELETE FROM templates WHERE title NOT IN (${placeholders})`
+      ).run(...systemTitles);
+      // Restart AUTOINCREMENT counters so a fresh start begins at id 1.
+      db.exec('DELETE FROM sqlite_sequence');
       // This table is no longer used, but good to clean up from old versions
       db.exec('DROP TABLE IF EXISTS schema_metadata');
     })();
-
-    // Re-create schema from scratch, mimicking the migration process
-    // This establishes the "Version 1" state
-    db.exec(schema);
-
-    // Manually apply the "Version 2" migration
-    db.exec(`
-      -- Analysis Jobs Table
-      CREATE TABLE IF NOT EXISTS analysis_jobs (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          original_prompt TEXT NOT NULL,
-          status TEXT NOT NULL DEFAULT 'pending', -- e.g., pending, mapping, reducing, completed, failed
-          final_result TEXT,
-          error_message TEXT,
-          created_at INTEGER NOT NULL,
-          completed_at INTEGER
-      );
-      CREATE INDEX IF NOT EXISTS idx_analysis_jobs_status ON analysis_jobs (status);
-      CREATE INDEX IF NOT EXISTS idx_analysis_jobs_created_at ON analysis_jobs (created_at);
-
-      -- Join table for Analysis Jobs and Sessions
-      CREATE TABLE IF NOT EXISTS analysis_job_sessions (
-          analysis_job_id INTEGER NOT NULL,
-          session_id INTEGER NOT NULL,
-          PRIMARY KEY (analysis_job_id, session_id),
-          FOREIGN KEY (analysis_job_id) REFERENCES analysis_jobs (id) ON DELETE CASCADE,
-          FOREIGN KEY (session_id) REFERENCES sessions (id) ON DELETE CASCADE
-      );
-
-      -- Intermediate Summaries from the "Map" step
-      CREATE TABLE IF NOT EXISTS intermediate_summaries (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          analysis_job_id INTEGER NOT NULL,
-          session_id INTEGER NOT NULL,
-          summary_text TEXT,
-          status TEXT NOT NULL DEFAULT 'pending', -- e.g., pending, processing, completed, failed
-          error_message TEXT,
-          FOREIGN KEY (analysis_job_id) REFERENCES analysis_jobs (id) ON DELETE CASCADE,
-          FOREIGN KEY (session_id) REFERENCES sessions (id) ON DELETE CASCADE
-      );
-      CREATE INDEX IF NOT EXISTS idx_intermediate_summaries_job_id ON intermediate_summaries (analysis_job_id);
-    `);
-
-    // Manually apply "Version 3" migration
-    db.exec('ALTER TABLE analysis_jobs ADD COLUMN model_name TEXT');
-    db.exec('ALTER TABLE analysis_jobs ADD COLUMN context_size INTEGER');
-
-    // Set the database version to the latest known version
-    db.pragma('user_version = 3');
   } catch (e: any) {
     errors.push(`Error resetting SQLite database: ${e.message || String(e)}`);
   }
@@ -276,6 +249,11 @@ export const exportDataService = async (): Promise<Readable> => {
         analysis_job_sessions: analysisRepository.findAllJobSessions(),
         intermediate_summaries:
           analysisRepository.findAllIntermediateSummaries(),
+        verification_jobs: verificationRepository.findAllJobsForBackup(),
+        message_verifications:
+          verificationRepository.findAllMessageVerificationsForBackup(),
+        verified_statements:
+          verificationRepository.findAllVerifiedStatementsForBackup(),
       };
       for (const [key, value] of Object.entries(dbData)) {
         pack.entry({ name: `${key}.json` }, JSON.stringify(value, null, 2));
@@ -378,6 +356,27 @@ const IntermediateSummarySchema = z.object({
   error_message: z.string().nullable(),
 });
 
+// Remaps the old session ids stored in a verification job's
+// `session_ids_json` array through the import's old-to-new id map.
+// Unparseable or non-array payloads pass through untouched.
+const remapSessionIdsJson = (
+  value: string | null,
+  oldToNewSessionIdMap: Record<number, number>
+): string | null => {
+  if (value == null) return value;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed)) return value;
+    return JSON.stringify(
+      parsed.map((id) =>
+        typeof id === 'number' ? (oldToNewSessionIdMap[id] ?? id) : id
+      )
+    );
+  } catch {
+    return value;
+  }
+};
+
 export const importDataService = async (
   backupFile: File
 ): Promise<{ message: string }> => {
@@ -434,12 +433,32 @@ export const importDataService = async (
     const intermediate_summaries = z
       .array(IntermediateSummarySchema)
       .parse(dataFiles['intermediate_summaries.json']);
+    // Verification files are optional so backups created before the audit
+    // feature still import cleanly.
+    const verification_jobs = z
+      .array(verificationJobSchema)
+      .optional()
+      .default([])
+      .parse(dataFiles['verification_jobs.json']);
+    const message_verifications = z
+      .array(messageVerificationSchema)
+      .optional()
+      .default([])
+      .parse(dataFiles['message_verifications.json']);
+    const verified_statements = z
+      .array(verifiedStatementSchema)
+      .optional()
+      .default([])
+      .parse(dataFiles['verified_statements.json']);
 
     await resetAllDataService();
 
     const oldToNewSessionIdMap: Record<number, number> = {};
     const oldToNewChatIdMap: Record<number, number> = {};
+    const oldToNewMessageIdMap: Record<number, number> = {};
     const oldToNewAnalysisJobIdMap: Record<number, number> = {};
+    const oldToNewVerificationJobIdMap: Record<number, number> = {};
+    const oldToNewMessageVerificationIdMap: Record<number, number> = {};
     db.transaction(() => {
       sessions.forEach((s) => {
         const { id, ...rest } = s;
@@ -520,17 +539,21 @@ export const importDataService = async (
       });
       messages.forEach((m) => {
         const newCid = oldToNewChatIdMap[m.chatId];
-        if (newCid)
-          db.prepare(
-            'INSERT INTO messages (chatId, sender, text, timestamp, promptTokens, completionTokens) VALUES (?, ?, ?, ?, ?, ?)'
-          ).run(
-            newCid,
-            m.sender,
-            m.text,
-            m.timestamp,
-            m.promptTokens,
-            m.completionTokens
-          );
+        if (newCid) {
+          const res = db
+            .prepare(
+              'INSERT INTO messages (chatId, sender, text, timestamp, promptTokens, completionTokens) VALUES (?, ?, ?, ?, ?, ?)'
+            )
+            .run(
+              newCid,
+              m.sender,
+              m.text,
+              m.timestamp,
+              m.promptTokens,
+              m.completionTokens
+            );
+          oldToNewMessageIdMap[m.id] = res.lastInsertRowid as number;
+        }
       });
       transcript_paragraphs.forEach((p) => {
         const newSid = oldToNewSessionIdMap[p.sessionId];
@@ -552,6 +575,105 @@ export const importDataService = async (
         upsertTemplateStmt.run(t.title, t.text, t.createdAt);
       }
       // --- END FIX ---
+
+      verification_jobs.forEach((job) => {
+        const { id, ...rest } = job;
+        const newChatId =
+          rest.chat_id != null
+            ? (oldToNewChatIdMap[rest.chat_id] ?? null)
+            : null;
+        const res = db
+          .prepare(
+            'INSERT INTO verification_jobs (status, scope, session_ids_json, chat_id, skip_verified, total_messages, processed_messages, total_statements, flagged_statements, omissions_count, created_at, completed_at, error_message, model_name, context_size, thinking_budget, temperature, top_p, repeat_penalty, num_gpu_layers, llm_base_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+          )
+          .run(
+            rest.status,
+            rest.scope,
+            remapSessionIdsJson(rest.session_ids_json, oldToNewSessionIdMap),
+            newChatId,
+            rest.skip_verified ? 1 : 0,
+            rest.total_messages,
+            rest.processed_messages,
+            rest.total_statements,
+            rest.flagged_statements,
+            rest.omissions_count,
+            rest.created_at,
+            rest.completed_at,
+            rest.error_message,
+            rest.model_name,
+            rest.context_size,
+            rest.thinking_budget,
+            rest.temperature,
+            rest.top_p,
+            rest.repeat_penalty,
+            rest.num_gpu_layers,
+            rest.llm_base_url
+          );
+        oldToNewVerificationJobIdMap[id] = res.lastInsertRowid as number;
+      });
+      message_verifications.forEach((mv) => {
+        const newMessageId = oldToNewMessageIdMap[mv.message_id];
+        const newChatId = oldToNewChatIdMap[mv.chat_id];
+        const newSessionId = oldToNewSessionIdMap[mv.session_id];
+        if (!newMessageId || !newChatId || !newSessionId) return;
+        const newJobId =
+          mv.verification_job_id != null
+            ? (oldToNewVerificationJobIdMap[mv.verification_job_id] ?? null)
+            : null;
+        const res = db
+          .prepare(
+            'INSERT INTO message_verifications (message_id, chat_id, session_id, verification_job_id, authored_model, judge_model, status, total_claims, supported_claims, partial_claims, contradicted_claims, fabricated_claims, omissions_count, accuracy_score, summary_assessment, prompt_tokens, completion_tokens, duration_ms, verified_at, error_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+          )
+          .run(
+            newMessageId,
+            newChatId,
+            newSessionId,
+            newJobId,
+            mv.authored_model,
+            mv.judge_model,
+            mv.status,
+            mv.total_claims,
+            mv.supported_claims,
+            mv.partial_claims,
+            mv.contradicted_claims,
+            mv.fabricated_claims,
+            mv.omissions_count,
+            mv.accuracy_score,
+            mv.summary_assessment,
+            mv.prompt_tokens,
+            mv.completion_tokens,
+            mv.duration_ms,
+            mv.verified_at,
+            mv.error_message
+          );
+        oldToNewMessageVerificationIdMap[mv.id] = res.lastInsertRowid as number;
+      });
+      verified_statements.forEach((st) => {
+        const newVerificationId =
+          oldToNewMessageVerificationIdMap[st.message_verification_id];
+        const newMessageId = oldToNewMessageIdMap[st.message_id];
+        const newSessionId = oldToNewSessionIdMap[st.session_id];
+        if (!newVerificationId || !newMessageId || !newSessionId) return;
+        db.prepare(
+          'INSERT INTO verified_statements (message_verification_id, message_id, session_id, statement_index, kind, exact_quote, normalized_claim, start_char, end_char, verdict, severity, confidence, reasoning, transcript_evidence_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        ).run(
+          newVerificationId,
+          newMessageId,
+          newSessionId,
+          st.statement_index,
+          st.kind,
+          st.exact_quote,
+          st.normalized_claim,
+          st.start_char,
+          st.end_char,
+          st.verdict,
+          st.severity,
+          st.confidence,
+          st.reasoning,
+          st.transcript_evidence_json,
+          st.created_at
+        );
+      });
     })();
 
     const uploadsSrcDir = path.join(tempDir, 'uploads');

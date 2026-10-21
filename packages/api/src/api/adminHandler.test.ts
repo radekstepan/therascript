@@ -22,23 +22,43 @@ const {
   mockTranscriptRepo,
   mockChatRepo,
   mockMessageRepo,
+  mockVerificationRepo,
   mockDb,
+  mockPrepareCalls,
   mockDeleteAllUploads,
-} = vi.hoisted(() => ({
-  mockDeleteIndex: vi.fn(),
-  mockInitializeIndices: vi.fn(),
-  mockBulkIndex: vi.fn(),
-  mockSessionRepo: { findAll: vi.fn() },
-  mockTranscriptRepo: { findParagraphsBySessionId: vi.fn() },
-  mockChatRepo: { findChatsBySessionId: vi.fn(), findStandaloneChats: vi.fn() },
-  mockMessageRepo: { findMessagesByChatId: vi.fn() },
-  mockDb: {
-    transaction: vi.fn((fn: () => void) => fn),
-    exec: vi.fn(),
-    pragma: vi.fn(),
-  },
-  mockDeleteAllUploads: vi.fn(),
-}));
+} = vi.hoisted(() => {
+  const mockPrepareCalls: Array<{ sql: string; args: unknown[] }> = [];
+  return {
+    mockDeleteIndex: vi.fn(),
+    mockInitializeIndices: vi.fn(),
+    mockBulkIndex: vi.fn(),
+    mockSessionRepo: { findAll: vi.fn() },
+    mockTranscriptRepo: { findParagraphsBySessionId: vi.fn() },
+    mockChatRepo: {
+      findChatsBySessionId: vi.fn(),
+      findStandaloneChats: vi.fn(),
+    },
+    mockMessageRepo: { findMessagesByChatId: vi.fn() },
+    mockVerificationRepo: {
+      findAllJobsForBackup: vi.fn(),
+      findAllMessageVerificationsForBackup: vi.fn(),
+      findAllVerifiedStatementsForBackup: vi.fn(),
+    },
+    mockDb: {
+      transaction: vi.fn((fn: () => void) => fn),
+      exec: vi.fn(),
+      pragma: vi.fn(),
+      prepare: vi.fn((sql: string) => ({
+        run: (...args: unknown[]) => {
+          mockPrepareCalls.push({ sql, args });
+          return { lastInsertRowid: 1, changes: 0 };
+        },
+      })),
+    },
+    mockPrepareCalls,
+    mockDeleteAllUploads: vi.fn(),
+  };
+});
 
 vi.mock('@therascript/elasticsearch-client', () => ({
   getElasticsearchClient: vi.fn(() => ({})),
@@ -56,6 +76,13 @@ vi.mock('@therascript/config', () => ({
 vi.mock('@therascript/db', () => ({
   db: mockDb,
   schema: 'TEST SCHEMA',
+  SYSTEM_PROMPT_TEMPLATES: {
+    SESSION_CHAT: { title: 'system_prompt', text: 'a' },
+    STANDALONE_CHAT: { title: 'system_standalone_prompt', text: 'b' },
+    ANALYSIS_STRATEGIST: { title: 'system_analysis_strategist', text: 'c' },
+    SHORT_PROMPT: { title: 'system_short_prompt_generator', text: 'd' },
+    VERIFICATION_JUDGE: { title: 'system_verification_judge', text: 'e' },
+  },
 }));
 
 vi.mock('@therascript/data', () => ({
@@ -65,6 +92,7 @@ vi.mock('@therascript/data', () => ({
   messageRepository: mockMessageRepo,
   templateRepository: {},
   analysisRepository: {},
+  verificationRepository: mockVerificationRepo,
 }));
 
 vi.mock('@therascript/services', () => ({
@@ -90,6 +118,7 @@ const queuedSession = { ...completedSession, id: 2, status: 'transcribing' };
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockPrepareCalls.length = 0;
   mockDeleteIndex.mockResolvedValue(undefined);
   mockInitializeIndices.mockResolvedValue(undefined);
   mockBulkIndex.mockResolvedValue(undefined);
@@ -210,8 +239,72 @@ describe('resetAllDataService', () => {
     });
     expect(mockInitializeIndices).toHaveBeenCalledTimes(1);
     expect(mockDb.exec).toHaveBeenCalled();
-    expect(mockDb.pragma).toHaveBeenCalledWith('user_version = 3');
+    // The schema version is never downgraded by a reset.
+    expect(mockDb.pragma).not.toHaveBeenCalled();
     expect(mockDeleteAllUploads).toHaveBeenCalledTimes(1);
+  });
+
+  it('wipes verification tables children-first and leaves the schema intact', async () => {
+    await resetAllDataService();
+    const execSql = mockDb.exec.mock.calls.map(
+      (call: unknown[]) => call[0] as string
+    );
+    // Verification tables are wiped along with all other user data.
+    const statementsIdx = execSql.findIndex((sql: string) =>
+      sql.includes('DELETE FROM verified_statements')
+    );
+    const verificationsIdx = execSql.findIndex((sql: string) =>
+      sql.includes('DELETE FROM message_verifications')
+    );
+    const jobsIdx = execSql.findIndex((sql: string) =>
+      sql.includes('DELETE FROM verification_jobs')
+    );
+    const messagesIdx = execSql.findIndex((sql: string) =>
+      sql.includes('DELETE FROM messages')
+    );
+    const sessionsIdx = execSql.findIndex((sql: string) =>
+      sql.includes('DELETE FROM sessions')
+    );
+    expect(statementsIdx).toBeGreaterThanOrEqual(0);
+    expect(verificationsIdx).toBeGreaterThanOrEqual(0);
+    expect(jobsIdx).toBeGreaterThanOrEqual(0);
+    // Children are deleted before their parents (foreign keys are ON).
+    expect(statementsIdx).toBeLessThan(verificationsIdx);
+    expect(verificationsIdx).toBeLessThan(jobsIdx);
+    expect(verificationsIdx).toBeLessThan(messagesIdx);
+    expect(messagesIdx).toBeLessThan(sessionsIdx);
+    // AUTOINCREMENT counters restart so a fresh start begins at id 1.
+    expect(
+      execSql.some((sql: string) => sql.includes('DELETE FROM sqlite_sequence'))
+    ).toBe(true);
+    // No user-data table is ever dropped or rebuilt, so verification
+    // tables (and every other table) stay queryable after a reset; the
+    // only DROP allowed targets the legacy schema_metadata table.
+    for (const sql of execSql) {
+      expect(sql).not.toMatch(/CREATE TABLE/i);
+      expect(sql).not.toMatch(/ALTER TABLE/i);
+      if (/DROP TABLE/i.test(sql)) {
+        expect(sql).toMatch(/schema_metadata/);
+      }
+    }
+  });
+
+  it('preserves system templates while deleting user templates', async () => {
+    await resetAllDataService();
+    const templateWipe = mockPrepareCalls.find(({ sql }) =>
+      sql.includes('DELETE FROM templates')
+    );
+    expect(templateWipe).toBeDefined();
+    expect(templateWipe?.sql).toMatch(/WHERE title NOT IN/);
+    expect(templateWipe?.args).toEqual(
+      expect.arrayContaining([
+        'system_prompt',
+        'system_standalone_prompt',
+        'system_analysis_strategist',
+        'system_short_prompt_generator',
+        'system_verification_judge',
+      ])
+    );
   });
 
   it('aggregates failures from every stage without stopping', async () => {

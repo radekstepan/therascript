@@ -431,6 +431,8 @@ export interface SessionVerificationSummary {
   date: string;
   totalAiMessages: number;
   verifiedAiMessages: number;
+  /** Messages whose latest verification attempt ended with status = 'failed'. */
+  failedAiMessages: number;
   isFullyVerified: boolean;
   flaggedIssues: number;
   averageAccuracy: number | null;
@@ -446,6 +448,8 @@ export interface VerificationGlobalStats {
   fabricatedClaims: number;
   omissions: number;
   unverifiedMessagesCount: number;
+  /** Messages whose latest verification attempt ended with status = 'failed'. */
+  failedMessagesCount: number;
   byModel: ModelAccuracyStat[];
   overTime: VerificationTimepointStat[];
   sessionsSummary: SessionVerificationSummary[];

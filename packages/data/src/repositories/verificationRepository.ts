@@ -5,12 +5,14 @@ import type {
   BackendVerificationJob,
   BackendVerifiedStatement,
   ModelAccuracyStat,
+  MessageVerificationRow,
   SessionVerificationSummary,
   StatementKind,
   StatementSeverity,
   StatementVerdict,
   TranscriptEvidenceItem,
   VerificationGlobalStats,
+  VerifiedStatementRow,
   VerificationJobScope,
   VerificationJobStatus,
   VerificationTimepointStat,
@@ -103,6 +105,7 @@ export interface SessionVerificationDetail {
   sessionId: number;
   totalAiMessages: number;
   verifiedAiMessages: number;
+  failedAiMessages: number;
   averageAccuracy: number | null;
   flaggedIssues: number;
   omissions: number;
@@ -335,6 +338,22 @@ export const verificationRepository = {
         error
       );
       throw new Error('Database error fetching verification jobs.');
+    }
+  },
+
+  hasActiveVerificationJobs: (): boolean => {
+    try {
+      const row = get<{ active: number }>(
+        `SELECT 1 AS active FROM verification_jobs
+         WHERE status IN ('pending', 'processing', 'canceling') LIMIT 1`
+      );
+      return row?.active === 1;
+    } catch (error) {
+      console.error(
+        '[VerificationRepo] Error checking for active verification jobs:',
+        error
+      );
+      throw new Error('Database error checking active verification jobs.');
     }
   },
 
@@ -666,12 +685,14 @@ export const verificationRepository = {
       );
       const aggregateRow = get<{
         verified: number;
+        failed: number;
         averageAccuracy: number | null;
         omissions: number;
       }>(
-        `SELECT COUNT(*) AS verified,
+        `SELECT COUNT(CASE WHEN status = 'completed' THEN 1 ELSE NULL END) AS verified,
+                COUNT(CASE WHEN status = 'failed' THEN 1 ELSE NULL END) AS failed,
                 AVG(CASE WHEN status = 'completed' THEN accuracy_score ELSE NULL END) AS averageAccuracy,
-                COALESCE(SUM(omissions_count), 0) AS omissions
+                COALESCE(SUM(CASE WHEN status = 'completed' THEN omissions_count ELSE 0 END), 0) AS omissions
          FROM message_verifications WHERE session_id = ?`,
         sessionId
       );
@@ -684,6 +705,7 @@ export const verificationRepository = {
         sessionId,
         totalAiMessages: totalRow?.count ?? 0,
         verifiedAiMessages: aggregateRow?.verified ?? 0,
+        failedAiMessages: aggregateRow?.failed ?? 0,
         averageAccuracy: aggregateRow?.averageAccuracy ?? null,
         flaggedIssues: flaggedRow?.count ?? 0,
         omissions: aggregateRow?.omissions ?? 0,
@@ -708,25 +730,34 @@ export const verificationRepository = {
   ): VerificationGlobalStats => {
     try {
       const params: unknown[] = [];
-      const conditions: string[] = ["mv.status = 'completed'"];
+      const filterConditions: string[] = [];
       if (filters.sessionIds && filters.sessionIds.length > 0) {
-        conditions.push(
+        filterConditions.push(
           `mv.session_id IN ${buildInClause(filters.sessionIds, params)}`
         );
       }
       if (filters.model) {
-        conditions.push('COALESCE(mv.authored_model, m.model, ?) = ?');
+        filterConditions.push('COALESCE(mv.authored_model, m.model, ?) = ?');
         params.push(UNKNOWN_MODEL_LABEL, filters.model);
       }
       if (filters.startDate) {
-        conditions.push("date(m.timestamp / 1000, 'unixepoch') >= date(?)");
+        filterConditions.push(
+          "date(m.timestamp / 1000, 'unixepoch') >= date(?)"
+        );
         params.push(filters.startDate);
       }
       if (filters.endDate) {
-        conditions.push("date(m.timestamp / 1000, 'unixepoch') <= date(?)");
+        filterConditions.push(
+          "date(m.timestamp / 1000, 'unixepoch') <= date(?)"
+        );
         params.push(filters.endDate);
       }
-      const where = conditions.join(' AND ');
+      const where = ["mv.status = 'completed'", ...filterConditions].join(
+        ' AND '
+      );
+      const failedWhere = ["mv.status = 'failed'", ...filterConditions].join(
+        ' AND '
+      );
 
       const kpi = get<{
         totalMessagesAudited: number;
@@ -747,6 +778,14 @@ export const verificationRepository = {
          FROM message_verifications mv
          INNER JOIN messages m ON m.id = mv.message_id
          WHERE ${where}`,
+        ...params
+      );
+
+      const failedRow = get<{ count: number }>(
+        `SELECT COUNT(*) AS count
+         FROM message_verifications mv
+         INNER JOIN messages m ON m.id = mv.message_id
+         WHERE ${failedWhere}`,
         ...params
       );
 
@@ -833,6 +872,7 @@ export const verificationRepository = {
         date: string;
         totalAiMessages: number;
         verifiedAiMessages: number;
+        failedAiMessages: number;
         flaggedIssues: number;
         averageAccuracy: number | null;
       }>(
@@ -842,6 +882,8 @@ export const verificationRepository = {
                  WHERE c.sessionId = s.id AND ${VERIFIABLE_AI_MESSAGE_FILTER}) AS totalAiMessages,
                 (SELECT COUNT(*) FROM message_verifications mv
                  WHERE mv.session_id = s.id AND mv.status = 'completed') AS verifiedAiMessages,
+                (SELECT COUNT(*) FROM message_verifications mv
+                 WHERE mv.session_id = s.id AND mv.status = 'failed') AS failedAiMessages,
                 (SELECT COUNT(*) FROM verified_statements vs
                  WHERE vs.session_id = s.id
                    AND vs.verdict IN ('fabricated', 'contradicted', 'partially_supported', 'omission')) AS flaggedIssues,
@@ -924,6 +966,7 @@ export const verificationRepository = {
           date: r.date,
           totalAiMessages: r.totalAiMessages,
           verifiedAiMessages: r.verifiedAiMessages,
+          failedAiMessages: r.failedAiMessages,
           isFullyVerified:
             r.totalAiMessages > 0 && r.verifiedAiMessages >= r.totalAiMessages,
           flaggedIssues: r.flaggedIssues,
@@ -941,6 +984,7 @@ export const verificationRepository = {
         fabricatedClaims: kpi?.fabricatedClaims ?? 0,
         omissions,
         unverifiedMessagesCount: unverifiedRow?.count ?? 0,
+        failedMessagesCount: failedRow?.count ?? 0,
         byModel,
         overTime,
         sessionsSummary,
@@ -1058,22 +1102,78 @@ export const verificationRepository = {
   },
 
   /**
-   * Clears ALL verifications and statements so the user can re-audit from
-   * scratch. Job history rows are kept; only `message_verifications` and
-   * `verified_statements` are truncated.
-   * @returns The number of message verifications deleted.
+   * Clears ALL verification data — statements, message verifications, and
+   * job history rows — so the user can re-audit from scratch.
+   * @returns The number of rows deleted from each verification table.
    */
-  resetAllVerifications: (): { deletedVerifications: number } => {
+  resetAllVerifications: (): {
+    deletedVerifications: number;
+    deletedStatements: number;
+    deletedJobs: number;
+  } => {
     try {
-      const deletedVerifications = db.transaction(() => {
-        run('DELETE FROM verified_statements');
-        const info = run('DELETE FROM message_verifications');
-        return Number(info.changes ?? 0);
+      const result = db.transaction(() => {
+        const statementsInfo = run('DELETE FROM verified_statements');
+        const verificationsInfo = run('DELETE FROM message_verifications');
+        const jobsInfo = run('DELETE FROM verification_jobs');
+        return {
+          deletedVerifications: Number(verificationsInfo.changes ?? 0),
+          deletedStatements: Number(statementsInfo.changes ?? 0),
+          deletedJobs: Number(jobsInfo.changes ?? 0),
+        };
       })();
-      return { deletedVerifications };
+      return result;
     } catch (error) {
       console.error('[VerificationRepo] Error resetting verifications:', error);
       throw new Error('Database error resetting verifications.');
+    }
+  },
+
+  /**
+   * Bulk readers for admin backup export. Jobs are mapped (notably
+   * `skip_verified` INTEGER -> boolean) so rows validate against the
+   * domain zod schemas on import.
+   */
+  findAllJobsForBackup: (): BackendVerificationJob[] => {
+    try {
+      const rows = all<any>('SELECT * FROM verification_jobs ORDER BY id ASC');
+      return rows.map(mapJobRow);
+    } catch (error) {
+      console.error(
+        '[VerificationRepo] Error reading verification jobs for backup:',
+        error
+      );
+      throw new Error('Database error reading verification jobs for backup.');
+    }
+  },
+
+  findAllMessageVerificationsForBackup: (): MessageVerificationRow[] => {
+    try {
+      return all<MessageVerificationRow>(
+        'SELECT * FROM message_verifications ORDER BY id ASC'
+      );
+    } catch (error) {
+      console.error(
+        '[VerificationRepo] Error reading message verifications for backup:',
+        error
+      );
+      throw new Error(
+        'Database error reading message verifications for backup.'
+      );
+    }
+  },
+
+  findAllVerifiedStatementsForBackup: (): VerifiedStatementRow[] => {
+    try {
+      return all<VerifiedStatementRow>(
+        'SELECT * FROM verified_statements ORDER BY id ASC'
+      );
+    } catch (error) {
+      console.error(
+        '[VerificationRepo] Error reading verified statements for backup:',
+        error
+      );
+      throw new Error('Database error reading verified statements for backup.');
     }
   },
 };

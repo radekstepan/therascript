@@ -114,6 +114,33 @@ export const transcriptEvidenceItemSchema = z.object({
   quote: z.string(),
 });
 
+export const sessionVerificationSummarySchema = z.object({
+  sessionId: z.number().int().nonnegative(),
+  sessionName: z.string(),
+  clientName: z.string(),
+  date: z.string(),
+  totalAiMessages: z.number().int().nonnegative(),
+  verifiedAiMessages: z.number().int().nonnegative(),
+  failedAiMessages: z.number().int().nonnegative().optional().default(0),
+  isFullyVerified: z.boolean(),
+  flaggedIssues: z.number().int().nonnegative(),
+  averageAccuracy: z.number().nullable(),
+});
+
+export const globalVerificationAnalyticsSchema = z.object({
+  totalMessagesAudited: z.number().int().nonnegative(),
+  overallAccuracyPercent: z.number(),
+  totalClaims: z.number().int().nonnegative(),
+  supportedClaims: z.number().int().nonnegative(),
+  partialClaims: z.number().int().nonnegative(),
+  contradictedClaims: z.number().int().nonnegative(),
+  fabricatedClaims: z.number().int().nonnegative(),
+  omissions: z.number().int().nonnegative(),
+  unverifiedMessagesCount: z.number().int().nonnegative(),
+  failedMessagesCount: z.number().int().nonnegative().optional().default(0),
+  sessionsSummary: z.array(sessionVerificationSummarySchema),
+});
+
 export type VerificationJobRow = z.infer<typeof verificationJobSchema>;
 export type MessageVerificationRow = z.infer<typeof messageVerificationSchema>;
 export type VerifiedStatementRow = z.infer<typeof verifiedStatementSchema>;

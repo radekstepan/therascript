@@ -827,6 +827,193 @@ describe('getGlobalVerificationAnalytics', () => {
   });
 });
 
+describe('failed verification accounting', () => {
+  const seedMixed = () => {
+    const sessionId = insertSession('S1');
+    const chatId = insertChat(sessionId);
+    insertMessage({
+      chatId,
+      sender: 'user',
+      text: 'Question?',
+      timestamp: T0 - 1000,
+    });
+    const ok = insertMessage({
+      chatId,
+      sender: 'ai',
+      text: 'Supported answer.',
+      timestamp: T0,
+      model: 'model-a',
+    });
+    const broken = insertMessage({
+      chatId,
+      sender: 'ai',
+      text: 'Unverifiable answer.',
+      timestamp: T0 + 1000,
+      model: 'model-a',
+    });
+    verificationRepository.saveMessageVerificationResult({
+      messageId: ok,
+      chatId,
+      sessionId,
+      judgeModel: 'judge-1',
+      totalClaims: 1,
+      supportedClaims: 1,
+      accuracyScore: 1,
+    });
+    verificationRepository.saveMessageVerificationResult({
+      messageId: broken,
+      chatId,
+      sessionId,
+      judgeModel: 'judge-1',
+      status: 'failed',
+      errorMessage: 'Judge JSON parse error',
+    });
+    return { sessionId, chatId, ok, broken };
+  };
+
+  it('excludes failed rows from verified counts and reports failedAiMessages', () => {
+    const { sessionId } = seedMixed();
+    const detail =
+      verificationRepository.findVerificationsBySessionId(sessionId);
+    expect(detail.totalAiMessages).toBe(2);
+    expect(detail.verifiedAiMessages).toBe(1);
+    expect(detail.failedAiMessages).toBe(1);
+
+    const stats = verificationRepository.getGlobalVerificationAnalytics();
+    expect(stats.totalMessagesAudited).toBe(1);
+    expect(stats.failedMessagesCount).toBe(1);
+    const summary = stats.sessionsSummary.find(
+      (s) => s.sessionId === sessionId
+    );
+    expect(summary?.totalAiMessages).toBe(2);
+    expect(summary?.verifiedAiMessages).toBe(1);
+    expect(summary?.failedAiMessages).toBe(1);
+    expect(summary?.isFullyVerified).toBe(false);
+  });
+
+  it('reports zero failed counts when nothing failed', () => {
+    const sessionId = insertSession('S1');
+    const chatId = insertChat(sessionId);
+    insertMessage({
+      chatId,
+      sender: 'user',
+      text: 'Question?',
+      timestamp: T0 - 1000,
+    });
+    const msgId = insertMessage({
+      chatId,
+      sender: 'ai',
+      text: 'Answer.',
+      timestamp: T0,
+    });
+    verificationRepository.saveMessageVerificationResult({
+      messageId: msgId,
+      chatId,
+      sessionId,
+      judgeModel: 'judge-1',
+      totalClaims: 1,
+      supportedClaims: 1,
+    });
+    const detail =
+      verificationRepository.findVerificationsBySessionId(sessionId);
+    expect(detail.verifiedAiMessages).toBe(1);
+    expect(detail.failedAiMessages).toBe(0);
+    const stats = verificationRepository.getGlobalVerificationAnalytics();
+    expect(stats.failedMessagesCount).toBe(0);
+    expect(stats.sessionsSummary[0]?.failedAiMessages).toBe(0);
+  });
+});
+
+describe('hasActiveVerificationJobs', () => {
+  it('returns false when no jobs exist', () => {
+    expect(verificationRepository.hasActiveVerificationJobs()).toBe(false);
+  });
+
+  // NOTE: 'canceling' is also matched by hasActiveVerificationJobs(), but no
+  // 'canceling' row can be persisted yet (the V20 verification_jobs CHECK
+  // constraint only allows pending/processing/completed/failed/canceled),
+  // so only the storable active statuses are exercised here.
+  it.each(['pending', 'processing'] as const)(
+    'returns true when a job is %s',
+    (status) => {
+      const job = verificationRepository.createVerificationJob({
+        scope: 'all_unverified',
+      });
+      if (status !== 'pending') {
+        verificationRepository.updateJobStatus(job.id, status);
+      }
+      expect(verificationRepository.hasActiveVerificationJobs()).toBe(true);
+    }
+  );
+
+  it.each(['completed', 'failed', 'canceled'] as const)(
+    'returns false when all jobs are %s',
+    (status) => {
+      const job = verificationRepository.createVerificationJob({
+        scope: 'all_unverified',
+      });
+      verificationRepository.updateJobStatus(job.id, status);
+      expect(verificationRepository.hasActiveVerificationJobs()).toBe(false);
+    }
+  );
+});
+
+describe('resetAllVerifications', () => {
+  it('deletes jobs as well as verifications and statements', () => {
+    const sessionId = insertSession('S1');
+    const chatId = insertChat(sessionId);
+    const msgId = insertMessage({
+      chatId,
+      sender: 'ai',
+      text: 'Answer.',
+      timestamp: T0,
+    });
+    const job = verificationRepository.createVerificationJob({
+      scope: 'all_unverified',
+    });
+    verificationRepository.saveMessageVerificationResult({
+      messageId: msgId,
+      chatId,
+      sessionId,
+      verificationJobId: job.id,
+      judgeModel: 'judge-1',
+      totalClaims: 1,
+      supportedClaims: 1,
+      statements: [
+        {
+          statementIndex: 0,
+          kind: 'claim',
+          exactQuote: 'Answer',
+          normalizedClaim: 'Answer.',
+          verdict: 'supported',
+          reasoning: 'ok',
+        },
+      ],
+    });
+    const idle = verificationRepository.createVerificationJob({
+      scope: 'all_unverified',
+    });
+    void idle;
+
+    const result = verificationRepository.resetAllVerifications();
+    expect(result).toEqual({
+      deletedVerifications: 1,
+      deletedStatements: 1,
+      deletedJobs: 2,
+    });
+    expect(verificationRepository.findAllVerificationJobs()).toHaveLength(0);
+    expect(
+      verificationRepository.findVerificationsByChatId(chatId)
+    ).toHaveLength(0);
+    expect(
+      verificationRepository.findAllMessageVerificationsForBackup()
+    ).toHaveLength(0);
+    expect(
+      verificationRepository.findAllVerifiedStatementsForBackup()
+    ).toHaveLength(0);
+  });
+});
+
 describe('findFlaggedStatements', () => {
   const seedFlagged = () => {
     const sessionId = insertSession('S1');

@@ -28,4 +28,6 @@ export {
   type StatementSeverityRow,
   transcriptEvidenceItemSchema,
   type TranscriptEvidenceItemRow,
+  sessionVerificationSummarySchema,
+  globalVerificationAnalyticsSchema,
 } from './verification.js';

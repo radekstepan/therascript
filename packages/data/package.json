@@ -8,6 +8,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
+    "test": "vitest run --root ../.. packages/data",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {

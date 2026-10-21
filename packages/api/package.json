@@ -8,7 +8,7 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "dev": "concurrently --kill-others-on-fail \"tsc --watch --preserveWatchOutput\" \"nodemon\"",
-    "test": "vitest run",
+    "test": "vitest run --root ../.. packages/api",
     "test:watch": "vitest",
     "preload": "yarn build && node dist/preloadDb.js",
     "clean": "rm -rf dist *.tsbuildinfo"
