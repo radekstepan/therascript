@@ -143,6 +143,25 @@ export async function unloadModelAtUrlForWorker(url: string): Promise<number> {
 }
 
 /**
+ * Last LM Studio base URL the worker loaded (or confirmed already loaded) a
+ * model on. Starts at the config default and is updated on every
+ * `loadLlmModelForWorker` call that targets an explicit URL, so a switch
+ * between two remote URLs — or remote back to local — evicts the stale
+ * model on the *previous* URL instead of always probing the config default.
+ */
+let lastWorkerBaseUrl: string = config.llm.baseURL;
+
+/**
+ * Test-only reset for `lastWorkerBaseUrl`. The tracker is module-level
+ * worker state that persists across jobs in the long-lived worker process;
+ * unit tests must reset it in `beforeEach` so URL-switch assertions stay
+ * deterministic regardless of test order.
+ */
+export function __resetLastWorkerBaseUrlForTests(url?: string): void {
+  lastWorkerBaseUrl = url ?? config.llm.baseURL;
+}
+
+/**
  * Load a model in LM Studio via its REST API.
  * This is required because LM Studio doesn't auto-load models on first request.
  *
@@ -153,12 +172,13 @@ export async function unloadModelAtUrlForWorker(url: string): Promise<number> {
 export async function loadLlmModelForWorker(
   modelKey: string,
   contextSize?: number | null,
-  baseUrl?: string
+  baseUrl?: string,
+  numGpuLayers?: number | null
 ): Promise<void> {
-  // If the target URL differs from the worker's currently known default
-  // base URL, evict any model loaded on the previous URL so we don't
-  // leave a stale model in VRAM on the other server.
-  const previousBaseUrl = config.llm.baseURL;
+  // If the target URL differs from the worker's last active base URL, evict
+  // any model loaded on the previous URL so we don't leave a stale model in
+  // VRAM on the other server.
+  const previousBaseUrl = lastWorkerBaseUrl;
   if (baseUrl && baseUrl !== previousBaseUrl) {
     try {
       const unloaded = await unloadModelAtUrlForWorker(previousBaseUrl);
@@ -171,6 +191,12 @@ export async function loadLlmModelForWorker(
         e
       );
     }
+  }
+  // Record the target URL as the worker's last active base URL — including
+  // on the early-return path below, where the model is already loaded on
+  // this URL and no load call is needed.
+  if (baseUrl) {
+    lastWorkerBaseUrl = baseUrl;
   }
 
   // Single fetch — used both for the early-return check and for unloading.
@@ -247,6 +273,12 @@ export async function loadLlmModelForWorker(
   if (contextSize && contextSize > 0) {
     loadPayload.context_length = contextSize;
   }
+  // Mirror the API's loadLlmModel: numGpuLayers=0 means CPU-only, any other
+  // value lets LM Studio offload the KV cache to GPU. Left unset when the
+  // job carries no preference so LM Studio keeps its own default.
+  if (numGpuLayers !== undefined && numGpuLayers !== null) {
+    loadPayload.offload_kv_cache_to_gpu = numGpuLayers !== 0;
+  }
 
   console.log(`[Analysis Worker] Loading model: ${modelKey}`);
   const loadRes = await fetch(`${baseUrl}/api/v1/models/load`, {
@@ -309,6 +341,26 @@ export async function loadLlmModelForWorker(
 export function computeMapCompletionCap(contextSize: number): number {
   const MIN_COMPLETION_TOKENS = 4096; // 2 × 2048
   return Math.max(MIN_COMPLETION_TOKENS, Math.round(contextSize * 0.3));
+}
+
+/**
+ * Resolve the effective thinking budget for a Map/Reduce LLM call.
+ *
+ * The UI represents "Unrestricted" as `-1`, stored verbatim in
+ * `analysis_jobs.thinking_budget`. Passing `-1` through to the LLM client
+ * would let reasoning models spend 100% of `max_tokens` inside `<think>`
+ * and produce an empty visible summary, so `-1` (and unset) is clamped to
+ * the phase's 40% thinking cap instead.
+ *
+ * Pure function: no I/O. Exported for unit testing.
+ */
+export function resolveEffectiveThinkingBudget(
+  configuredBudget: number | null | undefined,
+  maxThinkingCap: number
+): number {
+  if (configuredBudget === 0) return 0;
+  if (configuredBudget == null || configuredBudget < 0) return maxThinkingCap;
+  return Math.min(configuredBudget, maxThinkingCap);
 }
 
 export function assembleReducePrompt(
@@ -443,7 +495,8 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
         await loadLlmModelForWorker(
           jobRecord.model_name,
           jobRecord.context_size,
-          jobLlmBaseUrl
+          jobLlmBaseUrl,
+          jobRecord.num_gpu_layers
         );
         console.log(`[Analysis Worker ${jobId}] Model ready.`);
       } catch (loadError: any) {
@@ -636,16 +689,22 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
         // user-supplied value on the job still wins.
         const mapTemperature = jobRecord?.temperature ?? 0.3;
 
-        // Build the LLM call options once; reused across retries. We pin
-        // chat_template_kwargs.enable_thinking=true so LM Studio doesn't
-        // toggle unpredictably between calls (atlas's discipline in
-        // apps/api/src/lib/model-client.ts:146-170). We also pass the default
-        // stop tokens so the model emits a hard end-of-turn signal instead of
+        // Build the LLM call options once; reused across retries. The
+        // effective thinking budget is resolved once and drives both
+        // `reasoning_budget` and `enable_thinking`, so a disabled budget (0)
+        // turns the template flag off instead of forcing thinking on. We
+        // pin the flag explicitly (rather than relying on the client's
+        // thinkingBudget===0 default) so LM Studio doesn't toggle
+        // unpredictably between calls. We also pass the default stop
+        // tokens so the model emits a hard end-of-turn signal instead of
         // running until max_tokens — combined with the new repeat_penalty
         // routing, this is the core fix for the "loopy output" symptom.
+        const mapEffectiveThinkingBudget = resolveEffectiveThinkingBudget(
+          jobRecord?.thinking_budget,
+          mapMaxThinkingTokens
+        );
         const mapCallOptions = {
           model: jobRecord?.model_name || undefined,
-          contextSize: jobRecord?.context_size || undefined,
           abortSignal: abortController.signal,
           llamaCppBaseUrl: jobLlmBaseUrl,
           llmApiToken: resolveLlmApiTokenForWorker(jobLlmBaseUrl),
@@ -653,11 +712,13 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
           topP: jobRecord?.top_p ?? undefined,
           repeatPenalty: jobRecord?.repeat_penalty ?? undefined,
           numGpuLayers: jobRecord?.num_gpu_layers ?? undefined,
-          thinkingBudget: jobRecord?.thinking_budget ?? mapMaxThinkingTokens,
+          thinkingBudget: mapEffectiveThinkingBudget,
           maxCompletionTokens: mapMaxCompletionTokens,
           passDefaultStopTokens: true,
           hardTimeoutMs: 15 * 60 * 1000,
-          chatTemplateKwargs: { enable_thinking: true },
+          chatTemplateKwargs: {
+            enable_thinking: mapEffectiveThinkingBudget !== 0,
+          },
         } as const;
 
         // Retry the initial connection (and the entire stream) on transient
@@ -989,9 +1050,15 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
       // synthesis is a structured task that benefits from less variance.
       const reduceTemperature = jobRecord?.temperature ?? 0.3;
 
+      // Resolve once per phase: the effective budget drives both
+      // `reasoning_budget` and `enable_thinking` so a disabled budget (0)
+      // turns the template flag off instead of forcing thinking on.
+      const reduceEffectiveThinkingBudget = resolveEffectiveThinkingBudget(
+        jobRecord?.thinking_budget,
+        reduceMaxThinkingTokens
+      );
       const reduceCallOptions = {
         model: jobRecord?.model_name || undefined,
-        contextSize: jobRecord?.context_size || undefined,
         abortSignal: reduceAbortController.signal,
         llamaCppBaseUrl: jobLlmBaseUrl,
         llmApiToken: resolveLlmApiTokenForWorker(jobLlmBaseUrl),
@@ -999,11 +1066,13 @@ export default async function (job: Job<AnalysisJobData, any, string>) {
         topP: jobRecord?.top_p ?? undefined,
         repeatPenalty: jobRecord?.repeat_penalty ?? undefined,
         numGpuLayers: jobRecord?.num_gpu_layers ?? undefined,
-        thinkingBudget: jobRecord?.thinking_budget ?? reduceMaxThinkingTokens,
+        thinkingBudget: reduceEffectiveThinkingBudget,
         maxCompletionTokens: reduceMaxCompletionTokens,
         passDefaultStopTokens: true,
         hardTimeoutMs: 15 * 60 * 1000,
-        chatTemplateKwargs: { enable_thinking: true },
+        chatTemplateKwargs: {
+          enable_thinking: reduceEffectiveThinkingBudget !== 0,
+        },
       } as const;
 
       // Same retry-on-initial-connection pattern as the map phase.

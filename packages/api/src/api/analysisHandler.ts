@@ -29,6 +29,7 @@ import type {
 } from '@therascript/domain';
 import {
   cleanLlmOutput,
+  extractVisibleAnswer,
   parseJsonObjectFromLlm,
   type StreamLlmChatOptions,
 } from '@therascript/services';
@@ -72,7 +73,13 @@ async function accumulateStreamResponse(
       completionTokens = chunk.completionTokens;
     }
   }
-  return { text: cleanLlmOutput(fullText), promptTokens, completionTokens };
+  // Strip any <think> reasoning before cleaning so strategy JSON parsing
+  // and short-prompt titles never see the model's hidden reasoning.
+  return {
+    text: cleanLlmOutput(extractVisibleAnswer(fullText)),
+    promptTokens,
+    completionTokens,
+  };
 }
 
 const getSystemPrompt = (
@@ -120,6 +127,10 @@ const generateShortPromptInBackground = async (
       {
         model: modelName || undefined,
         ...(jobLlmBaseUrl ? { llamaCppBaseUrl: jobLlmBaseUrl } : {}),
+        // A 5-word UI title needs no reasoning: disable thinking so the
+        // call is instant and never wastes tokens on `<think>`.
+        thinkingBudget: 0,
+        chatTemplateKwargs: { enable_thinking: false },
       }
     );
     const {
@@ -234,13 +245,20 @@ const generateStrategyAndUpdateJob = async (
     // is a known loop amplifier for structured output), pass default stop
     // tokens, and an explicit hard timeout so a runaway generation can't
     // pin a slot in the API process forever.
+    // Honor the job's thinking preference (snapshotted at creation) for the
+    // strategy call: when the user disabled thinking (budget 0), the
+    // template must not enable it. Unset/null falls back to the globally
+    // configured value; both null and -1 ("Unrestricted") keep thinking on.
+    const strategyThinkingBudget =
+      analysisRepository.getJobById(jobId)?.thinking_budget ??
+      getConfiguredThinkingBudget();
     const strategyCallOptions: StreamLlmChatOptions = {
       model: modelName || undefined,
       ...(jobLlmBaseUrl ? { llamaCppBaseUrl: jobLlmBaseUrl } : {}),
       temperature: 0.3,
       passDefaultStopTokens: true,
       hardTimeoutMs: 5 * 60 * 1000,
-      chatTemplateKwargs: { enable_thinking: true },
+      chatTemplateKwargs: { enable_thinking: strategyThinkingBudget !== 0 },
     };
     const stream = await streamChatResponse(
       [

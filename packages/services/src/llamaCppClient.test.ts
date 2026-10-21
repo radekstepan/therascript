@@ -224,6 +224,63 @@ describe('streamLlmChatDetailed', () => {
     expect(body).not.toHaveProperty('chat_template_kwargs');
   });
 
+  it('sets chat_template_kwargs.enable_thinking=false when thinkingBudget is 0', async () => {
+    mockFetch.mockResolvedValue(makeSseResponse(['[DONE]']));
+    await consume(
+      streamLlmChatDetailed(messages, {
+        llamaCppBaseUrl: 'http://h:1',
+        thinkingBudget: 0,
+      })
+    );
+    const body = JSON.parse(mockFetch.mock.calls[0]![1].body);
+    expect(body.reasoning_budget).toBe(0);
+    expect(body.chat_template_kwargs).toEqual({ enable_thinking: false });
+  });
+
+  it('does not override an explicit enable_thinking when thinkingBudget is 0', async () => {
+    mockFetch.mockResolvedValue(makeSseResponse(['[DONE]']));
+    await consume(
+      streamLlmChatDetailed(messages, {
+        llamaCppBaseUrl: 'http://h:1',
+        thinkingBudget: 0,
+        chatTemplateKwargs: { enable_thinking: true },
+      })
+    );
+    const body = JSON.parse(mockFetch.mock.calls[0]![1].body);
+    expect(body.chat_template_kwargs).toEqual({ enable_thinking: true });
+  });
+
+  it('merges auto enable_thinking=false with other kwargs and repeatPenalty when thinkingBudget is 0', async () => {
+    mockFetch.mockResolvedValue(makeSseResponse(['[DONE]']));
+    await consume(
+      streamLlmChatDetailed(messages, {
+        llamaCppBaseUrl: 'http://h:1',
+        thinkingBudget: 0,
+        repeatPenalty: 1.1,
+        chatTemplateKwargs: { custom_flag: 'x' },
+      })
+    );
+    const body = JSON.parse(mockFetch.mock.calls[0]![1].body);
+    expect(body.chat_template_kwargs).toEqual({
+      custom_flag: 'x',
+      repeat_penalty: 1.1,
+      enable_thinking: false,
+    });
+  });
+
+  it('does not set enable_thinking for a nonzero thinkingBudget', async () => {
+    mockFetch.mockResolvedValue(makeSseResponse(['[DONE]']));
+    await consume(
+      streamLlmChatDetailed(messages, {
+        llamaCppBaseUrl: 'http://h:1',
+        thinkingBudget: 512,
+      })
+    );
+    const body = JSON.parse(mockFetch.mock.calls[0]![1].body);
+    expect(body.reasoning_budget).toBe(512);
+    expect(body).not.toHaveProperty('chat_template_kwargs');
+  });
+
   it('yields each delta.content as a content chunk and finalises on [DONE]', async () => {
     mockFetch.mockResolvedValue(
       makeSseResponse([
@@ -702,5 +759,112 @@ describe('streamLlmChatDetailed stored-reasoning isolation', () => {
     );
     expect(aiMsg.text).toBe('<think>r</think>Answer');
     expect(input).toHaveLength(2);
+  });
+});
+
+describe('streamLlmChatDetailed streaming think-tag parser', () => {
+  let mockFetchParser: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    mockFetchParser = vi.fn();
+    vi.stubGlobal('fetch', mockFetchParser);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const contentChunks = (texts: string[]): Array<object | string> => [
+    ...texts.map((content) => ({ choices: [{ delta: { content } }] })),
+    '[DONE]',
+  ];
+
+  const runContents = async (texts: string[]) => {
+    mockFetchParser.mockResolvedValue(makeSseResponse(contentChunks(texts)));
+    return consume(
+      streamLlmChatDetailed(messages, { llamaCppBaseUrl: 'http://h:1' })
+    );
+  };
+
+  const joined = (chunks: LlmChatChunk[], key: 'content' | 'thinking') =>
+    chunks.map((c) => c[key] ?? '').join('');
+
+  it('detects <think> split across chunks', async () => {
+    const { chunks } = await runContents(['<th', 'ink>secret</think>visible']);
+
+    expect(joined(chunks, 'thinking')).toBe('secret');
+    expect(joined(chunks, 'content')).toBe('visible');
+  });
+
+  it('detects </think> split across chunks', async () => {
+    const { chunks } = await runContents(['<think>secret</th', 'ink>visible']);
+
+    expect(joined(chunks, 'thinking')).toBe('secret');
+    expect(joined(chunks, 'content')).toBe('visible');
+  });
+
+  it('handles 1-char-at-a-time chunk streaming', async () => {
+    const text = '<think>reasoning</think>answer';
+    const { chunks } = await runContents(text.split(''));
+
+    expect(joined(chunks, 'thinking')).toBe('reasoning');
+    expect(joined(chunks, 'content')).toBe('answer');
+    // No tag fragments may leak into either channel.
+    for (const chunk of chunks) {
+      expect(chunk.content ?? '').not.toMatch(/</);
+      expect(chunk.thinking ?? '').not.toMatch(/</);
+    }
+  });
+
+  it('matches <THINK>...</THINK> case-insensitively across chunks', async () => {
+    const { chunks } = await runContents([
+      '<TH',
+      'INK>secret</TH',
+      'INK>visible',
+    ]);
+
+    expect(joined(chunks, 'thinking')).toBe('secret');
+    expect(joined(chunks, 'content')).toBe('visible');
+  });
+
+  it('does not get stuck on a literal < in normal text', async () => {
+    const { chunks } = await runContents(['2 < 3 and 5 > 4']);
+
+    expect(chunks).toEqual([{ content: '2 < 3 and 5 > 4' }]);
+  });
+
+  it('does not get stuck when a literal < lands on a chunk boundary', async () => {
+    const { chunks } = await runContents(['2 <', ' 3 and 5 > 4']);
+
+    expect(joined(chunks, 'thinking')).toBe('');
+    expect(joined(chunks, 'content')).toBe('2 < 3 and 5 > 4');
+  });
+
+  it('handles multiple <think>...</think> transitions within a single chunk', async () => {
+    const { chunks } = await runContents([
+      'a<think>b</think>c<think>d</think>e',
+    ]);
+
+    expect(chunks).toEqual([
+      { content: 'a' },
+      { thinking: 'b' },
+      { content: 'c' },
+      { thinking: 'd' },
+      { content: 'e' },
+    ]);
+  });
+
+  it('flushes buffered text on [DONE] when the stream ends mid-thinking', async () => {
+    const { chunks } = await runContents(['<think>secret']);
+
+    expect(joined(chunks, 'thinking')).toBe('secret');
+    expect(joined(chunks, 'content')).toBe('');
+  });
+
+  it('flushes a trailing partial tag as literal text on [DONE]', async () => {
+    const { chunks } = await runContents(['hello <th']);
+
+    expect(joined(chunks, 'content')).toBe('hello <th');
+    expect(joined(chunks, 'thinking')).toBe('');
   });
 });

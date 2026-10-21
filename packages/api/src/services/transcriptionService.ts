@@ -67,15 +67,6 @@ export async function startTranscriptionJob(
   await addTranscriptionJob({ sessionId, numSpeakers });
 }
 
-export async function getStructuredTranscriptionResult(
-  jobId: string
-): Promise<any> {
-  const response = await axios.get(`${config.whisper.apiUrl}/status/${jobId}`, {
-    timeout: 3000,
-  });
-  return response.data;
-}
-
 /**
  * Fast (no-network) check: is HF_TOKEN set in the Whisper service
  * and are the pyannote model files present in its local HF hub cache?

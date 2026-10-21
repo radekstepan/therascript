@@ -22,6 +22,15 @@ export const DEFAULT_STOP_TOKENS = [
 
 export interface StreamLlmChatOptions {
   model?: string;
+  /**
+   * Desired context window for the model. NOTE: `streamLlmChatDetailed`
+   * never reads this field — LM Studio only applies `context_length` at
+   * model load time, so the effective context size is enforced when the
+   * model is loaded via `ensureModelLoaded` / `loadLlmModel` (API) or
+   * `loadLlmModelForWorker` (analysis worker), not per chat-completion
+   * request. Retained on the options type for backward compatibility;
+   * prefer passing the context size to the load call and leave this unset.
+   */
   contextSize?: number;
   abortSignal?: AbortSignal;
   /**
@@ -132,6 +141,26 @@ function mapSenderToRole(
   return sender;
 }
 
+const THINK_OPEN_TAG = '<think>';
+const THINK_CLOSE_TAG = '</think>';
+
+/**
+ * Length of the longest trailing substring of `text` that is a proper prefix
+ * of `tag` (compared case-insensitively). Used to hold a possibly split
+ * `<think>` / `</think>` tag across SSE delta boundaries. Returns 0 when the
+ * buffer ends with no partial tag.
+ */
+function trailingPartialTagLength(text: string, tag: string): number {
+  const maxLen = Math.min(text.length, tag.length - 1);
+  const lowerText = text.toLowerCase();
+  for (let len = maxLen; len >= 1; len--) {
+    if (lowerText.endsWith(tag.slice(0, len))) {
+      return len;
+    }
+  }
+  return 0;
+}
+
 export async function* streamLlmChat(
   messages: BackendChatMessage[],
   options?: StreamLlmChatOptions
@@ -238,6 +267,16 @@ export async function* streamLlmChatDetailed(
     if (options?.repeatPenalty !== undefined) {
       chatTemplateKwargs.repeat_penalty = options.repeatPenalty;
     }
+    // When thinking is explicitly disabled (`thinkingBudget === 0`,
+    // "Disabled" in the UI), default `enable_thinking` to false so the
+    // template does not emit a `<think>` block. An explicit caller value
+    // always wins — this only fills in the unset case.
+    if (
+      options?.thinkingBudget === 0 &&
+      chatTemplateKwargs.enable_thinking === undefined
+    ) {
+      chatTemplateKwargs.enable_thinking = false;
+    }
     if (Object.keys(chatTemplateKwargs).length > 0) {
       bodyPayload.chat_template_kwargs = chatTemplateKwargs;
     }
@@ -300,6 +339,10 @@ export async function* streamLlmChatDetailed(
 
     let inThinkResponse = false;
     let thinkStartTime: number | null = null;
+    // Holds a trailing partial `<think>` / `</think>` tag across
+    // `delta.content` chunks so tags split over SSE deltas are still
+    // recognised. Text before the held suffix is emitted immediately.
+    let pendingBuffer = '';
 
     while (true) {
       const { done, value } = await reader.read();
@@ -347,33 +390,46 @@ export async function* streamLlmChatDetailed(
           }
 
           if (delta && typeof delta.content === 'string') {
-            let content = delta.content;
-
-            // Simple heuristic to split `<think>` contents into thinking vs content
-            if (content.includes('<think>')) {
-              inThinkResponse = true;
-              content = content.replace('<think>', '');
-            }
-            if (content.includes('</think>')) {
-              inThinkResponse = false;
-              const parts = content.split('</think>');
-              if (parts[0]) {
-                // Estimate thinking tokens from the closing think block
-                thinkingTokens += Math.max(1, Math.floor(parts[0].length / 4));
-                yield { thinking: parts[0] };
+            // Stateful streaming tag parser: `<think>` / `</think>` may be
+            // split across SSE deltas, so accumulate into `pendingBuffer`,
+            // flip modes on every complete tag (case-insensitive), and hold
+            // only a trailing partial-tag prefix for the next chunk.
+            pendingBuffer += delta.content;
+            while (true) {
+              const tag = inThinkResponse ? THINK_CLOSE_TAG : THINK_OPEN_TAG;
+              const idx = pendingBuffer.toLowerCase().indexOf(tag);
+              if (idx === -1) break;
+              const before = pendingBuffer.slice(0, idx);
+              if (before) {
+                if (inThinkResponse) {
+                  thinkingTokens += Math.max(1, Math.floor(before.length / 4));
+                  yield { thinking: before };
+                } else {
+                  yield { content: before };
+                }
               }
-              if (parts[1]) {
-                yield { content: parts[1] };
-              }
-              continue;
+              pendingBuffer = pendingBuffer.slice(idx + tag.length);
+              inThinkResponse = !inThinkResponse;
             }
-
-            if (inThinkResponse) {
-              // Estimate thinking tokens for content within think block
-              thinkingTokens += Math.max(1, Math.floor(content.length / 4));
-              yield { thinking: content };
-            } else {
-              yield { content: content };
+            // Emit everything except a trailing partial-tag prefix, which is
+            // held until the next chunk proves or disproves the tag.
+            const activeTag = inThinkResponse
+              ? THINK_CLOSE_TAG
+              : THINK_OPEN_TAG;
+            const holdLen = trailingPartialTagLength(pendingBuffer, activeTag);
+            const emitText = pendingBuffer.slice(
+              0,
+              pendingBuffer.length - holdLen
+            );
+            pendingBuffer = pendingBuffer.slice(pendingBuffer.length - holdLen);
+            if (emitText) {
+              if (inThinkResponse) {
+                // Estimate thinking tokens for content within think block
+                thinkingTokens += Math.max(1, Math.floor(emitText.length / 4));
+                yield { thinking: emitText };
+              } else {
+                yield { content: emitText };
+              }
             }
           }
 
@@ -405,6 +461,19 @@ export async function* streamLlmChatDetailed(
       // (where loopback is already microseconds) and turns remote streaming
       // into the same token-by-token cadence the user sees locally.
       await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+
+    // Flush any buffered tail (a partial tag that never completed, or
+    // text withheld at EOF) to the currently active channel so no streamed
+    // text is silently dropped.
+    if (pendingBuffer) {
+      if (inThinkResponse) {
+        thinkingTokens += Math.max(1, Math.floor(pendingBuffer.length / 4));
+        yield { thinking: pendingBuffer };
+      } else {
+        yield { content: pendingBuffer };
+      }
+      pendingBuffer = '';
     }
 
     // Return the usage result to the iterator's result value

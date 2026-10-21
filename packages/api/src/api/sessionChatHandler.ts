@@ -7,6 +7,7 @@ import {
   templateRepository,
 } from '@therascript/data';
 import {
+  ensureModelLoaded,
   streamChatResponse,
   unloadActiveModel,
 } from '../services/llamaCppService.js';
@@ -31,11 +32,16 @@ import {
   deleteByQuery,
 } from '@therascript/elasticsearch-client';
 import config from '@therascript/config';
-import { cleanLlmOutput, prepareLlmChatMessages } from '@therascript/services';
+import {
+  cleanLlmOutput,
+  prepareLlmChatMessages,
+  extractVisibleAnswer,
+} from '@therascript/services';
 import {
   computeContextUsageForChat,
   recommendContextSize,
 } from '../services/contextUsageService.js';
+import { stripSpeakerLabelsFromHistory } from '../services/speakerLabelUtils.js';
 import {
   getConfiguredContextSize,
   getActiveModel,
@@ -165,6 +171,14 @@ export const addSessionChatMessage = async ({
         '\n\nSpeaker labels are disabled for this transcript. Do not invent or use speaker names (like "SPEAKER_01" or "John"). Refer to speakers descriptively (e.g., "the therapist" or "the patient") without using explicit names or labels.';
     }
 
+    // KV-cache-friendly prompt layout (Task 14): the transcript is injected
+    // into the system prefix so the token prefix [system + transcript] is
+    // stable across turns and LM Studio can reuse its KV prefix cache.
+    // (Previously the transcript rode along in the latest user message,
+    // which invalidated the cache on every follow-up turn.)
+    const transcriptBlock = transcriptString || 'No transcript available.';
+    systemPromptText += `\n\n---\nCONTEXT TRANSCRIPT:\n"""\n${transcriptBlock}\n"""\n---`;
+
     const systemPromptMsg: BackendChatMessage = {
       id: 0,
       chatId: chatData.id,
@@ -186,30 +200,25 @@ export const addSessionChatMessage = async ({
 
     const previousHistory = trimmedHistory.map((msg) => {
       if (!showSpeakers && msg.sender === 'ai') {
-        const cleanedText = msg.text.replace(
-          /((?:SPEAKER_\d+)|(?:[A-Z][A-Za-z]+)):\s/g,
-          ''
-        );
+        // Defensive strip only: line-start SPEAKER_\d+ labels from stale
+        // history. Shared helper — see speakerLabelUtils.ts. Prose labels
+        // like "Summary: " must survive (Task 10).
+        const cleanedText = stripSpeakerLabelsFromHistory(msg.text);
         return { ...msg, text: cleanedText };
       }
       return msg;
     });
 
+    // The latest user message stays clean: the transcript now lives in the
+    // system prefix above. Any adjacent user turns are merged by
+    // prepareLlmChatMessages, so no "user -> user" sequence can reach the
+    // model (previously avoided by combining transcript + question).
     const latestUserMessage = currentMessages[currentMessages.length - 1];
-
-    // Combine transcript context with user prompt into a single user message
-    // Prevents "user -> user" sequence which breaks Llama 3 ChatML format causing premature EOS
-    const combinedUserMessageText = `CONTEXT TRANSCRIPT:\n"""\n${transcriptString || 'No transcript available.'}\n"""\n\nUSER QUESTION:\n${latestUserMessage.text}`;
-
-    const combinedUserMessage: BackendChatMessage = {
-      ...latestUserMessage,
-      text: combinedUserMessageText,
-    };
 
     const streamMessages = prepareLlmChatMessages([
       systemPromptMsg,
       ...previousHistory,
-      combinedUserMessage,
+      latestUserMessage,
     ]);
 
     const configured = getConfiguredContextSize();
@@ -262,6 +271,20 @@ export const addSessionChatMessage = async ({
       },
       { once: true }
     );
+
+    // Ensure the model is loaded with the effective context size before
+    // streaming. Without this, a prior unload (STOP button, transcription
+    // VRAM handoff) leaves LM Studio to auto-load with its default ~4K
+    // context instead of the configured size. Idempotent when already warm.
+    // (Temperature is applied per-request by streamChatResponse.)
+    const activeModelName = getActiveModel();
+    if (activeModelName && activeModelName !== 'default') {
+      await ensureModelLoaded(
+        activeModelName,
+        effectiveContextSize,
+        getActiveBaseUrl()
+      );
+    }
 
     const llmStream = await streamChatResponse(
       streamMessages,
@@ -446,6 +469,31 @@ export const addSessionChatMessage = async ({
           if (contextPressureRatio > 0.8 && tokenDifference > 500) {
             isTruncated = true;
           }
+        }
+
+        // Thinking-only response: the model exhausted its token budget
+        // inside <think> and produced zero visible answer tokens. Append a
+        // fallback notice after </think> — streamed as a chunk before `done`
+        // (the UI stops reading at `done`) so the user sees why the body is
+        // empty and the turn stays valid in chat history. Skipped when the
+        // user aborted the stream. The notice is appended to fullAiText only
+        // after both writes succeed, so an abort racing this block cannot
+        // leave a notice the user never saw.
+        const visibleAiText = extractVisibleAnswer(fullAiText).trim();
+        if (
+          fullAiText.trim() &&
+          !visibleAiText &&
+          !llmAbortController.signal.aborted &&
+          !sseStreamClosed
+        ) {
+          const fallbackNotice =
+            '\n\n*(The model exhausted its token budget while reasoning and did not produce a final answer. Try increasing the Thinking Budget or Context Size, or simplifying your prompt.)*';
+          if (!hasSentRespondingStatus) {
+            hasSentRespondingStatus = true;
+            await writeSseEvent({ status: 'responding' });
+          }
+          await writeSseEvent({ chunk: fallbackNotice });
+          fullAiText += fallbackNotice;
         }
 
         console.log(

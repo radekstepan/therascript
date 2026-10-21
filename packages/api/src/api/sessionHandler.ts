@@ -9,8 +9,6 @@ import {
   deleteUploadedAudioFile,
   saveUploadedAudio,
 } from '@therascript/services';
-import { getStructuredTranscriptionResult } from '../services/transcriptionService.js';
-
 import type {
   BackendSession,
   StructuredTranscript,
@@ -23,7 +21,6 @@ import {
   BadRequestError,
   InternalServerError,
   ApiError,
-  ConflictError,
 } from '../errors.js';
 import { calculateTokenCount } from '@therascript/services';
 import {
@@ -225,6 +222,7 @@ export const updateSessionMetadata = async ({
             session_id: sessionId,
             paragraph_index: p.id,
             text: p.text,
+            speaker: p.speaker ?? null,
             timestamp_ms: p.timestamp,
             client_name: updatedSession.clientName,
             session_name: updatedSession.sessionName,
@@ -384,8 +382,12 @@ export const updateTranscriptParagraph = async ({
 
     const updatedTranscriptFromDb: StructuredTranscript =
       transcriptRepository.findParagraphsBySessionId(sessionId);
+    // Include the `Speaker: ` prefix so the cached count matches the default
+    // prompt injection format (`getTranscriptTextForSession` with speakers shown).
     const fullTextForTokens = updatedTranscriptFromDb
-      .map((p: TranscriptParagraphData) => p.text)
+      .map((p: TranscriptParagraphData) =>
+        p.speaker ? `${p.speaker}: ${p.text}` : p.text
+      )
       .join('\n\n'); // Added type for p
     const tokenCount = calculateTokenCount(fullTextForTokens);
     sessionRepository.updateMetadata(sessionId, {
@@ -404,6 +406,7 @@ export const updateTranscriptParagraph = async ({
           session_id: sessionId,
           paragraph_index: paragraphIndex,
           text: trimmedNewText,
+          speaker: esParagraphData.speaker ?? null,
           timestamp_ms: esParagraphData.timestamp,
           client_name: sessionData.clientName,
           session_name: sessionData.sessionName,
@@ -475,8 +478,12 @@ export const deleteTranscriptParagraph = async ({
     // After deleting, we need to update token count and ES
     const updatedTranscript =
       transcriptRepository.findParagraphsBySessionId(sessionId);
+    // Include the `Speaker: ` prefix so the cached count matches the default
+    // prompt injection format (`getTranscriptTextForSession` with speakers shown).
     const fullTextForTokens = updatedTranscript
-      .map((p: TranscriptParagraphData) => p.text)
+      .map((p: TranscriptParagraphData) =>
+        p.speaker ? `${p.speaker}: ${p.text}` : p.text
+      )
       .join('\n\n');
     const tokenCount = calculateTokenCount(fullTextForTokens);
 
@@ -505,159 +512,6 @@ export const deleteTranscriptParagraph = async ({
     if (error instanceof ApiError) throw error;
     throw new InternalServerError(
       'Failed to delete transcript paragraph',
-      error instanceof Error ? error : undefined
-    );
-  }
-};
-
-export const finalizeSessionHandler = async ({
-  params,
-  set,
-  sessionData: initialSessionDataFromDerive,
-}: SessionHandlerContext) => {
-  const sessionId = initialSessionDataFromDerive.id;
-
-  console.log(`[API Finalize] Request received for session ${sessionId}`);
-  const currentSessionData = sessionRepository.findById(sessionId);
-  if (!currentSessionData)
-    throw new NotFoundError(`Session ${sessionId} not found for finalization.`);
-
-  if (currentSessionData.status === 'completed') {
-    console.log(
-      `[API Finalize] Session ${sessionId} is already completed. Returning current data.`
-    );
-    const chats = chatRepository.findChatsBySessionId(sessionId);
-    currentSessionData.chats = chats.map(
-      ({ tags, ...rest }) => rest
-    ) as BackendSession['chats'];
-    set.status = 200;
-    return currentSessionData;
-  }
-
-  if (currentSessionData.status !== 'transcribing') {
-    throw new ConflictError(
-      `Session ${sessionId} status is '${currentSessionData.status}', not 'transcribing'.`
-    );
-  }
-  if (!currentSessionData.whisperJobId) {
-    throw new InternalServerError(
-      `Session ${sessionId} is transcribing but has no Whisper Job ID.`
-    );
-  }
-  const jobId = currentSessionData.whisperJobId;
-
-  try {
-    const structuredTranscript = await getStructuredTranscriptionResult(jobId);
-    const fullText = structuredTranscript
-      .map((p: TranscriptParagraphData) => p.text)
-      .join('\n\n'); // Type for p
-    const tokenCount = calculateTokenCount(fullText);
-
-    // Estimate duration if not already set (fallback for manual finalization)
-    const maxTimestampMs =
-      structuredTranscript.length > 0
-        ? Math.max(
-            ...structuredTranscript.map(
-              (p: TranscriptParagraphData) => p.timestamp || 0
-            )
-          )
-        : 0;
-    const estimatedDuration =
-      maxTimestampMs > 0 ? Math.round(maxTimestampMs / 1000) : null;
-
-    transcriptRepository.insertParagraphs(sessionId, structuredTranscript);
-    console.log(
-      `[API Finalize] Saved ${structuredTranscript.length} transcript paragraphs to DB for session ${sessionId}.`
-    );
-
-    const esTranscriptDocs = structuredTranscript.map(
-      (p: TranscriptParagraphData) => ({
-        // Type for p
-        id: `${sessionId}_${p.id}`,
-        document: {
-          session_id: sessionId,
-          paragraph_index: p.id,
-          text: p.text,
-          timestamp_ms: p.timestamp,
-          client_name: currentSessionData.clientName,
-          session_name: currentSessionData.sessionName,
-          session_date: currentSessionData.date,
-          session_type: currentSessionData.sessionType,
-          therapy_type: currentSessionData.therapy,
-        },
-      })
-    );
-    if (esTranscriptDocs.length > 0) {
-      await bulkIndexDocuments(esClient, TRANSCRIPTS_INDEX, esTranscriptDocs);
-    }
-    console.log(
-      `[API Finalize ES] Indexed ${esTranscriptDocs.length} paragraphs for session ${sessionId}.`
-    );
-
-    const finalizedSessionInDb = sessionRepository.updateMetadata(sessionId, {
-      status: 'completed',
-      transcriptTokenCount: tokenCount,
-      duration: estimatedDuration,
-    });
-    if (!finalizedSessionInDb)
-      throw new InternalServerError(
-        `Failed to update session ${sessionId} status to completed.`
-      );
-
-    const finalSessionState = sessionRepository.findById(sessionId);
-    if (!finalSessionState)
-      throw new InternalServerError(
-        `Failed to retrieve session ${sessionId} after finalizing.`
-      );
-
-    const chatsMetadataRaw = chatRepository.findChatsBySessionId(sessionId);
-    const chatsMetadata = chatsMetadataRaw.map(
-      ({ tags, ...restOfChat }) => restOfChat
-    ); // Corrected destructuring
-
-    if (!chatsMetadata || chatsMetadata.length === 0) {
-      const newFullChat = chatRepository.createChat(sessionId);
-      const aiInitialMessageText = `Session "${finalSessionState.sessionName}" uploaded on ${finalSessionState.date.split('T')[0]} has been transcribed and is ready for analysis.`;
-      const aiInitialMessage = messageRepository.addMessage(
-        newFullChat.id,
-        'ai',
-        aiInitialMessageText
-      );
-      await indexDocument(
-        esClient,
-        MESSAGES_INDEX,
-        String(aiInitialMessage.id),
-        {
-          message_id: String(aiInitialMessage.id),
-          chat_id: newFullChat.id,
-          session_id: sessionId,
-          sender: 'ai',
-          text: aiInitialMessageText,
-          timestamp: aiInitialMessage.timestamp,
-          client_name: finalSessionState.clientName,
-          session_name: finalSessionState.sessionName,
-        }
-      );
-      console.log(
-        `[API Finalize] Initial chat created (ID: ${newFullChat.id}) and message indexed for session ${sessionId}.`
-      );
-      const updatedChatsMetadataRaw =
-        chatRepository.findChatsBySessionId(sessionId);
-      finalSessionState.chats = updatedChatsMetadataRaw.map(
-        ({ tags, ...restOfChat }) => restOfChat
-      ); // Corrected destructuring
-    } else {
-      finalSessionState.chats = chatsMetadata;
-    }
-    console.log(`[API Finalize] Session ${sessionId} finalized successfully.`);
-    set.status = 200;
-    return finalSessionState;
-  } catch (error) {
-    console.error(`[API Error] Finalize Session ${sessionId}:`, error);
-
-    if (error instanceof ApiError) throw error;
-    throw new InternalServerError(
-      `Failed to finalize session ${sessionId}`,
       error instanceof Error ? error : undefined
     );
   }

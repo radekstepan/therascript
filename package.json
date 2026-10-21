@@ -49,18 +49,21 @@
     "e2e:ui": "yarn workspace @therascript/ui e2e:ui",
     "e2e:headed": "yarn workspace @therascript/ui e2e:headed",
     "e2e:server": "yarn workspace @therascript/ui e2e:server",
-    "e2e:install": "yarn workspace @therascript/ui e2e:install"
+    "e2e:install": "yarn workspace @therascript/ui e2e:install",
+    "changeset": "changeset",
+    "version-packages": "changeset version"
   },
   "keywords": [],
   "author": "",
   "license": "MIT",
   "devDependencies": {
+    "@changesets/cli": "2.27.1",
     "concurrently": "^8.2.2",
     "husky": "^9.1.7",
-    "turbo": "^2.5.0",
     "lint-staged": "^15.5.1",
     "prettier": "^3.5.3",
     "ts-node": "^10.9.2",
+    "turbo": "^2.5.0",
     "typescript": "^5.5.4",
     "vitest": "0.34.6"
   },

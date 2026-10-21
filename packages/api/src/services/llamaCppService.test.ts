@@ -151,6 +151,11 @@ const {
 
 const { streamLlmChatDetailed } = await import('@therascript/services');
 
+// Real load-attempt tracker (not mocked): defaults to idle so existing
+// tests exercise the normal sync path.
+const { markLoadStarted, __resetForTests: resetLoadAttemptForTests } =
+  await import('./loadAttemptTracker.js');
+
 describe('llamaCppService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -817,6 +822,96 @@ describe('llamaCppService', () => {
       expect(result).not.toBeNull();
       expect(result!.size_vram).toBe(5_000_000_000);
       expect(clearModelAndContext).not.toHaveBeenCalled();
+    });
+
+    it('skips settings sync while a model load is in flight', async () => {
+      // Race: `POST /api/llm/set-model` persisted Model B (the load target)
+      // and fired `loadLlmModel` asynchronously. LM Studio still has Model A
+      // loaded. The UI's `/api/llm/status` poll must NOT clobber the
+      // just-saved Model B (+ context) with Model A's transient state.
+      resetLoadAttemptForTests();
+      markLoadStarted('org-b/model-b');
+      vi.mocked(getActiveModel).mockReturnValue('org-b/model-b');
+      try {
+        // First call for isLlmApiResponsive, second for actual data
+        mockAxiosGet
+          .mockResolvedValueOnce({ status: 200, data: { models: [] } })
+          .mockResolvedValueOnce({
+            data: {
+              models: [
+                {
+                  type: 'llm',
+                  publisher: 'org-a',
+                  key: 'org-a/model-a',
+                  display_name: 'Model A',
+                  architecture: 'llama',
+                  quantization: { name: 'Q4_K_M', bits_per_weight: 4.5 },
+                  size_bytes: 4_500_000_000,
+                  params_string: '8B',
+                  loaded_instances: [
+                    {
+                      id: 'instance-1',
+                      config: { context_length: 4096 },
+                    },
+                  ],
+                  max_context_length: 8192,
+                  format: 'gguf',
+                },
+              ],
+            },
+          });
+
+        const result = await checkModelStatus('org-b/model-b');
+        expect(result).toBeNull(); // Model B is not loaded yet
+        expect(setActiveModelName).not.toHaveBeenCalled();
+        expect(setConfiguredContextSize).not.toHaveBeenCalled();
+        expect(clearModelAndContext).not.toHaveBeenCalled();
+      } finally {
+        resetLoadAttemptForTests();
+        vi.mocked(getActiveModel).mockReturnValue('default');
+      }
+    });
+
+    it('still syncs settings from LM Studio when no load is in flight', async () => {
+      // Guard for the guard above: with an idle tracker, the legacy sync
+      // path must keep working so the UI reflects externally loaded models.
+      resetLoadAttemptForTests();
+      vi.mocked(getActiveModel).mockReturnValue('stale-model');
+      try {
+        mockAxiosGet
+          .mockResolvedValueOnce({ status: 200, data: { models: [] } })
+          .mockResolvedValueOnce({
+            data: {
+              models: [
+                {
+                  type: 'llm',
+                  publisher: 'meta',
+                  key: 'meta/llama-3-8b',
+                  display_name: 'Llama 3 8B',
+                  architecture: 'llama',
+                  quantization: { name: 'Q4_K_M', bits_per_weight: 4.5 },
+                  size_bytes: 4_500_000_000,
+                  params_string: '8B',
+                  loaded_instances: [
+                    {
+                      id: 'instance-1',
+                      config: { context_length: 4096 },
+                    },
+                  ],
+                  max_context_length: 8192,
+                  format: 'gguf',
+                },
+              ],
+            },
+          });
+
+        const result = await checkModelStatus('meta/llama-3-8b');
+        expect(result).not.toBeNull();
+        expect(setActiveModelName).toHaveBeenCalledWith('meta/llama-3-8b');
+        expect(setConfiguredContextSize).toHaveBeenCalledWith(4096);
+      } finally {
+        vi.mocked(getActiveModel).mockReturnValue('default');
+      }
     });
   });
 

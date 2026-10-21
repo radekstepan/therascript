@@ -119,6 +119,45 @@ describe('contextUsageService.computeContextUsageForChat', () => {
     expect(withThinking.totals.promptTokens).toBe(clean.totals.promptTokens);
   });
 
+  it('preserves prose labels in history when showSpeakers === 0 (Task 10)', async () => {
+    const sessionData = { showSpeakers: 0, transcriptTokenCount: 10 } as any;
+    const res = await computeContextUsageForChat({
+      isStandalone: false,
+      sessionData,
+      messages: [
+        { sender: 'user', text: 'Q1', timestamp: 0 },
+        {
+          sender: 'ai',
+          text: 'Summary: the patient reports anxiety. Note: follow up.',
+          timestamp: 1,
+        },
+      ] as any,
+    });
+    // Mocked token counter returns string length; prose labels must survive
+    // the defensive speaker strip, so the full text is counted.
+    const expectedChatHistory =
+      'user: Q1\nai: Summary: the patient reports anxiety. Note: follow up.';
+    expect(res.breakdown.chatHistoryTokens).toBe(expectedChatHistory.length);
+  });
+
+  it('strips only line-start SPEAKER_\\d+ labels when showSpeakers === 0 (Task 10)', async () => {
+    const sessionData = { showSpeakers: 0, transcriptTokenCount: 10 } as any;
+    const res = await computeContextUsageForChat({
+      isStandalone: false,
+      sessionData,
+      messages: [
+        { sender: 'user', text: 'Q1', timestamp: 0 },
+        {
+          sender: 'ai',
+          text: 'SPEAKER_00: stale quoted label',
+          timestamp: 1,
+        },
+      ] as any,
+    });
+    const expectedChatHistory = 'user: Q1\nai: stale quoted label';
+    expect(res.breakdown.chatHistoryTokens).toBe(expectedChatHistory.length);
+  });
+
   it('drops reasoning-only assistant turns and leading welcome messages from the estimate', async () => {
     const res = await computeContextUsageForChat({
       isStandalone: true,

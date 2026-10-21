@@ -78,8 +78,10 @@ vi.stubGlobal('fetch', mockFetch);
 const {
   unloadModelAtUrlForWorker,
   loadLlmModelForWorker,
+  __resetLastWorkerBaseUrlForTests,
   assembleReducePrompt,
   computeMapCompletionCap,
+  resolveEffectiveThinkingBudget,
 } = await import('./analysisProcessor.js');
 const { appSettingsRepository } = await import('@therascript/data');
 
@@ -106,6 +108,11 @@ const makeJsonResponse = (body: unknown, ok = true, status = 200) =>
 describe('analysis worker — loadLlmModelForWorker URL switching', () => {
   beforeEach(() => {
     mockFetch.mockReset();
+    // The worker tracks its last active base URL in module state that
+    // persists across calls in the long-lived process (and across tests in
+    // this file, which shares one module import). Reset it so every
+    // URL-switch assertion starts from the config default.
+    __resetLastWorkerBaseUrlForTests();
   });
 
   afterEach(() => {
@@ -278,9 +285,32 @@ describe('analysis worker — loadLlmModelForWorker URL switching', () => {
       const REMOTE_A = 'http://10.0.0.1:1234';
       const REMOTE_B = 'http://10.0.0.2:1234';
 
-      // Pre-switch GET on previous (= LOCAL_URL, the config default) — empty
+      // First job targets REMOTE_A: pre-switch probes the config default
+      // (empty), then the main flow loads on REMOTE_A. The worker now
+      // tracks REMOTE_A as its last active base URL.
       mockFetch.mockResolvedValueOnce(makeJsonResponse({ models: [] }));
-      // No pre-switch unload POST since previous is empty.
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({ models: [] }));
+      mockFetch.mockResolvedValueOnce(
+        makeJsonResponse({ instance_id: 'a-inst-new' })
+      );
+      await loadLlmModelForWorker('meta/old', 4096, REMOTE_A);
+      mockFetch.mockClear();
+
+      // Second job targets REMOTE_B: the pre-switch must evict the stale
+      // model on REMOTE_A (the tracked previous URL), not the default.
+      // Pre-switch GET on REMOTE_A — returns 1 stale instance
+      mockFetch.mockResolvedValueOnce(
+        makeJsonResponse({
+          models: [
+            {
+              type: 'llm',
+              loaded_instances: [{ id: 'a-inst-1' }],
+            },
+          ],
+        })
+      );
+      // Pre-switch POST unload on REMOTE_A
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({}));
       // Main GET on REMOTE_B — returns 1 instance from a prior job
       mockFetch.mockResolvedValueOnce(
         makeJsonResponse({
@@ -302,13 +332,160 @@ describe('analysis worker — loadLlmModelForWorker URL switching', () => {
       await loadLlmModelForWorker('meta/new', 4096, REMOTE_B);
 
       const calls = recordCalls();
-      // Note: REMOTE_A is not the config default, so the pre-switch only
-      // touches LOCAL_URL. Then the main flow handles REMOTE_B.
-      expect(calls[0].url).toBe(`${LOCAL_URL}/api/v1/models`);
-      expect(calls[1].url).toBe(`${REMOTE_B}/api/v1/models`);
-      expect(calls[2].url).toBe(`${REMOTE_B}/api/v1/models/unload`);
-      expect(calls[3].url).toBe(`${REMOTE_B}/api/v1/models/load`);
+      expect(calls).toHaveLength(5);
+      // Pre-switch: GET + unload POST on REMOTE_A
+      expect(calls[0].url).toBe(`${REMOTE_A}/api/v1/models`);
+      expect(calls[1].url).toBe(`${REMOTE_A}/api/v1/models/unload`);
+      expect(calls[1].init?.method).toBe('POST');
+      expect(JSON.parse(calls[1].init?.body as string)).toEqual({
+        instance_id: 'a-inst-1',
+      });
+      // Main: GET + unload + load on REMOTE_B
+      expect(calls[2].url).toBe(`${REMOTE_B}/api/v1/models`);
+      expect(calls[3].url).toBe(`${REMOTE_B}/api/v1/models/unload`);
+      expect(JSON.parse(calls[3].init?.body as string)).toEqual({
+        instance_id: 'b-inst-1',
+      });
+      expect(calls[4].url).toBe(`${REMOTE_B}/api/v1/models/load`);
     });
+
+    it('remote back to local switch unloads the remote URL', async () => {
+      // First job targets the remote URL: pre-switch probes the config
+      // default (empty), then the main flow loads remotely.
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({ models: [] }));
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({ models: [] }));
+      mockFetch.mockResolvedValueOnce(
+        makeJsonResponse({ instance_id: 'remote-inst-1' })
+      );
+      await loadLlmModelForWorker('meta/remote', 4096, REMOTE_URL);
+      mockFetch.mockClear();
+
+      // Second job targets local: the pre-switch must evict the stale
+      // model on the tracked remote URL.
+      mockFetch.mockResolvedValueOnce(
+        makeJsonResponse({
+          models: [
+            {
+              type: 'llm',
+              loaded_instances: [{ id: 'remote-stale-1' }],
+            },
+          ],
+        })
+      );
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({}));
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({ models: [] }));
+      mockFetch.mockResolvedValueOnce(
+        makeJsonResponse({ instance_id: 'local-inst-new' })
+      );
+
+      await loadLlmModelForWorker('meta/local', 4096, LOCAL_URL);
+
+      const calls = recordCalls();
+      expect(calls).toHaveLength(4);
+      expect(calls[0].url).toBe(`${REMOTE_URL}/api/v1/models`);
+      expect(calls[1].url).toBe(`${REMOTE_URL}/api/v1/models/unload`);
+      expect(JSON.parse(calls[1].init?.body as string)).toEqual({
+        instance_id: 'remote-stale-1',
+      });
+      expect(calls[2].url).toBe(`${LOCAL_URL}/api/v1/models`);
+      expect(calls[3].url).toBe(`${LOCAL_URL}/api/v1/models/load`);
+    });
+
+    it('repeat call on the same URL does not pre-unload', async () => {
+      // First call establishes REMOTE_URL as the tracked URL.
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({ models: [] }));
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({ models: [] }));
+      mockFetch.mockResolvedValueOnce(
+        makeJsonResponse({ instance_id: 'remote-inst-1' })
+      );
+      await loadLlmModelForWorker('meta/remote', 4096, REMOTE_URL);
+      mockFetch.mockClear();
+
+      // Second call on the same URL: no pre-switch, only the main flow.
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({ models: [] }));
+      mockFetch.mockResolvedValueOnce(
+        makeJsonResponse({ instance_id: 'remote-inst-2' })
+      );
+      await loadLlmModelForWorker('meta/other', 4096, REMOTE_URL);
+
+      const calls = recordCalls();
+      expect(calls).toHaveLength(2);
+      expect(calls[0].url).toBe(`${REMOTE_URL}/api/v1/models`);
+      expect(calls[1].url).toBe(`${REMOTE_URL}/api/v1/models/load`);
+    });
+  });
+
+  describe('loadLlmModelForWorker — numGpuLayers forwarding', () => {
+    const loadPayloadOf = (): Record<string, unknown> => {
+      const loadCall = recordCalls().find((c) =>
+        c.url.endsWith('/api/v1/models/load')
+      );
+      expect(loadCall).toBeDefined();
+      return JSON.parse(loadCall!.init?.body as string);
+    };
+
+    it('sends offload_kv_cache_to_gpu=false when numGpuLayers is 0 (CPU-only)', async () => {
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({ models: [] }));
+      mockFetch.mockResolvedValueOnce(
+        makeJsonResponse({ instance_id: 'inst-1' })
+      );
+
+      await loadLlmModelForWorker('meta/local', 4096, LOCAL_URL, 0);
+
+      expect(loadPayloadOf()).toEqual({
+        model: 'meta/local',
+        context_length: 4096,
+        echo_load_config: true,
+        flash_attention: true,
+        offload_kv_cache_to_gpu: false,
+      });
+    });
+
+    it('sends offload_kv_cache_to_gpu=true when numGpuLayers is positive', async () => {
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({ models: [] }));
+      mockFetch.mockResolvedValueOnce(
+        makeJsonResponse({ instance_id: 'inst-1' })
+      );
+
+      await loadLlmModelForWorker('meta/local', 4096, LOCAL_URL, 99);
+
+      expect(loadPayloadOf()).toEqual({
+        model: 'meta/local',
+        context_length: 4096,
+        echo_load_config: true,
+        flash_attention: true,
+        offload_kv_cache_to_gpu: true,
+      });
+    });
+
+    it.each([
+      ['undefined', undefined],
+      ['null', null],
+    ] as const)(
+      'omits offload_kv_cache_to_gpu when numGpuLayers is %s',
+      async (_label, numGpuLayers) => {
+        mockFetch.mockResolvedValueOnce(makeJsonResponse({ models: [] }));
+        mockFetch.mockResolvedValueOnce(
+          makeJsonResponse({ instance_id: 'inst-1' })
+        );
+
+        await loadLlmModelForWorker(
+          'meta/local',
+          4096,
+          LOCAL_URL,
+          numGpuLayers
+        );
+
+        const payload = loadPayloadOf();
+        expect(payload).toEqual({
+          model: 'meta/local',
+          context_length: 4096,
+          echo_load_config: true,
+          flash_attention: true,
+        });
+        expect('offload_kv_cache_to_gpu' in payload).toBe(false);
+      }
+    );
   });
 
   describe('Authorization header — remote-only credential forwarding', () => {
@@ -969,5 +1146,60 @@ describe('analysis worker — computeMapCompletionCap', () => {
     for (const ctx of cases) {
       expect(Number.isInteger(computeMapCompletionCap(ctx))).toBe(true);
     }
+  });
+});
+
+/**
+ * resolveEffectiveThinkingBudget — clamp the configured thinking budget so
+ * reasoning can never starve the visible completion budget in Map/Reduce.
+ *
+ * Contract:
+ *   - `0` disables thinking (returns 0).
+ *   - `null` / `undefined` / negative (`-1` "Unrestricted") → the phase cap.
+ *   - positive values are capped at `maxThinkingCap`.
+ */
+describe('analysis worker — resolveEffectiveThinkingBudget', () => {
+  // Representative 40% cap: 4096 completion tokens × 0.4 ≈ 1638.
+  const mapMaxThinkingTokens = Math.round(computeMapCompletionCap(8192) * 0.4);
+
+  it('maps -1 ("Unrestricted") to the phase cap', () => {
+    expect(resolveEffectiveThinkingBudget(-1, mapMaxThinkingTokens)).toBe(
+      mapMaxThinkingTokens
+    );
+  });
+
+  it('maps null and undefined (unset) to the phase cap', () => {
+    expect(resolveEffectiveThinkingBudget(null, mapMaxThinkingTokens)).toBe(
+      mapMaxThinkingTokens
+    );
+    expect(
+      resolveEffectiveThinkingBudget(undefined, mapMaxThinkingTokens)
+    ).toBe(mapMaxThinkingTokens);
+  });
+
+  it('maps any negative value to the phase cap', () => {
+    expect(resolveEffectiveThinkingBudget(-100, mapMaxThinkingTokens)).toBe(
+      mapMaxThinkingTokens
+    );
+  });
+
+  it('returns 0 when thinking is disabled', () => {
+    expect(resolveEffectiveThinkingBudget(0, mapMaxThinkingTokens)).toBe(0);
+  });
+
+  it('passes through positive budgets below the cap unchanged', () => {
+    expect(resolveEffectiveThinkingBudget(512, mapMaxThinkingTokens)).toBe(512);
+  });
+
+  it('clamps positive budgets above the cap', () => {
+    expect(resolveEffectiveThinkingBudget(99999, mapMaxThinkingTokens)).toBe(
+      mapMaxThinkingTokens
+    );
+  });
+
+  it('returns the cap exactly when the budget equals the cap', () => {
+    expect(
+      resolveEffectiveThinkingBudget(mapMaxThinkingTokens, mapMaxThinkingTokens)
+    ).toBe(mapMaxThinkingTokens);
   });
 });

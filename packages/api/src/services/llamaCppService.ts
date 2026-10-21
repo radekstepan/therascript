@@ -49,6 +49,7 @@ import {
   markUnloaded as trackerMarkUnloaded,
 } from './loadedModelsTracker.js';
 import {
+  getLastLoadAttempt,
   markLoadStarted,
   markLoadSucceeded,
   markLoadFailed,
@@ -1164,7 +1165,21 @@ export const checkModelStatus = async (
     // SYNC: Update the active model name to match reality if the server
     // thinks something else is loaded. This fix ensures the UI shows
     // the correct model state.
-    if (loadedModel) {
+    //
+    // SKIP while a model load is in flight: `POST /api/llm/set-model`
+    // persists the NEW target (Model B) and then loads it asynchronously.
+    // Until the load completes, LM Studio still reports the OLD model
+    // (Model A) as loaded — syncing that transient state back into
+    // `app_settings` would clobber the just-saved target every time the
+    // UI's `/api/llm/status` poll runs. The persisted Model B (+ context)
+    // is already the correct configuration, so leave it untouched.
+    const loadState = getLastLoadAttempt();
+    if (loadedModel && loadState.status === 'loading') {
+      console.log(
+        `[LlmService] Skipping settings sync during in-flight load of ${loadState.modelName ?? '(unknown target)'} (transient loaded model: ${loadedModel.key})`
+      );
+    }
+    if (loadedModel && loadState.status !== 'loading') {
       if (getActiveModel() !== loadedModel.key) {
         console.log(
           `[LlmService] Syncing active model: ${getActiveModel()} -> ${loadedModel.key}`

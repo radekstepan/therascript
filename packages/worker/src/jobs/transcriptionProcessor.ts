@@ -117,9 +117,6 @@ async function pollWhisperStatus(
       `${config.whisper.apiUrl}/status/${whisperJobId}`,
       { timeout: 10000 }
     );
-    // Treat a successful status poll as activity (log heartbeat)
-    lastActivityTime = Date.now();
-
     // Track activity: if progress, status, or message changed, reset timer
     const currentMessage = status.message ?? null;
     const hasActivity =
@@ -134,6 +131,7 @@ async function pollWhisperStatus(
       lastProgress = status.progress ?? null;
       lastStatus = status.status;
       lastMessage = currentMessage;
+      lastActivityTime = Date.now();
     } else {
       const idleSeconds = Math.round((Date.now() - lastActivityTime) / 1000);
       if (idleSeconds > 60 && idleSeconds % 30 === 0) {
@@ -315,8 +313,12 @@ export default async function (job: Job<TranscriptionJobData, any, string>) {
     const structuredTranscript = groupSegmentsIntoParagraphs(
       finalStatus.result.segments
     );
+    // Include the `Speaker: ` prefix so the cached count matches the default
+    // prompt injection format (`getTranscriptTextForSession` with speakers shown).
     const fullText = structuredTranscript
-      .map((p: TranscriptParagraphData) => p.text)
+      .map((p: TranscriptParagraphData) =>
+        p.speaker ? `${p.speaker}: ${p.text}` : p.text
+      )
       .join('\n\n');
     const tokenCount = calculateTokenCount(fullText);
 

@@ -12,6 +12,7 @@ import { listModels } from './llamaCppService.js';
 import { templateRepository } from '@therascript/data';
 import { SYSTEM_PROMPT_TEMPLATES } from '@therascript/db/dist/sqliteService.js';
 import type { BackendChatMessage, BackendSession } from '@therascript/domain';
+import { stripSpeakerLabelsFromHistory } from './speakerLabelUtils.js';
 
 export interface ContextUsageBreakdown {
   systemTokens: number | null;
@@ -132,12 +133,12 @@ export async function computeContextUsageForChat(options: {
     .filter((m) => m.sender !== 'system')
     .map((msg) => {
       if (stripSpeakers && msg.sender === 'ai') {
+        // Same defensive strip as sessionChatHandler.ts (shared helper) so
+        // estimation cannot drift from the constructed prompt. Prose labels
+        // like "Summary: " must survive (Task 10).
         return {
           ...msg,
-          text: msg.text.replace(
-            /((?:SPEAKER_\d+)|(?:[A-Z][A-Za-z]+)):\s/g,
-            ''
-          ),
+          text: stripSpeakerLabelsFromHistory(msg.text),
         };
       }
       return msg;
@@ -155,7 +156,10 @@ export async function computeContextUsageForChat(options: {
   const { name, configured, defaultMax } = await resolveModelContextSizes();
   const effective = configured ?? defaultMax ?? null;
 
-  // Totals and percentages
+  // Totals and percentages. The total is an order-independent sum, so it
+  // stays consistent with the inference prompt where the transcript is
+  // injected into the system prefix (Task 14): system + transcript +
+  // history, with only the small framing-wrapper tokens uncounted.
   const promptTokens = sumParts([
     systemTokens,
     // For standalone chats, transcriptTokens is null and should be ignored

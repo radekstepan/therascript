@@ -154,20 +154,17 @@ function seedSystemTemplates(dbInstance: DB) {
   const insertStmt = dbInstance.prepare(
     'INSERT INTO templates (title, text, createdAt) VALUES (?, ?, ?)'
   );
-  const updateStmt = dbInstance.prepare(
-    'UPDATE templates SET text = ?, createdAt = ? WHERE title = ?'
-  );
 
   for (const template of Object.values(SYSTEM_PROMPT_TEMPLATES)) {
     const existing = checkStmt.get(template.title) as
       | { text: string }
       | undefined;
+    // Insert-only seeding: never overwrite an existing row. Users can
+    // customize system prompts via SystemPromptsPage, and those edits
+    // must survive API/worker restarts.
     if (!existing) {
       insertStmt.run(template.title, template.text, Date.now());
       console.log(`[db Seeder] Seeded system template: "${template.title}"`);
-    } else if (existing.text !== template.text) {
-      updateStmt.run(template.text, Date.now(), template.title);
-      console.log(`[db Seeder] Updated system template: "${template.title}"`);
     }
   }
 }

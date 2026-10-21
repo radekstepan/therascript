@@ -5,6 +5,7 @@
 //
 //   - renameSpeakersHandler      (PATCH /api/sessions/:id/speakers)
 //   - updateParagraphSpeakerHandler (per-paragraph speaker edit)
+//   - updateSessionMetadata      (PATCH /api/sessions/:id, speaker preservation)
 //   - updateTranscriptParagraph  (PATCH /api/sessions/:id/transcript)
 //   - deleteTranscriptParagraph  (DELETE /api/sessions/:id/transcript/:index)
 //
@@ -12,21 +13,32 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { BadRequestError, NotFoundError } from '../errors.js';
 
-const { mockSessionRepo, mockTranscriptRepo, mockEsUpdateByQuery } = vi.hoisted(
-  () => ({
-    mockSessionRepo: {
-      updateMetadata: vi.fn(),
-    },
-    mockTranscriptRepo: {
-      findParagraphsBySessionId: vi.fn(),
-      updateParagraphText: vi.fn(),
-      deleteParagraphByIndex: vi.fn(),
-      updateParagraphSpeaker: vi.fn(),
-      renameSpeaker: vi.fn(),
-    },
-    mockEsUpdateByQuery: vi.fn(),
-  })
-);
+const {
+  mockSessionRepo,
+  mockTranscriptRepo,
+  mockChatRepo,
+  mockMessageRepo,
+  mockEsUpdateByQuery,
+} = vi.hoisted(() => ({
+  mockSessionRepo: {
+    findById: vi.fn(),
+    updateMetadata: vi.fn(),
+  },
+  mockTranscriptRepo: {
+    findParagraphsBySessionId: vi.fn(),
+    updateParagraphText: vi.fn(),
+    deleteParagraphByIndex: vi.fn(),
+    updateParagraphSpeaker: vi.fn(),
+    renameSpeaker: vi.fn(),
+  },
+  mockChatRepo: {
+    findChatsBySessionId: vi.fn(),
+  },
+  mockMessageRepo: {
+    findMessagesByChatId: vi.fn(),
+  },
+  mockEsUpdateByQuery: vi.fn(),
+}));
 
 vi.mock('@therascript/config', () => ({
   default: { elasticsearch: { url: 'http://es-test:9200' } },
@@ -34,19 +46,15 @@ vi.mock('@therascript/config', () => ({
 
 vi.mock('@therascript/data', () => ({
   sessionRepository: mockSessionRepo,
-  chatRepository: {},
+  chatRepository: mockChatRepo,
   transcriptRepository: mockTranscriptRepo,
-  messageRepository: {},
+  messageRepository: mockMessageRepo,
 }));
 
 vi.mock('@therascript/services', () => ({
   deleteUploadedAudioFile: vi.fn(),
   saveUploadedAudio: vi.fn(),
   calculateTokenCount: vi.fn(() => 10),
-}));
-
-vi.mock('../services/transcriptionService.js', () => ({
-  getStructuredTranscriptionResult: vi.fn(),
 }));
 
 vi.mock('@therascript/elasticsearch-client', () => ({
@@ -64,12 +72,14 @@ vi.mock('@therascript/elasticsearch-client', () => ({
 const {
   renameSpeakersHandler,
   updateParagraphSpeakerHandler,
+  updateSessionMetadata,
   updateTranscriptParagraph,
   deleteTranscriptParagraph,
 } = await import('./sessionHandler.js');
-const { indexDocument, deleteDocument } = await import(
+const { bulkIndexDocuments, indexDocument, deleteDocument } = await import(
   '@therascript/elasticsearch-client'
 );
+const { calculateTokenCount } = await import('@therascript/services');
 
 const completedSession = {
   id: 1,
@@ -298,9 +308,137 @@ describe('updateTranscriptParagraph', () => {
       expect.anything(),
       'test-transcripts',
       '1_0',
-      expect.objectContaining({ text: 'Hello there, edited' })
+      expect.objectContaining({
+        text: 'Hello there, edited',
+        speaker: 'SPEAKER_00',
+      })
     );
     expect(result).toEqual(updated);
+  });
+
+  it('indexes speaker as null when the paragraph has no speaker label', async () => {
+    const noSpeakerParagraphs = [
+      { id: 0, timestamp: 0, text: 'Hello there' },
+      paragraphs[1],
+    ];
+    const updated = [
+      { id: 0, timestamp: 0, text: 'Hello there, edited' },
+      paragraphs[1],
+    ];
+    mockTranscriptRepo.findParagraphsBySessionId
+      .mockReturnValueOnce(noSpeakerParagraphs)
+      .mockReturnValueOnce(updated);
+    mockTranscriptRepo.updateParagraphText.mockReturnValue(true);
+    const set: Record<string, unknown> = {};
+    await updateTranscriptParagraph(
+      ctx({
+        body: { paragraphIndex: 0, newText: 'Hello there, edited' },
+        set,
+      }) as any
+    );
+    expect(indexDocument).toHaveBeenCalledWith(
+      expect.anything(),
+      'test-transcripts',
+      '1_0',
+      expect.objectContaining({ speaker: null })
+    );
+  });
+
+  it('includes the speaker prefix when recomputing the token count (Task 11)', async () => {
+    const updated = [
+      { ...paragraphs[0], text: 'Hello there, edited' },
+      paragraphs[1],
+    ];
+    mockTranscriptRepo.findParagraphsBySessionId
+      .mockReturnValueOnce(paragraphs)
+      .mockReturnValueOnce(updated);
+    mockTranscriptRepo.updateParagraphText.mockReturnValue(true);
+    const set: Record<string, unknown> = {};
+    await updateTranscriptParagraph(
+      ctx({
+        body: { paragraphIndex: 0, newText: 'Hello there, edited' },
+        set,
+      }) as any
+    );
+    // Must match the default prompt injection format (`Speaker: text`).
+    expect(calculateTokenCount).toHaveBeenCalledWith(
+      'SPEAKER_00: Hello there, edited\n\nSPEAKER_01: I feel anxious'
+    );
+  });
+
+  it('omits the speaker prefix for paragraphs without a speaker label (Task 11)', async () => {
+    const noSpeakerParagraphs = [{ id: 0, timestamp: 0, text: 'Hello there' }];
+    const updated = [{ id: 0, timestamp: 0, text: 'Hello there, edited' }];
+    mockTranscriptRepo.findParagraphsBySessionId
+      .mockReturnValueOnce(noSpeakerParagraphs)
+      .mockReturnValueOnce(updated);
+    mockTranscriptRepo.updateParagraphText.mockReturnValue(true);
+    const set: Record<string, unknown> = {};
+    await updateTranscriptParagraph(
+      ctx({
+        body: { paragraphIndex: 0, newText: 'Hello there, edited' },
+        set,
+      }) as any
+    );
+    expect(calculateTokenCount).toHaveBeenCalledWith('Hello there, edited');
+  });
+});
+
+describe('updateSessionMetadata', () => {
+  it('preserves the speaker field when re-indexing transcripts', async () => {
+    mockSessionRepo.findById.mockReturnValue(completedSession);
+    mockSessionRepo.updateMetadata.mockReturnValue({
+      ...completedSession,
+      clientName: 'John Smith',
+    });
+    mockTranscriptRepo.findParagraphsBySessionId.mockReturnValue(paragraphs);
+    mockChatRepo.findChatsBySessionId.mockReturnValue([]);
+    const set: Record<string, unknown> = {};
+    const result = await updateSessionMetadata(
+      ctx({ body: { clientName: 'John Smith' }, set }) as any
+    );
+    expect(set.status).toBe(200);
+    expect(result).toMatchObject({ clientName: 'John Smith' });
+    expect(bulkIndexDocuments).toHaveBeenCalledWith(
+      expect.anything(),
+      'test-transcripts',
+      [
+        expect.objectContaining({
+          id: '1_0',
+          document: expect.objectContaining({ speaker: 'SPEAKER_00' }),
+        }),
+        expect.objectContaining({
+          id: '1_1',
+          document: expect.objectContaining({ speaker: 'SPEAKER_01' }),
+        }),
+      ]
+    );
+  });
+
+  it('indexes speaker as null for paragraphs without a speaker label', async () => {
+    mockSessionRepo.findById.mockReturnValue(completedSession);
+    mockSessionRepo.updateMetadata.mockReturnValue({
+      ...completedSession,
+      sessionName: 'Follow-up',
+    });
+    mockTranscriptRepo.findParagraphsBySessionId.mockReturnValue([
+      { id: 0, timestamp: 0, text: 'Hello there' },
+    ]);
+    mockChatRepo.findChatsBySessionId.mockReturnValue([]);
+    const set: Record<string, unknown> = {};
+    await updateSessionMetadata(
+      ctx({ body: { sessionName: 'Follow-up' }, set }) as any
+    );
+    expect(bulkIndexDocuments).toHaveBeenCalledWith(
+      expect.anything(),
+      'test-transcripts',
+      [
+        expect.objectContaining({
+          id: '1_0',
+          document: expect.objectContaining({ speaker: null }),
+        }),
+      ]
+    );
   });
 });
 
@@ -357,5 +495,19 @@ describe('deleteTranscriptParagraph', () => {
       '1_0'
     );
     expect(result).toEqual([paragraphs[1]]);
+  });
+
+  it('includes the speaker prefix when recomputing the token count (Task 11)', async () => {
+    mockTranscriptRepo.deleteParagraphByIndex.mockReturnValue(true);
+    mockTranscriptRepo.findParagraphsBySessionId.mockReturnValue([
+      paragraphs[1],
+    ]);
+    const set: Record<string, unknown> = {};
+    await deleteTranscriptParagraph(
+      ctx({ params: { paragraphIndex: '0' }, set }) as any
+    );
+    expect(calculateTokenCount).toHaveBeenCalledWith(
+      'SPEAKER_01: I feel anxious'
+    );
   });
 });

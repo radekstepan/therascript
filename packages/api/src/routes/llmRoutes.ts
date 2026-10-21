@@ -395,13 +395,22 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
       )
       .post(
         '/unload',
-        async ({ set }) => {
+        async ({ body, set }) => {
           const modelToUnload = getActiveModel();
+          // Default `false`: stopping a stream or freeing VRAM must not
+          // wipe a configured remote LM Studio URL (`llm_base_url`).
+          // Callers that explicitly want the post-unload reset to local
+          // (e.g. a "disconnect remote" settings flow) opt in with
+          // `{ resetBaseUrl: true }`.
+          const resetBaseUrl = body?.resetBaseUrl ?? false;
           console.log(
-            `[API Unload] Received request to unload active model: ${modelToUnload}`
+            `[API Unload] Received request to unload active model: ${modelToUnload} (resetBaseUrl=${resetBaseUrl})`
           );
           try {
-            const resultMessage = await unloadActiveModel(undefined, true);
+            const resultMessage = await unloadActiveModel(
+              undefined,
+              resetBaseUrl
+            );
             set.status = 200;
             return { message: resultMessage };
           } catch (error: any) {
@@ -417,6 +426,11 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
           }
         },
         {
+          body: t.Optional(
+            t.Object({
+              resetBaseUrl: t.Optional(t.Boolean()),
+            })
+          ),
           response: {
             200: t.Object({ message: t.String() }),
             404: t.Any(),
@@ -649,8 +663,18 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
           try {
             const loadedModelResult = await checkModelStatus(modelNameToCheck);
             // Re-fetch since sync might have happened inside checkModelStatus
+            // (skipped while a load is in flight — see checkModelStatus).
             const latestActiveModel = getActiveModel();
             const latestContextSize = getConfiguredContextSize();
+            const loadAttempt = getLastLoadAttempt();
+            // While a model load is in flight, report the load target
+            // (Model B) as the active model rather than whatever is
+            // transiently loaded (Model A), so the UI's status poll shows
+            // consistent target configuration until the load completes.
+            const reportedActiveModel =
+              loadAttempt.status === 'loading' && loadAttempt.modelName
+                ? loadAttempt.modelName
+                : latestActiveModel;
 
             set.status = 200;
             if (
@@ -660,7 +684,7 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
             ) {
               return {
                 status: 'unavailable',
-                activeModel: latestActiveModel,
+                activeModel: reportedActiveModel,
                 modelChecked: modelNameToCheck,
                 loaded: false,
                 details: undefined,
@@ -674,7 +698,7 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
                 defaultBaseUrl,
                 isRemoteBaseUrl,
                 hasRemoteApiToken,
-                loadState: getLastLoadAttempt(),
+                loadState: loadAttempt,
               };
             } else {
               const loadedModelInfo = loadedModelResult as LlmModelInfo | null;
@@ -689,7 +713,7 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
                 : undefined;
               return {
                 status: 'available',
-                activeModel: latestActiveModel,
+                activeModel: reportedActiveModel,
                 modelChecked: modelNameToCheck,
                 loaded: !!loadedModelInfo,
                 details: detailsResponse,
@@ -703,7 +727,7 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
                 defaultBaseUrl,
                 isRemoteBaseUrl,
                 hasRemoteApiToken,
-                loadState: getLastLoadAttempt(),
+                loadState: loadAttempt,
               };
             }
           } catch (error: any) {

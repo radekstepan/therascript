@@ -5,6 +5,7 @@ import {
   usageRepository,
 } from '@therascript/data';
 import {
+  ensureModelLoaded,
   streamChatResponse,
   unloadActiveModel,
 } from '../services/llamaCppService.js';
@@ -29,7 +30,11 @@ import {
   bulkIndexDocuments,
 } from '@therascript/elasticsearch-client';
 import config from '@therascript/config';
-import { cleanLlmOutput, prepareLlmChatMessages } from '@therascript/services';
+import {
+  cleanLlmOutput,
+  prepareLlmChatMessages,
+  extractVisibleAnswer,
+} from '@therascript/services';
 import {
   computeContextUsageForChat,
   recommendContextSize,
@@ -249,6 +254,20 @@ export const addStandaloneChatMessage = async ({
 
     const streamMessages = prepareLlmChatMessages(currentMessages);
 
+    // Ensure the model is loaded with the effective context size before
+    // streaming. Without this, a prior unload (STOP button, transcription
+    // VRAM handoff) leaves LM Studio to auto-load with its default ~4K
+    // context instead of the configured size. Idempotent when already warm.
+    // (Temperature is applied per-request by streamChatResponse.)
+    const activeModelName = getActiveModel();
+    if (activeModelName && activeModelName !== 'default') {
+      await ensureModelLoaded(
+        activeModelName,
+        effectiveContextSize,
+        getActiveBaseUrl()
+      );
+    }
+
     const llmStream = await streamChatResponse(
       streamMessages,
       configured == null && recommendedContext != null
@@ -435,6 +454,31 @@ export const addStandaloneChatMessage = async ({
           if (contextPressureRatio > 0.8 && tokenDifference > 500) {
             isTruncated = true;
           }
+        }
+
+        // Thinking-only response: the model exhausted its token budget
+        // inside <think> and produced zero visible answer tokens. Append a
+        // fallback notice after </think> — streamed as a chunk before `done`
+        // (the UI stops reading at `done`) so the user sees why the body is
+        // empty and the turn stays valid in chat history. Skipped when the
+        // user aborted the stream. The notice is appended to fullAiText only
+        // after both writes succeed, so an abort racing this block cannot
+        // leave a notice the user never saw.
+        const visibleAiText = extractVisibleAnswer(fullAiText).trim();
+        if (
+          fullAiText.trim() &&
+          !visibleAiText &&
+          !llmAbortController.signal.aborted &&
+          !sseStreamClosed
+        ) {
+          const fallbackNotice =
+            '\n\n*(The model exhausted its token budget while reasoning and did not produce a final answer. Try increasing the Thinking Budget or Context Size, or simplifying your prompt.)*';
+          if (!hasSentRespondingStatus) {
+            hasSentRespondingStatus = true;
+            await writeSseEvent({ status: 'responding' });
+          }
+          await writeSseEvent({ chunk: fallbackNotice });
+          fullAiText += fallbackNotice;
         }
 
         console.log(
