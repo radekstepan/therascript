@@ -1,0 +1,774 @@
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { configureDb, run, closeDb } from '@therascript/db';
+import { messageRepository } from './messageRepository.js';
+import { verificationRepository } from './verificationRepository.js';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const T0 = Date.UTC(2024, 4, 10, 12, 0, 0);
+
+let tmpDir: string;
+
+const insertSession = (
+  name: string,
+  status: string = 'completed',
+  date: string = '2024-05-10'
+): number => {
+  const info = run(
+    `INSERT INTO sessions (fileName, clientName, sessionName, date, sessionType, therapy, status)
+     VALUES ('audio.mp3', 'Client', ?, ?, 'intake', 'cbt', ?)`,
+    name,
+    date,
+    status
+  );
+  return info.lastInsertRowid as number;
+};
+
+const insertChat = (sessionId: number | null): number => {
+  const info = run(
+    'INSERT INTO chats (sessionId, timestamp, name, tags) VALUES (?, ?, ?, ?)',
+    sessionId,
+    T0,
+    null,
+    null
+  );
+  return info.lastInsertRowid as number;
+};
+
+const insertMessage = (opts: {
+  chatId: number;
+  sender: 'user' | 'ai';
+  text: string;
+  timestamp: number;
+  promptTokens?: number | null;
+  completionTokens?: number | null;
+  model?: string | null;
+}): number => {
+  // Explicit null must stay null (welcome messages); only `undefined` means
+  // "use the default", so `??` cannot be used here.
+  const completionTokens =
+    opts.completionTokens === undefined
+      ? opts.sender === 'ai'
+        ? 10
+        : null
+      : opts.completionTokens;
+  const info = run(
+    `INSERT INTO messages (chatId, sender, text, timestamp, promptTokens, completionTokens, duration, isTruncated, model)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    opts.chatId,
+    opts.sender,
+    opts.text,
+    opts.timestamp,
+    opts.promptTokens ?? null,
+    completionTokens,
+    null,
+    0,
+    opts.model ?? null
+  );
+  return info.lastInsertRowid as number;
+};
+
+beforeAll(() => {
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'verification-repo-test-'));
+  configureDb({ dbPath: path.join(tmpDir, 'test.db'), isDev: false });
+  // Trigger lazy DB init (migrations to V20 + template seeding).
+  run('SELECT 1');
+});
+
+afterAll(() => {
+  closeDb();
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+beforeEach(() => {
+  run('DELETE FROM verified_statements');
+  run('DELETE FROM message_verifications');
+  run('DELETE FROM verification_jobs');
+  run('DELETE FROM messages');
+  run('DELETE FROM chats');
+  run('DELETE FROM sessions');
+});
+
+describe('messageRepository model capture', () => {
+  it('stores the authoring model on ai messages', () => {
+    const sessionId = insertSession('S1');
+    const chatId = insertChat(sessionId);
+    const ai = messageRepository.addMessage(
+      chatId,
+      'ai',
+      'hello',
+      5,
+      10,
+      100,
+      false,
+      'llama-3-test'
+    );
+    expect(ai.model).toBe('llama-3-test');
+
+    const fetched = messageRepository.findMessageById(ai.id);
+    expect(fetched?.model).toBe('llama-3-test');
+  });
+
+  it('defaults model to null when not provided', () => {
+    const sessionId = insertSession('S1');
+    const chatId = insertChat(sessionId);
+    const user = messageRepository.addMessage(chatId, 'user', 'hi');
+    expect(user.model).toBeNull();
+  });
+});
+
+describe('verificationRepository job lifecycle', () => {
+  it('creates, finds, updates, and counts jobs', () => {
+    const job = verificationRepository.createVerificationJob({
+      scope: 'selected_sessions',
+      sessionIds: [3, 7],
+      skipVerified: true,
+      modelName: 'judge-1',
+      contextSize: 8192,
+      thinkingBudget: 1024,
+      temperature: 0.2,
+      topP: 0.9,
+      repeatPenalty: 1.1,
+      numGpuLayers: 99,
+      llmBaseUrl: 'http://localhost:1234/v1',
+    });
+    expect(job.id).toBeGreaterThan(0);
+    expect(job.status).toBe('pending');
+    expect(job.scope).toBe('selected_sessions');
+    expect(job.session_ids_json).toBe('[3,7]');
+    expect(job.skip_verified).toBe(true);
+    expect(job.model_name).toBe('judge-1');
+    expect(job.num_gpu_layers).toBe(99);
+
+    const found = verificationRepository.findVerificationJobById(job.id);
+    expect(found?.id).toBe(job.id);
+    expect(found?.skip_verified).toBe(true);
+
+    expect(verificationRepository.findVerificationJobById(999999)).toBeNull();
+
+    const second = verificationRepository.createVerificationJob({
+      scope: 'all_unverified',
+      skipVerified: false,
+    });
+    expect(second.skip_verified).toBe(false);
+    const jobs = verificationRepository.findAllVerificationJobs();
+    expect(jobs.map((j) => j.id)).toContain(job.id);
+    expect(jobs.map((j) => j.id)).toContain(second.id);
+
+    expect(
+      verificationRepository.updateJobStatus(job.id, 'processing', {
+        totalMessages: 5,
+      })
+    ).toBe(true);
+    const processing = verificationRepository.findVerificationJobById(job.id);
+    expect(processing?.status).toBe('processing');
+    expect(processing?.total_messages).toBe(5);
+    expect(processing?.completed_at).toBeNull();
+
+    expect(
+      verificationRepository.incrementJobCounters(job.id, {
+        processedMessages: 2,
+        totalStatements: 10,
+        flaggedStatements: 3,
+        omissionsCount: 1,
+      })
+    ).toBe(true);
+    const counted = verificationRepository.findVerificationJobById(job.id);
+    expect(counted?.processed_messages).toBe(2);
+    expect(counted?.total_statements).toBe(10);
+    expect(counted?.flagged_statements).toBe(3);
+    expect(counted?.omissions_count).toBe(1);
+
+    expect(verificationRepository.updateJobStatus(job.id, 'completed')).toBe(
+      true
+    );
+    const done = verificationRepository.findVerificationJobById(job.id);
+    expect(done?.status).toBe('completed');
+    expect(done?.completed_at).not.toBeNull();
+
+    expect(
+      verificationRepository.updateJobStatus(second.id, 'failed', {
+        errorMessage: 'boom',
+      })
+    ).toBe(true);
+    expect(
+      verificationRepository.findVerificationJobById(second.id)?.error_message
+    ).toBe('boom');
+  });
+});
+
+describe('findCandidateMessagesForVerification', () => {
+  const seedScenario = () => {
+    const sessionId = insertSession('Main');
+    const chatId = insertChat(sessionId);
+    insertMessage({
+      chatId,
+      sender: 'user',
+      text: 'How is the patient sleeping?',
+      timestamp: T0,
+    });
+    const a1 = insertMessage({
+      chatId,
+      sender: 'ai',
+      text: 'The patient sleeps well.',
+      timestamp: T0 + 1000,
+      model: 'model-a',
+    });
+    insertMessage({
+      chatId,
+      sender: 'user',
+      text: 'Any anxiety symptoms?',
+      timestamp: T0 + 2000,
+    });
+    const a2 = insertMessage({
+      chatId,
+      sender: 'ai',
+      text: 'Yes, panic attacks nightly.',
+      timestamp: T0 + 3000,
+      model: 'model-b',
+    });
+    // Welcome message: completionTokens NULL + stock text.
+    insertMessage({
+      chatId,
+      sender: 'ai',
+      text: 'Session "Main" has been transcribed and is ready for analysis.',
+      timestamp: T0 + 4000,
+      completionTokens: null,
+    });
+    // Empty message.
+    insertMessage({
+      chatId,
+      sender: 'ai',
+      text: '   ',
+      timestamp: T0 + 5000,
+    });
+    return { sessionId, chatId, a1, a2 };
+  };
+
+  it('returns newest-first with preceding user questions, excluding welcome/empty', () => {
+    const { sessionId, a1, a2 } = seedScenario();
+    const candidates =
+      verificationRepository.findCandidateMessagesForVerification({
+        scope: 'all_unverified',
+      });
+    expect(candidates.map((c) => c.id)).toEqual([a2, a1]);
+    expect(candidates[0]?.sessionId).toBe(sessionId);
+    expect(candidates[0]?.userQuestion).toBe('Any anxiety symptoms?');
+    expect(candidates[1]?.userQuestion).toBe('How is the patient sleeping?');
+    expect(candidates[0]?.model).toBe('model-b');
+  });
+
+  it('excludes standalone chats and non-completed sessions', () => {
+    seedScenario();
+    const standaloneChat = insertChat(null);
+    insertMessage({
+      chatId: standaloneChat,
+      sender: 'ai',
+      text: 'Standalone answer.',
+      timestamp: T0 + 9000,
+    });
+    const pendingSession = insertSession('Pending', 'transcribing');
+    const pendingChat = insertChat(pendingSession);
+    insertMessage({
+      chatId: pendingChat,
+      sender: 'ai',
+      text: 'Pending answer.',
+      timestamp: T0 + 9500,
+    });
+    const candidates =
+      verificationRepository.findCandidateMessagesForVerification({
+        scope: 'all_unverified',
+      });
+    expect(candidates).toHaveLength(2);
+  });
+
+  it('skips verified messages by default and re-includes with skipVerified=false', () => {
+    const { sessionId, chatId, a1, a2 } = seedScenario();
+    verificationRepository.saveMessageVerificationResult({
+      messageId: a2,
+      chatId,
+      sessionId,
+      authoredModel: 'model-b',
+      judgeModel: 'judge-1',
+      totalClaims: 1,
+      supportedClaims: 1,
+      accuracyScore: 1,
+    });
+    const skipped = verificationRepository.findCandidateMessagesForVerification(
+      {
+        scope: 'all_unverified',
+      }
+    );
+    expect(skipped.map((c) => c.id)).toEqual([a1]);
+
+    const forced = verificationRepository.findCandidateMessagesForVerification({
+      scope: 'all_force',
+      skipVerified: false,
+    });
+    expect(forced.map((c) => c.id)).toEqual([a2, a1]);
+  });
+
+  it('filters by selected sessions and single chat', () => {
+    const first = seedScenario();
+    const otherSession = insertSession('Other');
+    const otherChat = insertChat(otherSession);
+    insertMessage({
+      chatId: otherChat,
+      sender: 'ai',
+      text: 'Other answer.',
+      timestamp: T0 + 8000,
+    });
+    const selected =
+      verificationRepository.findCandidateMessagesForVerification({
+        scope: 'selected_sessions',
+        sessionIds: [otherSession],
+      });
+    expect(selected).toHaveLength(1);
+    expect(selected[0]?.sessionId).toBe(otherSession);
+
+    const single = verificationRepository.findCandidateMessagesForVerification({
+      scope: 'single_chat',
+      chatId: first.chatId,
+    });
+    expect(single.map((c) => c.id)).toEqual([first.a2, first.a1]);
+
+    const limited = verificationRepository.findCandidateMessagesForVerification(
+      {
+        scope: 'all_unverified',
+        limit: 1,
+      }
+    );
+    expect(limited).toHaveLength(1);
+  });
+});
+
+describe('saveMessageVerificationResult', () => {
+  it('persists verification + statements and updates job counters atomically', () => {
+    const sessionId = insertSession('S1');
+    const chatId = insertChat(sessionId);
+    const msgId = insertMessage({
+      chatId,
+      sender: 'ai',
+      text: 'The patient takes aspirin daily.',
+      timestamp: T0,
+      model: 'model-a',
+    });
+    const job = verificationRepository.createVerificationJob({
+      scope: 'all_unverified',
+    });
+    const saved = verificationRepository.saveMessageVerificationResult({
+      messageId: msgId,
+      chatId,
+      sessionId,
+      verificationJobId: job.id,
+      authoredModel: 'model-a',
+      judgeModel: 'judge-1',
+      totalClaims: 2,
+      supportedClaims: 1,
+      fabricatedClaims: 1,
+      omissionsCount: 1,
+      accuracyScore: 1 / 3,
+      summaryAssessment: 'One fabrication, one omission.',
+      promptTokens: 100,
+      completionTokens: 50,
+      durationMs: 1234,
+      statements: [
+        {
+          statementIndex: 0,
+          kind: 'claim',
+          exactQuote: 'takes aspirin daily',
+          normalizedClaim: 'Patient takes aspirin daily.',
+          startChar: 12,
+          endChar: 29,
+          verdict: 'fabricated',
+          severity: 'high',
+          confidence: 0.9,
+          reasoning: 'No mention in transcript.',
+          evidence: [],
+        },
+        {
+          statementIndex: 1,
+          kind: 'omission',
+          exactQuote: '',
+          normalizedClaim: 'Missed insomnia discussion.',
+          verdict: 'omission',
+          severity: 'medium',
+          confidence: 0.8,
+          reasoning: 'Transcript covers insomnia at length.',
+          evidence: [
+            {
+              paragraphIndex: 3,
+              timestampMs: 60000,
+              speaker: 'SPEAKER_01',
+              quote: 'I cannot sleep at all.',
+            },
+          ],
+        },
+      ],
+    });
+    expect(saved.message_id).toBe(msgId);
+    expect(saved.accuracy_score).toBeCloseTo(1 / 3);
+    expect(saved.statements).toHaveLength(2);
+    expect(saved.statements?.[0]?.start_char).toBe(12);
+    expect(saved.statements?.[1]?.evidence).toEqual([
+      {
+        paragraphIndex: 3,
+        timestampMs: 60000,
+        speaker: 'SPEAKER_01',
+        quote: 'I cannot sleep at all.',
+      },
+    ]);
+
+    const updatedJob = verificationRepository.findVerificationJobById(job.id);
+    expect(updatedJob?.processed_messages).toBe(1);
+    expect(updatedJob?.total_statements).toBe(3);
+    expect(updatedJob?.flagged_statements).toBe(1);
+    expect(updatedJob?.omissions_count).toBe(1);
+  });
+
+  it('re-saving replaces prior statements (re-audit)', () => {
+    const sessionId = insertSession('S1');
+    const chatId = insertChat(sessionId);
+    const msgId = insertMessage({
+      chatId,
+      sender: 'ai',
+      text: 'Answer.',
+      timestamp: T0,
+    });
+    const base = {
+      messageId: msgId,
+      chatId,
+      sessionId,
+      judgeModel: 'judge-1',
+    } as const;
+    verificationRepository.saveMessageVerificationResult({
+      ...base,
+      totalClaims: 2,
+      statements: [
+        {
+          statementIndex: 0,
+          kind: 'claim',
+          exactQuote: 'a',
+          normalizedClaim: 'a',
+          verdict: 'supported',
+          reasoning: 'ok',
+        },
+        {
+          statementIndex: 1,
+          kind: 'claim',
+          exactQuote: 'b',
+          normalizedClaim: 'b',
+          verdict: 'supported',
+          reasoning: 'ok',
+        },
+      ],
+    });
+    const resaved = verificationRepository.saveMessageVerificationResult({
+      ...base,
+      judgeModel: 'judge-2',
+      totalClaims: 1,
+      supportedClaims: 1,
+      statements: [
+        {
+          statementIndex: 0,
+          kind: 'claim',
+          exactQuote: 'a',
+          normalizedClaim: 'a',
+          verdict: 'supported',
+          reasoning: 'ok',
+        },
+      ],
+    });
+    expect(resaved.judge_model).toBe('judge-2');
+    expect(resaved.statements).toHaveLength(1);
+    const byChat = verificationRepository.findVerificationsByChatId(chatId);
+    expect(byChat).toHaveLength(1);
+    expect(byChat[0]?.statements).toHaveLength(1);
+  });
+
+  it('supports failed status without statements', () => {
+    const sessionId = insertSession('S1');
+    const chatId = insertChat(sessionId);
+    const msgId = insertMessage({
+      chatId,
+      sender: 'ai',
+      text: 'Answer.',
+      timestamp: T0,
+    });
+    const saved = verificationRepository.saveMessageVerificationResult({
+      messageId: msgId,
+      chatId,
+      sessionId,
+      judgeModel: 'judge-1',
+      status: 'failed',
+      errorMessage: 'Judge JSON parse error',
+    });
+    expect(saved.status).toBe('failed');
+    expect(saved.error_message).toBe('Judge JSON parse error');
+    expect(saved.statements).toHaveLength(0);
+  });
+});
+
+describe('findVerificationsBySessionId', () => {
+  it('returns stats plus chronological breakdown', () => {
+    const sessionId = insertSession('S1');
+    const chatId = insertChat(sessionId);
+    const m1 = insertMessage({
+      chatId,
+      sender: 'ai',
+      text: 'First.',
+      timestamp: T0,
+      model: 'model-a',
+    });
+    const m2 = insertMessage({
+      chatId,
+      sender: 'ai',
+      text: 'Second.',
+      timestamp: T0 + 1000,
+      model: 'model-a',
+    });
+    verificationRepository.saveMessageVerificationResult({
+      messageId: m1,
+      chatId,
+      sessionId,
+      judgeModel: 'judge-1',
+      totalClaims: 1,
+      fabricatedClaims: 1,
+      accuracyScore: 0,
+      statements: [
+        {
+          statementIndex: 0,
+          kind: 'claim',
+          exactQuote: 'First',
+          normalizedClaim: 'First.',
+          verdict: 'fabricated',
+          severity: 'critical',
+          reasoning: 'Made up.',
+        },
+      ],
+    });
+    const detail =
+      verificationRepository.findVerificationsBySessionId(sessionId);
+    expect(detail.totalAiMessages).toBe(2);
+    expect(detail.verifiedAiMessages).toBe(1);
+    expect(detail.averageAccuracy).toBe(0);
+    expect(detail.flaggedIssues).toBe(1);
+    expect(detail.verifications.map((v) => v.message_id)).toEqual([m1]);
+    void m2;
+  });
+});
+
+describe('getGlobalVerificationAnalytics', () => {
+  const seedAnalytics = () => {
+    const s1 = insertSession('S1', 'completed', '2024-05-10');
+    const c1 = insertChat(s1);
+    const m1 = insertMessage({
+      chatId: c1,
+      sender: 'ai',
+      text: 'Claim one.',
+      timestamp: T0,
+      model: 'llama',
+    });
+    const m2 = insertMessage({
+      chatId: c1,
+      sender: 'ai',
+      text: 'Claim two.',
+      timestamp: T0 + DAY_MS,
+      model: null,
+    });
+    const s2 = insertSession('S2', 'completed', '2024-05-11');
+    const c2 = insertChat(s2);
+    const m3 = insertMessage({
+      chatId: c2,
+      sender: 'ai',
+      text: 'Unverified here.',
+      timestamp: T0,
+      model: 'mistral',
+    });
+    verificationRepository.saveMessageVerificationResult({
+      messageId: m1,
+      chatId: c1,
+      sessionId: s1,
+      authoredModel: 'llama',
+      judgeModel: 'judge-1',
+      totalClaims: 4,
+      supportedClaims: 3,
+      partialClaims: 1,
+      accuracyScore: 0.875,
+    });
+    verificationRepository.saveMessageVerificationResult({
+      messageId: m2,
+      chatId: c1,
+      sessionId: s1,
+      judgeModel: 'judge-1',
+      totalClaims: 2,
+      supportedClaims: 1,
+      contradictedClaims: 1,
+      omissionsCount: 1,
+      accuracyScore: 1 / 3,
+    });
+    return { s1, s2, m3 };
+  };
+
+  it('computes KPIs, byModel, overTime, and sessionsSummary', () => {
+    const { s1, s2 } = seedAnalytics();
+    const stats = verificationRepository.getGlobalVerificationAnalytics();
+    expect(stats.totalMessagesAudited).toBe(2);
+    expect(stats.totalClaims).toBe(6);
+    expect(stats.supportedClaims).toBe(4);
+    expect(stats.partialClaims).toBe(1);
+    expect(stats.contradictedClaims).toBe(1);
+    expect(stats.fabricatedClaims).toBe(0);
+    expect(stats.omissions).toBe(1);
+    // Pooled: (4 + 0.5*1) / (6 + 1) * 100
+    expect(stats.overallAccuracyPercent).toBeCloseTo((4.5 / 7) * 100);
+    expect(stats.unverifiedMessagesCount).toBe(1);
+
+    expect(stats.byModel.map((m) => m.model).sort()).toEqual([
+      'Unknown Model',
+      'llama',
+    ]);
+    const llama = stats.byModel.find((m) => m.model === 'llama');
+    expect(llama?.messagesAudited).toBe(1);
+    expect(llama?.accuracyPercent).toBeCloseTo((3.5 / 4) * 100);
+    expect(llama?.averageAccuracyScore).toBeCloseTo(0.875);
+    const unknown = stats.byModel.find((m) => m.model === 'Unknown Model');
+    expect(unknown?.contradictionRate).toBeCloseTo(50);
+    expect(unknown?.omissionsPerMessage).toBe(1);
+
+    expect(stats.overTime.map((t) => t.date)).toEqual([
+      '2024-05-10',
+      '2024-05-11',
+    ]);
+    expect(stats.overTime[0]?.messagesAudited).toBe(1);
+
+    const summaryS1 = stats.sessionsSummary.find((s) => s.sessionId === s1);
+    const summaryS2 = stats.sessionsSummary.find((s) => s.sessionId === s2);
+    expect(summaryS1?.totalAiMessages).toBe(2);
+    expect(summaryS1?.verifiedAiMessages).toBe(2);
+    expect(summaryS1?.isFullyVerified).toBe(true);
+    expect(summaryS2?.isFullyVerified).toBe(false);
+    expect(summaryS2?.averageAccuracy).toBeNull();
+  });
+
+  it('prefers authored_model over messages.model and honors filters', () => {
+    const { s1 } = seedAnalytics();
+    const filtered = verificationRepository.getGlobalVerificationAnalytics({
+      sessionIds: [s1],
+      model: 'llama',
+    });
+    expect(filtered.totalMessagesAudited).toBe(1);
+    expect(filtered.byModel).toHaveLength(1);
+    const dated = verificationRepository.getGlobalVerificationAnalytics({
+      startDate: '2024-05-11',
+      endDate: '2024-05-11',
+    });
+    expect(dated.totalMessagesAudited).toBe(1);
+    expect(dated.overTime.map((t) => t.date)).toEqual(['2024-05-11']);
+  });
+});
+
+describe('findFlaggedStatements', () => {
+  const seedFlagged = () => {
+    const sessionId = insertSession('S1');
+    const chatId = insertChat(sessionId);
+    const msgId = insertMessage({
+      chatId,
+      sender: 'ai',
+      text: 'Aspirin cures anxiety and insomnia is irrelevant.',
+      timestamp: T0,
+      model: 'llama',
+    });
+    verificationRepository.saveMessageVerificationResult({
+      messageId: msgId,
+      chatId,
+      sessionId,
+      authoredModel: 'llama',
+      judgeModel: 'judge-9',
+      totalClaims: 2,
+      supportedClaims: 1,
+      fabricatedClaims: 1,
+      accuracyScore: 0.5,
+      statements: [
+        {
+          statementIndex: 0,
+          kind: 'claim',
+          exactQuote: 'Aspirin cures anxiety',
+          normalizedClaim: 'Aspirin cures anxiety.',
+          verdict: 'fabricated',
+          severity: 'critical',
+          reasoning: 'No transcript support for aspirin.',
+        },
+        {
+          statementIndex: 1,
+          kind: 'claim',
+          exactQuote: 'insomnia is irrelevant',
+          normalizedClaim: 'Insomnia is irrelevant.',
+          verdict: 'supported',
+          reasoning: 'Confirmed.',
+        },
+      ],
+    });
+    return { sessionId, chatId, msgId };
+  };
+
+  it('returns only problematic verdicts with joined context', () => {
+    const { sessionId, chatId, msgId } = seedFlagged();
+    const result = verificationRepository.findFlaggedStatements();
+    expect(result.total).toBe(1);
+    expect(result.items).toHaveLength(1);
+    const item = result.items[0];
+    expect(item?.verdict).toBe('fabricated');
+    expect(item?.session_id).toBe(sessionId);
+    expect(item?.chatId).toBe(chatId);
+    expect(item?.message_id).toBe(msgId);
+    expect(item?.sessionName).toBe('S1');
+    expect(item?.authoredModel).toBe('llama');
+    expect(item?.judgeModel).toBe('judge-9');
+  });
+
+  it('supports verdict, severity, model, session, search, and pagination filters', () => {
+    const { sessionId } = seedFlagged();
+    const supportedOnly = verificationRepository.findFlaggedStatements({
+      verdicts: ['supported'],
+    });
+    expect(supportedOnly.total).toBe(1);
+    expect(supportedOnly.items[0]?.verdict).toBe('supported');
+    expect(
+      verificationRepository.findFlaggedStatements({ verdicts: ['omission'] })
+        .total
+    ).toBe(0);
+    expect(
+      verificationRepository.findFlaggedStatements({ severities: ['low'] })
+        .total
+    ).toBe(0);
+    expect(
+      verificationRepository.findFlaggedStatements({ severities: ['critical'] })
+        .total
+    ).toBe(1);
+    expect(
+      verificationRepository.findFlaggedStatements({ authoredModel: 'mistral' })
+        .total
+    ).toBe(0);
+    expect(
+      verificationRepository.findFlaggedStatements({
+        sessionId: sessionId + 999,
+      }).total
+    ).toBe(0);
+    expect(
+      verificationRepository.findFlaggedStatements({ search: 'aspirin' }).total
+    ).toBe(1);
+    expect(
+      verificationRepository.findFlaggedStatements({ search: 'zzz-no-match' })
+        .total
+    ).toBe(0);
+    const paged = verificationRepository.findFlaggedStatements({
+      limit: 1,
+      offset: 1,
+    });
+    expect(paged.total).toBe(1);
+    expect(paged.items).toHaveLength(0);
+  });
+});

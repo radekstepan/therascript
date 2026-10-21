@@ -2,8 +2,8 @@ import { db, run, all, get } from '@therascript/db';
 import type { BackendChatMessage } from '@therascript/domain';
 
 const insertMessageSql = `
-    INSERT INTO messages (chatId, sender, text, timestamp, promptTokens, completionTokens, duration, isTruncated)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO messages (chatId, sender, text, timestamp, promptTokens, completionTokens, duration, isTruncated, model)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `;
 const selectMessagesByChatIdSql = `
     SELECT * FROM messages WHERE chatId = ? ORDER BY id ASC
@@ -21,7 +21,8 @@ export const messageRepository = {
     promptTokens?: number | null,
     completionTokens?: number | null,
     duration?: number | null,
-    isTruncated?: boolean | null
+    isTruncated?: boolean | null,
+    model?: string | null
   ): BackendChatMessage => {
     const timestamp = Date.now();
     try {
@@ -34,7 +35,8 @@ export const messageRepository = {
         promptTokens ?? null,
         completionTokens ?? null,
         duration ?? null,
-        isTruncated ? 1 : 0
+        isTruncated ? 1 : 0,
+        model ?? null
       );
       const newId = info.lastInsertRowid as number;
       const newMsg = get<BackendChatMessage>(selectMessageByIdSql, newId);

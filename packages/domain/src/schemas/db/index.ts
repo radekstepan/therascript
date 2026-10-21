@@ -9,3 +9,23 @@ export {
 } from './intermediateSummary.js';
 export { templateSchema, type TemplateRow } from './template.js';
 export { appSettingsSchema, type AppSettingsRow } from './appSettings.js';
+export {
+  verificationJobStatusSchema,
+  verificationJobScopeSchema,
+  verificationJobSchema,
+  type VerificationJobRow,
+  type VerificationJobStatusRow,
+  type VerificationJobScopeRow,
+  messageVerificationStatusSchema,
+  messageVerificationSchema,
+  type MessageVerificationRow,
+  statementKindSchema,
+  statementVerdictSchema,
+  statementSeveritySchema,
+  verifiedStatementSchema,
+  type VerifiedStatementRow,
+  type StatementVerdictRow,
+  type StatementSeverityRow,
+  transcriptEvidenceItemSchema,
+  type TranscriptEvidenceItemRow,
+} from './verification.js';

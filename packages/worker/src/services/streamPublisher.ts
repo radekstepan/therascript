@@ -2,7 +2,9 @@ import { Redis } from 'ioredis';
 import {
   createRedisClient,
   getAnalysisChannel,
+  getVerificationChannel,
   type StreamEvent,
+  type VerificationStreamEvent,
 } from '@therascript/queue';
 
 let publisher: Redis | null = null;
@@ -35,6 +37,25 @@ export function publishStreamEvent(
     .catch((err: unknown) => {
       console.error(
         `[StreamPublisher] Failed to publish event for job ${jobId}:`,
+        err
+      );
+    });
+}
+
+export function publishVerificationEvent(
+  jobId: number,
+  event: Omit<VerificationStreamEvent, 'jobId' | 'timestamp'>
+) {
+  const payload: VerificationStreamEvent = {
+    jobId,
+    timestamp: Date.now(),
+    ...event,
+  };
+  getPublisher()
+    .publish(getVerificationChannel(jobId), JSON.stringify(payload))
+    .catch((err: unknown) => {
+      console.error(
+        `[StreamPublisher] Failed to publish verification event for job ${jobId}:`,
         err
       );
     });

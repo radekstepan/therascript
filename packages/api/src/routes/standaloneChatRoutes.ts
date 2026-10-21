@@ -54,6 +54,7 @@ const ChatMessageResponseSchema = t.Object({
   completionTokens: t.Optional(t.Union([t.Number(), t.Null()])),
   duration: t.Optional(t.Union([t.Number(), t.Null()])),
   isTruncated: t.Optional(t.Union([t.Boolean(), t.Null()])),
+  model: t.Optional(t.Union([t.String(), t.Null()])),
 });
 const FullStandaloneChatResponseSchema = t.Intersect([
   StandaloneChatMetadataResponseSchema,

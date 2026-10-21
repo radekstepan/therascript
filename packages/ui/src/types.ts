@@ -94,6 +94,8 @@ export interface ChatMessage {
   thinkingTokens?: number | null;
   duration?: number | null;
   isTruncated?: boolean | null;
+  /** Authoring LLM model name (present when the backend recorded it). */
+  model?: string | null;
 }
 
 export interface ChatSession {
@@ -149,6 +151,7 @@ export interface BackendChatMessage {
   thinkingTokens?: number | null;
   duration?: number | null;
   isTruncated?: boolean | null;
+  model?: string | null;
 }
 
 export interface LlmModelInfo {

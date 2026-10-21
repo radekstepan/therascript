@@ -10,6 +10,7 @@ export const messageSchema = z.object({
   completionTokens: z.number().nullable(),
   duration: z.number().nullable(),
   isTruncated: z.boolean().nullable().optional(),
+  model: z.string().nullable().optional(),
 });
 
 export type MessageRow = z.infer<typeof messageSchema>;

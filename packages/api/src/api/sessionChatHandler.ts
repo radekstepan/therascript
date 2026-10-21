@@ -543,7 +543,8 @@ export const addSessionChatMessage = async ({
               finalPromptTokens,
               finalCompletionTokens,
               llmStreamError ? null : llmDuration,
-              isTruncated
+              isTruncated,
+              getActiveModel()
             );
 
             await indexDocument(

@@ -4,10 +4,12 @@ import {
   redisConnection,
   TRANSCRIPTION_QUEUE_NAME,
   ANALYSIS_QUEUE_NAME,
+  VERIFICATION_QUEUE_NAME,
 } from '@therascript/queue';
 import type {
   TranscriptionJobData,
   AnalysisJobData,
+  VerificationJobData,
 } from '../types/jobQueue.js';
 
 // --- Initialize Queues ---
@@ -19,18 +21,24 @@ const transcriptionQueue = new Queue<TranscriptionJobData>(
 const analysisQueue = new Queue<AnalysisJobData>(ANALYSIS_QUEUE_NAME, {
   connection: redisConnection,
 });
+const verificationQueue = new Queue<VerificationJobData>(
+  VERIFICATION_QUEUE_NAME,
+  { connection: redisConnection }
+);
 
 console.log('[JobQueueService] BullMQ Queues initialized.');
 
 /**
  * Gets the number of active and waiting jobs for all queues.
- * @returns An object with total, transcription, and analysis counts.
+ * @returns An object with total, transcription, analysis, and verification counts.
  */
 export const getActiveJobCounts = async () => {
-  const [transcriptionCounts, analysisCounts] = await Promise.all([
-    transcriptionQueue.getJobCounts('wait', 'active', 'delayed'),
-    analysisQueue.getJobCounts('wait', 'active', 'delayed'),
-  ]);
+  const [transcriptionCounts, analysisCounts, verificationCounts] =
+    await Promise.all([
+      transcriptionQueue.getJobCounts('wait', 'active', 'delayed'),
+      analysisQueue.getJobCounts('wait', 'active', 'delayed'),
+      verificationQueue.getJobCounts('wait', 'active', 'delayed'),
+    ]);
 
   const transcriptionTotal =
     transcriptionCounts.wait +
@@ -38,11 +46,16 @@ export const getActiveJobCounts = async () => {
     transcriptionCounts.delayed;
   const analysisTotal =
     analysisCounts.wait + analysisCounts.active + analysisCounts.delayed;
+  const verificationTotal =
+    verificationCounts.wait +
+    verificationCounts.active +
+    verificationCounts.delayed;
 
   return {
-    total: transcriptionTotal + analysisTotal,
+    total: transcriptionTotal + analysisTotal + verificationTotal,
     transcription: transcriptionTotal,
     analysis: analysisTotal,
+    verification: verificationTotal,
   };
 };
 
@@ -87,6 +100,51 @@ export const addAnalysisJob = async (data: AnalysisJobData) => {
 };
 
 /**
+ * Adds a new verification job to the queue.
+ * @param data - The data required for the verification job (e.g., jobId from the database).
+ * @returns The added job instance from BullMQ.
+ */
+export const addVerificationJob = async (data: VerificationJobData) => {
+  console.log(
+    `[JobQueueService] Adding verification job to queue for DB job ID: ${data.jobId}`
+  );
+  const job = await verificationQueue.add('process-verification', data, {
+    removeOnComplete: true,
+    removeOnFail: 50,
+  });
+  console.log(
+    `[JobQueueService] Added job ${job.id} to queue "${VERIFICATION_QUEUE_NAME}"`
+  );
+  return job;
+};
+
+/**
+ * Removes a pending (not yet picked up by the worker) verification job from
+ * the queue. Active jobs cannot be removed this way — they observe the
+ * `canceled` DB status and stop cooperatively.
+ * @param jobId - The SQLite `verification_jobs` row id.
+ * @returns The number of queued BullMQ jobs removed.
+ */
+export const cancelVerificationJobFromQueue = async (
+  jobId: number
+): Promise<number> => {
+  const queuedJobs = await verificationQueue.getJobs(['wait', 'delayed']);
+  let removed = 0;
+  for (const queuedJob of queuedJobs) {
+    if (queuedJob.data?.jobId === jobId) {
+      await queuedJob.remove();
+      removed++;
+    }
+  }
+  if (removed > 0) {
+    console.log(
+      `[JobQueueService] Removed ${removed} queued verification job(s) for DB job ID: ${jobId}`
+    );
+  }
+  return removed;
+};
+
+/**
  * Obliterates all jobs in the transcription queue, including active ones.
  * Useful for clearing stuck jobs.
  */
@@ -100,7 +158,11 @@ export const resetTranscriptionQueue = async () => {
 export async function closeQueues() {
   console.log('[JobQueueService] Closing BullMQ queues...');
   try {
-    await Promise.all([transcriptionQueue.close(), analysisQueue.close()]);
+    await Promise.all([
+      transcriptionQueue.close(),
+      analysisQueue.close(),
+      verificationQueue.close(),
+    ]);
     console.log('[JobQueueService] BullMQ queues closed.');
   } catch (err) {
     console.error('[JobQueueService] Error closing BullMQ queues:', err);

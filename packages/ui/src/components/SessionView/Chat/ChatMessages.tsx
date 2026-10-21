@@ -1,13 +1,15 @@
 /* packages/ui/src/components/SessionView/Chat/ChatMessages.tsx */
 import React, {
   useState,
+  useEffect,
   useRef,
   useCallback,
   RefObject,
   useMemo,
 } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
 import {
   Box,
@@ -19,9 +21,16 @@ import {
   Spinner,
 } from '@radix-ui/themes';
 import { createTemplate } from '../../../api/templates';
+import {
+  chatVerificationsQueryKey,
+  fetchChatVerifications,
+  type MessageVerification,
+  type VerifiedStatement,
+} from '../../../api/verification';
 import { toastMessageAtom, renderMarkdownAtom } from '../../../store';
 import type { ChatMessage, Template } from '../../../types';
 import { ChatMessageBubble } from './ChatMessageBubble';
+import { StatementVerdictModal } from '../../Verification/StatementVerdictModal';
 import { EditEntityModal, type BaseEntity } from '../../Shared/EditEntityModal';
 
 interface ChatMessagesProps {
@@ -40,6 +49,11 @@ interface TemplateFormState {
   text: string;
 }
 
+interface VerdictModalState {
+  messageId: number;
+  statementId: number | null;
+}
+
 // Helper function to strip HTML tags for plain text fallback
 function stripHtmlTags(html: string): string {
   const SCRIPT_REGEX = /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi;
@@ -53,10 +67,13 @@ function stripHtmlTags(html: string): string {
 
 export function ChatMessages({
   messages,
+  activeChatId,
+  isStandalone,
   isAiResponding,
   streamingMessageId,
   streamingPhase,
   streamingTokensPerSecond,
+  activeSessionId,
 }: ChatMessagesProps) {
   const queryClient = useQueryClient();
   const setToast = useSetAtom(toastMessageAtom);
@@ -73,6 +90,122 @@ export function ChatMessages({
   const handleScrolledToBottom = useCallback(() => {
     // Virtuoso's followOutput handles this automatically
   }, []);
+
+  // --- Fact-check verifications (session chats only) -------------------------
+  const verificationsEnabled =
+    !isStandalone && activeSessionId !== null && activeChatId !== null;
+
+  const { data: verificationsData, isLoading: verificationsLoading } = useQuery(
+    {
+      queryKey: chatVerificationsQueryKey(activeSessionId, activeChatId),
+      queryFn: () => fetchChatVerifications(activeSessionId!, activeChatId!),
+      enabled: verificationsEnabled,
+      staleTime: 60 * 1000,
+      refetchOnWindowFocus: false,
+    }
+  );
+
+  const verificationByMessageId = useMemo(() => {
+    const map = new Map<number, MessageVerification>();
+    for (const v of verificationsData ?? []) {
+      map.set(v.message_id, v);
+    }
+    return map;
+  }, [verificationsData]);
+
+  // --- Verdict modal ----------------------------------------------------------
+  const [verdictModal, setVerdictModal] = useState<VerdictModalState | null>(
+    null
+  );
+
+  const handleStatementClick = useCallback(
+    (messageId: number, statement: VerifiedStatement) => {
+      setVerdictModal({ messageId, statementId: statement.id });
+    },
+    []
+  );
+
+  const activeVerification =
+    verdictModal !== null
+      ? (verificationByMessageId.get(verdictModal.messageId) ?? null)
+      : null;
+
+  // Therapist's prompt preceding the audited AI message (omission context).
+  const activeUserQuestion = useMemo(() => {
+    if (verdictModal === null) return null;
+    const idx = messages.findIndex((m) => m.id === verdictModal.messageId);
+    if (idx < 0) return null;
+    for (let i = idx - 1; i >= 0; i--) {
+      if (messages[i]!.sender === 'user') return messages[i]!.text;
+    }
+    return null;
+  }, [verdictModal, messages]);
+
+  // --- ?highlightMsg deep-link ------------------------------------------------
+  // From the /verification issues feed: scrolls to the message, briefly
+  // rings it, and opens the verdict modal at the most severe statement.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const highlightMsgId = useMemo(() => {
+    const raw = searchParams.get('highlightMsg');
+    if (raw === null) return null;
+    const parsed = parseInt(raw, 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  }, [searchParams]);
+  const [flashMessageId, setFlashMessageId] = useState<number | null>(null);
+  // Guards the deep-link effect so it fires exactly once, only after both
+  // the messages and their verdicts have loaded (either may arrive after
+  // the first render, which would otherwise consume the param before the
+  // modal can open at the most severe statement).
+  const handledHighlightRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (highlightMsgId === null) return;
+    if (handledHighlightRef.current === highlightMsgId) return;
+    if (verificationsLoading) return;
+    const idx = messages.findIndex((m) => m.id === highlightMsgId);
+    if (idx < 0) return;
+    handledHighlightRef.current = highlightMsgId;
+    // Consume the param exactly once so back-navigation stays clean.
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('highlightMsg');
+        return next;
+      },
+      { replace: true }
+    );
+    try {
+      virtuosoRef.current?.scrollToIndex?.({
+        index: idx,
+        align: 'center',
+        behavior: 'smooth',
+      });
+    } catch {
+      // Virtuoso may not be ready yet — the flash still orients the user.
+    }
+    setFlashMessageId(highlightMsgId);
+    const timer = setTimeout(() => setFlashMessageId(null), 4500);
+    const verification = verificationByMessageId.get(highlightMsgId);
+    const stmts = verification?.statements ?? [];
+    if (stmts.length > 0) {
+      const flagged =
+        stmts.find(
+          (s) => s.verdict === 'fabricated' || s.verdict === 'contradicted'
+        ) ??
+        stmts.find(
+          (s) => s.verdict === 'partially_supported' || s.verdict === 'omission'
+        ) ??
+        stmts[0]!;
+      setVerdictModal({ messageId: highlightMsgId, statementId: flagged.id });
+    }
+    return () => clearTimeout(timer);
+  }, [
+    highlightMsgId,
+    messages,
+    verificationByMessageId,
+    verificationsLoading,
+    setSearchParams,
+  ]);
 
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
   const [templateToCreate, setTemplateToCreate] =
@@ -233,10 +366,27 @@ export function ChatMessages({
                 onStarClick={handleStarClick}
                 onCopyClick={handleCopyClick}
                 tokensPerSecond={tokensPerSecond}
+                verification={verificationByMessageId.get(message.id) ?? null}
+                flashHighlight={flashMessageId === message.id}
+                onStatementClick={handleStatementClick}
               />
             </Box>
           );
         }}
+      />
+
+      <StatementVerdictModal
+        open={verdictModal !== null}
+        onOpenChange={(open) => {
+          if (!open) setVerdictModal(null);
+        }}
+        statements={activeVerification?.statements ?? []}
+        initialStatementId={verdictModal?.statementId ?? null}
+        authoredModel={activeVerification?.authored_model ?? null}
+        judgeModel={activeVerification?.judge_model ?? null}
+        verifiedAt={activeVerification?.verified_at ?? null}
+        summaryAssessment={activeVerification?.summary_assessment ?? null}
+        userQuestion={activeUserQuestion}
       />
 
       <EditEntityModal

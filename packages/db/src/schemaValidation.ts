@@ -9,6 +9,9 @@ import {
   intermediateSummarySchema,
   templateSchema,
   appSettingsSchema,
+  verificationJobSchema,
+  messageVerificationSchema,
+  verifiedStatementSchema,
 } from '@therascript/domain';
 
 interface SchemaColumn {
@@ -97,6 +100,9 @@ export const validateDatabaseSchema = (
     { name: 'intermediate_summaries', schema: intermediateSummarySchema },
     { name: 'templates', schema: templateSchema },
     { name: 'app_settings', schema: appSettingsSchema },
+    { name: 'verification_jobs', schema: verificationJobSchema },
+    { name: 'message_verifications', schema: messageVerificationSchema },
+    { name: 'verified_statements', schema: verifiedStatementSchema },
   ];
 
   for (const table of tables) {

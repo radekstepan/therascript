@@ -32,6 +32,7 @@ const mapBackendMessageToUi = (msg: BackendChatMessage): ChatMessage => ({
   completionTokens: msg.completionTokens ?? undefined,
   duration: msg.duration ?? undefined,
   isTruncated: msg.isTruncated ?? undefined,
+  model: msg.model ?? undefined,
 });
 
 // ==============================

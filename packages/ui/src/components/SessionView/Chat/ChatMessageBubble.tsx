@@ -1,6 +1,14 @@
 // packages/ui/src/components/SessionView/Chat/ChatMessageBubble.tsx
-import React, { useRef } from 'react';
-import { Box, Flex, Text, Spinner, Callout } from '@radix-ui/themes';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
+import {
+  Badge,
+  Box,
+  Button,
+  Flex,
+  Text,
+  Spinner,
+  Callout,
+} from '@radix-ui/themes';
 import {
   StarIcon,
   CopyIcon,
@@ -12,6 +20,19 @@ import remarkBreaks from 'remark-breaks';
 import { cn } from '../../../utils';
 import { useAnimatedText } from '../../../hooks/useAnimatedText';
 import type { ChatMessage } from '../../../types';
+import type {
+  MessageVerification,
+  VerifiedStatement,
+} from '../../../api/verification';
+import {
+  VERIFIED_MARK_CLASS,
+  getVerdictLabel,
+  getVerdictMarkStyle,
+  rehypeHighlightStatements,
+  splitTextByStatementSpans,
+  type HighlightableStatement,
+  type TextSegment,
+} from '../../../utils/highlightVerifiedStatements';
 
 interface ChatMessageBubbleProps {
   message: ChatMessage;
@@ -22,6 +43,11 @@ interface ChatMessageBubbleProps {
   onStarClick: (message: ChatMessage) => void;
   onCopyClick: (payload: { text: string; html?: string }) => void;
   tokensPerSecond?: number | null;
+  /** Fact-check verdict for this message (session chats only). */
+  verification?: MessageVerification | null;
+  /** Briefly ring the bubble (deep-link highlight). */
+  flashHighlight?: boolean;
+  onStatementClick?: (messageId: number, statement: VerifiedStatement) => void;
 }
 
 function splitThinkingText(text: string) {
@@ -57,6 +83,9 @@ export function ChatMessageBubble({
   onStarClick,
   onCopyClick,
   tokensPerSecond,
+  verification,
+  flashHighlight,
+  onStatementClick,
 }: ChatMessageBubbleProps) {
   const { thinkingText, visibleText } = splitThinkingText(message.text);
   const animatedText = useAnimatedText(
@@ -100,10 +129,200 @@ export function ChatMessageBubble({
   const hasBubbleContent =
     displayText.trim() !== '' || showThinkingMarquee || showWaitingIndicator;
 
+  // --- Verification highlighting -------------------------------------------
+  const [showSupported, setShowSupported] = useState(false);
+
+  const verificationStatements: VerifiedStatement[] = useMemo(
+    () =>
+      verification?.status === 'completed' && !isCurrentlyStreaming
+        ? (verification.statements ?? [])
+        : [],
+    [verification, isCurrentlyStreaming]
+  );
+
+  const statementById = useMemo(
+    () => new Map(verificationStatements.map((s) => [s.id, s])),
+    [verificationStatements]
+  );
+
+  // Inline highlights cover claims only (omissions have no in-text span).
+  // Supported claims stay clean unless the "show verified" toggle is on.
+  const highlightable: HighlightableStatement[] = useMemo(
+    () =>
+      verificationStatements
+        .filter(
+          (s) =>
+            s.kind === 'claim' &&
+            s.exact_quote.trim() !== '' &&
+            (showSupported || s.verdict !== 'supported')
+        )
+        .map((s) => ({
+          id: s.id,
+          exact_quote: s.exact_quote,
+          start_char: s.start_char,
+          end_char: s.end_char,
+          verdict: s.verdict,
+        })),
+    [verificationStatements, showSupported]
+  );
+
+  const handleMarkActivate = useCallback(
+    (statementId: number) => {
+      const stmt = statementById.get(statementId);
+      if (stmt) onStatementClick?.(message.id, stmt);
+    },
+    [statementById, message.id, onStatementClick]
+  );
+
+  const handleMarkKeyDown = useCallback(
+    (event: React.KeyboardEvent, statementId: number) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        handleMarkActivate(statementId);
+      }
+    },
+    [handleMarkActivate]
+  );
+
+  // Markdown mode: rehype plugin wraps quotes in <mark>, rendered here.
+  const rehypePlugins = useMemo(
+    () =>
+      highlightable.length > 0
+        ? [() => rehypeHighlightStatements(highlightable)]
+        : [],
+    [highlightable]
+  );
+
+  const markdownComponents = useMemo(
+    () => ({
+      mark: ({ node: _node, ...props }: any) => {
+        const rawId = props['data-statement-id'] ?? props.dataStatementId;
+        const statementId = Number(rawId);
+        const stmt =
+          Number.isFinite(statementId) && statementId > 0
+            ? statementById.get(statementId)
+            : undefined;
+        if (!stmt) {
+          return <mark {...props} />;
+        }
+        return (
+          <mark
+            {...props}
+            className={cn(VERIFIED_MARK_CLASS, props.className)}
+            style={{ ...getVerdictMarkStyle(stmt.verdict), ...props.style }}
+            role="button"
+            tabIndex={0}
+            title={`${getVerdictLabel(stmt.verdict)} — click for the Judge's verdict`}
+            aria-label={`${getVerdictLabel(stmt.verdict)} statement. Activate for details.`}
+            onClick={(event: React.MouseEvent) => {
+              event.stopPropagation();
+              handleMarkActivate(stmt.id);
+            }}
+            onKeyDown={(event: React.KeyboardEvent) =>
+              handleMarkKeyDown(event, stmt.id)
+            }
+          />
+        );
+      },
+    }),
+    [statementById, handleMarkActivate, handleMarkKeyDown]
+  );
+
+  // Plain-text mode: slice displayText into plain/highlighted segments.
+  const plainSegments: TextSegment[] = useMemo(
+    () =>
+      highlightable.length > 0
+        ? splitTextByStatementSpans(displayText, highlightable)
+        : [{ text: displayText, statementId: null, verdict: null }],
+    [displayText, highlightable]
+  );
+
+  const renderPlainSegments = () => {
+    if (highlightable.length === 0) return displayText;
+    return plainSegments.map((segment, idx) => {
+      if (segment.statementId === null || segment.verdict === null) {
+        return <React.Fragment key={idx}>{segment.text}</React.Fragment>;
+      }
+      const stmt = statementById.get(segment.statementId);
+      if (!stmt)
+        return <React.Fragment key={idx}>{segment.text}</React.Fragment>;
+      return (
+        <mark
+          key={idx}
+          className={VERIFIED_MARK_CLASS}
+          style={getVerdictMarkStyle(segment.verdict)}
+          role="button"
+          tabIndex={0}
+          title={`${getVerdictLabel(segment.verdict)} — click for the Judge's verdict`}
+          aria-label={`${getVerdictLabel(segment.verdict)} statement. Activate for details.`}
+          onClick={(event: React.MouseEvent) => {
+            event.stopPropagation();
+            handleMarkActivate(stmt.id);
+          }}
+          onKeyDown={(event: React.KeyboardEvent) =>
+            handleMarkKeyDown(event, stmt.id)
+          }
+        >
+          {segment.text}
+        </mark>
+      );
+    });
+  };
+
+  // Footer badge counts.
+  const showVerificationFooter =
+    !isUser &&
+    !isCurrentlyStreaming &&
+    verification != null &&
+    verification.status === 'completed';
+  const hallucinationCount = showVerificationFooter
+    ? verification.contradicted_claims + verification.fabricated_claims
+    : 0;
+  const partialCount = showVerificationFooter ? verification.partial_claims : 0;
+  const omissionCount = showVerificationFooter
+    ? verification.omissions_count
+    : 0;
+  const totalClaims = showVerificationFooter ? verification.total_claims : 0;
+  const supportedCount = showVerificationFooter
+    ? verification.supported_claims
+    : 0;
+  const isFullyClean =
+    showVerificationFooter &&
+    hallucinationCount === 0 &&
+    partialCount === 0 &&
+    omissionCount === 0;
+
+  const firstOmission = useMemo(
+    () =>
+      verificationStatements.find(
+        (s) => s.kind === 'omission' || s.verdict === 'omission'
+      ) ?? null,
+    [verificationStatements]
+  );
+  const firstIssue = useMemo(
+    () =>
+      verificationStatements.find(
+        (s) => s.verdict === 'contradicted' || s.verdict === 'fabricated'
+      ) ??
+      verificationStatements.find((s) => s.verdict === 'partially_supported') ??
+      null,
+    [verificationStatements]
+  );
+
+  const authoredModel = verification?.authored_model ?? message.model ?? null;
+
   const handleCopy = () => {
     if (message.sender === 'ai' && renderMd && markdownContainerRef.current) {
+      // Unwrap verification <mark> overlays so pasted notes stay clean.
+      const clone = markdownContainerRef.current.cloneNode(true) as HTMLElement;
+      clone.querySelectorAll(`mark.${VERIFIED_MARK_CLASS}`).forEach((el) => {
+        const parent = el.parentNode;
+        if (!parent) return;
+        while (el.firstChild) parent.insertBefore(el.firstChild, el);
+        parent.removeChild(el);
+      });
       onCopyClick({
-        html: markdownContainerRef.current.innerHTML,
+        html: clone.innerHTML,
         text: message.text,
       });
     } else {
@@ -129,7 +348,10 @@ export function ChatMessageBubble({
             isUser
               ? 'bg-[var(--accent-9)] text-white rounded-lg ml-auto'
               : 'bg-[var(--gray-2)] text-[var(--gray-12)] rounded-lg border border-[var(--gray-4)]',
-            showWaitingIndicator && 'min-h-[3rem] flex items-center'
+            showWaitingIndicator && 'min-h-[3rem] flex items-center',
+            flashHighlight &&
+              !isUser &&
+              'ring-2 ring-[var(--amber-8)] ring-offset-2 ring-offset-[var(--color-background)]'
           )}
           style={{
             // Subtle pop
@@ -195,7 +417,11 @@ export function ChatMessageBubble({
               {displayText.trim() !== '' &&
                 (!isUser && renderMd ? (
                   <Box ref={markdownContainerRef}>
-                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm, remarkBreaks]}
+                      rehypePlugins={rehypePlugins}
+                      components={markdownComponents}
+                    >
                       {displayText}
                     </ReactMarkdown>
                   </Box>
@@ -208,7 +434,7 @@ export function ChatMessageBubble({
                       lineHeight: 1.6,
                     }}
                   >
-                    {displayText}
+                    {isUser ? displayText : renderPlainSegments()}
                   </Text>
                 ))}
             </Box>
@@ -299,6 +525,129 @@ export function ChatMessageBubble({
           </Text>
         </Flex>
       )}
+
+      {/* Verification footer — only for verified AI messages */}
+      {showVerificationFooter && (
+        <Flex
+          mt="1"
+          width="100%"
+          justify="start"
+          align="center"
+          gap="2"
+          wrap="wrap"
+        >
+          {isFullyClean ? (
+            <Badge color="green" variant="soft" size="1">
+              ✓ Verified ({supportedCount}/{totalClaims} claims)
+            </Badge>
+          ) : (
+            <>
+              {hallucinationCount > 0 && (
+                <Badge
+                  color="red"
+                  variant="soft"
+                  size="1"
+                  className="cursor-pointer hover:brightness-95 transition"
+                  role={firstIssue ? 'button' : undefined}
+                  tabIndex={firstIssue ? 0 : undefined}
+                  title="Open the Judge's verdict"
+                  onClick={
+                    firstIssue
+                      ? (event: React.MouseEvent) => {
+                          event.stopPropagation();
+                          onStatementClick?.(message.id, firstIssue);
+                        }
+                      : undefined
+                  }
+                  onKeyDown={
+                    firstIssue
+                      ? (event: React.KeyboardEvent) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            onStatementClick?.(message.id, firstIssue);
+                          }
+                        }
+                      : undefined
+                  }
+                >
+                  {hallucinationCount} Hallucination
+                  {hallucinationCount === 1 ? '' : 's'} / Contradiction
+                  {hallucinationCount === 1 ? '' : 's'}
+                </Badge>
+              )}
+              {partialCount > 0 && (
+                <Badge color="amber" variant="soft" size="1">
+                  {partialCount} Partially supported
+                </Badge>
+              )}
+              {omissionCount > 0 && (
+                <Badge
+                  color="amber"
+                  variant="soft"
+                  size="1"
+                  className="cursor-pointer hover:brightness-95 transition"
+                  role={firstOmission ? 'button' : undefined}
+                  tabIndex={firstOmission ? 0 : undefined}
+                  title="Omissions have no in-text highlight — click to see what was missed"
+                  onClick={
+                    firstOmission
+                      ? (event: React.MouseEvent) => {
+                          event.stopPropagation();
+                          onStatementClick?.(message.id, firstOmission);
+                        }
+                      : undefined
+                  }
+                  onKeyDown={
+                    firstOmission
+                      ? (event: React.KeyboardEvent) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            onStatementClick?.(message.id, firstOmission);
+                          }
+                        }
+                      : undefined
+                  }
+                >
+                  {omissionCount} Omission{omissionCount === 1 ? '' : 's'}{' '}
+                  detected
+                </Badge>
+              )}
+            </>
+          )}
+          {authoredModel != null && authoredModel !== '' && (
+            <Badge
+              color="gray"
+              variant="soft"
+              size="1"
+              title={`Authored by ${authoredModel}`}
+              style={{
+                maxWidth: 220,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {authoredModel}
+            </Badge>
+          )}
+          {supportedCount > 0 && !isFullyClean && (
+            <Button
+              size="1"
+              variant="ghost"
+              color="gray"
+              onClick={() => setShowSupported((prev) => !prev)}
+              title={
+                showSupported
+                  ? 'Hide supported-claim underlines'
+                  : 'Underline supported claims too'
+              }
+            >
+              {showSupported ? 'Hide verified' : 'Show verified'}
+            </Button>
+          )}
+        </Flex>
+      )}
+
       {/* Action Row */}
       {(showCopyButton || isUser) && (
         <Flex

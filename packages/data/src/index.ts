@@ -6,6 +6,7 @@ export { usageRepository } from './repositories/usageRepository.js';
 export { analysisRepository } from './repositories/analysisRepository.js';
 export { templateRepository } from './repositories/templateRepository.js';
 export { appSettingsRepository } from './repositories/appSettingsRepository.js';
+export { verificationRepository } from './repositories/verificationRepository.js';
 
 export type {
   UsageLog,
@@ -17,3 +18,18 @@ export type {
   UsageTotals,
   UsageTotalsByModel,
 } from './repositories/usageRepository.js';
+
+export type {
+  CreateVerificationJobOptions,
+  UpdateVerificationJobFields,
+  VerificationJobCounterDeltas,
+  VerificationCandidateFilters,
+  VerificationCandidateMessage,
+  VerificationStatementInput,
+  SaveMessageVerificationInput,
+  SessionVerificationDetail,
+  VerificationAnalyticsFilters,
+  FlaggedStatementsQuery,
+  FlaggedStatementItem,
+  FlaggedStatementsResult,
+} from './repositories/verificationRepository.js';

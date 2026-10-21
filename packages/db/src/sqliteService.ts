@@ -95,7 +95,7 @@ export const schema = `
 `;
 
 // --- NEW MIGRATION LOGIC ---
-export const LATEST_SCHEMA_VERSION = 19;
+export const LATEST_SCHEMA_VERSION = 20;
 
 // --- NEW SYSTEM PROMPTS ---
 export const SYSTEM_PROMPT_TEMPLATES = {
@@ -142,6 +142,62 @@ export const SYSTEM_PROMPT_TEMPLATES = {
     text: `Summarize the following user request into a very short, title-like phrase of no more than 5 words. Do not use quotes or introductory phrases.
 
 REQUEST: "{{USER_PROMPT}}"`,
+  },
+  VERIFICATION_JUDGE: {
+    title: 'system_verification_judge',
+    text: `You are an expert fact-verification judge auditing an AI-generated therapy chat response against the ground-truth session transcript. You will be given:
+1. GROUND-TRUTH SESSION TRANSCRIPT: Paragraphs formatted as [P#<index> MM:SS] <SPEAKER>: <text>.
+2. THERAPIST'S PROMPT / QUESTION: The user message the AI was answering.
+3. AI RESPONSE TO AUDIT: The visible text of the AI message to verify.
+
+Your tasks:
+1. Extract every distinct factual or clinical statement/claim made in the AI Response about the session, client, therapist, symptoms, events, quotes, or interventions.
+2. For each claim, copy the VERBATIM substring ("exact_quote") exactly as it appears in the AI Response so it can be highlighted in the UI. Do not paraphrase.
+3. Verify each claim strictly against the Ground-Truth Session Transcript and assign one verdict:
+   - "supported": Directly corroborated by the transcript.
+   - "partially_supported": Contains a kernel of truth from the transcript but exaggerates, overgeneralizes, or adds unsupported detail.
+   - "contradicted": Directly conflicts with what the transcript says (e.g., wrong speaker attribution, opposite clinical fact, wrong timeline).
+   - "fabricated": Completely made up / hallucinated; not mentioned anywhere in the transcript.
+4. Check for OMISSIONS: Did the AI fail to mention a major, explicit point from the transcript that directly answers the Therapist's Prompt? If so, include entries in the "omissions" array.
+
+Respond with ONLY a valid JSON object (no markdown fences, no commentary) matching this schema:
+{
+  "summary_assessment": "Brief 1-sentence overall audit summary.",
+  "claims": [
+    {
+      "exact_quote": "Verbatim sentence or clause from the AI response",
+      "normalized_claim": "Concise standalone statement of the claim",
+      "verdict": "supported | partially_supported | contradicted | fabricated",
+      "severity": "none | low | medium | high | critical",
+      "confidence": 0.95,
+      "reasoning": "Why this claim is supported, contradicted, or fabricated based on the transcript.",
+      "evidence": [
+        {
+          "paragraphIndex": 14,
+          "timestampMs": 84000,
+          "speaker": "SPEAKER_01",
+          "quote": "Verbatim quote from the transcript"
+        }
+      ]
+    }
+  ],
+  "omissions": [
+    {
+      "normalized_claim": "What important fact from the transcript was omitted relative to the user's prompt",
+      "severity": "low | medium | high | critical",
+      "confidence": 0.9,
+      "reasoning": "Why this omission matters for the therapist's question.",
+      "evidence": [
+        {
+          "paragraphIndex": 22,
+          "timestampMs": 135000,
+          "speaker": "SPEAKER_01",
+          "quote": "Verbatim quote from the transcript that was missed"
+        }
+      ]
+    }
+  ]
+}`,
   },
 };
 // --- END NEW SYSTEM PROMPTS ---
@@ -663,6 +719,169 @@ function runMigrations(dbInstance: DB) {
         dbInstance.pragma(`user_version = 19`);
         currentVersion = 19;
         console.log('[db Migrator] Version 19 applied.');
+      }
+
+      // NEW MIGRATION: Version 20 for the LLM Fact-Verification & Hallucination
+      // Audit ("LLM Judge") system. Adds the authoring model column to messages
+      // (backfilled from usage_logs), plus verification_jobs,
+      // message_verifications, and verified_statements tables.
+      if (currentVersion < 20) {
+        console.log('[db Migrator] Applying version 20...');
+        // Guard: ALTER/UPDATE/INDEX on messages require the table to exist.
+        // Real v18/v19 databases always have it (created early in the chain),
+        // but partial databases must not crash the migrator.
+        const existingTables = (
+          dbInstance
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+            .all() as { name: string }[]
+        ).map((row) => row.name);
+        const hasMessagesTable = existingTables.includes('messages');
+        if (hasMessagesTable) {
+          const messageColumns = dbInstance.pragma('table_info(messages)') as {
+            name: string;
+          }[];
+          if (!messageColumns.some((col) => col.name === 'model')) {
+            console.log('[db Migrator V20] Adding "model" to messages...');
+            dbInstance.exec('ALTER TABLE messages ADD COLUMN model TEXT NULL');
+          }
+
+          if (existingTables.includes('usage_logs')) {
+            console.log('[db Migrator V20] Backfilling messages.model...');
+            // NOTE: Deviates from plan.md's literal SQL. SQLite does not resolve
+            // outer-query columns inside a subquery ORDER BY expression
+            // ("no such column: messages.timestamp"), so the nearest-match
+            // ordering is expressed as a MIN(...) equality in WHERE (which fully
+            // supports correlation) with an inner-only ORDER BY tiebreak.
+            dbInstance.exec(`
+              UPDATE messages AS m
+              SET model = (
+                SELECT u.model
+                FROM usage_logs u
+                WHERE u.type = 'llm'
+                  AND u.source IN ('session_chat', 'standalone_chat')
+                  AND ABS(u.timestamp - m.timestamp) <= 5000
+                  AND ABS(u.timestamp - m.timestamp) = (
+                    SELECT MIN(ABS(u2.timestamp - m.timestamp))
+                    FROM usage_logs u2
+                    WHERE u2.type = 'llm'
+                      AND u2.source IN ('session_chat', 'standalone_chat')
+                      AND ABS(u2.timestamp - m.timestamp) <= 5000
+                  )
+                ORDER BY u.timestamp ASC
+                LIMIT 1
+              )
+              WHERE m.sender = 'ai' AND m.completionTokens IS NOT NULL;
+            `);
+          } else {
+            console.log(
+              '[db Migrator V20] Skipping messages.model backfill (no usage_logs table).'
+            );
+          }
+
+          dbInstance.exec(`
+            CREATE INDEX IF NOT EXISTS idx_messages_model ON messages (model);
+          `);
+        } else {
+          console.log(
+            '[db Migrator V20] Skipping messages.model steps (no messages table).'
+          );
+        }
+
+        dbInstance.exec(`
+
+          CREATE TABLE IF NOT EXISTS verification_jobs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              status TEXT NOT NULL DEFAULT 'pending'
+                CHECK(status IN ('pending', 'processing', 'completed', 'failed', 'canceled')),
+              scope TEXT NOT NULL DEFAULT 'all_unverified'
+                CHECK(scope IN ('all_unverified', 'all_force', 'selected_sessions', 'single_chat')),
+              session_ids_json TEXT NULL,
+              chat_id INTEGER NULL,
+              skip_verified INTEGER NOT NULL DEFAULT 1,
+              total_messages INTEGER NOT NULL DEFAULT 0,
+              processed_messages INTEGER NOT NULL DEFAULT 0,
+              total_statements INTEGER NOT NULL DEFAULT 0,
+              flagged_statements INTEGER NOT NULL DEFAULT 0,
+              omissions_count INTEGER NOT NULL DEFAULT 0,
+              created_at INTEGER NOT NULL,
+              completed_at INTEGER NULL,
+              error_message TEXT NULL,
+              model_name TEXT NULL,
+              context_size INTEGER NULL,
+              thinking_budget INTEGER NULL,
+              temperature REAL NULL,
+              top_p REAL NULL,
+              repeat_penalty REAL NULL,
+              num_gpu_layers INTEGER NULL,
+              llm_base_url TEXT NULL
+          );
+          CREATE INDEX IF NOT EXISTS idx_verification_jobs_status ON verification_jobs (status);
+          CREATE INDEX IF NOT EXISTS idx_verification_jobs_created_at ON verification_jobs (created_at DESC);
+
+          CREATE TABLE IF NOT EXISTS message_verifications (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              message_id INTEGER NOT NULL UNIQUE,
+              chat_id INTEGER NOT NULL,
+              session_id INTEGER NOT NULL,
+              verification_job_id INTEGER NULL,
+              authored_model TEXT NULL,
+              judge_model TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'completed'
+                CHECK(status IN ('completed', 'failed', 'skipped')),
+              total_claims INTEGER NOT NULL DEFAULT 0,
+              supported_claims INTEGER NOT NULL DEFAULT 0,
+              partial_claims INTEGER NOT NULL DEFAULT 0,
+              contradicted_claims INTEGER NOT NULL DEFAULT 0,
+              fabricated_claims INTEGER NOT NULL DEFAULT 0,
+              omissions_count INTEGER NOT NULL DEFAULT 0,
+              accuracy_score REAL NOT NULL DEFAULT 1.0,
+              summary_assessment TEXT NULL,
+              prompt_tokens INTEGER NULL,
+              completion_tokens INTEGER NULL,
+              duration_ms INTEGER NULL,
+              verified_at INTEGER NOT NULL,
+              error_message TEXT NULL,
+              FOREIGN KEY (message_id) REFERENCES messages (id) ON DELETE CASCADE,
+              FOREIGN KEY (chat_id) REFERENCES chats (id) ON DELETE CASCADE,
+              FOREIGN KEY (session_id) REFERENCES sessions (id) ON DELETE CASCADE,
+              FOREIGN KEY (verification_job_id) REFERENCES verification_jobs (id) ON DELETE SET NULL
+          );
+          CREATE INDEX IF NOT EXISTS idx_msg_verifications_session ON message_verifications (session_id);
+          CREATE INDEX IF NOT EXISTS idx_msg_verifications_chat ON message_verifications (chat_id);
+          CREATE INDEX IF NOT EXISTS idx_msg_verifications_authored_model ON message_verifications (authored_model);
+          CREATE INDEX IF NOT EXISTS idx_msg_verifications_verified_at ON message_verifications (verified_at DESC);
+
+          CREATE TABLE IF NOT EXISTS verified_statements (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              message_verification_id INTEGER NOT NULL,
+              message_id INTEGER NOT NULL,
+              session_id INTEGER NOT NULL,
+              statement_index INTEGER NOT NULL,
+              kind TEXT NOT NULL DEFAULT 'claim'
+                CHECK(kind IN ('claim', 'omission')),
+              exact_quote TEXT NOT NULL,
+              normalized_claim TEXT NOT NULL,
+              start_char INTEGER NULL,
+              end_char INTEGER NULL,
+              verdict TEXT NOT NULL
+                CHECK(verdict IN ('supported', 'partially_supported', 'contradicted', 'fabricated', 'omission')),
+              severity TEXT NOT NULL DEFAULT 'none'
+                CHECK(severity IN ('none', 'low', 'medium', 'high', 'critical')),
+              confidence REAL NOT NULL DEFAULT 1.0,
+              reasoning TEXT NOT NULL,
+              transcript_evidence_json TEXT NULL,
+              created_at INTEGER NOT NULL,
+              FOREIGN KEY (message_verification_id) REFERENCES message_verifications (id) ON DELETE CASCADE,
+              FOREIGN KEY (message_id) REFERENCES messages (id) ON DELETE CASCADE,
+              FOREIGN KEY (session_id) REFERENCES sessions (id) ON DELETE CASCADE
+          );
+          CREATE INDEX IF NOT EXISTS idx_verified_statements_msg ON verified_statements (message_id);
+          CREATE INDEX IF NOT EXISTS idx_verified_statements_verdict ON verified_statements (verdict);
+          CREATE INDEX IF NOT EXISTS idx_verified_statements_session ON verified_statements (session_id);
+        `);
+        dbInstance.pragma(`user_version = 20`);
+        currentVersion = 20;
+        console.log('[db Migrator] Version 20 applied.');
       }
     })();
     console.log(

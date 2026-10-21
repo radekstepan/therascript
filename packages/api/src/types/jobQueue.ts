@@ -14,3 +14,11 @@ export interface TranscriptionJobData {
 export interface AnalysisJobData {
   jobId: number;
 }
+
+/**
+ * Defines the data structure for a job that runs the LLM fact-verification
+ * audit ("LLM Judge") over session-bound chats.
+ */
+export interface VerificationJobData {
+  jobId: number;
+}

@@ -10,3 +10,4 @@ export * from './system';
 export * from './templates';
 export * from './analysis';
 export * from './jobs';
+export * from './verification';

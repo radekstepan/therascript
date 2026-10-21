@@ -8,9 +8,11 @@ import {
   redisConnection,
   TRANSCRIPTION_QUEUE_NAME,
   ANALYSIS_QUEUE_NAME,
+  VERIFICATION_QUEUE_NAME,
 } from '@therascript/queue';
 import transcriptionProcessor from './jobs/transcriptionProcessor.js';
 import analysisProcessor from './jobs/analysisProcessor.js';
+import verificationProcessor from './jobs/verificationProcessor.js';
 import { closePublisher } from './services/streamPublisher.js';
 import {
   getLoadedBaseUrls as getTrackedLoadedBaseUrls,
@@ -53,6 +55,20 @@ const analysisWorker = new Worker(ANALYSIS_QUEUE_NAME, analysisProcessor, {
   concurrency: 1,
 });
 
+console.log(
+  `[Worker] Initializing worker for queue: "${VERIFICATION_QUEUE_NAME}"`
+);
+const verificationWorker = new Worker(
+  VERIFICATION_QUEUE_NAME,
+  verificationProcessor,
+  {
+    connection: redisConnection,
+    // Same single-model-at-a-time constraint as the analysis worker: the
+    // Judge loads its own model via loadLlmModelForWorker.
+    concurrency: 1,
+  }
+);
+
 // --- Event Listeners for Logging ---
 const setupWorkerEventListeners = (worker: Worker, name: string) => {
   worker.on('active', (job: Job) => {
@@ -87,6 +103,7 @@ transcriptionWorker.on('active', (job: Job) => {
 
 setupWorkerEventListeners(transcriptionWorker, 'Transcription');
 setupWorkerEventListeners(analysisWorker, 'Analysis');
+setupWorkerEventListeners(verificationWorker, 'Verification');
 
 console.log('[Worker] All workers initialized and waiting for jobs.');
 
@@ -97,11 +114,15 @@ async function shutdown(signal: string) {
   isShuttingDown = true;
   console.log(`\n[Worker] Received ${signal}. Shutting down gracefully...`);
   try {
-    await Promise.all([transcriptionWorker.close(), analysisWorker.close()]);
+    await Promise.all([
+      transcriptionWorker.close(),
+      analysisWorker.close(),
+      verificationWorker.close(),
+    ]);
     console.log('[Worker] All BullMQ components closed.');
-    // Unload any models we loaded during in-flight analysis jobs (including
-    // per-job remote URLs the API process can't see). Best-effort: a
-    // transient network blip must not block the exit.
+    // Unload any models we loaded during in-flight analysis/verification
+    // jobs (including per-job remote URLs the API process can't see).
+    // Best-effort: a transient network blip must not block the exit.
     const trackedUrls = getTrackedLoadedBaseUrls();
     if (trackedUrls.length > 0) {
       console.log(

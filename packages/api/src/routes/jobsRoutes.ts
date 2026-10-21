@@ -9,6 +9,7 @@ const ActiveJobCountResponseSchema = t.Object({
   total: t.Number(),
   transcription: t.Number(),
   analysis: t.Number(),
+  verification: t.Number(),
 });
 
 export const jobsRoutes = new Elysia({ prefix: '/api/jobs' })

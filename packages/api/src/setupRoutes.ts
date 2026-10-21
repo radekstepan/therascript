@@ -13,6 +13,7 @@ import { analysisRoutes } from './routes/analysisRoutes.js';
 import { transcriptionRoutes } from './routes/transcriptionRoutes.js';
 import { jobsRoutes } from './routes/jobsRoutes.js';
 import { usageRoutes } from './routes/usageRoutes.js';
+import { verificationRoutes } from './routes/verificationRoutes.js';
 
 export function setupRoutes() {
   return new Elysia({ name: 'routes' })
@@ -26,6 +27,7 @@ export function setupRoutes() {
     .use(transcriptionRoutes)
     .use(jobsRoutes)
     .use(sessionRoutes)
+    .use(verificationRoutes)
     .use(chatRoutes)
     .use(standaloneChatRoutes)
     .use(templateRoutes)

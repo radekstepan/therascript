@@ -20,6 +20,10 @@ import type {
   BackendSession,
 } from '@therascript/domain'; // Added BackendChatSession
 import { computeContextUsageForChat } from '../services/contextUsageService.js';
+import {
+  getChatVerificationsHandler,
+  verifySingleChatHandler,
+} from '../api/verificationHandler.js';
 
 // --- Schemas ---
 const SessionIdParamSchema = t.Object({
@@ -66,6 +70,7 @@ const ChatMessageResponseSchema = t.Object({
   completionTokens: t.Optional(t.Union([t.Number(), t.Null()])),
   duration: t.Optional(t.Union([t.Number(), t.Null()])),
   isTruncated: t.Optional(t.Union([t.Boolean(), t.Null()])),
+  model: t.Optional(t.Union([t.String(), t.Null()])),
 });
 
 const FullSessionChatResponseSchema = t.Object({
@@ -77,6 +82,87 @@ const FullSessionChatResponseSchema = t.Object({
 });
 
 const DeleteChatResponseSchema = t.Object({ message: t.String() });
+
+// --- Verification Schemas ---
+const ChatTranscriptEvidenceItemSchema = t.Object({
+  paragraphIndex: t.Union([t.Number(), t.Null()]),
+  timestampMs: t.Union([t.Number(), t.Null()]),
+  speaker: t.Union([t.String(), t.Null()]),
+  quote: t.String(),
+});
+
+const ChatVerifiedStatementSchema = t.Object({
+  id: t.Number(),
+  message_verification_id: t.Number(),
+  message_id: t.Number(),
+  session_id: t.Number(),
+  statement_index: t.Number(),
+  kind: t.Union([t.Literal('claim'), t.Literal('omission')]),
+  exact_quote: t.String(),
+  normalized_claim: t.String(),
+  start_char: t.Union([t.Number(), t.Null()]),
+  end_char: t.Union([t.Number(), t.Null()]),
+  verdict: t.Union([
+    t.Literal('supported'),
+    t.Literal('partially_supported'),
+    t.Literal('contradicted'),
+    t.Literal('fabricated'),
+    t.Literal('omission'),
+  ]),
+  severity: t.Union([
+    t.Literal('none'),
+    t.Literal('low'),
+    t.Literal('medium'),
+    t.Literal('high'),
+    t.Literal('critical'),
+  ]),
+  confidence: t.Number(),
+  reasoning: t.String(),
+  transcript_evidence_json: t.Union([t.String(), t.Null()]),
+  evidence: t.Optional(t.Array(ChatTranscriptEvidenceItemSchema)),
+  created_at: t.Number(),
+});
+
+const ChatMessageVerificationSchema = t.Object({
+  id: t.Number(),
+  message_id: t.Number(),
+  chat_id: t.Number(),
+  session_id: t.Number(),
+  verification_job_id: t.Union([t.Number(), t.Null()]),
+  authored_model: t.Union([t.String(), t.Null()]),
+  judge_model: t.String(),
+  status: t.Union([
+    t.Literal('completed'),
+    t.Literal('failed'),
+    t.Literal('skipped'),
+  ]),
+  total_claims: t.Number(),
+  supported_claims: t.Number(),
+  partial_claims: t.Number(),
+  contradicted_claims: t.Number(),
+  fabricated_claims: t.Number(),
+  omissions_count: t.Number(),
+  accuracy_score: t.Number(),
+  summary_assessment: t.Union([t.String(), t.Null()]),
+  prompt_tokens: t.Union([t.Number(), t.Null()]),
+  completion_tokens: t.Union([t.Number(), t.Null()]),
+  duration_ms: t.Union([t.Number(), t.Null()]),
+  verified_at: t.Number(),
+  error_message: t.Union([t.String(), t.Null()]),
+  statements: t.Optional(t.Array(ChatVerifiedStatementSchema)),
+});
+
+const VerifySingleChatBodySchema = t.Object({
+  skipVerified: t.Optional(t.Boolean()),
+  modelName: t.Optional(t.String({ minLength: 1 })),
+  contextSize: t.Optional(t.Union([t.Number({ minimum: 1 }), t.Null()])),
+  thinkingBudget: t.Optional(t.Union([t.Number(), t.Null()])),
+  temperature: t.Optional(t.Number({ minimum: 0, maximum: 2 })),
+  topP: t.Optional(t.Number({ minimum: 0, maximum: 1 })),
+  repeatPenalty: t.Optional(t.Number({ minimum: 0.5, maximum: 2 })),
+  numGpuLayers: t.Optional(t.Union([t.Number({ minimum: 0 }), t.Null()])),
+  baseUrl: t.Optional(t.String({ maxLength: 2048 })),
+});
 
 // --- NEW: Context Usage Schemas ---
 const NullableNumber = t.Union([t.Number(), t.Null()]);
@@ -117,6 +203,8 @@ export const chatRoutes = new Elysia({
     fullSessionChatResponse: FullSessionChatResponseSchema,
     deleteChatResponse: DeleteChatResponseSchema,
     contextUsageResponse: ContextUsageResponseSchema,
+    chatMessageVerification: ChatMessageVerificationSchema,
+    verifySingleChatBody: VerifySingleChatBodySchema,
   })
   .guard(
     { params: 'sessionIdParam' }, // Ensures params.sessionId is a string and matches pattern
@@ -242,6 +330,31 @@ export const chatRoutes = new Elysia({
                         response: { 200: 'deleteChatResponse' },
                         detail: {
                           summary: 'Delete a session chat and its messages',
+                        },
+                      }
+                    )
+                    .get(
+                      '/:chatId/verifications',
+                      (context) => getChatVerificationsHandler(context as any),
+                      {
+                        response: {
+                          200: t.Array(ChatMessageVerificationSchema),
+                        },
+                        detail: {
+                          summary:
+                            'Get fact-verification verdicts for all AI messages in a chat',
+                        },
+                      }
+                    )
+                    .post(
+                      '/:chatId/verify',
+                      (context) => verifySingleChatHandler(context as any),
+                      {
+                        body: t.Optional(VerifySingleChatBodySchema),
+                        response: { 202: t.Object({ jobId: t.Number() }) },
+                        detail: {
+                          summary:
+                            'Trigger a single-chat fact-verification job',
                         },
                       }
                     )

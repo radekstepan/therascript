@@ -530,3 +530,29 @@ button[class*='rt-IconButton']:not(:disabled):hover {
   width: 100% !important;
 }
 
+/* --- Verified statement highlights (LLM Judge) --- */
+/* Inline <mark> overlays in session chat notes. Base colors are set inline
+   per verdict; hover/focus elevation lives here. */
+.verified-statement-mark {
+  transition:
+    background-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.verified-statement-mark:hover {
+  filter: brightness(0.96);
+  box-shadow: 0 1px 0 var(--gray-a6);
+}
+
+.verified-statement-mark:focus-visible {
+  outline: 2px solid var(--accent-8);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .verified-statement-mark {
+    transition: none;
+  }
+}
+/* --- End verified statement highlights --- */
+

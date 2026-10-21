@@ -528,7 +528,8 @@ export const addStandaloneChatMessage = async ({
               finalPromptTokens,
               finalCompletionTokens,
               llmStreamError ? null : llmDuration,
-              isTruncated
+              isTruncated,
+              getActiveModel()
             );
 
             await indexDocument(
