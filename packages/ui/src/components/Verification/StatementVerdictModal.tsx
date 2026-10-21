@@ -323,7 +323,7 @@ export function StatementVerdictModal({
                       <InfoCircledIcon />
                     </Callout.Icon>
                     <Callout.Text>
-                      The Judge did not attach transcript quotes for this
+                      The Fact Check did not attach transcript quotes for this
                       statement.
                     </Callout.Text>
                   </Callout.Root>

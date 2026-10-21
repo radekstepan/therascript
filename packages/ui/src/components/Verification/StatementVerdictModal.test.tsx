@@ -54,6 +54,52 @@ describe('StatementVerdictModal title', () => {
   });
 });
 
+describe('StatementVerdictModal empty evidence note', () => {
+  // Mirrors the API shape for a judge verdict without quotes: the
+  // repository persists NULL and the API returns evidence: [].
+  const NO_EVIDENCE: VerifiedStatement = {
+    ...STATEMENT,
+    id: 13,
+    verdict: 'supported',
+    severity: 'none',
+    reasoning: 'Confirmed by the session transcript.',
+    transcript_evidence_json: null,
+    evidence: [],
+  };
+
+  function renderStatement(statement: VerifiedStatement) {
+    return render(
+      <Theme>
+        <StatementVerdictModal
+          open
+          onOpenChange={() => {}}
+          statements={[statement]}
+          initialStatementId={statement.id}
+          authoredModel="author-model"
+          judgeModel="judge-model"
+          verifiedAt={Date.now()}
+        />
+      </Theme>
+    );
+  }
+
+  it('renders the Fact Check empty-state note when a non-fabricated statement has no evidence', async () => {
+    renderStatement(NO_EVIDENCE);
+    expect(
+      await screen.findByText(
+        'The Fact Check did not attach transcript quotes for this statement.'
+      )
+    ).toBeTruthy();
+    expect(screen.queryByText(/Judge did not attach/)).toBeNull();
+  });
+
+  it('routes fabricated statements without evidence to the red no-evidence callout instead', async () => {
+    renderStatement(STATEMENT);
+    expect(await screen.findByText(/No matching evidence found/)).toBeTruthy();
+    expect(screen.queryByText(/did not attach transcript quotes/)).toBeNull();
+  });
+});
+
 describe('StatementVerdictModal top steppers', () => {
   const SECOND: VerifiedStatement = {
     ...STATEMENT,
