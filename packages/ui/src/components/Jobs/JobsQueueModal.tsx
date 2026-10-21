@@ -25,9 +25,14 @@ import {
   FileTextIcon,
   ChevronRightIcon,
   ChatBubbleIcon,
+  MagnifyingGlassIcon,
 } from '@radix-ui/react-icons';
 import { fetchAnalysisJobs } from '../../api/analysis';
 import { fetchSessions } from '../../api/session';
+import {
+  fetchVerificationJobs,
+  type VerificationJob,
+} from '../../api/verification';
 import { activeLlmJobsAtom } from '../../store';
 import type { AnalysisJob, Session } from '../../types';
 import { formatTimestamp } from '../../helpers';
@@ -39,7 +44,7 @@ interface JobsQueueModalProps {
 }
 
 const getStatusBadgeColor = (
-  status: AnalysisJob['status'] | Session['status']
+  status: AnalysisJob['status'] | Session['status'] | VerificationJob['status']
 ): React.ComponentProps<typeof Badge>['color'] => {
   switch (status) {
     case 'completed':
@@ -48,6 +53,7 @@ const getStatusBadgeColor = (
       return 'red';
     case 'mapping':
     case 'reducing':
+    case 'processing':
     case 'transcribing':
     case 'queued':
       return 'blue';
@@ -87,6 +93,17 @@ export function JobsQueueModal({ isOpen, onOpenChange }: JobsQueueModalProps) {
     refetchInterval: isOpen ? 5000 : false,
   });
 
+  const {
+    data: verificationJobs,
+    isLoading: isLoadingVerification,
+    error: verificationError,
+  } = useQuery<VerificationJob[], Error>({
+    queryKey: ['verificationJobs'],
+    queryFn: fetchVerificationJobs,
+    enabled: isOpen,
+    refetchInterval: isOpen ? 5000 : false,
+  });
+
   const activeAnalysisJobs =
     analysisJobs?.filter(
       (job) => !['completed', 'failed', 'canceled'].includes(job.status)
@@ -97,17 +114,26 @@ export function JobsQueueModal({ isOpen, onOpenChange }: JobsQueueModalProps) {
       ['queued', 'transcribing'].includes(session.status)
     ) || [];
 
+  // Same active filter as the badge count (GET /api/jobs/active-count
+  // includes verification) and VerificationAuditPage.isActiveJob.
+  const activeVerificationJobs =
+    verificationJobs?.filter(
+      (job) => job.status === 'pending' || job.status === 'processing'
+    ) || [];
+
   const handleNavigate = (path: string) => {
     navigate(path);
     onOpenChange(false);
   };
 
-  const isLoading = isLoadingAnalysis || isLoadingSessions;
-  const error = analysisError || sessionsError;
+  const isLoading =
+    isLoadingAnalysis || isLoadingSessions || isLoadingVerification;
+  const error = analysisError || sessionsError || verificationError;
   const hasActiveJobs =
     activeLlmJobs.length > 0 ||
     activeAnalysisJobs.length > 0 ||
-    activeTranscriptionJobs.length > 0;
+    activeTranscriptionJobs.length > 0 ||
+    activeVerificationJobs.length > 0;
 
   return (
     <Dialog.Root open={isOpen} onOpenChange={onOpenChange}>
@@ -119,7 +145,7 @@ export function JobsQueueModal({ isOpen, onOpenChange }: JobsQueueModalProps) {
           </Flex>
         </Dialog.Title>
         <Dialog.Description size="2" mb="4" color="gray">
-          Overview of ongoing analysis and transcription tasks.
+          Overview of ongoing analysis, transcription, and fact-check tasks.
         </Dialog.Description>
 
         <ScrollArea
@@ -242,6 +268,58 @@ export function JobsQueueModal({ isOpen, onOpenChange }: JobsQueueModalProps) {
                               </AppTooltip>
                               <Text size="1" color="gray">
                                 Created: {formatTimestamp(job.created_at)}
+                              </Text>
+                            </Flex>
+                            <Flex align="center" gap="2" flexShrink="0">
+                              <Badge
+                                color={getStatusBadgeColor(job.status)}
+                                variant="soft"
+                              >
+                                {job.status}
+                              </Badge>
+                              <ChevronRightIcon className="text-[--gray-a9]" />
+                            </Flex>
+                          </Flex>
+                        </Card>
+                      ))}
+                    </Flex>
+                  </Box>
+                )}
+
+                {/* Verification Jobs */}
+                {activeVerificationJobs.length > 0 && (
+                  <Box>
+                    <Heading as="h3" size="3" mb="2">
+                      <Flex align="center" gap="2">
+                        <MagnifyingGlassIcon />
+                        Verification Jobs ({activeVerificationJobs.length})
+                      </Flex>
+                    </Heading>
+                    <Flex direction="column" gap="2">
+                      {activeVerificationJobs.map((job) => (
+                        <Card
+                          key={`verification-${job.id}`}
+                          size="1"
+                          className="cursor-pointer hover:bg-[--gray-a3]"
+                          onClick={() => handleNavigate('/verification')}
+                        >
+                          <Flex justify="between" align="center">
+                            <Flex
+                              direction="column"
+                              gap="1"
+                              style={{ minWidth: 0 }}
+                            >
+                              <AppTooltip
+                                content={`Fact-check audit #${job.id}`}
+                              >
+                                <Text size="2" weight="medium" truncate>
+                                  Audit #{job.id}:{' '}
+                                  {job.scope.replace(/_/g, ' ')}
+                                </Text>
+                              </AppTooltip>
+                              <Text size="1" color="gray">
+                                Processed: {job.processed_messages} /{' '}
+                                {job.total_messages} messages
                               </Text>
                             </Flex>
                             <Flex align="center" gap="2" flexShrink="0">
