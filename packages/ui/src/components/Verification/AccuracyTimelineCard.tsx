@@ -25,8 +25,8 @@ const ALL_MODELS = '__all__';
 function TrendChart({ points }: { points: VerificationTimepointStat[] }) {
   const width = 640;
   const height = 180;
-  const padL = 44;
-  const padR = 12;
+  const padL = 52;
+  const padR = 20;
   const padT = 12;
   const padB = 28;
   const innerW = width - padL - padR;
@@ -37,10 +37,18 @@ function TrendChart({ points }: { points: VerificationTimepointStat[] }) {
     ...points.map((p) => p.fabrications + p.contradictions + p.omissions)
   );
 
+  const barW = Math.max(
+    4,
+    Math.min(26, (innerW / Math.max(points.length, 1)) * 0.4)
+  );
+
+  // Inset the x-range by half a bar so the edge bars sit fully
+  // inside the plot frame instead of covering the y-axis tick
+  // labels (left) or clipping past the SVG edge (right).
   const x = (i: number) =>
     points.length === 1
       ? padL + innerW / 2
-      : padL + (i / (points.length - 1)) * innerW;
+      : padL + barW / 2 + (i / (points.length - 1)) * (innerW - barW);
   const yAcc = (pct: number) => padT + (1 - pct / 100) * innerH;
 
   const line = points
@@ -50,11 +58,6 @@ function TrendChart({ points }: { points: VerificationTimepointStat[] }) {
     )
     .join(' ');
   const area = `${line} L${x(points.length - 1).toFixed(1)},${(padT + innerH).toFixed(1)} L${x(0).toFixed(1)},${(padT + innerH).toFixed(1)} Z`;
-
-  const barW = Math.max(
-    4,
-    Math.min(26, (innerW / Math.max(points.length, 1)) * 0.4)
-  );
 
   // Show at most ~8 x-axis labels, evenly spaced.
   const labelIdx = useMemo(() => {
@@ -159,18 +162,31 @@ function TrendChart({ points }: { points: VerificationTimepointStat[] }) {
         </g>
       ))}
 
-      {labelIdx.map((i) => (
-        <text
-          key={points[i].date}
-          x={x(i)}
-          y={height - 8}
-          textAnchor="middle"
-          fontSize="10"
-          fill="var(--gray-10)"
-        >
-          {points[i].date.slice(5)}
-        </text>
-      ))}
+      {labelIdx.map((i) => {
+        // Anchor the edge labels inward so they clear the y-axis
+        // zone (left) and the SVG edge (right) instead of hanging
+        // half outside the plot frame.
+        const anchor =
+          points.length === 1
+            ? 'middle'
+            : i === 0
+              ? 'start'
+              : i === points.length - 1
+                ? 'end'
+                : 'middle';
+        return (
+          <text
+            key={points[i].date}
+            x={x(i)}
+            y={height - 8}
+            textAnchor={anchor}
+            fontSize="10"
+            fill="var(--gray-10)"
+          >
+            {points[i].date.slice(5)}
+          </text>
+        );
+      })}
     </svg>
   );
 }

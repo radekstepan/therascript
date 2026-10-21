@@ -8,7 +8,8 @@
 // Session", matching MOCK_INTAKE_SESSION in ../state.ts) so specs can
 // exercise the jump-to-transcript navigation from the Coverage tab.
 //
-// Owned spec files: verification-coverage.spec.ts.
+// Owned spec files: verification-coverage.spec.ts,
+// verification-chart-padding.spec.ts.
 import { http, HttpResponse } from 'msw';
 import type { VerificationGlobalStats } from '../../api/verification';
 
@@ -40,6 +41,42 @@ const STATS_FIXTURE: VerificationGlobalStats = {
     },
   ],
   overTime: [
+    {
+      date: '2026-06-19',
+      messagesAudited: 2,
+      totalClaims: 4,
+      accuracyPercent: 75,
+      fabrications: 1,
+      contradictions: 0,
+      omissions: 1,
+    },
+    {
+      date: '2026-06-20',
+      messagesAudited: 3,
+      totalClaims: 6,
+      accuracyPercent: 83.3,
+      fabrications: 0,
+      contradictions: 1,
+      omissions: 0,
+    },
+    {
+      date: '2026-06-21',
+      messagesAudited: 1,
+      totalClaims: 2,
+      accuracyPercent: 100,
+      fabrications: 0,
+      contradictions: 0,
+      omissions: 1,
+    },
+    {
+      date: '2026-06-22',
+      messagesAudited: 5,
+      totalClaims: 10,
+      accuracyPercent: 90,
+      fabrications: 1,
+      contradictions: 1,
+      omissions: 0,
+    },
     {
       date: '2026-06-23',
       messagesAudited: 4,
