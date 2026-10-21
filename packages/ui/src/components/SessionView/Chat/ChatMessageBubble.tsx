@@ -212,7 +212,7 @@ export function ChatMessageBubble({
             style={{ ...getVerdictMarkStyle(stmt.verdict), ...props.style }}
             role="button"
             tabIndex={0}
-            title={`${getVerdictLabel(stmt.verdict)} — click for the Judge's verdict`}
+            title={`${getVerdictLabel(stmt.verdict)} — click for the Fact Check`}
             aria-label={`${getVerdictLabel(stmt.verdict)} statement. Activate for details.`}
             onClick={(event: React.MouseEvent) => {
               event.stopPropagation();
@@ -253,7 +253,7 @@ export function ChatMessageBubble({
           style={getVerdictMarkStyle(segment.verdict)}
           role="button"
           tabIndex={0}
-          title={`${getVerdictLabel(segment.verdict)} — click for the Judge's verdict`}
+          title={`${getVerdictLabel(segment.verdict)} — click for the Fact Check`}
           aria-label={`${getVerdictLabel(segment.verdict)} statement. Activate for details.`}
           onClick={(event: React.MouseEvent) => {
             event.stopPropagation();
@@ -550,7 +550,7 @@ export function ChatMessageBubble({
                   className="cursor-pointer hover:brightness-95 transition"
                   role={firstIssue ? 'button' : undefined}
                   tabIndex={firstIssue ? 0 : undefined}
-                  title="Open the Judge's verdict"
+                  title="Open the Fact Check"
                   onClick={
                     firstIssue
                       ? (event: React.MouseEvent) => {

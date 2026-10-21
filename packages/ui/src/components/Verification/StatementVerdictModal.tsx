@@ -165,7 +165,7 @@ export function StatementVerdictModal({
       >
         <Flex justify="between" align="start" gap="3">
           <Box>
-            <Dialog.Title size="4">Judge Verdict</Dialog.Title>
+            <Dialog.Title size="4">Fact Check</Dialog.Title>
             <Dialog.Description size="2" color="gray">
               {sorted.length > 1
                 ? `Statement ${selectedIndex + 1} of ${sorted.length} in this response`
