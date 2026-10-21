@@ -27,7 +27,6 @@ import {
 } from '../services/jobQueueService.js';
 import { subscribeToVerificationStream } from '../services/streamSubscriber.js';
 import {
-  getConfiguredTemperature,
   getConfiguredTopP,
   getConfiguredRepeatPenalty,
   getConfiguredNumGpuLayers,
@@ -35,9 +34,7 @@ import {
   getActiveBaseUrl,
   getActiveModel,
   getConfiguredContextSize,
-  setActiveModelAndContextAndParams,
 } from '../services/activeModelService.js';
-import { unloadModelAtUrl } from '../services/llamaCppService.js';
 
 interface VerificationHandlerContext {
   params: { jobId?: string | number } & Record<
@@ -116,8 +113,11 @@ const parseOptionalString = (
 
 /**
  * Shared job-creation core used by both the global verification endpoint and
- * the single-chat "verify" action: snapshots the Judge LLM config, validates
- * scope filters, persists the job row, and enqueues the BullMQ job.
+ * the single-chat "verify" action: validates scope filters, refuses to start
+ * a second job while one is active, snapshots the Judge LLM config into the
+ * job row (without touching the user's global chat model), persists the job
+ * row, and enqueues the BullMQ job. The worker loads/unloads the Judge model
+ * itself when it picks the job up.
  */
 export const createVerificationJobRecord = async (
   body: CreateVerificationJobBody
@@ -175,6 +175,15 @@ export const createVerificationJobRecord = async (
     }
   }
 
+  // Guard against duplicate concurrent jobs: a second job would thrash
+  // the Judge model (load/unload races) and duplicate LLM calls. Runs
+  // after scope validation so malformed requests still get a 400.
+  if (verificationRepository.hasActiveVerificationJobs()) {
+    throw new ConflictError(
+      'A verification job is already in progress. Please wait for it to finish or cancel it before starting a new one.'
+    );
+  }
+
   // Resolve the per-job LLM base URL before snapshotting so the worker
   // streams to the same endpoint the user selected.
   const jobLlmBaseUrl =
@@ -187,7 +196,9 @@ export const createVerificationJobRecord = async (
       thinkingBudget !== undefined
         ? thinkingBudget
         : getConfiguredThinkingBudget(),
-    temperature: temperature ?? getConfiguredTemperature(),
+    // Deterministic Judge default: verdict JSON needs low variance, not the
+    // global chat temperature (0.7). An explicit caller value still wins.
+    temperature: temperature ?? 0.3,
     topP: topP ?? getConfiguredTopP(),
     repeatPenalty: repeatPenalty ?? getConfiguredRepeatPenalty(),
     numGpuLayers:
@@ -198,35 +209,13 @@ export const createVerificationJobRecord = async (
       ? requestedContextSize
       : getConfiguredContextSize();
 
-  // Keep global state in sync (mirrors analysis job creation): when the job
-  // targets a different URL, evict whatever is loaded on the previous one so
-  // we don't leave a stale model in VRAM, then mirror the Judge config
-  // globally so subsequent chats hook onto the same model.
-  const previousBaseUrl = getActiveBaseUrl();
-  if (jobLlmBaseUrl && jobLlmBaseUrl !== previousBaseUrl) {
-    try {
-      const unloaded = await unloadModelAtUrl(previousBaseUrl);
-      console.log(
-        `[Verification (pre-create)] Pre-switch unload: removed ${unloaded} model(s) from previous URL ${previousBaseUrl} (job URL: ${jobLlmBaseUrl})`
-      );
-    } catch (unloadErr: any) {
-      console.warn(
-        `[Verification (pre-create)] Pre-switch unload on ${previousBaseUrl} failed (non-fatal): ${unloadErr.message}`
-      );
-    }
-  }
-
+  // NOTE: creating a background job must NOT mutate the user's global
+  // chat model (no unloadModelAtUrl / setActiveModelAndContextAndParams
+  // here): doing so would overwrite Session/Standalone chat settings with
+  // the Judge's parameters and could unload a model mid-stream. The Judge
+  // config is snapshotted into the job row below, and the worker loads and
+  // unloads that model around the job itself.
   const judgeModelName = modelName || getActiveModel();
-  setActiveModelAndContextAndParams(
-    judgeModelName,
-    contextSizeToUse,
-    llmParams.temperature,
-    llmParams.topP,
-    llmParams.repeatPenalty,
-    llmParams.numGpuLayers,
-    llmParams.thinkingBudget,
-    jobLlmBaseUrl
-  );
 
   const job = verificationRepository.createVerificationJob({
     scope,
@@ -558,13 +547,9 @@ export const resetVerificationsHandler = ({
   try {
     // Refuse to wipe audit data while a job is running — the worker would
     // keep writing rows and counters mid-reset.
-    const recentJobs = verificationRepository.findAllVerificationJobs(50);
-    const activeJob = recentJobs.find(
-      (job) => job.status === 'pending' || job.status === 'processing'
-    );
-    if (activeJob) {
+    if (verificationRepository.hasActiveVerificationJobs()) {
       throw new ConflictError(
-        `Cannot reset verifications while job ${activeJob.id} is ${activeJob.status}. Cancel it first.`
+        'Cannot reset verifications while a verification job is in progress. Cancel it first.'
       );
     }
     const { deletedVerifications } =

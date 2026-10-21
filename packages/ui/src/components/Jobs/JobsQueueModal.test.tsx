@@ -10,6 +10,7 @@
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { Provider as JotaiProvider } from 'jotai';
@@ -59,6 +60,9 @@ vi.mock('../../api/verification', async (importOriginal) => {
   return {
     ...original,
     fetchVerificationJobs: vi.fn().mockResolvedValue([PROCESSING_JOB]),
+    cancelVerificationJob: vi
+      .fn()
+      .mockResolvedValue({ message: 'Cancellation request accepted.' }),
   };
 });
 
@@ -90,6 +94,20 @@ describe('JobsQueueModal verification jobs', () => {
     expect(screen.queryByText('No active jobs in the queue.')).toBeNull();
     expect(screen.getByText(/Audit #7/)).not.toBeNull();
     expect(screen.getByText('processing')).not.toBeNull();
+  });
+
+  it('shows flagged counts and cancels without following the card link', async () => {
+    const user = userEvent.setup();
+    renderModal();
+
+    await screen.findByText(/Verification Jobs \(1\)/);
+    expect(screen.getByText(/Processed: 4 \/ 10 messages/)).not.toBeNull();
+    expect(screen.getByText(/1 flagged/)).not.toBeNull();
+
+    const { cancelVerificationJob } = await import('../../api/verification');
+    await user.click(screen.getByRole('button', { name: /Cancel/ }));
+
+    expect(vi.mocked(cancelVerificationJob)).toHaveBeenCalledWith(7);
   });
 
   it('hides the verification section when no verification job is active', async () => {

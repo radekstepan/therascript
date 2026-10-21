@@ -9,7 +9,12 @@ import { MOCK_GPU_STATS } from '../state';
 
 export const systemHandlers = [
   http.get('/api/jobs/active-count', () =>
-    HttpResponse.json({ total: 0, transcription: 0, analysis: 0 })
+    HttpResponse.json({
+      total: 0,
+      transcription: 0,
+      analysis: 0,
+      verification: 0,
+    })
   ),
 
   http.get('/api/system/gpu-stats', () => HttpResponse.json(MOCK_GPU_STATS)),

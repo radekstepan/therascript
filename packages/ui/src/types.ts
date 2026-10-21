@@ -1,10 +1,26 @@
 // packages/ui/src/types.ts
+import type { VerificationJob } from './api/verification';
 
 // --- NEW JOB COUNT TYPE ---
 export interface ActiveJobCount {
   total: number;
   transcription: number;
   analysis: number;
+  /** Active/waiting fact-check jobs (GET /api/jobs/active-count). */
+  verification: number;
+}
+// --- END NEW ---
+
+// --- NEW ALL-JOBS STATUS TYPE ---
+// Aggregate shape for the Active Jobs Queue modal: every background queue
+// the modal renders, including fact-check (verification) jobs. The UI
+// fetches verification jobs via fetchVerificationJobs(), but the field
+// lives here so the modal, sidebar badge, and any future GET /api/jobs
+// aggregate consumer share one contract.
+/** Job-list row for the verification queue (same DTO as VerificationJob). */
+export type VerificationJobSummary = VerificationJob;
+export interface AllJobsStatus {
+  verification?: VerificationJobSummary[];
 }
 // --- END NEW ---
 

@@ -1,9 +1,9 @@
 // packages/ui/src/components/Jobs/JobsQueueModal.tsx
 
 import React from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import {
   Dialog,
   Button,
@@ -30,11 +30,17 @@ import {
 import { fetchAnalysisJobs } from '../../api/analysis';
 import { fetchSessions } from '../../api/session';
 import {
+  cancelVerificationJob,
   fetchVerificationJobs,
   type VerificationJob,
 } from '../../api/verification';
-import { activeLlmJobsAtom } from '../../store';
-import type { AnalysisJob, Session } from '../../types';
+import { activeLlmJobsAtom, toastMessageAtom } from '../../store';
+import type {
+  AllJobsStatus,
+  AnalysisJob,
+  Session,
+  VerificationJobSummary,
+} from '../../types';
 import { formatTimestamp } from '../../helpers';
 import { AppTooltip } from '../Shared/AppTooltip';
 
@@ -69,7 +75,22 @@ const getStatusBadgeColor = (
 
 export function JobsQueueModal({ isOpen, onOpenChange }: JobsQueueModalProps) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const setToast = useSetAtom(toastMessageAtom);
   const activeLlmJobs = useAtomValue(activeLlmJobsAtom);
+
+  const cancelVerificationMutation = useMutation({
+    mutationFn: cancelVerificationJob,
+    onSuccess: () => {
+      setToast('Cancellation requested — the audit will stop shortly.');
+      queryClient.invalidateQueries({ queryKey: ['verificationJobs'] });
+      queryClient.invalidateQueries({ queryKey: ['verificationStats'] });
+      queryClient.invalidateQueries({ queryKey: ['activeJobCount'] });
+    },
+    onError: (error: Error) => {
+      setToast(`Failed to cancel job: ${error.message}`);
+    },
+  });
 
   const {
     data: analysisJobs,
@@ -114,12 +135,14 @@ export function JobsQueueModal({ isOpen, onOpenChange }: JobsQueueModalProps) {
       ['queued', 'transcribing'].includes(session.status)
     ) || [];
 
+  // Aggregate view shared with the sidebar badge contract: the modal's
+  // verification section renders from AllJobsStatus.verification.
+  const jobsStatus: AllJobsStatus = { verification: verificationJobs };
   // Same active filter as the badge count (GET /api/jobs/active-count
   // includes verification) and VerificationAuditPage.isActiveJob.
-  const activeVerificationJobs =
-    verificationJobs?.filter(
-      (job) => job.status === 'pending' || job.status === 'processing'
-    ) || [];
+  const activeVerificationJobs: VerificationJobSummary[] = (
+    jobsStatus.verification ?? []
+  ).filter((job) => job.status === 'pending' || job.status === 'processing');
 
   const handleNavigate = (path: string) => {
     navigate(path);
@@ -319,7 +342,8 @@ export function JobsQueueModal({ isOpen, onOpenChange }: JobsQueueModalProps) {
                               </AppTooltip>
                               <Text size="1" color="gray">
                                 Processed: {job.processed_messages} /{' '}
-                                {job.total_messages} messages
+                                {job.total_messages} messages ·{' '}
+                                {job.flagged_statements} flagged
                               </Text>
                             </Flex>
                             <Flex align="center" gap="2" flexShrink="0">
@@ -329,6 +353,20 @@ export function JobsQueueModal({ isOpen, onOpenChange }: JobsQueueModalProps) {
                               >
                                 {job.status}
                               </Badge>
+                              <Button
+                                size="1"
+                                variant="soft"
+                                color="red"
+                                disabled={cancelVerificationMutation.isPending}
+                                onClick={(e) => {
+                                  // Don't follow the card link to /verification
+                                  // when the user only meant to cancel.
+                                  e.stopPropagation();
+                                  cancelVerificationMutation.mutate(job.id);
+                                }}
+                              >
+                                <Cross2Icon /> Cancel
+                              </Button>
                               <ChevronRightIcon className="text-[--gray-a9]" />
                             </Flex>
                           </Flex>
