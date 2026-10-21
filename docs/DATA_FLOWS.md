@@ -239,7 +239,7 @@ For a remote URL the unload path is identical to local: `GET /api/v1/models` to 
 
 On `SIGINT` / `SIGTERM` the worker:
 
-1. Closes both BullMQ workers (`transcriptionWorker.close()`, `analysisWorker.close()`).
+1. Closes all three BullMQ workers (`transcriptionWorker.close()`, `analysisWorker.close()`, `verificationWorker.close()`).
 2. For each URL in its own loaded-models tracker, calls `unloadModelAtUrlForWorker(url)`. This is what unloads a per-job remote URL the API process never knew about.
 3. Closes the SQLite, Elasticsearch, and Redis-publisher connections.
 4. `process.exit(0)`.
@@ -270,3 +270,45 @@ Flow:
 5. The UI's `ReadinessOverlay` (`App.tsx:50`) appears the moment `/api/status/readiness` starts failing, and disappears once the new API comes back healthy. There is no separate "Restarting" screen — the existing "System Initializing" overlay is reused.
 
 The `currentProcess !== devProcess` guard in the concurrently event handlers is the safety net that prevents a stale `close` event from the old process from triggering cleanup during the restart window.
+
+## 9. Fact Verification / Hallucination Audit (LLM Judge)
+
+**Goal:** Audit session-bound AI chat responses against the ground-truth session transcript, record per-claim verdicts, and surface them in the `/verification` hub and inline in chat bubbles.
+
+1.  **Job Creation (UI -> API)**
+
+    - User launches an audit from `StartVerificationModal.tsx` (scope picker + Judge LLM settings) or clicks "Fact Check Chat" in `ChatPanelHeader.tsx` for the active chat.
+    - `POST /api/verification/jobs` (or `POST /api/sessions/:id/chats/:chatId/verify`) creates a `verification_jobs` row (`verification_jobs` table).
+    - **Single-job guard:** `createVerificationJobRecord` refuses with `409 Conflict` when `verificationRepository.hasActiveVerificationJobs()` is true (a job is `pending`/`processing`/`canceling`).
+    - **LLM Param Snapshot:** like analysis jobs, the API snapshots the Judge config (`model_name`, `context_size`, `thinking_budget`, `temperature` defaulting to `0.3`, `top_p`, `repeat_penalty`, `num_gpu_layers`, `llm_base_url`) into the job row. Job creation never mutates the user's global chat model — the worker loads/unloads the Judge model itself.
+    - **File:** `packages/api/src/api/verificationHandler.ts`.
+
+2.  **Job Enqueue (API -> Redis)**
+
+    - API calls `addVerificationJob({ jobId })`.
+    - Adds a job to the `verification-jobs` queue via BullMQ (`VERIFICATION_QUEUE_NAME` in `@therascript/queue`).
+    - **File:** `packages/api/src/services/jobQueueService.ts`
+
+3.  **Per-Message Audit (Worker)**
+
+    - Worker picks up the job in `processVerificationJob` (`packages/worker/src/jobs/verificationProcessor.ts`), wrapped in `runWithLlmWorkerLock` (`llmWorkerMutex.ts`) so it never loads/unloads models concurrently with an analysis job.
+    - Loads the snapshotted Judge model via `loadLlmModelForWorker` (thinking budget capped at `2048` via `resolveJudgeThinkingBudget`).
+    - Iterates candidate AI messages newest-first (skipping already-verified unless `skipVerified` is false), polling job status before each message for cooperative cancellation:
+        - **Greeting fast-path:** trivial conversational messages (`isTrivialConversationalMessage`) complete with zero LLM calls.
+        - **Judge call:** transcript context is budgeted per message (`selectJudgeTranscriptContext`, `showSpeakers`-aware `[P#<index> MM:SS]` formatting) and sent with the therapist question + visible AI answer to the Judge LLM under the `system_verification_judge` prompt. The Judge returns atomic claims (`supported` / `partially_supported` / `contradicted` / `fabricated`), omissions, severity, and transcript evidence.
+        - **JSON repair:** raw output is parsed with control-character/trailing-comma sanitization (`sanitizeJsonForParse`); on failure the worker retries once with thinking disabled and `temperature: 0.1`. Usage logs and token counts are persisted even when parsing fails.
+        - **Span resolution:** each `exact_quote` is mapped to `start_char`/`end_char` in the message (`locateQuoteSpan`) for inline highlighting.
+        - **Evidence hydration:** LLM-guessed `timestampMs`/`speaker` are overwritten with ground-truth `transcript_paragraphs` values (`hydrateEvidenceItem`); unresolvable citations are nulled.
+        - **Persistence:** a `message_verifications` row (accuracy score via `computeVerificationAccuracy`) plus `verified_statements` rows; job counters (`processed_messages`, `flagged_statements`, ...) advance.
+    - Unloads the Judge model in `finally`; marks the job `completed` / `failed` / `canceled`.
+
+4.  **Real-time Updates (Redis Pub/Sub -> SSE)**
+
+    - The worker publishes `status` / `progress` / `message_verified` / `complete` / `error` events to Redis channel `verification-stream:<jobId>` (`@therascript/queue` `VerificationStreamEvent`).
+    - The UI consumes them via `GET /api/verification/jobs/:jobId/stream` (SSE, `streamVerificationJobHandler` -> `subscribeToVerificationStream`) using the `useVerificationStream.ts` hook, which invalidates the `verificationStats` / `verificationJobs` / `chatVerifications` / `verificationStatements` queries as messages finish.
+
+5.  **Verdict Display (UI)**
+
+    - **Audit hub:** `/verification` (`VerificationAuditPage.tsx`) shows the live job banner, analytics (KPIs, per-model accuracy, trends), and Issues / Coverage / Job History tabs with deep links into session chats.
+    - **Inline highlights:** `highlightVerifiedStatements.ts` resolves worker `start_char`/`end_char` spans (falling back to normalized quote search) and wraps matches in `<mark>` elements in both plain-text and Markdown (`rehypeHighlightStatements`) rendering paths; clicking a highlight opens `StatementVerdictModal.tsx` with transcript evidence.
+    - **Failed states:** messages with `status = 'failed'` render a "Fact-check failed" badge with the error tooltip and a Clear action; coverage/stats surfaces expose `failedAiMessages` / `failedMessagesCount` with one-click retry (`skipVerified: true`).

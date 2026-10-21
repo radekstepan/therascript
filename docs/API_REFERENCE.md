@@ -41,6 +41,8 @@ Session-bound chat operations. All routes are nested under `/api/sessions/:sessi
 | `POST` | `/api/sessions/:sessionId/chats/:chatId/messages` | Add user message and get AI response (**SSE stream**) |
 | `PATCH` | `/api/sessions/:sessionId/chats/:chatId/name` | Rename a session chat |
 | `DELETE` | `/api/sessions/:sessionId/chats/:chatId` | Delete a session chat and its messages |
+| `GET` | `/api/sessions/:sessionId/chats/:chatId/verifications` | Get fact-verification verdicts (with nested statements) for all AI messages in a chat |
+| `POST` | `/api/sessions/:sessionId/chats/:chatId/verify` | Trigger a single-chat (`single_chat` scope) fact-verification job; returns `{ jobId }` (`202`, `409` if a job is already active) |
 
 ---
 
@@ -72,6 +74,38 @@ Multi-session analysis job creation and streaming progress.
 | `GET` | `/api/analysis-jobs/:jobId/stream` | Stream analysis logs and tokens (**SSE stream**) |
 | `POST` | `/api/analysis-jobs/:jobId/cancel` | Request to cancel a running analysis job |
 | `DELETE` | `/api/analysis-jobs/:jobId` | Delete an analysis job and its data |
+
+---
+
+## Verification (`verificationRoutes.ts`)
+
+LLM Fact-Verification & Hallucination Audit ("LLM Judge") job management, analytics, and verdict lookup. Only one verification job may be active at a time — creating a job (or resetting) while another is `pending`/`processing`/`canceling` returns `409 Conflict`.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/api/verification/jobs` | Create and enqueue a fact-verification job; returns `{ jobId }` (`202`) |
+| `GET` | `/api/verification/jobs` | List recent verification jobs (newest first) |
+| `GET` | `/api/verification/jobs/:jobId` | Get status and counters of a single verification job |
+| `GET` | `/api/verification/jobs/:jobId/stream` | Stream job progress events (**SSE stream**) |
+| `POST` | `/api/verification/jobs/:jobId/cancel` | Request cancellation of a pending/processing job (`202`; `409` if already terminal) |
+| `GET` | `/api/verification/stats` | Global verification analytics (KPIs, per-model accuracy, trends, session coverage) |
+| `GET` | `/api/verification/statements` | List paginated/filterable flagged statements |
+| `DELETE` | `/api/verification/messages/:messageId` | Clear the verification (and its statements) for a specific chat message |
+| `DELETE` | `/api/verification/reset` | Clear all verifications, statements, and jobs (`409` while a job is active) |
+
+**Create Job Body (`POST /api/verification/jobs`):**
+- `scope` (required) — `all_unverified` | `all_force` | `selected_sessions` | `single_chat`.
+- `sessionIds` — Required non-empty array when `scope` is `selected_sessions` (each session must exist).
+- `chatId` — Required when `scope` is `single_chat` (must be a session-bound chat).
+- `skipVerified` — Skip already-verified messages (default `true`).
+- Optional Judge LLM overrides — `modelName`, `contextSize`, `thinkingBudget`, `temperature`, `topP`, `repeatPenalty`, `numGpuLayers`, `baseUrl`. Omitted fields fall back to global config, except `temperature` which defaults to `0.3` for deterministic verdict JSON. The resolved config is snapshotted into the job row; job creation never mutates the user's global chat model.
+
+**Stats Query Parameters (`GET /api/verification/stats`):**
+- `sessionId`, `model`, `startDate`, `endDate` — Optional filters.
+- Response includes `failedMessagesCount` (messages whose latest attempt ended `failed`) and per-session `failedAiMessages` alongside verified counts.
+
+**Statements Query Parameters (`GET /api/verification/statements`):**
+- `verdict`, `severity`, `authoredModel`, `sessionId`, `search`, `limit`, `offset` — Optional filters (`verdict`/`severity` accept comma-separated lists).
 
 ---
 
@@ -237,7 +271,7 @@ Background job queue status.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `GET` | `/api/jobs/active-count` | Get count of active and waiting background jobs |
+| `GET` | `/api/jobs/active-count` | Get count of active and waiting background jobs (`{ total, transcription, analysis, verification }`) |
 | `POST` | `/api/jobs/reset-transcription` | Force-clear all queued/active transcription jobs (queue obliterate) |
 
 ---
@@ -261,3 +295,4 @@ The following endpoints return Server-Sent Events (SSE) streams:
 - `POST /api/sessions/:sessionId/chats/:chatId/messages` - Chat message streaming
 - `POST /api/chats/:chatId/messages` - Standalone chat message streaming
 - `GET /api/analysis-jobs/:jobId/stream` - Analysis progress streaming
+- `GET /api/verification/jobs/:jobId/stream` - Verification job progress streaming (`snapshot` / `status` / `progress` / `message_verified` / `complete` / `error` events)

@@ -8,11 +8,12 @@ This document provides a detailed breakdown of the monorepo's package structure,
 **Entry Point:** `src/server.ts`
 
 ### Responsibilities
-- **REST API:** Exposes endpoints for the UI to manage sessions, chats, and analysis jobs.
+- **REST API:** Exposes endpoints for the UI to manage sessions, chats, analysis jobs, and fact-verification audits.
 - **Orchestration:** Coordinators interactions between the Database, Search Engine, Redis Queue, and AI Services (LM Studio, Whisper).
 - **Transcription Gating:** Verifies Whisper diarization readiness (`/diarization/check`) before upload/job enqueue and can trigger prefetch (`/diarization/prefetch`).
 - **Transcript Speaker Operations:** Supports session-level speaker label rename and propagates updates to SQLite and Elasticsearch.
 - **Context Management:** Calculates token usage and manages LLM context windows (`src/services/contextUsageService.ts`).
+- **Verification Orchestration:** Creates/guards fact-verification jobs, snapshots Judge LLM config, and streams Redis progress over SSE (`src/api/verificationHandler.ts`, `src/routes/verificationRoutes.ts`).
 - **Service Management:** Monitors and manages Docker containers for AI services (`src/services/dockerManagementService.ts`).
 
 ### Key Libraries
@@ -30,9 +31,10 @@ This document provides a detailed breakdown of the monorepo's package structure,
 **Entry Point:** `src/index.ts`
 
 ### Responsibilities
-- **Job Consumption:** Consumes jobs from Redis queues (`transcription-jobs`, `analysis-jobs`).
+- **Job Consumption:** Consumes jobs from Redis queues (`transcription-jobs`, `analysis-jobs`, `verification-jobs`).
 - **Transcription Processing:** Coordinates file handling and status polling with the transcription service, validates diarization readiness, and enforces speaker-labeled output (`src/jobs/transcriptionProcessor.ts`).
 - **Analysis Execution:** Executes MapReduce strategies using LM Studio to analyze multiple sessions (`src/jobs/analysisProcessor.ts`).
+- **Fact Verification:** Audits AI chat responses against ground-truth transcripts with a Judge LLM — claims extraction, quote span resolution, evidence hydration, accuracy scoring — and streams progress over Redis (`src/jobs/verificationProcessor.ts`, serialized against analysis jobs via `src/llmWorkerMutex.ts`).
 - **Data Indexing:** Pushes processed transcripts (including `speaker`) and analysis results to Elasticsearch.
 
 ### Key Libraries
@@ -47,6 +49,7 @@ This document provides a detailed breakdown of the monorepo's package structure,
 
 ### Responsibilities
 - **User Interaction:** Provides interfaces for uploading audio, chatting with AI, and viewing results.
+- **Hallucination Audit Hub:** `/verification` page with live job banner, accuracy analytics, and Issues/Coverage/Job History tabs (`src/components/Verification/`), plus inline verdict highlighting in chat bubbles (`src/utils/highlightVerifiedStatements.ts`).
 - **Speaker-Aware Transcripts:** Renders speaker labels, supports in-place speaker rename modal, and accepts upload-time `numSpeakers` input.
 - **State Management:** Manages local UI state (theme, sidebar) and server state (caching, optimistic updates).
 - **Streaming:** Handles Server-Sent Events (SSE) for real-time chat responses (`src/hooks/useMessageStream.ts`).

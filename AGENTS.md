@@ -13,7 +13,7 @@ For detailed implementation references, please see:
 - **[Component Map](docs/COMPONENT_MAP.md)**: Breakdown of packages, libraries, and entry points.
 - **[Navigation Guide](docs/NAVIGATION.md)**: "Where to change what" – directory structure and common tasks.
 - **[API Reference](docs/API_REFERENCE.md)**: Complete REST API endpoint documentation.
-- **[Operational Flows](docs/DATA_FLOWS.md)**: Step-by-step data flow for Transcription, Chat, and Analysis.
+- **[Operational Flows](docs/DATA_FLOWS.md)**: Step-by-step data flow for Transcription, Chat, Analysis, and Fact Verification.
 - **[Schema Reference](docs/SCHEMA_REFERENCE.md)**: SQLite tables and Elasticsearch indices.
 
 ## 1. Background Workers
@@ -49,6 +49,25 @@ Located in `packages/worker`, these agents run asynchronously to handle heavy co
         *   Context: The collection of summaries.
         *   Prompt: The `final_synthesis_instructions` defined by the Strategy Agent.
         *   Output: Generates the final answer to the user's high-level query.
+
+### Verification Agent (The Fact-Checker / Judge)
+*   **Type:** BullMQ Worker (`verification-jobs`)
+*   **Source:** `packages/worker/src/jobs/verificationProcessor.ts`
+*   **Prompt Template:** `system_verification_judge` (in `packages/db/src/sqliteService.ts`, with a `DEFAULT_VERIFICATION_JUDGE_PROMPT` fallback in the processor)
+*   **Responsibility:** "The Judge" — audits session-bound AI chat responses against the ground-truth session transcript and records per-claim verdicts for the Hallucination Audit (`/verification` UI hub).
+*   **Workflow:**
+    1.  Receives a `jobId` from the API (`POST /api/verification/jobs` or single-chat verify). The job row snapshots the Judge LLM config (model, context size, temperature default `0.3`, thinking budget capped at `2048`) so the worker never touches the user's global chat model.
+    2.  Loads the Judge model via `loadLlmModelForWorker` under the cross-worker LLM mutex (`packages/worker/src/llmWorkerMutex.ts`), so analysis and verification jobs never load/unload models concurrently.
+    3.  For each candidate AI message (newest-first, skipping already-verified unless forced):
+        *   **Fast-path:** trivial conversational greetings (`isTrivialConversationalMessage`) complete immediately with zero LLM calls.
+        *   **Claims extraction:** sends the ground-truth transcript (budgeted via `selectJudgeTranscriptContext`, speaker labels honoring `session.showSpeakers`) + therapist question + visible AI answer to the Judge LLM, which returns atomic claims with verdicts (`supported` / `partially_supported` / `contradicted` / `fabricated`), omissions, severity, and transcript evidence.
+        *   **JSON hardening:** sanitizes control characters/trailing commas (`sanitizeJsonForParse`); on unparseable output performs one retry with thinking disabled and `temperature: 0.1`. Usage logs and token counts are recorded even on failure.
+        *   **Quote span resolution:** maps each `exact_quote` back to `start_char`/`end_char` in the message (`locateQuoteSpan`, quote/dash normalization, ellipsis-clause handling) for inline UI highlighting.
+        *   **Evidence hydration:** overwrites LLM-guessed `timestampMs`/`speaker` with ground-truth `transcript_paragraphs` values (`hydrateEvidenceItem`); unresolvable citations are nulled.
+        *   **Accuracy scoring:** persists a `message_verifications` row (`computeVerificationAccuracy`) plus `verified_statements` rows, and updates the job counters.
+    4.  **Progress streaming:** publishes `status` / `progress` / `message_verified` / `complete` / `error` events to Redis channel `verification-stream:<jobId>` (`@therascript/queue`), consumed by `GET /api/verification/jobs/:jobId/stream` (SSE) and the `useVerificationStream` UI hook.
+    5.  Unloads the Judge model in `finally` and marks the job `completed` / `failed` / `canceled` (cancellation is cooperative: the worker polls job status before each message).
+*   **Storage:** `verification_jobs`, `message_verifications`, `verified_statements` (Migration V20); per-message authoring model in `messages.model`.
 
 ## 2. System & Utility Agents
 Located in `packages/api`, these "meta-agents" configure or summarize data to facilitate the main workflows.

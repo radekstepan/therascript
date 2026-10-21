@@ -13,15 +13,16 @@
 | File | Purpose |
 |------|---------|
 | `sessionRoutes.ts` | Session CRUD, file upload, diarization readiness gate, speaker rename |
-| `chatRoutes.ts` | Session-bound chat endpoints |
+| `chatRoutes.ts` | Session-bound chat endpoints (incl. per-chat `verifications` / `verify`) |
 | `standaloneChatRoutes.ts` | Standalone chat (no session context) |
 | `analysisRoutes.ts` | Multi-session analysis jobs |
+| `verificationRoutes.ts` | Fact-verification jobs, stats, statements, resets (`/api/verification/*`) |
 | `transcriptionRoutes.ts` | Transcription status, polling |
 | `searchRoutes.ts` | Elasticsearch search endpoints |
 | `llmRoutes.ts` | Model management (list, load, unload) |
 | `templateRoutes.ts` | Prompt template CRUD |
 | `systemRoutes.ts` | System prompts management |
-| `jobsRoutes.ts` | Background job status + transcription queue reset |
+| `jobsRoutes.ts` | Background job status (incl. verification counts) + transcription queue reset |
 | `dockerRoutes.ts` | Docker container management |
 | `adminRoutes.ts` | Admin/debug endpoints |
 | `metaRoutes.ts` | Health checks, readiness |
@@ -33,6 +34,7 @@
 | `sessionChatHandler.ts` | RAG chat with transcript context |
 | `standaloneChatHandler.ts` | General-purpose chat (no context) |
 | `analysisHandler.ts` | Strategy generation, MapReduce orchestration |
+| `verificationHandler.ts` | Verification job CRUD, single-job guard, stats/statements, SSE stream |
 | `templateHandler.ts` | Template management logic |
 | `jobsHandler.ts` | Job queue operations (active count + queue reset) |
 | `gpuHandler.ts` | GPU availability checks |
@@ -80,6 +82,7 @@
 |------|---------|
 | `transcriptionProcessor.ts` | "The Ears" — Whisper job processing, ES indexing |
 | `analysisProcessor.ts` | "The Analyst" — MapReduce analysis execution |
+| `verificationProcessor.ts` | "The Judge" — per-message fact verification, span resolution, evidence hydration |
 
 ### Services (`/services/*.ts`)
 | File | Purpose |
@@ -90,6 +93,7 @@
 | File | Purpose |
 |------|---------|
 | `redisConnection.ts` | Redis client for BullMQ |
+| `llmWorkerMutex.ts` | Cross-queue mutex serializing LLM load/unload (analysis vs verification) |
 | `types.ts` | Worker-specific type definitions |
 
 ---
@@ -111,6 +115,7 @@
 | `/chats-list` | `StandaloneChatsPage` |
 | `/templates` | `TemplatesPage` |
 | `/analysis-jobs` | `AnalysisJobsPage` |
+| `/verification` | `VerificationAuditPage` (Fact Check hub) |
 | `/settings` | `SettingsPage` |
 
 ### Pages (`/components/*.tsx`)
@@ -126,6 +131,7 @@
 | Directory | Purpose |
 |-----------|---------|
 | `Analysis/` | Analysis jobs UI, `AnalysisJobsPage.tsx` |
+| `Verification/` | Fact Check hub: `VerificationAuditPage.tsx`, `StartVerificationModal.tsx`, `CoverageTab.tsx`, `IssuesFeedTab.tsx`, `JobHistoryTab.tsx`, `StatementVerdictModal.tsx`, analytics cards |
 | `SessionView/` | Session detail, chat, transcript display, speaker rename modal |
 | `StandaloneChatView/` | Standalone chat interface |
 | `Search/` | Search UI components |
@@ -150,6 +156,7 @@
 | `templates.ts` | Templates API |
 | `system.ts` | System prompts API |
 | `jobs.ts` | Jobs API (active count + reset transcription queue) |
+| `verification.ts` | Verification API calls (jobs, stats, statements, per-chat verify, resets) |
 | `docker.ts` | Docker management API |
 | `meta.ts` | Health/readiness API (explicit 200/503 readiness handling) |
 
@@ -158,7 +165,13 @@
 |------|---------|
 | `useMessageStream.ts` | SSE streaming for chat messages |
 | `useAnalysisStream.ts` | SSE streaming for analysis results |
+| `useVerificationStream.ts` | SSE streaming for verification job progress |
 | `useAnimatedText.tsx` | Text animation effects |
+
+### Utilities (`/utils/*.ts`)
+| File | Purpose |
+|------|---------|
+| `highlightVerifiedStatements.ts` | Inline verdict highlighting: worker-span validation + normalized quote search for plain-text and Markdown (`rehypeHighlightStatements`) paths |
 
 ### State Management (`/store/*.ts`) — Jotai atoms
 | Directory/File | Purpose |

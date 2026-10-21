@@ -6,7 +6,7 @@ This document outlines the data structures used in SQLite (primary storage) and 
 
 Defined in `src/sqliteService.ts`. Migrations are handled programmatically via `user_version` pragma.
 
-**Current Schema Version:** 16
+**Current Schema Version:** 20
 
 ### Core Tables
 
@@ -66,8 +66,9 @@ Individual messages within a chat.
 | `timestamp` | INTEGER | NOT NULL | Creation timestamp |
 | `promptTokens` | INTEGER | NULL | Input token count |
 | `completionTokens` | INTEGER | NULL | Output token count |
+| `model` | TEXT | NULL | **Added in V20.** LLM that authored the message (backfilled from `usage_logs` via nearest-timestamp match within 5s) |
 
-**Indices:** `idx_message_chat`, `idx_message_timestamp`
+**Indices:** `idx_message_chat`, `idx_message_timestamp`, `idx_messages_model`
 
 #### `templates`
 Saved message templates for quick reuse.
@@ -149,6 +150,109 @@ Stores the result of the "Map" phase for each session.
 | `error_message` | TEXT | NULL | Error details if failed |
 
 **Indices:** `idx_intermediate_summaries_job_id`
+
+### Verification Tables (Added in V20)
+
+Migration V20 adds the LLM Fact-Verification & Hallucination Audit ("LLM Judge") system: audit-run tracking (`verification_jobs`), per-message audit summaries (`message_verifications`), and atomic claim/omission verdicts (`verified_statements`), plus the `messages.model` authoring-model column above.
+
+#### `verification_jobs`
+Tracks fact-verification audit runs. The Judge LLM config is snapshotted into the row at creation time so the worker (a separate process) honours the user's Judge settings without touching the global chat model.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | INTEGER | PK, AUTOINCREMENT | Unique job identifier |
+| `status` | TEXT | NOT NULL, DEFAULT 'pending' | 'pending' \| 'processing' \| 'completed' \| 'failed' \| 'canceled' (CHECK) |
+| `scope` | TEXT | NOT NULL, DEFAULT 'all_unverified' | 'all_unverified' \| 'all_force' \| 'selected_sessions' \| 'single_chat' (CHECK) |
+| `session_ids_json` | TEXT | NULL | JSON array of session IDs (for `selected_sessions` scope) |
+| `chat_id` | INTEGER | NULL | Target chat (for `single_chat` scope) |
+| `skip_verified` | INTEGER | NOT NULL, DEFAULT 1 | 1 = skip already-verified messages |
+| `total_messages` | INTEGER | NOT NULL, DEFAULT 0 | Candidate AI messages at job start |
+| `processed_messages` | INTEGER | NOT NULL, DEFAULT 0 | Messages audited so far |
+| `total_statements` | INTEGER | NOT NULL, DEFAULT 0 | Claims extracted so far |
+| `flagged_statements` | INTEGER | NOT NULL, DEFAULT 0 | Claims with a non-clean verdict so far |
+| `omissions_count` | INTEGER | NOT NULL, DEFAULT 0 | Omissions detected so far |
+| `created_at` | INTEGER | NOT NULL | Creation timestamp |
+| `completed_at` | INTEGER | NULL | Completion timestamp |
+| `error_message` | TEXT | NULL | Error details if failed |
+| `model_name` | TEXT | NULL | Snapshotted Judge model |
+| `context_size` | INTEGER | NULL | Snapshotted context window size |
+| `thinking_budget` | INTEGER | NULL | Snapshotted `reasoning_budget` (capped at 2048 by the worker) |
+| `temperature` | REAL | NULL | Snapshotted sampling temperature (default 0.3) |
+| `top_p` | REAL | NULL | Snapshotted nucleus sampling threshold |
+| `repeat_penalty` | REAL | NULL | Snapshotted repeat/presence penalty |
+| `num_gpu_layers` | INTEGER | NULL | Snapshotted GPU offload layer count |
+| `llm_base_url` | TEXT | NULL | Snapshotted LLM endpoint URL |
+
+**Indices:** `idx_verification_jobs_status`, `idx_verification_jobs_created_at`
+
+#### `message_verifications`
+Per-message audit summary: one row per audited AI message (`message_id` is UNIQUE, so re-verifying a message replaces its row).
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | INTEGER | PK, AUTOINCREMENT | Unique verification identifier |
+| `message_id` | INTEGER | NOT NULL, UNIQUE, FK → messages(id) ON DELETE CASCADE | Audited AI message |
+| `chat_id` | INTEGER | NOT NULL, FK → chats(id) ON DELETE CASCADE | Parent chat |
+| `session_id` | INTEGER | NOT NULL, FK → sessions(id) ON DELETE CASCADE | Parent session |
+| `verification_job_id` | INTEGER | NULL, FK → verification_jobs(id) ON DELETE SET NULL | Audit run that produced this verdict |
+| `authored_model` | TEXT | NULL | LLM that wrote the message (from `messages.model`) |
+| `judge_model` | TEXT | NOT NULL | Judge LLM that produced the verdict |
+| `status` | TEXT | NOT NULL, DEFAULT 'completed' | 'completed' \| 'failed' \| 'skipped' (CHECK) |
+| `total_claims` | INTEGER | NOT NULL, DEFAULT 0 | Atomic claims extracted |
+| `supported_claims` | INTEGER | NOT NULL, DEFAULT 0 | Claims verified against the transcript |
+| `partial_claims` | INTEGER | NOT NULL, DEFAULT 0 | Partially supported claims |
+| `contradicted_claims` | INTEGER | NOT NULL, DEFAULT 0 | Claims contradicting the transcript |
+| `fabricated_claims` | INTEGER | NOT NULL, DEFAULT 0 | Claims with no transcript basis |
+| `omissions_count` | INTEGER | NOT NULL, DEFAULT 0 | Key facts the answer omitted |
+| `accuracy_score` | REAL | NOT NULL, DEFAULT 1.0 | Weighted accuracy (supported + 0.5·partial) / (claims + omissions) |
+| `summary_assessment` | TEXT | NULL | Judge's overall assessment text |
+| `prompt_tokens` | INTEGER | NULL | Judge input tokens (accumulated across retry) |
+| `completion_tokens` | INTEGER | NULL | Judge output tokens (accumulated across retry) |
+| `duration_ms` | INTEGER | NULL | Judge wall-clock time in ms |
+| `verified_at` | INTEGER | NOT NULL | Verification timestamp |
+| `error_message` | TEXT | NULL | Error details when `status = 'failed'` |
+
+**Indices:** `idx_msg_verifications_session`, `idx_msg_verifications_chat`, `idx_msg_verifications_authored_model`, `idx_msg_verifications_verified_at`
+
+#### `verified_statements`
+Atomic claims and omissions extracted from an audited message, each with a verdict, severity, character span (for inline UI highlighting), and transcript evidence.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | INTEGER | PK, AUTOINCREMENT | Unique statement identifier |
+| `message_verification_id` | INTEGER | NOT NULL, FK → message_verifications(id) ON DELETE CASCADE | Parent verification |
+| `message_id` | INTEGER | NOT NULL, FK → messages(id) ON DELETE CASCADE | Source AI message |
+| `session_id` | INTEGER | NOT NULL, FK → sessions(id) ON DELETE CASCADE | Parent session |
+| `statement_index` | INTEGER | NOT NULL | Ordering index within the message |
+| `kind` | TEXT | NOT NULL, DEFAULT 'claim' | 'claim' \| 'omission' (CHECK) |
+| `exact_quote` | TEXT | NOT NULL | Verbatim quote from the AI message (empty for omissions) |
+| `normalized_claim` | TEXT | NOT NULL | Judge-normalized claim text |
+| `start_char` | INTEGER | NULL | Quote start offset in the message (inline highlight) |
+| `end_char` | INTEGER | NULL | Quote end offset in the message (inline highlight) |
+| `verdict` | TEXT | NOT NULL | 'supported' \| 'partially_supported' \| 'contradicted' \| 'fabricated' \| 'omission' (CHECK) |
+| `severity` | TEXT | NOT NULL, DEFAULT 'none' | 'none' \| 'low' \| 'medium' \| 'high' \| 'critical' (CHECK) |
+| `confidence` | REAL | NOT NULL, DEFAULT 1.0 | Judge confidence 0–1 |
+| `reasoning` | TEXT | NOT NULL | Judge's justification |
+| `transcript_evidence_json` | TEXT | NULL | JSON array of `{ paragraphIndex, timestampMs, speaker, quote }`, hydrated against ground-truth paragraphs |
+| `created_at` | INTEGER | NOT NULL | Creation timestamp |
+
+**Indices:** `idx_verified_statements_msg`, `idx_verified_statements_verdict`, `idx_verified_statements_session`
+
+```
+┌──────────────────┐     ┌───────────────────┐     ┌──────────────────┐
+│ verification_    │     │ message_          │     │ verified_        │
+│ jobs             │     │ verifications     │     │ statements       │
+├──────────────────┤     ├───────────────────┤     ├──────────────────┤
+│ id (PK)          │◄────│ verification_     │◄────│ message_         │
+│ status / scope   │     │  job_id (FK,      │     │  verification_   │
+│ counters         │     │  SET NULL)        │     │  id (FK)         │
+│ Judge LLM config │     │ message_id (FK,   │     │ message_id (FK)  │
+│ snapshot         │     │  UNIQUE)          │     │ verdict/severity │
+└──────────────────┘     │ chat_id (FK)      │     │ start/end_char   │
+                         │ session_id (FK)   │     │ evidence JSON    │
+                         │ accuracy_score    │     └──────────────────┘
+                         └───────────────────┘
+```
 
 ---
 
