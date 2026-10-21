@@ -251,3 +251,336 @@ describe('formatEvidenceTimestamp', () => {
     expect(formatEvidenceTimestamp(null)).toBe('--:--');
   });
 });
+
+describe('resolveStatementSpans worker-span preservation', () => {
+  it('preserves worker spans when the quote differs by case', () => {
+    const text = 'The client has been Using coping strategies daily.';
+    const start = text.indexOf('Using coping strategies');
+    const end = start + 'Using coping strategies'.length;
+    const spans = resolveStatementSpans(text, [
+      stmt({
+        id: 1,
+        exact_quote: 'using coping strategies',
+        start_char: start,
+        end_char: end,
+      }),
+    ]);
+    expect(spans).toEqual([
+      { statementId: 1, start, end, verdict: 'fabricated' },
+    ]);
+  });
+
+  it('preserves worker spans when quotes use single vs double quotes', () => {
+    const text = 'The therapist said "Inspect" the area daily.';
+    const slice = '"Inspect" the area';
+    const start = text.indexOf(slice);
+    const spans = resolveStatementSpans(text, [
+      stmt({
+        id: 1,
+        exact_quote: "'Inspect' the area",
+        start_char: start,
+        end_char: start + slice.length,
+      }),
+    ]);
+    expect(spans).toEqual([
+      {
+        statementId: 1,
+        start,
+        end: start + slice.length,
+        verdict: 'fabricated',
+      },
+    ]);
+  });
+
+  it('preserves worker Pass 3 anchor spans carrying slack over skipped text', () => {
+    const sentence =
+      'The client takes aspirin every morning with breakfast and reports no side effects at all.';
+    const text = `Intro. ${sentence} Outro.`;
+    const start = text.indexOf(sentence);
+    const end = start + sentence.length;
+    const spans = resolveStatementSpans(text, [
+      stmt({
+        id: 1,
+        // Worker skipped the "with breakfast" middle clause.
+        exact_quote:
+          'The client takes aspirin every morning and reports no side effects at all.',
+        start_char: start,
+        end_char: end,
+      }),
+    ]);
+    expect(spans).toEqual([
+      { statementId: 1, start, end, verdict: 'fabricated' },
+    ]);
+  });
+
+  it('rejects overlapping worker spans and falls back to a free occurrence', () => {
+    const text = 'takes aspirin daily. takes aspirin daily.';
+    const both = [
+      stmt({
+        id: 1,
+        exact_quote: 'takes aspirin',
+        start_char: 0,
+        end_char: 13,
+      }),
+      stmt({
+        id: 2,
+        exact_quote: 'takes aspirin',
+        start_char: 0,
+        end_char: 13,
+      }),
+    ];
+    const spans = resolveStatementSpans(text, both);
+    expect(spans).toHaveLength(2);
+    expect(spans[0]).toMatchObject({ statementId: 1, start: 0, end: 13 });
+    expect(spans[1]).toMatchObject({ statementId: 2, start: 21, end: 34 });
+  });
+});
+
+describe('resolveStatementSpans fallback normalization', () => {
+  it('matches quotes wrapped in outer quotes', () => {
+    const text = 'The client takes aspirin daily.';
+    for (const quote of [
+      '"takes aspirin"',
+      "'takes aspirin'",
+      '\u201Ctakes aspirin\u201D',
+    ]) {
+      const spans = resolveStatementSpans(text, [
+        stmt({ id: 1, exact_quote: quote }),
+      ]);
+      expect(spans).toHaveLength(1);
+      expect(text.slice(spans[0]!.start, spans[0]!.end)).toBe('takes aspirin');
+    }
+  });
+
+  it('matches quotes with leading/trailing ellipses', () => {
+    const text = 'The client takes aspirin daily.';
+    for (const quote of [
+      '...takes aspirin...',
+      '\u2026takes aspirin\u2026',
+      '..."takes aspirin"...',
+    ]) {
+      const spans = resolveStatementSpans(text, [
+        stmt({ id: 1, exact_quote: quote }),
+      ]);
+      expect(spans).toHaveLength(1);
+      expect(text.slice(spans[0]!.start, spans[0]!.end)).toBe('takes aspirin');
+    }
+  });
+
+  it('matches across inline Markdown in text or quote', () => {
+    const mdText = 'The client **takes aspirin** daily.';
+    const spans = resolveStatementSpans(mdText, [
+      stmt({ id: 1, exact_quote: 'takes aspirin' }),
+    ]);
+    expect(spans).toHaveLength(1);
+    expect(mdText.slice(spans[0]!.start, spans[0]!.end)).toBe('takes aspirin');
+
+    const plainText = 'The client takes aspirin daily.';
+    const mdQuote = resolveStatementSpans(plainText, [
+      stmt({ id: 2, exact_quote: '**takes aspirin**' }),
+    ]);
+    expect(mdQuote).toHaveLength(1);
+    expect(plainText.slice(mdQuote[0]!.start, mdQuote[0]!.end)).toBe(
+      'takes aspirin'
+    );
+
+    const codeText = 'Use padding-top for spacing.';
+    const codeQuote = resolveStatementSpans(codeText, [
+      stmt({ id: 3, exact_quote: '`padding-top`' }),
+    ]);
+    expect(codeQuote).toHaveLength(1);
+    expect(codeText.slice(codeQuote[0]!.start, codeQuote[0]!.end)).toBe(
+      'padding-top'
+    );
+  });
+
+  it('matches case-insensitively with quote-style differences', () => {
+    const text = 'She said "Inspect" the wound.';
+    const spans = resolveStatementSpans(text, [
+      stmt({ id: 1, exact_quote: "she said 'inspect' the wound" }),
+    ]);
+    expect(spans).toHaveLength(1);
+    expect(text.slice(spans[0]!.start, spans[0]!.end)).toBe(
+      'She said "Inspect" the wound'
+    );
+  });
+
+  it('resolves mid-quote ellipsis splices across a short gap', () => {
+    const text =
+      'The client takes aspirin every morning and reports no side effects at all.';
+    const spans = resolveStatementSpans(text, [
+      stmt({
+        id: 1,
+        exact_quote: 'takes aspirin every morning ... reports no side effects',
+      }),
+    ]);
+    expect(spans).toHaveLength(1);
+    expect(text.slice(spans[0]!.start, spans[0]!.end)).toBe(
+      'takes aspirin every morning and reports no side effects'
+    );
+  });
+
+  it('resolves long truncated quotes via the prefix+suffix anchor fallback', () => {
+    const text =
+      'The client takes aspirin every morning with breakfast and reports no side effects at all.';
+    const spans = resolveStatementSpans(text, [
+      stmt({
+        id: 1,
+        exact_quote:
+          'The client takes aspirin every morning and reports no side effects at all.',
+      }),
+    ]);
+    expect(spans).toHaveLength(1);
+    expect(text.slice(spans[0]!.start, spans[0]!.end)).toBe(text);
+  });
+});
+
+describe('rehypeHighlightStatements cross-node matching', () => {
+  const paragraph = (...children: Array<Text | Element>): Element => ({
+    type: 'element',
+    tagName: 'p',
+    properties: {},
+    children,
+  });
+  const inline = (tagName: string, value: string): Element => ({
+    type: 'element',
+    tagName,
+    properties: {},
+    children: [textNode(value)],
+  });
+
+  const collectMarks = (node: Element | Text | Root): Element[] => {
+    const marks: Element[] = [];
+    const kids =
+      node.type === 'text' ? [] : ((node as Element | Root).children ?? []);
+    for (const child of kids) {
+      if (child.type === 'element') {
+        if ((child as Element).tagName === 'mark') marks.push(child as Element);
+        marks.push(...collectMarks(child as Element));
+      }
+    }
+    return marks;
+  };
+
+  it('highlights a sentence spanning code, em, and strong nodes', () => {
+    // As parsed from: Set `padding-top` now and *review* the **Summary** below.
+    const code = inline('code', 'padding-top');
+    const em = inline('em', 'review');
+    const strong = inline('strong', 'Summary');
+    const tree: Root = {
+      type: 'root',
+      children: [
+        paragraph(
+          textNode('Set '),
+          code,
+          textNode(' now and '),
+          em,
+          textNode(' the '),
+          strong,
+          textNode(' below.')
+        ),
+      ],
+    };
+    rehypeHighlightStatements([
+      stmt({
+        id: 9,
+        exact_quote: 'Set padding-top now and review the Summary below.',
+        verdict: 'contradicted',
+      }),
+    ])(tree);
+
+    const marks = collectMarks(tree);
+    expect(marks.length).toBeGreaterThanOrEqual(5);
+    for (const mark of marks) {
+      expect(mark.properties).toMatchObject({
+        dataStatementId: '9',
+        dataVerdict: 'contradicted',
+        className: ['verified-statement-mark'],
+      });
+    }
+    // Inline elements keep their tags with marked children.
+    expect(code.children).toHaveLength(1);
+    expect((code.children[0] as Element).tagName).toBe('mark');
+    expect(((code.children[0] as Element).children[0] as Text).value).toBe(
+      'padding-top'
+    );
+    expect(em.children).toHaveLength(1);
+    expect((em.children[0] as Element).tagName).toBe('mark');
+    expect(strong.children).toHaveLength(1);
+    expect((strong.children[0] as Element).tagName).toBe('mark');
+    expect(((strong.children[0] as Element).children[0] as Text).value).toBe(
+      'Summary'
+    );
+  });
+
+  it('matches quotes containing Markdown tokens against rendered text nodes', () => {
+    // Quote kept raw Markdown while HAST holds rendered text.
+    const tree: Root = {
+      type: 'root',
+      children: [
+        paragraph(
+          textNode('Set '),
+          inline('code', 'padding-top'),
+          textNode(' now.')
+        ),
+      ],
+    };
+    rehypeHighlightStatements([
+      stmt({ id: 4, exact_quote: 'Set `padding-top` now.' }),
+    ])(tree);
+    const marks = collectMarks(tree);
+    expect(marks.length).toBeGreaterThanOrEqual(3);
+    for (const mark of marks) {
+      expect(mark.properties).toMatchObject({ dataStatementId: '4' });
+    }
+  });
+
+  it('never highlights inside pre code blocks', () => {
+    const tree: Root = {
+      type: 'root',
+      children: [
+        {
+          type: 'element',
+          tagName: 'pre',
+          properties: {},
+          children: [
+            {
+              type: 'element',
+              tagName: 'code',
+              properties: {},
+              children: [textNode('secret padding-top value')],
+            },
+          ],
+        },
+      ],
+    };
+    rehypeHighlightStatements([stmt({ id: 1, exact_quote: 'secret padding' })])(
+      tree
+    );
+    expect(collectMarks(tree)).toHaveLength(0);
+  });
+
+  it('does not match across nested list items', () => {
+    const li = (value: string): Element => ({
+      type: 'element',
+      tagName: 'li',
+      properties: {},
+      children: [textNode(value)],
+    });
+    const tree: Root = {
+      type: 'root',
+      children: [
+        {
+          type: 'element',
+          tagName: 'ul',
+          properties: {},
+          children: [li('end of first'), li('start of second')],
+        },
+      ],
+    };
+    rehypeHighlightStatements([stmt({ id: 1, exact_quote: 'first start' })])(
+      tree
+    );
+    expect(collectMarks(tree)).toHaveLength(0);
+  });
+});
