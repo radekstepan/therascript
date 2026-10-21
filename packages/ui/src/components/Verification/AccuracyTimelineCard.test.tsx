@@ -17,7 +17,8 @@
 // the bars inside the frame stay green.
 import React from 'react';
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Theme } from '@radix-ui/themes';
 import type { VerificationTimepointStat } from '../../api/verification';
@@ -160,5 +161,122 @@ describe('AccuracyTimelineCard chart padding', () => {
       expect(x).toBeGreaterThanOrEqual(frameL);
       expect(x + w).toBeLessThanOrEqual(frameR);
     }
+  });
+});
+
+// Per-data-point hover tooltips: every trend point renders its own
+// AppTooltip (Radix) readout — date, messages audited, accuracy,
+// and the claims breakdown — instead of the native SVG <title>.
+// The trigger is the focusable point group (dot + invisible
+// full-height hover rect), so keyboard focus opens it too.
+describe('AccuracyTimelineCard point tooltips', () => {
+  const TOOLTIP_POINTS: VerificationTimepointStat[] = [
+    makePoint({
+      date: '2026-06-19',
+      messagesAudited: 2,
+      totalClaims: 4,
+      accuracyPercent: 75,
+      fabrications: 1,
+      contradictions: 0,
+      omissions: 1,
+    }),
+    makePoint({
+      date: '2026-06-20',
+      messagesAudited: 3,
+      totalClaims: 6,
+      accuracyPercent: 83.3,
+      fabrications: 0,
+      contradictions: 1,
+      omissions: 0,
+    }),
+    makePoint({
+      date: '2026-06-21',
+      messagesAudited: 1,
+      totalClaims: 2,
+      accuracyPercent: 100,
+      fabrications: 0,
+      contradictions: 0,
+      omissions: 0,
+    }),
+  ];
+
+  /** Per-point trigger groups, in date order. */
+  function pointTriggers(svg: SVGSVGElement): SVGGElement[] {
+    return Array.from(svg.querySelectorAll('g[data-date]'));
+  }
+
+  function expectedLines(p: VerificationTimepointStat): string[] {
+    return [
+      p.date,
+      `${p.accuracyPercent.toFixed(1)}% accuracy`,
+      `${p.messagesAudited} messages audited`,
+      `${p.fabrications} fabricated`,
+      `${p.contradictions} contradicted`,
+      `${p.omissions} omitted`,
+    ];
+  }
+
+  // Fresh render per point: cycling hover/unhover across triggers in
+  // one jsdom render leaves the first Radix tooltip open (Radix close
+  // timing relies on real pointer tracking), so each case hovers
+  // exactly one trigger.
+  it.each([0, 1, 2])(
+    'shows point %s its own tooltip content on hover',
+    async (i) => {
+      const user = userEvent.setup();
+      renderCard(TOOLTIP_POINTS);
+      const svg = screen.getByRole('img', {
+        name: 'Accuracy trend across 3 days',
+      }) as unknown as SVGSVGElement;
+
+      const triggers = pointTriggers(svg);
+      expect(triggers).toHaveLength(3);
+
+      await user.hover(triggers[i]);
+      const lines = expectedLines(TOOLTIP_POINTS[i]);
+      await waitFor(
+        () => {
+          const tooltip = screen.getByRole('tooltip');
+          for (const line of lines) {
+            expect(tooltip.textContent).toContain(line);
+          }
+          // And no other point's date leaks in.
+          for (const other of TOOLTIP_POINTS.filter(
+            (p) => p.date !== TOOLTIP_POINTS[i].date
+          )) {
+            expect(tooltip.textContent).not.toContain(other.date);
+          }
+        },
+        { timeout: 3000 }
+      );
+    }
+  );
+
+  it('opens the point tooltip on keyboard focus', async () => {
+    renderCard(TOOLTIP_POINTS);
+    const svg = screen.getByRole('img', {
+      name: 'Accuracy trend across 3 days',
+    }) as unknown as SVGSVGElement;
+
+    const triggers = pointTriggers(svg);
+    expect(triggers[0].getAttribute('tabindex')).toBe('0');
+    triggers[1].focus();
+    await waitFor(
+      () => {
+        const tooltip = screen.getByRole('tooltip');
+        for (const line of expectedLines(TOOLTIP_POINTS[1])) {
+          expect(tooltip.textContent).toContain(line);
+        }
+      },
+      { timeout: 3000 }
+    );
+  });
+
+  it('uses Radix tooltips instead of native SVG titles', () => {
+    renderCard(TOOLTIP_POINTS);
+    const svg = screen.getByRole('img', {
+      name: 'Accuracy trend across 3 days',
+    }) as unknown as SVGSVGElement;
+    expect(svg.querySelectorAll('title')).toHaveLength(0);
   });
 });

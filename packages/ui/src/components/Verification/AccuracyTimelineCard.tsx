@@ -19,8 +19,38 @@ import {
   fetchVerificationStats,
   type VerificationTimepointStat,
 } from '../../api/verification';
+import { AppTooltip } from '../Shared/AppTooltip';
 
 const ALL_MODELS = '__all__';
+
+/**
+ * Per-data-point tooltip body. Radix Themes renders Tooltip content
+ * inside a `<p>`, so this uses only phrasing content (spans/line
+ * breaks) — no block layout that would be invalid there.
+ */
+function TrendPointTooltipContent({
+  point,
+}: {
+  point: VerificationTimepointStat;
+}) {
+  return (
+    <span>
+      <strong>{point.date}</strong>
+      <br />
+      {`${point.accuracyPercent.toFixed(1)}% accuracy · ${point.messagesAudited} messages audited`}
+      <br />
+      {`${point.totalClaims} claims: ${point.fabrications} fabricated · ${point.contradictions} contradicted · ${point.omissions} omitted`}
+    </span>
+  );
+}
+
+function trendPointLabel(p: VerificationTimepointStat): string {
+  return (
+    `${p.date}: ${p.accuracyPercent.toFixed(1)}% accuracy, ` +
+    `${p.messagesAudited} messages audited, ${p.fabrications} fabricated, ` +
+    `${p.contradictions} contradicted, ${p.omissions} omitted`
+  );
+}
 
 function TrendChart({ points }: { points: VerificationTimepointStat[] }) {
   const width = 640;
@@ -105,8 +135,10 @@ function TrendChart({ points }: { points: VerificationTimepointStat[] }) {
         const fabH = total > 0 ? (p.fabrications / total) * h : 0;
         const conH = total > 0 ? (p.contradictions / total) * h : 0;
         return (
+          // No native <title> here: the per-point AppTooltip below owns
+          // the hover readout, and its invisible hover rect covers the
+          // bars too (it spans the full plot height above them).
           <g key={p.date}>
-            <title>{`${p.date}: ${p.accuracyPercent.toFixed(1)}% accuracy · ${p.fabrications} fabricated · ${p.contradictions} contradicted · ${p.omissions} omissions · ${p.messagesAudited} msgs`}</title>
             {total > 0 && (
               <>
                 <rect
@@ -148,19 +180,49 @@ function TrendChart({ points }: { points: VerificationTimepointStat[] }) {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-      {points.map((p, i) => (
-        <g key={`dot-${p.date}`}>
-          <title>{`${p.date}: ${p.accuracyPercent.toFixed(1)}% accuracy`}</title>
-          <circle
-            cx={x(i)}
-            cy={yAcc(p.accuracyPercent)}
-            r={3}
-            fill="var(--accent-9)"
-            stroke="var(--color-panel-solid)"
-            strokeWidth={1.5}
-          />
-        </g>
-      ))}
+      {points.map((p, i) => {
+        // Generous per-point hover target: one cell wide (adjacent
+        // cells tile without overlap), full plot height so hovering
+        // the stacked bars reads out the same point. Transparent
+        // fill still receives pointer events; zero layout shift.
+        const spacing =
+          points.length === 1
+            ? Math.min(innerW, barW * 4)
+            : (innerW - barW) / (points.length - 1);
+        const hoverX = Math.min(
+          Math.max(x(i) - spacing / 2, padL),
+          padL + innerW - spacing
+        );
+        return (
+          <AppTooltip
+            key={`dot-${p.date}`}
+            content={<TrendPointTooltipContent point={p} />}
+          >
+            <g
+              tabIndex={0}
+              role="img"
+              aria-label={trendPointLabel(p)}
+              data-date={p.date}
+            >
+              <rect
+                x={hoverX}
+                y={padT}
+                width={spacing}
+                height={innerH}
+                fill="transparent"
+              />
+              <circle
+                cx={x(i)}
+                cy={yAcc(p.accuracyPercent)}
+                r={3}
+                fill="var(--accent-9)"
+                stroke="var(--color-panel-solid)"
+                strokeWidth={1.5}
+              />
+            </g>
+          </AppTooltip>
+        );
+      })}
 
       {labelIdx.map((i) => {
         // Anchor the edge labels inward so they clear the y-axis
