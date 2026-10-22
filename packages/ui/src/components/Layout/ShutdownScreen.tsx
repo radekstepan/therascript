@@ -1,7 +1,8 @@
 // packages/ui/src/components/Layout/ShutdownScreen.tsx
 import React, { useEffect, useState } from 'react';
-import { Power, AudioLines, Check } from 'lucide-react';
+import { Power, Check } from 'lucide-react';
 import { cn } from '../../utils';
+import { TherascriptLogo } from '../Brand/TherascriptLogo';
 
 const STEPS = [
   'Saving your work',
@@ -57,14 +58,7 @@ export function ShutdownScreen() {
         )}
       >
         {/* Branding */}
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 bg-[var(--accent-9)] rounded-md flex items-center justify-center">
-            <AudioLines size={14} className="text-white" />
-          </div>
-          <span className="text-slate-500 dark:text-slate-500 text-xs font-semibold tracking-[0.2em] uppercase">
-            Therascript
-          </span>
-        </div>
+        <TherascriptLogo variant="full" size="sm" />
 
         {/* Pulsing power icon */}
         <div className="relative flex items-center justify-center">

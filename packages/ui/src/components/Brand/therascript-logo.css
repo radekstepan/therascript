@@ -1,0 +1,86 @@
+/* packages/ui/src/components/Brand/therascript-logo.css
+ *
+ * Shared Therascript brand lockup. Light values are plan-exact
+ * (see plan-logo.md §1); dark values are designed tints, not
+ * inversions, verified for legibility on the app's dark surfaces.
+ */
+
+.brand-logo {
+  --brand-logo-mark: #428366;
+  --brand-logo-ink: #284a3d;
+  --brand-logo-dot: #62a985;
+  --brand-logo-focus: #63b69a;
+
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: none;
+  border-radius: 6px;
+  font-family:
+    Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* The Radix theme root carries .dark (+ .custom-dark-theme from App)
+ * whenever the effective theme is dark, including system-resolved. */
+.dark .brand-logo,
+.dark-theme .brand-logo,
+.custom-dark-theme .brand-logo {
+  --brand-logo-mark: #6fae8f;
+  --brand-logo-ink: #dce9e2;
+  --brand-logo-dot: #7cc4a0;
+  --brand-logo-focus: #63b69a;
+}
+
+.brand-logo__mark {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 32px;
+  flex: none;
+  color: var(--brand-logo-mark);
+  transition: color 150ms ease;
+}
+
+.brand-logo:hover .brand-logo__mark {
+  color: var(--brand-logo-dot);
+}
+
+.brand-logo__wordmark {
+  color: var(--brand-logo-ink);
+  font-size: 23px;
+  font-weight: 650;
+  letter-spacing: -1px;
+}
+
+.brand-logo__dot {
+  color: var(--brand-logo-dot);
+}
+
+/* Compact shell size: sidebar header, splash screens. */
+.brand-logo--sm {
+  gap: 7px;
+}
+
+.brand-logo--sm .brand-logo__mark {
+  width: 26px;
+  height: 28px;
+}
+
+.brand-logo--sm .brand-logo__wordmark {
+  font-size: 18px;
+  letter-spacing: -0.5px;
+}
+
+/* Global styles intentionally clear :focus-visible; brand link opts in. */
+.brand-logo:focus-visible {
+  outline: 3px solid var(--brand-logo-focus);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brand-logo__mark {
+    transition: none;
+  }
+}

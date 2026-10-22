@@ -23,7 +23,6 @@ import {
   Star,
   BarChart,
   ShieldCheck,
-  AudioLines,
   ChevronDown,
   ChevronRight,
   RefreshCw,
@@ -50,6 +49,7 @@ import {
   isRestartingAtom,
 } from '../../store';
 import { JobsQueueModal } from '../Jobs/JobsQueueModal';
+import { TherascriptLogo } from '../Brand/TherascriptLogo';
 import { ShutdownScreen } from './ShutdownScreen';
 import {
   requestAppShutdown,
@@ -236,27 +236,13 @@ export function PersistentSidebar() {
             'flex items-center p-4',
             isSidebarOpen
               ? 'flex-row h-14 justify-between'
-              : 'flex-col h-auto justify-center gap-3'
+              : 'flex-col h-auto justify-center items-center gap-3'
           )}
         >
-          {!isSidebarOpen && (
-            <div
-              className="w-8 h-8 bg-[var(--accent-9)] rounded-lg flex items-center justify-center"
-              aria-hidden="true"
-            >
-              <AudioLines size={18} className="text-white" />
-            </div>
-          )}
-          {isSidebarOpen && (
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-[var(--accent-9)] rounded-lg flex items-center justify-center">
-                <AudioLines size={18} className="text-white" />
-              </div>
-              <h1 className="text-[13.5px] font-bold text-[var(--gray-12)] tracking-tight">
-                Therascript
-              </h1>
-            </div>
-          )}
+          <TherascriptLogo
+            variant={isSidebarOpen ? 'full' : 'mark'}
+            size="sm"
+          />
           <button
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
             className="p-1.5 rounded-lg text-[var(--gray-11)] hover:bg-[var(--gray-a3)] hover:text-[var(--gray-12)] focus:outline-none transition-colors"

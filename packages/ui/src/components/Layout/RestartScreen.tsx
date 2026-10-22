@@ -1,7 +1,8 @@
 // packages/ui/src/components/Layout/RestartScreen.tsx
 import React, { useEffect, useState } from 'react';
-import { RefreshCw, AudioLines, Check } from 'lucide-react';
+import { RefreshCw, Check } from 'lucide-react';
 import { cn } from '../../utils';
+import { TherascriptLogo } from '../Brand/TherascriptLogo';
 
 const STEPS = [
   'Stopping application services',
@@ -38,14 +39,7 @@ export function RestartScreen({ step }: { step: number }) {
 function ProgressScreen({ step }: { step: number }) {
   return (
     <div className="flex flex-col items-center gap-8">
-      <div className="flex items-center gap-2">
-        <div className="w-6 h-6 bg-[var(--accent-9)] rounded-md flex items-center justify-center">
-          <AudioLines size={14} className="text-white" />
-        </div>
-        <span className="text-slate-500 dark:text-slate-500 text-xs font-semibold tracking-[0.2em] uppercase">
-          Therascript
-        </span>
-      </div>
+      <TherascriptLogo variant="full" size="sm" />
 
       <div className="relative flex items-center justify-center">
         <div

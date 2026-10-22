@@ -317,3 +317,5 @@ cython_debug/
 .turbo/
 
 packages/ui/test-results/
+
+.DS_Store
