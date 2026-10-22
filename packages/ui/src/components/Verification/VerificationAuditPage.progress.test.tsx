@@ -219,6 +219,7 @@ describe('VerificationAuditPage live phase display', () => {
       messageIndex: 1,
       attempt: 1,
       elapsedMs: 4200,
+      messagePreview: null,
       tokensPerSecond: null,
       generatedTokens: null,
       updatedAt: Date.now(),
@@ -236,13 +237,56 @@ describe('VerificationAuditPage live phase display', () => {
 
   it('falls back to the durable snapshot phase after a reload (no SSE yet)', async () => {
     // No live SSE phase (page just reloaded): the snapshot columns on the
-    // job row still identify the in-flight message.
+    // job row still identify the in-flight message by its raw id.
     hookState.phase = null;
     renderPage();
 
     await screen.findByRole('heading', { name: /Audit #7 in progress/ });
     expect(screen.getByTestId('audit-live-phase').textContent).toContain(
-      'Working on message 1914'
+      'Working on message #1914'
+    );
+  });
+
+  it('prefers the snapshot message preview over the raw id after a reload', async () => {
+    hookState.phase = null;
+    hookState.job = {
+      ...ACTIVE_JOB,
+      current_message_preview: 'SOAP Note S – Subjective The client…',
+    };
+    renderPage();
+
+    await screen.findByRole('heading', { name: /Audit #7 in progress/ });
+    const text = screen.getByTestId('audit-live-phase').textContent ?? '';
+    expect(text).toContain('Working on "SOAP Note S – Subjective The client…"');
+    expect(text).not.toContain('1914');
+  });
+
+  it('shows the preview (or id fallback) for a retrying snapshot phase', async () => {
+    hookState.phase = null;
+    hookState.job = {
+      ...ACTIVE_JOB,
+      current_phase: 'retrying',
+      current_attempt: 2,
+      current_message_preview: 'The client takes Sertraline',
+    };
+    const { unmount } = renderPage();
+
+    await screen.findByRole('heading', { name: /Audit #7 in progress/ });
+    expect(screen.getByTestId('audit-live-phase').textContent).toContain(
+      'Retrying "The client takes Sertraline" (attempt 2)'
+    );
+    unmount();
+
+    hookState.job = {
+      ...ACTIVE_JOB,
+      current_phase: 'retrying',
+      current_attempt: 2,
+      current_message_preview: null,
+    };
+    renderPage();
+    await screen.findByRole('heading', { name: /Audit #7 in progress/ });
+    expect(screen.getByTestId('audit-live-phase').textContent).toContain(
+      'Retrying message #1914 (attempt 2)'
     );
   });
 
@@ -271,6 +315,7 @@ describe('VerificationAuditPage live phase display', () => {
       messageIndex: 1,
       attempt: 1,
       elapsedMs: 4200,
+      messagePreview: null,
       tokensPerSecond: null,
       generatedTokens: null,
       updatedAt: Date.now(),
@@ -293,6 +338,7 @@ describe('VerificationAuditPage live phase display', () => {
       messageIndex: 1,
       attempt: 1,
       elapsedMs: 4200,
+      messagePreview: null,
       tokensPerSecond: 12.34,
       generatedTokens: 120,
       updatedAt: Date.now(),
@@ -315,6 +361,7 @@ describe('VerificationAuditPage live phase display', () => {
       messageIndex: null,
       attempt: null,
       elapsedMs: 9000,
+      messagePreview: null,
       tokensPerSecond: null,
       generatedTokens: null,
       updatedAt: Date.now(),
@@ -336,6 +383,7 @@ describe('VerificationAuditPage live phase display', () => {
       messageIndex: 1,
       attempt: 1,
       elapsedMs: 100,
+      messagePreview: null,
       tokensPerSecond: 0,
       generatedTokens: 0,
       updatedAt: Date.now(),

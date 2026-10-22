@@ -1461,6 +1461,61 @@ describe('verification job outcome counters and phase snapshot', () => {
     expect(terminal?.current_attempt).toBeNull();
     expect(terminal?.phase_updated_at).toBeNull();
   });
+
+  it('derives current_message_preview from the in-flight message text', () => {
+    const sessionId = insertSession('Preview Session');
+    const chatId = insertChat(sessionId);
+    const messageId = insertMessage({
+      chatId,
+      sender: 'ai',
+      text: '### **SOAP Note**\n\n#### **S – Subjective**\nThe client opened the session describing mounting anxiety.',
+      timestamp: T0,
+    });
+
+    const job = verificationRepository.createVerificationJob({
+      scope: 'all_unverified',
+    });
+    expect(job.current_message_preview).toBeNull();
+
+    verificationRepository.updateJobStatus(job.id, 'processing');
+    verificationRepository.updateJobPhase(job.id, {
+      currentPhase: 'generating',
+      currentMessageId: messageId,
+      currentAttempt: 1,
+    });
+
+    const expected = 'SOAP Note S – Subjective The client opened the…';
+    expect(
+      verificationRepository.findVerificationJobById(job.id)
+        ?.current_message_preview
+    ).toBe(expected);
+    // The list reader hydrates the preview too (reload path).
+    const listed = verificationRepository.findAllVerificationJobs(100);
+    expect(
+      listed.find((row) => row.id === job.id)?.current_message_preview
+    ).toBe(expected);
+
+    // Clearing the phase clears the derived preview (no extra column).
+    verificationRepository.clearJobPhase(job.id);
+    expect(
+      verificationRepository.findVerificationJobById(job.id)
+        ?.current_message_preview
+    ).toBeNull();
+  });
+
+  it('maps a missing in-flight message to a null preview', () => {
+    const job = verificationRepository.createVerificationJob({
+      scope: 'all_unverified',
+    });
+    verificationRepository.updateJobPhase(job.id, {
+      currentPhase: 'generating',
+      currentMessageId: 424242,
+      currentAttempt: 1,
+    });
+    const live = verificationRepository.findVerificationJobById(job.id);
+    expect(live?.current_message_id).toBe(424242);
+    expect(live?.current_message_preview).toBeNull();
+  });
 });
 
 describe('message verification failure codes', () => {

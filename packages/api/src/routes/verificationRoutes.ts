@@ -53,6 +53,7 @@ const VerificationJobSchema = t.Object({
   current_message_id: t.Union([t.Number(), t.Null()]),
   current_attempt: t.Union([t.Number(), t.Null()]),
   phase_updated_at: t.Union([t.Number(), t.Null()]),
+  current_message_preview: t.Optional(t.Union([t.String(), t.Null()])),
   total_statements: t.Number(),
   flagged_statements: t.Number(),
   omissions_count: t.Number(),

@@ -341,6 +341,12 @@ export interface BackendVerificationJob {
   current_message_id: number | null;
   current_attempt: number | null;
   phase_updated_at: number | null;
+  /**
+   * Human-readable preview of `current_message_id` text (derived at read
+   * time via a scalar subquery — no migration). Null when the job has no
+   * in-flight message or its text is empty.
+   */
+  current_message_preview?: string | null;
   total_statements: number;
   flagged_statements: number;
   omissions_count: number;
@@ -484,6 +490,7 @@ export interface VerificationGlobalStats {
 }
 
 export * from './validators.js';
+export * from './messagePreview.js';
 export * from './schemas/api/index.js';
 export * from './schemas/jobs/index.js';
 export * from './schemas/db/index.js';

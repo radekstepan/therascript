@@ -10,6 +10,7 @@ import {
   type VerificationCandidateMessage,
   type VerificationStatementInput,
 } from '@therascript/data';
+import { formatMessagePreview } from '@therascript/domain';
 import type {
   BackendChatMessage,
   BackendVerificationJob,
@@ -1589,6 +1590,7 @@ interface JudgeStreamTelemetry {
   succeededMessages: number;
   failedMessages: number;
   jobStartTime: number;
+  messagePreview?: string | null;
 }
 
 /**
@@ -1660,6 +1662,7 @@ async function runJudgeStreamAttempt(options: {
         totalMessages: streamTelemetry.totalMessages,
         messageId,
         attempt: streamTelemetry.attempt,
+        messagePreview: streamTelemetry.messagePreview,
       }),
       totalMessages: streamTelemetry.totalMessages,
       processedMessages: streamTelemetry.processedMessages,
@@ -1672,6 +1675,7 @@ async function runJudgeStreamAttempt(options: {
       messageIndex: streamTelemetry.messageIndex,
       attempt: streamTelemetry.attempt,
       elapsedMs: now - streamTelemetry.jobStartTime,
+      messagePreview: streamTelemetry.messagePreview ?? null,
       tokensPerSecond,
       generatedTokens: estimatedTokens,
     });
@@ -1928,25 +1932,51 @@ export function describeVerificationPhase(options: {
   totalMessages?: number;
   messageId?: number;
   attempt?: number;
+  messagePreview?: string | null;
 }): string {
   const { phase, messageIndex, totalMessages, messageId, attempt } = options;
+  const preview = options.messagePreview?.trim()
+    ? options.messagePreview
+    : null;
+  const position =
+    messageIndex !== undefined && totalMessages !== undefined
+      ? `${messageIndex} of ${totalMessages}`
+      : null;
   switch (phase) {
     case 'waiting_for_lock':
       return 'Waiting for the LLM worker lock…';
     case 'loading_judge':
       return 'Loading the Judge model…';
     case 'checking_message':
-      return messageIndex !== undefined && totalMessages !== undefined
-        ? `Checking message ${messageIndex} of ${totalMessages}…`
-        : 'Checking message…';
-    case 'generating':
+      if (preview) {
+        return position && totalMessages !== 1
+          ? `Checking message ${position}: "${preview}"…`
+          : `Checking "${preview}"…`;
+      }
+      return position ? `Checking message ${position}…` : 'Checking message…';
+    case 'generating': {
+      if (preview) {
+        const attemptSuffix =
+          attempt !== undefined && attempt > 1 ? `, attempt ${attempt}` : '';
+        return position
+          ? `Generating assessment (${position}${attemptSuffix}): "${preview}"…`
+          : `Generating assessment: "${preview}"…`;
+      }
       return messageId !== undefined
-        ? `Generating assessment for message ${messageId} (attempt 1)…`
+        ? `Generating assessment for message #${messageId} (attempt 1)…`
         : 'Generating assessment (attempt 1)…';
-    case 'retrying':
+    }
+    case 'retrying': {
+      const attemptLabel = attempt ?? 2;
+      if (preview) {
+        return position
+          ? `Retrying assessment (${position}, attempt ${attemptLabel}): "${preview}"…`
+          : `Retrying assessment (attempt ${attemptLabel}): "${preview}"…`;
+      }
       return messageId !== undefined
-        ? `Retrying message ${messageId} with thinking disabled (attempt ${attempt ?? 2})…`
-        : `Retrying with thinking disabled (attempt ${attempt ?? 2})…`;
+        ? `Retrying message #${messageId} (attempt ${attemptLabel})…`
+        : `Retrying assessment (attempt ${attemptLabel})…`;
+    }
     case 'finishing':
       return 'Finishing audit…';
   }
@@ -2001,10 +2031,18 @@ export async function processVerificationJob(
       sessionId?: number;
       messageIndex?: number;
       attempt?: number;
+      messagePreview?: string | null;
     }
   ): void => {
-    const { processed, messageId, chatId, sessionId, messageIndex, attempt } =
-      options;
+    const {
+      processed,
+      messageId,
+      chatId,
+      sessionId,
+      messageIndex,
+      attempt,
+      messagePreview,
+    } = options;
     try {
       verificationRepository.updateJobPhase(jobId, {
         currentPhase: phase,
@@ -2026,6 +2064,7 @@ export async function processVerificationJob(
         totalMessages: totalCandidates > 0 ? totalCandidates : undefined,
         messageId,
         attempt,
+        messagePreview,
       }),
       totalMessages: totalCandidates > 0 ? totalCandidates : undefined,
       processedMessages: processed,
@@ -2038,6 +2077,7 @@ export async function processVerificationJob(
       messageIndex,
       attempt,
       elapsedMs: Date.now() - processingStartTime,
+      messagePreview: messagePreview ?? null,
       // Phase transitions carry no live speed: generation ticks publish
       // their own values, and every other transition clears stale speed.
       tokensPerSecond: null,
@@ -2389,6 +2429,15 @@ export async function processVerificationJob(
       const sessionId = candidate.sessionId;
       const authoredModel = candidate.model ?? null;
       const messageIndex = candidateIndex + 1;
+      // Human-readable preview for phase text (visible answer preferred,
+      // raw text when the visible part is empty). Empty previews fall back
+      // to `message #<id>` in `describeVerificationPhase`.
+      const candidatePreview =
+        formatMessagePreview(
+          extractVisibleAnswer(candidate.text ?? '').trim() ||
+            candidate.text ||
+            ''
+        ) || null;
 
       // Per-message setup phase (fast-path checks, transcript load,
       // context budgeting) — published before any LLM work so a slow
@@ -2400,6 +2449,7 @@ export async function processVerificationJob(
         sessionId,
         messageIndex,
         attempt: 1,
+        messagePreview: candidatePreview,
       });
 
       // Token/duration accumulators across the initial Judge call + the
@@ -2682,6 +2732,7 @@ export async function processVerificationJob(
           sessionId,
           messageIndex,
           attempt: 1,
+          messagePreview: candidatePreview,
         });
         const firstAttempt = await runJudgeStreamAttempt({
           jobId,
@@ -2707,6 +2758,7 @@ export async function processVerificationJob(
             succeededMessages: succeeded,
             failedMessages: failed,
             jobStartTime: processingStartTime,
+            messagePreview: candidatePreview,
           },
         });
         recordAttemptUsage(firstAttempt.streamResult, firstAttempt.durationMs);
@@ -2738,6 +2790,7 @@ export async function processVerificationJob(
             sessionId,
             messageIndex,
             attempt: 2,
+            messagePreview: candidatePreview,
           });
           const retryMessages: BackendChatMessage[] = [
             judgeMessages[0],
@@ -2770,6 +2823,7 @@ export async function processVerificationJob(
               succeededMessages: succeeded,
               failedMessages: failed,
               jobStartTime: processingStartTime,
+              messagePreview: candidatePreview,
             },
           });
           recordAttemptUsage(

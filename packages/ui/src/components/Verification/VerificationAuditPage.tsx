@@ -52,10 +52,22 @@ function phaseFallbackText(job: VerificationJob): string | null {
     return 'Waiting for the LLM worker lock…';
   if (job.current_phase === 'loading_judge') return 'Loading the Judge model…';
   if (job.current_phase === 'finishing') return 'Finishing audit…';
-  if (job.current_phase && job.current_message_id != null)
-    return `Working on message ${job.current_message_id}…`;
-  if (job.current_phase) return 'Audit in progress…';
-  return null;
+  if (!job.current_phase) return null;
+  // Prefer the human-readable preview; the raw DB id is a last resort.
+  const preview = job.current_message_preview?.trim()
+    ? job.current_message_preview
+    : null;
+  if (job.current_phase === 'retrying') {
+    if (preview)
+      return `Retrying "${preview}" (attempt ${job.current_attempt ?? 2})…`;
+    if (job.current_message_id != null)
+      return `Retrying message #${job.current_message_id} (attempt ${job.current_attempt ?? 2})…`;
+    return 'Audit in progress…';
+  }
+  if (preview) return `Working on "${preview}"…`;
+  if (job.current_message_id != null)
+    return `Working on message #${job.current_message_id}…`;
+  return 'Audit in progress…';
 }
 
 function LiveJobBanner({ job }: { job: VerificationJob }) {

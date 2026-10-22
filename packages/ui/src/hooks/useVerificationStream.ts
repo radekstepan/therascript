@@ -65,6 +65,7 @@ function phaseFromJob(job: VerificationJob): VerificationLivePhase | null {
     messageIndex: null,
     attempt: job.current_attempt ?? null,
     elapsedMs: null,
+    messagePreview: job.current_message_preview ?? null,
     tokensPerSecond: null,
     generatedTokens: null,
     updatedAt: job.phase_updated_at ?? Date.now(),
@@ -84,6 +85,7 @@ function phaseFromEvent(
     messageIndex: data.messageIndex ?? null,
     attempt: data.attempt ?? null,
     elapsedMs: data.elapsedMs ?? null,
+    messagePreview: data.messagePreview ?? null,
     // Throttled generating/retrying ticks carry the live speed; every
     // other phase event (or a missing field) clears it.
     tokensPerSecond: data.tokensPerSecond ?? null,
@@ -225,6 +227,7 @@ export function useVerificationStream(
             next.current_message_id = eventPhase.messageId;
             next.current_attempt = eventPhase.attempt;
             next.phase_updated_at = eventPhase.updatedAt;
+            next.current_message_preview = eventPhase.messagePreview;
           }
           if (data.message && data.type === 'error')
             next.error_message = data.message;

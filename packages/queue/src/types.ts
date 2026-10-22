@@ -82,6 +82,12 @@ export interface VerificationStreamEvent {
   /** Milliseconds elapsed since the worker started processing this job. */
   elapsedMs?: number;
   /**
+   * Human-readable preview of the in-flight message text (present on
+   * `phase` events for message-bound phases; null when unavailable so
+   * the UI falls back to `message #<id>`).
+   */
+  messagePreview?: string | null;
+  /**
    * Live generation rate for the current Judge call (present on throttled
    * `phase` ticks during `generating`/`retrying`; explicitly null once
    * generation ends so stale speed never lingers).

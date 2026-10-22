@@ -176,6 +176,8 @@ export interface VerificationJob {
   current_message_id?: number | null;
   current_attempt?: number | null;
   phase_updated_at?: number | null;
+  /** Human-readable preview of `current_message_id` text (derived server-side). */
+  current_message_preview?: string | null;
   total_statements: number;
   flagged_statements: number;
   omissions_count: number;
@@ -373,6 +375,8 @@ export interface VerificationStreamEvent {
   messageIndex?: number;
   attempt?: number;
   elapsedMs?: number;
+  /** Human-readable preview of the in-flight message (present on `phase`). */
+  messagePreview?: string | null;
   /** Live Judge generation rate (throttled `phase` ticks; null once ended). */
   tokensPerSecond?: number | null;
   /** Cumulative estimated tokens in the current attempt. */
@@ -390,6 +394,7 @@ export interface VerificationLivePhase {
   messageIndex: number | null;
   attempt: number | null;
   elapsedMs: number | null;
+  messagePreview: string | null;
   tokensPerSecond: number | null;
   generatedTokens: number | null;
   updatedAt: number;

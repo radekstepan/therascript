@@ -133,6 +133,43 @@ describe('useVerificationStream phases', () => {
     expect(hook.result.current.job?.processed_messages).toBe(0);
   });
 
+  it('propagates the message preview from snapshots and phase events', () => {
+    const { hook } = renderStream(7);
+    act(() => {
+      lastInstance().emit({
+        type: 'snapshot',
+        job: { ...ACTIVE_JOB, current_message_preview: 'Snapshot preview' },
+      });
+    });
+    expect(hook.result.current.phase).toMatchObject({
+      phase: 'generating',
+      messagePreview: 'Snapshot preview',
+    });
+
+    act(() => {
+      lastInstance().emit({
+        jobId: 7,
+        timestamp: Date.now(),
+        type: 'phase',
+        phase: 'generating',
+        message: 'Generating assessment (1 of 1): "Live preview"…',
+        processedMessages: 0,
+        messageId: 1914,
+        messageIndex: 1,
+        attempt: 1,
+        messagePreview: 'Live preview',
+      });
+    });
+    expect(hook.result.current.phase).toMatchObject({
+      phase: 'generating',
+      messagePreview: 'Live preview',
+    });
+    // The local job snapshot mirrors the preview for reload consistency.
+    expect(hook.result.current.job?.current_message_preview).toBe(
+      'Live preview'
+    );
+  });
+
   it('updates the live phase on phase events without incrementing processed', () => {
     const { hook } = renderStream(7);
     act(() => {
@@ -185,7 +222,7 @@ describe('useVerificationStream phases', () => {
         timestamp: Date.now(),
         type: 'phase',
         phase: 'retrying',
-        message: 'Retrying message 1914 with thinking disabled (attempt 2)…',
+        message: 'Retrying message #1914 (attempt 2)…',
         processedMessages: 0,
         messageId: 1914,
         messageIndex: 1,
@@ -197,7 +234,7 @@ describe('useVerificationStream phases', () => {
       phase: 'retrying',
       attempt: 2,
     });
-    expect(hook.result.current.phase?.message).toContain('thinking disabled');
+    expect(hook.result.current.phase?.message).toContain('Retrying message');
   });
 
   it('merges outcome counts and clears the phase on terminal events', () => {

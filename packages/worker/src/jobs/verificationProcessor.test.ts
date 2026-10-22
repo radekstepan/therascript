@@ -2342,10 +2342,83 @@ describe('verification failure diagnostics (pure builders)', () => {
         messageId: 11,
         attempt: 2,
       })
-    ).toContain('thinking disabled');
+    ).toBe('Retrying message #11 (attempt 2)…');
     expect(describeVerificationPhase({ phase: 'finishing' })).toMatch(
       /Finishing/
     );
+  });
+
+  it('prefers the message preview over the raw id in phase text', () => {
+    const preview = 'The client takes Sertraline';
+    expect(
+      describeVerificationPhase({
+        phase: 'checking_message',
+        messageIndex: 1,
+        totalMessages: 3,
+        messagePreview: preview,
+      })
+    ).toBe(`Checking message 1 of 3: "${preview}"…`);
+    // A single-message run drops the redundant position prefix.
+    expect(
+      describeVerificationPhase({
+        phase: 'checking_message',
+        messageIndex: 1,
+        totalMessages: 1,
+        messagePreview: preview,
+      })
+    ).toBe(`Checking "${preview}"…`);
+    expect(
+      describeVerificationPhase({
+        phase: 'generating',
+        messageIndex: 1,
+        totalMessages: 3,
+        messageId: 11,
+        attempt: 1,
+        messagePreview: preview,
+      })
+    ).toBe(`Generating assessment (1 of 3): "${preview}"…`);
+    expect(
+      describeVerificationPhase({
+        phase: 'generating',
+        messageIndex: 1,
+        totalMessages: 3,
+        messageId: 11,
+        attempt: 2,
+        messagePreview: preview,
+      })
+    ).toBe(`Generating assessment (1 of 3, attempt 2): "${preview}"…`);
+    expect(
+      describeVerificationPhase({
+        phase: 'retrying',
+        messageIndex: 1,
+        totalMessages: 3,
+        messageId: 11,
+        attempt: 2,
+        messagePreview: preview,
+      })
+    ).toBe(`Retrying assessment (1 of 3, attempt 2): "${preview}"…`);
+  });
+
+  it('falls back to message #id when the preview is empty', () => {
+    expect(
+      describeVerificationPhase({
+        phase: 'generating',
+        messageIndex: 1,
+        totalMessages: 1,
+        messageId: 11,
+        messagePreview: null,
+      })
+    ).toBe('Generating assessment for message #11 (attempt 1)…');
+    expect(
+      describeVerificationPhase({
+        phase: 'retrying',
+        messageIndex: 1,
+        totalMessages: 1,
+        messageId: 11,
+        attempt: 2,
+        messagePreview: '   ',
+      })
+    ).toBe('Retrying message #11 (attempt 2)…');
   });
 });
 
@@ -2522,6 +2595,55 @@ describe('processVerificationJob — progress phases and outcome semantics', () 
     expect(clearJobPhaseMock).toHaveBeenCalledWith(1);
   });
 
+  it('shows a cleaned preview instead of the raw message id in phase text', async () => {
+    findCandidatesMock.mockReturnValue([
+      candidateFor(
+        11,
+        '### **SOAP Note**\nThe client opened the session describing mounting anxiety about work deadlines.'
+      ),
+    ]);
+    streamLlmMock.mockImplementationOnce(() =>
+      fakeStream([{ content: '{"summary_assessment": "ok"}' }], {
+        promptTokens: 90,
+        completionTokens: 40,
+      })
+    );
+    parseJsonMock.mockReturnValue({
+      summary_assessment: 'All supported.',
+      claims: [
+        {
+          exact_quote: 'mounting anxiety about work',
+          normalized_claim: 'Client has mounting anxiety about work.',
+          verdict: 'supported',
+          severity: 'none',
+          confidence: 0.9,
+          reasoning: 'Stated verbatim in P#0.',
+          evidence: [],
+        },
+      ],
+      omissions: [],
+    });
+
+    await runJob();
+
+    const preview =
+      'SOAP Note The client opened the session describing mounting…';
+    const phases = phaseEvents();
+    expect(phases[0]).toMatchObject({
+      phase: 'checking_message',
+      messagePreview: preview,
+    });
+    expect(phases[0].message).toBe(`Checking "${preview}"…`);
+    const generating = phases.find((e) => e.phase === 'generating');
+    expect(generating).toMatchObject({ messagePreview: preview });
+    expect(generating.message).toBe(
+      `Generating assessment (1 of 1): "${preview}"…`
+    );
+    for (const event of phases) {
+      expect(event.message).not.toContain('message 11');
+    }
+  });
+
   it('publishes a distinct retrying phase with attempt 2 on the JSON-repair retry', async () => {
     findCandidatesMock.mockReturnValue([
       candidateFor(11, 'The client takes Sertraline every morning.'),
@@ -2550,8 +2672,14 @@ describe('processVerificationJob — progress phases and outcome semantics', () 
       'finishing',
     ]);
     const retry = phaseEvents().find((e) => e.phase === 'retrying');
-    expect(retry).toMatchObject({ attempt: 2, messageId: 11 });
-    expect(retry.message).toContain('thinking disabled');
+    expect(retry).toMatchObject({
+      attempt: 2,
+      messageId: 11,
+      messagePreview: 'The client takes Sertraline every morning.',
+    });
+    expect(retry.message).toBe(
+      'Retrying assessment (1 of 1, attempt 2): "The client takes Sertraline every morning."…'
+    );
     expect(updateJobPhaseMock).toHaveBeenCalledWith(
       1,
       expect.objectContaining({
@@ -3074,7 +3202,9 @@ describe('processVerificationJob — live token-speed telemetry', () => {
         attempt: 1,
         totalMessages: 1,
         processedMessages: 0,
-        message: 'Generating assessment for message 11 (attempt 1)…',
+        message:
+          'Generating assessment (1 of 1): "The client takes Sertraline every morning."…',
+        messagePreview: 'The client takes Sertraline every morning.',
       });
       expect(typeof tick.elapsedMs).toBe('number');
     }

@@ -1,4 +1,5 @@
 import { db, run, all, get } from '@therascript/db';
+import { formatMessagePreview } from '@therascript/domain';
 import type {
   BackendChatMessage,
   BackendMessageVerification,
@@ -230,7 +231,14 @@ const insertJobSql = `
     INSERT INTO verification_jobs (status, scope, session_ids_json, chat_id, skip_verified, created_at, model_name, context_size, thinking_budget, temperature, top_p, repeat_penalty, num_gpu_layers, llm_base_url)
     VALUES ('pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `;
-const selectJobByIdSql = 'SELECT * FROM verification_jobs WHERE id = ?';
+/**
+ * Scalar subquery resolving the raw text of the in-flight message so
+ * `mapJobRow` can derive `current_message_preview` without a migration.
+ * Null when the job has no `current_message_id` (or the message is gone).
+ */
+const currentMessageTextSubquery =
+  '(SELECT m.text FROM messages m WHERE m.id = verification_jobs.current_message_id) AS current_message_text';
+const selectJobByIdSql = `SELECT verification_jobs.*, ${currentMessageTextSubquery} FROM verification_jobs WHERE id = ?`;
 
 const upsertMessageVerificationSql = `
     INSERT INTO message_verifications (message_id, chat_id, session_id, verification_job_id, authored_model, judge_model, status, total_claims, supported_claims, partial_claims, contradicted_claims, fabricated_claims, omissions_count, accuracy_score, summary_assessment, prompt_tokens, completion_tokens, duration_ms, verified_at, error_message, error_code)
@@ -266,19 +274,32 @@ const insertStatementSql = `
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `;
 
-const mapJobRow = (row: any): BackendVerificationJob => ({
-  ...(row as Omit<BackendVerificationJob, 'skip_verified'>),
-  skip_verified: row.skip_verified === 1,
-  // V21 columns default defensively so rows selected through older
-  // projections (or partially migrated DBs) still map.
-  succeeded_messages: row.succeeded_messages ?? 0,
-  failed_messages: row.failed_messages ?? 0,
-  skipped_messages: row.skipped_messages ?? 0,
-  current_phase: row.current_phase ?? null,
-  current_message_id: row.current_message_id ?? null,
-  current_attempt: row.current_attempt ?? null,
-  phase_updated_at: row.phase_updated_at ?? null,
-});
+const mapJobRow = (row: any): BackendVerificationJob => {
+  // Strip the preview subquery column: it is derived input, not a job field.
+  const { current_message_text, ...rest } = row as Record<string, unknown> & {
+    current_message_text?: string | null;
+  };
+  const preview =
+    typeof current_message_text === 'string'
+      ? formatMessagePreview(current_message_text)
+      : '';
+  return {
+    ...(rest as Omit<BackendVerificationJob, 'skip_verified'>),
+    skip_verified: row.skip_verified === 1,
+    // V21 columns default defensively so rows selected through older
+    // projections (or partially migrated DBs) still map.
+    succeeded_messages: row.succeeded_messages ?? 0,
+    failed_messages: row.failed_messages ?? 0,
+    skipped_messages: row.skipped_messages ?? 0,
+    current_phase: row.current_phase ?? null,
+    current_message_id: row.current_message_id ?? null,
+    current_attempt: row.current_attempt ?? null,
+    phase_updated_at: row.phase_updated_at ?? null,
+    // Empty/whitespace-only message text maps to null so the UI falls
+    // back to `message #<id>` instead of rendering empty quotes.
+    current_message_preview: preview ? preview : null,
+  };
+};
 
 const mapMessageRow = (row: any): BackendChatMessage => ({
   ...(row as BackendChatMessage),
@@ -402,7 +423,7 @@ export const verificationRepository = {
   findAllVerificationJobs: (limit: number = 50): BackendVerificationJob[] => {
     try {
       const rows = all<any>(
-        'SELECT * FROM verification_jobs ORDER BY created_at DESC, id DESC LIMIT ?',
+        `SELECT verification_jobs.*, ${currentMessageTextSubquery} FROM verification_jobs ORDER BY created_at DESC, id DESC LIMIT ?`,
         limit
       );
       return rows.map(mapJobRow);
