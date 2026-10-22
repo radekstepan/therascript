@@ -18,17 +18,4 @@ This document is structured as a sequential execution plan for an LLM orchestrat
 
 ## Tasks
 
-- [x] Task 1: The buttons in the header of Fact Check need to be right aligned on the same row as the title that says "Fact Check"
-- [x] Task 2: I don't understand why say session "foo" has accuracy of 0.8%. Statements???
-- [x] Task 3: Show accuracy by llm and the chart over time above rather than next to each other. The chart should go first.
-- [x] Task 4: When I navigate from issue feed to that chat, it opens the Fact Check modal on the page 2x
-- [x] Task 5: Highlight the name of the session in the issues feed like a link just like we do elsewhere
-- [x] Task 6: Be able to filter the issues list by client
-- [x] Task 7: Don't like the purple judge label when job is running, put the name of the judge in the "audit in progress" line instead
-- [x] Task 8: Currently we change the icon of the session in the list when it has a chat (speech bubble icon). If it is also fact checked, use that icon instead (the one you use in the header of the chat panel on the session page in the Fact Check Chat)
-- [x] Task 9: The Fact Check Chat should just be an icon in the header of the chat instzead of a whole "action" looking thing. Still should have a color. Doesn't open any modal or anything.
-- [ ] Task 10: Just to confirm, we only Fact Check AI messages/responses and not user's messages correct? Just confirm in writeup here, no need to makea commit.
-
-## Task 10 confirmation (writeup only, no commit)
-
-_TBD_
+...
