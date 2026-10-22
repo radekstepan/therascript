@@ -600,7 +600,17 @@ export function ChatMessageBubble({
             )}
             {showFailedFooter && failedTooltip !== null && (
               <Box className="min-w-0">
-                <Flex align="center" justify="end" gap="1">
+                {/* The "soft" Clear variant (unlike "ghost") carries no
+                    negative margins, so its hover/focus background stays
+                    inside its own box and can never paint over the badge.
+                    The row wraps on narrow notes instead of squeezing. */}
+                <Flex
+                  align="center"
+                  justify="end"
+                  gap="2"
+                  wrap="wrap"
+                  data-testid="failed-verification-footer"
+                >
                   <Badge
                     color="red"
                     variant="soft"
@@ -612,10 +622,11 @@ export function ChatMessageBubble({
                   </Badge>
                   <Button
                     size="1"
-                    variant="ghost"
+                    variant="soft"
                     color="red"
                     disabled={clearVerificationMutation.isPending}
                     title="Clear this failed verification so the next audit retries the message"
+                    style={{ flexShrink: 0 }}
                     onClick={() => clearVerificationMutation.mutate()}
                   >
                     {clearVerificationMutation.isPending

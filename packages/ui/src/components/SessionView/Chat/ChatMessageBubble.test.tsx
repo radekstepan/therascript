@@ -486,4 +486,108 @@ describe('ChatMessageBubble failed verification', () => {
     });
     expect(mockDeleteMessageVerification).toHaveBeenCalledWith(MESSAGE.id);
   });
+
+  it('gives the label and Clear separate layout space with a wrapping row', () => {
+    renderFailedBubble();
+
+    const footer = screen.getByTestId('failed-verification-footer');
+    // Explicit gap between the badge and the button...
+    expect(footer.classList.contains('rt-r-gap-2')).toBe(true);
+    // ...and the row wraps on narrow notes instead of squeezing.
+    expect(footer.classList.contains('rt-r-fw-wrap')).toBe(true);
+
+    const badge = within(footer).getByText('Fact-check failed');
+    const clear = within(footer).getByRole('button', { name: 'Clear' });
+    // Neither child shrinks: narrow widths wrap, never overlap.
+    expect((badge as HTMLElement).style.flexShrink).toBe('0');
+    expect((clear as HTMLElement).style.flexShrink).toBe('0');
+  });
+
+  it('uses a non-ghost Clear variant so hover/focus never paints over the label', () => {
+    renderFailedBubble();
+
+    // The Radix ghost variant pulls the button over its neighbours with
+    // negative margins; the soft variant keeps the hover/focus
+    // background inside the button's own box.
+    const clear = screen.getByRole('button', { name: 'Clear' });
+    expect(clear.classList.contains('rt-variant-ghost')).toBe(false);
+    expect(clear.classList.contains('rt-variant-soft')).toBe(true);
+  });
+
+  it('keeps the label and Clear separated in the Clearing… pending state', async () => {
+    let resolveClear!: (value: unknown) => void;
+    mockDeleteMessageVerification.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveClear = resolve;
+      })
+    );
+    renderFailedBubble();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+
+    const pending = await screen.findByRole('button', { name: 'Clearing…' });
+    expect(pending.getAttribute('disabled')).not.toBeNull();
+    const footer = screen.getByTestId('failed-verification-footer');
+    expect(within(footer).getByText('Fact-check failed')).not.toBeNull();
+    expect(
+      within(footer).getByRole('button', { name: 'Clearing…' })
+    ).not.toBeNull();
+
+    resolveClear({ message: 'cleared' });
+  });
+
+  it('returns the note to the unchecked pool via cache invalidation after clearing', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false, gcTime: 0 },
+        mutations: { retry: false },
+      },
+    });
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+    render(
+      <QueryClientProvider client={queryClient}>
+        <Theme>
+          <ChatMessageBubble
+            message={MESSAGE}
+            isCurrentlyStreaming={false}
+            isAiResponding={false}
+            renderMd={false}
+            onStarClick={() => {}}
+            onCopyClick={() => {}}
+            verification={FAILED}
+            onStatementClick={() => {}}
+          />
+        </Theme>
+      </QueryClientProvider>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+
+    await waitFor(() => {
+      expect(mockDeleteMessageVerification).toHaveBeenCalledWith(MESSAGE.id);
+    });
+    await waitFor(() => {
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: ['chatVerifications'],
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: ['verificationStats'],
+      });
+    });
+  });
+
+  it('shows a retry hint when clearing fails', async () => {
+    mockDeleteMessageVerification.mockRejectedValueOnce(new Error('boom'));
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      renderFailedBubble();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+
+      await screen.findByText("Couldn't clear — try again.");
+    } finally {
+      consoleSpy.mockRestore();
+    }
+  });
 });

@@ -127,7 +127,7 @@ For each task, run `yarn test` and the builds listed under **Verification** with
 
 **Verification:** `yarn test`; `yarn build:ui`; inspect browser Network requests during a running audit and after opening/closing its configuration dialog.
 
-### - [ ] Task 7: Prevent the failed-verification Clear control from overlapping its label
+### - [x] Task 7: Prevent the failed-verification Clear control from overlapping its label
 
 **Target Files:**
 - `packages/ui/src/components/SessionView/Chat/ChatMessageBubble.tsx` and `ChatMessageBubble.test.tsx`
