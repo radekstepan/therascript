@@ -81,4 +81,15 @@ export interface VerificationStreamEvent {
   attempt?: number;
   /** Milliseconds elapsed since the worker started processing this job. */
   elapsedMs?: number;
+  /**
+   * Live generation rate for the current Judge call (present on throttled
+   * `phase` ticks during `generating`/`retrying`; explicitly null once
+   * generation ends so stale speed never lingers).
+   */
+  tokensPerSecond?: number | null;
+  /**
+   * Cumulative estimated tokens generated in the current attempt
+   * (present alongside `tokensPerSecond`).
+   */
+  generatedTokens?: number | null;
 }

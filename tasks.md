@@ -60,7 +60,7 @@ For background on the Verification Agent and LLM lifecycle, see `AGENTS.md` (§1
 
 ---
 
-### - [ ] Task 3: Show live token generation speed (`~X.X tokens/s`) during an active fact-check audit
+### - [x] Task 3: Show live token generation speed (`~X.X tokens/s`) during an active fact-check audit
 
 - **Problem & Investigation Context:**
   In Session Chat (`packages/ui/src/components/SessionView/Chat/ChatInterface.tsx`, lines 203–222, and `packages/ui/src/components/SessionView/Chat/ChatMessageBubble.tsx`, lines 567–579) and Cross-Session Analysis (`packages/worker/src/jobs/analysisProcessor.ts`, lines 784–810, and `packages/ui/src/hooks/useAnalysisStream.ts`, lines 151–196), the user sees live token generation speed (`~X.X tokens/s`) while the LLM is streaming tokens (including `<think>` reasoning tokens).

@@ -1,5 +1,13 @@
 // packages/worker/src/jobs/verificationProcessor.test.ts
-import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
+import {
+  describe,
+  it,
+  expect,
+  vi,
+  beforeEach,
+  afterEach,
+  type Mock,
+} from 'vitest';
 import type { TranscriptParagraphData } from '@therascript/domain';
 
 vi.mock('@therascript/config', () => ({
@@ -80,6 +88,7 @@ const {
   JUDGE_MIN_TRANSCRIPT_TOKENS,
   buildMessageFailureMessage,
   buildJobFailureSummary,
+  VERIFICATION_TOKEN_TELEMETRY_THROTTLE_MS,
   describeVerificationPhase,
   truncateVerificationDetail,
   verificationFailureLabel,
@@ -2906,5 +2915,232 @@ describe('processVerificationJob — progress phases and outcome semantics', () 
     await runJob();
     expect(terminalStatusCall()?.[1]).toBe('completed');
     expect(unloadModelMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('processVerificationJob — live token-speed telemetry', () => {
+  const paragraphs: TranscriptParagraphData[] = [
+    {
+      id: 0,
+      timestamp: 866,
+      text: 'I take Sertraline every morning and I feel better.',
+      speaker: 'SPEAKER_00',
+    },
+  ];
+
+  const baseRecord = {
+    id: 1,
+    status: 'pending',
+    scope: 'all_unverified',
+    session_ids_json: null,
+    chat_id: null,
+    skip_verified: true,
+    total_messages: 0,
+    processed_messages: 0,
+    total_statements: 0,
+    flagged_statements: 0,
+    omissions_count: 0,
+    created_at: Date.now(),
+    completed_at: null,
+    error_message: null,
+    model_name: 'default',
+    context_size: 32768,
+    thinking_budget: -1,
+    temperature: 0.3,
+    top_p: null,
+    repeat_penalty: null,
+    num_gpu_layers: null,
+    llm_base_url: null,
+  };
+
+  const validVerdict = {
+    summary_assessment: 'All supported.',
+    claims: [
+      {
+        exact_quote: 'The client takes Sertraline every morning',
+        normalized_claim: 'Client takes Sertraline every morning.',
+        verdict: 'supported',
+        severity: 'none',
+        confidence: 0.9,
+        reasoning: 'Stated verbatim in P#0.',
+        evidence: [],
+      },
+    ],
+    omissions: [],
+  };
+
+  // Controllable clock: the Judge stream advances `now` per chunk so tick
+  // timing is deterministic without fake timers.
+  let now = 1_000_000;
+
+  async function* timedStream(
+    texts: string[],
+    stepMs: number
+  ): AsyncGenerator<{ content?: string; thinking?: string }, unknown> {
+    for (const text of texts) {
+      now += stepMs;
+      yield { content: text };
+    }
+    return { promptTokens: 90, completionTokens: 40 };
+  }
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.resetAllMocks();
+    now = 1_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    extractVisibleAnswerMock.mockImplementation((text: string) => text);
+    calculateTokenCountMock.mockReturnValue(10);
+    resolveBudgetStub.mockReturnValue(512);
+    findJobMock.mockReturnValue({ ...baseRecord });
+    findCandidatesMock.mockReturnValue([
+      {
+        id: 11,
+        chatId: 5,
+        sessionId: 2,
+        sender: 'ai',
+        text: 'The client takes Sertraline every morning.',
+        timestamp: Date.now(),
+        model: 'author-model',
+        userQuestion: 'What did the client say?',
+      },
+    ]);
+    findParagraphsMock.mockReturnValue(paragraphs);
+    findTemplateMock.mockReturnValue(null);
+    findSessionMock.mockReturnValue({ showSpeakers: 1 });
+    updateJobStatusMock.mockReturnValue(true);
+    updateJobPhaseMock.mockReturnValue(true);
+    clearJobPhaseMock.mockReturnValue(true);
+    incrementJobCountersMock.mockReturnValue(true);
+    transitionToProcessingMock.mockReturnValue(true);
+    saveResultMock.mockReturnValue({});
+    parseJsonMock.mockReturnValue(validVerdict);
+    streamWithRetryMock.mockImplementation(async function* (factory: any) {
+      return yield* factory();
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const runJob = () =>
+    processVerificationJob({
+      data: { jobId: 1 },
+      updateProgress: vi.fn(),
+    } as any);
+
+  const phaseEvents = () =>
+    publishEventMock.mock.calls
+      .filter((call) => call[1]?.type === 'phase')
+      .map((call) => call[1]);
+
+  it('publishes throttled generating ticks with live tokens/s and no per-tick SQLite writes', async () => {
+    // 4 chunks x 40 chars = 10 estimated tokens each, one tick-eligible
+    // step apart: ticks fire on chunks 2-4 with cumulative counts.
+    const stepMs = VERIFICATION_TOKEN_TELEMETRY_THROTTLE_MS + 100;
+    streamLlmMock.mockImplementation(() =>
+      timedStream(
+        ['a'.repeat(40), 'b'.repeat(40), 'c'.repeat(40), 'd'.repeat(40)],
+        stepMs
+      )
+    );
+
+    await runJob();
+
+    const generating = phaseEvents().filter((e) => e.phase === 'generating');
+    // Transition publish (null speed) + 3 throttled ticks.
+    expect(generating).toHaveLength(4);
+    expect(generating[0]).toMatchObject({
+      tokensPerSecond: null,
+      generatedTokens: null,
+    });
+    const ticks = generating.slice(1);
+    expect(ticks.map((e) => e.generatedTokens)).toEqual([20, 30, 40]);
+    // tokens/s = cumulative tokens / elapsed seconds since the first
+    // token, rounded to 1 decimal.
+    const elapsed = [stepMs, 2 * stepMs, 3 * stepMs].map((ms) => ms / 1000);
+    const expectedTps = [20 / elapsed[0], 30 / elapsed[1], 40 / elapsed[2]].map(
+      (tps) => Math.round(tps * 10) / 10
+    );
+    expect(ticks.map((e) => e.tokensPerSecond)).toEqual(expectedTps);
+    for (const tick of ticks) {
+      expect(tick).toMatchObject({
+        type: 'phase',
+        messageId: 11,
+        chatId: 5,
+        sessionId: 2,
+        messageIndex: 1,
+        attempt: 1,
+        totalMessages: 1,
+        processedMessages: 0,
+        message: 'Generating assessment for message 11 (attempt 1)…',
+      });
+      expect(typeof tick.elapsedMs).toBe('number');
+    }
+    // Ticks are Redis-only: SQLite sees just the phase transitions.
+    expect(
+      updateJobPhaseMock.mock.calls.map((call) => call[1].currentPhase)
+    ).toEqual(['checking_message', 'generating', 'finishing']);
+  });
+
+  it('coalesces sub-throttle chunks into fewer ticks', async () => {
+    // 6 chunks 100ms apart: only ~every third chunk passes the throttle.
+    streamLlmMock.mockImplementation(() =>
+      timedStream(
+        Array.from({ length: 6 }, (_, i) => `${i}`.repeat(40)),
+        100
+      )
+    );
+
+    await runJob();
+
+    const ticks = phaseEvents().filter(
+      (e) => e.phase === 'generating' && e.tokensPerSecond != null
+    );
+    expect(ticks.length).toBeLessThan(6);
+    expect(ticks.length).toBeGreaterThan(0);
+    // Cumulative counts stay monotonic across coalesced ticks.
+    const counts = ticks.map((e) => e.generatedTokens as number);
+    expect([...counts].sort((a, b) => a - b)).toEqual(counts);
+    expect(
+      updateJobPhaseMock.mock.calls.map((call) => call[1].currentPhase)
+    ).toEqual(['checking_message', 'generating', 'finishing']);
+  });
+
+  it('resets tokens/s to null once generation ends', async () => {
+    const stepMs = VERIFICATION_TOKEN_TELEMETRY_THROTTLE_MS + 100;
+    streamLlmMock.mockImplementation(() =>
+      timedStream(['a'.repeat(40), 'b'.repeat(40)], stepMs)
+    );
+
+    await runJob();
+
+    // At least one live tick fired, then every post-generation event
+    // cleared the speed explicitly.
+    expect(
+      phaseEvents().some(
+        (e) => e.phase === 'generating' && e.tokensPerSecond != null
+      )
+    ).toBe(true);
+    const finishing = phaseEvents().find((e) => e.phase === 'finishing');
+    expect(finishing).toMatchObject({
+      tokensPerSecond: null,
+      generatedTokens: null,
+    });
+    const verified = publishEventMock.mock.calls
+      .map((call) => call[1])
+      .find((e) => e?.type === 'message_verified');
+    expect(verified).toMatchObject({
+      tokensPerSecond: null,
+      generatedTokens: null,
+    });
+    const terminal = publishEventMock.mock.calls
+      .map((call) => call[1])
+      .find((e) => e?.type === 'complete');
+    expect(terminal).toMatchObject({
+      tokensPerSecond: null,
+      generatedTokens: null,
+    });
   });
 });

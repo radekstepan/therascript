@@ -219,6 +219,8 @@ describe('VerificationAuditPage live phase display', () => {
       messageIndex: 1,
       attempt: 1,
       elapsedMs: 4200,
+      tokensPerSecond: null,
+      generatedTokens: null,
       updatedAt: Date.now(),
     };
     renderPage();
@@ -269,6 +271,8 @@ describe('VerificationAuditPage live phase display', () => {
       messageIndex: 1,
       attempt: 1,
       elapsedMs: 4200,
+      tokensPerSecond: null,
+      generatedTokens: null,
       updatedAt: Date.now(),
     };
     const { container } = renderPage();
@@ -277,6 +281,69 @@ describe('VerificationAuditPage live phase display', () => {
     expect(screen.getByTestId('audit-live-phase')).not.toBeNull();
     // Header spinner kept; the duplicate phase-row spinner was removed.
     expect(container.querySelectorAll('.rt-Spinner')).toHaveLength(1);
+  });
+
+  it('shows the live token speed while the Judge is generating', async () => {
+    hookState.phase = {
+      phase: 'generating',
+      message: 'Generating assessment for message 1914 (attempt 1)…',
+      messageId: 1914,
+      chatId: 5,
+      sessionId: 2,
+      messageIndex: 1,
+      attempt: 1,
+      elapsedMs: 4200,
+      tokensPerSecond: 12.34,
+      generatedTokens: 120,
+      updatedAt: Date.now(),
+    };
+    renderPage();
+
+    await screen.findByRole('heading', { name: /Audit #7 in progress/ });
+    const tps = screen.getByTestId('audit-live-tps');
+    expect(tps.textContent).toBe('~12.3 tokens/s');
+    expect(tps.style.fontVariantNumeric).toBe('tabular-nums');
+  });
+
+  it('hides the token speed indicator once generation ends', async () => {
+    hookState.phase = {
+      phase: 'finishing',
+      message: 'Finishing audit…',
+      messageId: null,
+      chatId: null,
+      sessionId: null,
+      messageIndex: null,
+      attempt: null,
+      elapsedMs: 9000,
+      tokensPerSecond: null,
+      generatedTokens: null,
+      updatedAt: Date.now(),
+    };
+    renderPage();
+
+    await screen.findByRole('heading', { name: /Audit #7 in progress/ });
+    expect(screen.getByTestId('audit-live-phase')).not.toBeNull();
+    expect(screen.queryByTestId('audit-live-tps')).toBeNull();
+  });
+
+  it('hides the token speed indicator for a zero speed value', async () => {
+    hookState.phase = {
+      phase: 'generating',
+      message: 'Generating assessment for message 1914 (attempt 1)…',
+      messageId: 1914,
+      chatId: 5,
+      sessionId: 2,
+      messageIndex: 1,
+      attempt: 1,
+      elapsedMs: 100,
+      tokensPerSecond: 0,
+      generatedTokens: 0,
+      updatedAt: Date.now(),
+    };
+    renderPage();
+
+    await screen.findByRole('heading', { name: /Audit #7 in progress/ });
+    expect(screen.queryByTestId('audit-live-tps')).toBeNull();
   });
 
   it('distinguishes connection trouble from a Judge failure', async () => {

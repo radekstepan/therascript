@@ -373,6 +373,10 @@ export interface VerificationStreamEvent {
   messageIndex?: number;
   attempt?: number;
   elapsedMs?: number;
+  /** Live Judge generation rate (throttled `phase` ticks; null once ended). */
+  tokensPerSecond?: number | null;
+  /** Cumulative estimated tokens in the current attempt. */
+  generatedTokens?: number | null;
   job?: VerificationJob;
 }
 
@@ -386,6 +390,8 @@ export interface VerificationLivePhase {
   messageIndex: number | null;
   attempt: number | null;
   elapsedMs: number | null;
+  tokensPerSecond: number | null;
+  generatedTokens: number | null;
   updatedAt: number;
 }
 

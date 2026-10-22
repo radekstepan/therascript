@@ -1573,11 +1573,32 @@ interface JudgeStreamAttempt {
 }
 
 /**
+ * Live token-speed context for one Judge stream attempt. Counter values
+ * are snapshots taken when the attempt starts (they cannot change
+ * mid-attempt); ticks reuse the `phase` event so consumers need no new
+ * event branch.
+ */
+interface JudgeStreamTelemetry {
+  phase: 'generating' | 'retrying';
+  chatId?: number;
+  sessionId?: number;
+  messageIndex?: number;
+  attempt?: number;
+  totalMessages: number;
+  processedMessages: number;
+  succeededMessages: number;
+  failedMessages: number;
+  jobStartTime: number;
+}
+
+/**
  * Run one Judge LLM stream attempt (initial call or JSON-repair retry).
  * Accumulates `<think>` + content chunks into `rawOutput`, polls
  * `isCanceled` mid-stream, and reports usage via `streamResult`.
  * Usage logging is the caller's job so it happens immediately after *every*
  * attempt — even ones whose output later fails JSON parsing.
+ * When `streamTelemetry` is provided, throttled `phase` ticks publish the
+ * live token generation speed (Redis only, never SQLite).
  */
 async function runJudgeStreamAttempt(options: {
   jobId: number;
@@ -1592,6 +1613,7 @@ async function runJudgeStreamAttempt(options: {
   thinkingBudget: number;
   maxCompletionTokens: number;
   isCanceled: () => boolean;
+  streamTelemetry?: JudgeStreamTelemetry;
 }): Promise<JudgeStreamAttempt> {
   const {
     jobId,
@@ -1606,12 +1628,54 @@ async function runJudgeStreamAttempt(options: {
     thinkingBudget,
     maxCompletionTokens,
     isCanceled,
+    streamTelemetry,
   } = options;
   const abortController = new AbortController();
   let lastCancelCheck = Date.now();
   let rawOutput = '';
   let streamResult: StreamResult = {};
   const attemptStartTime = Date.now();
+
+  // Live token-speed tracking (same len/4 heuristic as Session Chat and
+  // Cross-Session Analysis). Ticks are throttled and Redis-only.
+  let firstTokenAt: number | null = null;
+  let estimatedTokens = 0;
+  let lastTokenPublishAt = attemptStartTime;
+  const maybePublishTokenTelemetry = (): void => {
+    if (!streamTelemetry || firstTokenAt === null) return;
+    const now = Date.now();
+    const elapsedSec = (now - firstTokenAt) / 1000;
+    if (elapsedSec <= 0.1) return;
+    if (now - lastTokenPublishAt < VERIFICATION_TOKEN_TELEMETRY_THROTTLE_MS)
+      return;
+    lastTokenPublishAt = now;
+    const tokensPerSecond =
+      Math.round((estimatedTokens / elapsedSec) * 10) / 10;
+    publishVerificationEvent(jobId, {
+      type: 'phase',
+      phase: streamTelemetry.phase,
+      message: describeVerificationPhase({
+        phase: streamTelemetry.phase,
+        messageIndex: streamTelemetry.messageIndex,
+        totalMessages: streamTelemetry.totalMessages,
+        messageId,
+        attempt: streamTelemetry.attempt,
+      }),
+      totalMessages: streamTelemetry.totalMessages,
+      processedMessages: streamTelemetry.processedMessages,
+      succeededMessages: streamTelemetry.succeededMessages,
+      failedMessages: streamTelemetry.failedMessages,
+      skippedMessages: 0,
+      messageId,
+      chatId: streamTelemetry.chatId,
+      sessionId: streamTelemetry.sessionId,
+      messageIndex: streamTelemetry.messageIndex,
+      attempt: streamTelemetry.attempt,
+      elapsedMs: now - streamTelemetry.jobStartTime,
+      tokensPerSecond,
+      generatedTokens: estimatedTokens,
+    });
+  };
 
   const generator = streamWithRetry(
     () =>
@@ -1663,6 +1727,12 @@ async function runJudgeStreamAttempt(options: {
       }
       rawOutput += contentChunk;
     }
+    for (const chunkText of [thinkingChunk, contentChunk]) {
+      if (!chunkText) continue;
+      if (firstTokenAt === null) firstTokenAt = Date.now();
+      estimatedTokens += Math.max(1, Math.floor(chunkText.length / 4));
+    }
+    maybePublishTokenTelemetry();
     if (Date.now() - lastCancelCheck > 500) {
       lastCancelCheck = Date.now();
       if (isCanceled()) {
@@ -1692,6 +1762,12 @@ export const VERIFICATION_MAX_JOB_SUMMARY_CHARS = 600;
 
 /** Delay before an uncontended lock wait publishes `waiting_for_lock`. */
 export const VERIFICATION_LOCK_WAIT_PUBLISH_MS = 500;
+
+/**
+ * Minimum gap between live token-speed `phase` ticks during Judge
+ * streaming, so fast token streams do not flood Redis/SSE (~3 msgs/sec).
+ */
+export const VERIFICATION_TOKEN_TELEMETRY_THROTTLE_MS = 300;
 
 export function truncateVerificationDetail(detail: string): string {
   const singleLine = detail.replace(/\s+/g, ' ').trim();
@@ -1962,6 +2038,10 @@ export async function processVerificationJob(
       messageIndex,
       attempt,
       elapsedMs: Date.now() - processingStartTime,
+      // Phase transitions carry no live speed: generation ticks publish
+      // their own values, and every other transition clears stale speed.
+      tokensPerSecond: null,
+      generatedTokens: null,
     });
   };
 
@@ -2023,6 +2103,8 @@ export async function processVerificationJob(
       flaggedStatements: fresh?.flagged_statements ?? 0,
       omissionsCount: fresh?.omissions_count ?? 0,
       elapsedMs: Date.now() - processingStartTime,
+      tokensPerSecond: null,
+      generatedTokens: null,
     });
   };
 
@@ -2358,6 +2440,8 @@ export async function processVerificationJob(
             sessionId,
             accuracyScore: 1.0,
             totalClaims: 0,
+            tokensPerSecond: null,
+            generatedTokens: null,
           });
           continue;
         }
@@ -2396,6 +2480,8 @@ export async function processVerificationJob(
             sessionId,
             accuracyScore: 1.0,
             totalClaims: 0,
+            tokensPerSecond: null,
+            generatedTokens: null,
           });
           continue;
         }
@@ -2610,6 +2696,18 @@ export async function processVerificationJob(
           thinkingBudget: effectiveThinkingBudget,
           maxCompletionTokens,
           isCanceled,
+          streamTelemetry: {
+            phase: 'generating',
+            chatId,
+            sessionId,
+            messageIndex,
+            attempt: 1,
+            totalMessages: candidates.length,
+            processedMessages: processed,
+            succeededMessages: succeeded,
+            failedMessages: failed,
+            jobStartTime: processingStartTime,
+          },
         });
         recordAttemptUsage(firstAttempt.streamResult, firstAttempt.durationMs);
 
@@ -2661,6 +2759,18 @@ export async function processVerificationJob(
             thinkingBudget: 0,
             maxCompletionTokens,
             isCanceled,
+            streamTelemetry: {
+              phase: 'retrying',
+              chatId,
+              sessionId,
+              messageIndex,
+              attempt: 2,
+              totalMessages: candidates.length,
+              processedMessages: processed,
+              succeededMessages: succeeded,
+              failedMessages: failed,
+              jobStartTime: processingStartTime,
+            },
           });
           recordAttemptUsage(
             retryAttempt.streamResult,
@@ -2839,6 +2949,8 @@ export async function processVerificationJob(
           sessionId,
           accuracyScore,
           totalClaims,
+          tokensPerSecond: null,
+          generatedTokens: null,
         });
 
         console.log(
@@ -3024,6 +3136,8 @@ export async function processVerificationJob(
           failedMessages: failed,
           skippedMessages: skipped,
           elapsedMs: Date.now() - processingStartTime,
+          tokensPerSecond: null,
+          generatedTokens: null,
         });
       } else if (jobRecord) {
         // Already terminal (a `finishJobTerminal` path published the

@@ -233,6 +233,94 @@ describe('useVerificationStream phases', () => {
   });
 });
 
+describe('useVerificationStream token speed', () => {
+  it('tracks live tokens/s from generating ticks and clears it on non-generating phases', () => {
+    const { hook } = renderStream(7);
+    act(() => {
+      lastInstance().emit({ type: 'snapshot', job: ACTIVE_JOB });
+    });
+    expect(hook.result.current.phase).toMatchObject({
+      tokensPerSecond: null,
+      generatedTokens: null,
+    });
+
+    act(() => {
+      lastInstance().emit({
+        jobId: 7,
+        timestamp: Date.now(),
+        type: 'phase',
+        phase: 'generating',
+        message: 'Generating assessment for message 1914 (attempt 1)…',
+        messageId: 1914,
+        messageIndex: 1,
+        attempt: 1,
+        tokensPerSecond: 42.5,
+        generatedTokens: 85,
+      });
+    });
+    expect(hook.result.current.phase).toMatchObject({
+      phase: 'generating',
+      tokensPerSecond: 42.5,
+      generatedTokens: 85,
+    });
+
+    // A non-generating transition without speed values clears the stale
+    // indicator while keeping the new phase detail.
+    act(() => {
+      lastInstance().emit({
+        jobId: 7,
+        timestamp: Date.now(),
+        type: 'phase',
+        phase: 'finishing',
+        message: 'Finishing audit…',
+      });
+    });
+    expect(hook.result.current.phase).toMatchObject({
+      phase: 'finishing',
+      tokensPerSecond: null,
+      generatedTokens: null,
+    });
+  });
+
+  it('clears lingering speed on message_verified without dropping the phase', () => {
+    const { hook } = renderStream(7);
+    act(() => {
+      lastInstance().emit({ type: 'snapshot', job: ACTIVE_JOB });
+    });
+    act(() => {
+      lastInstance().emit({
+        jobId: 7,
+        timestamp: Date.now(),
+        type: 'phase',
+        phase: 'generating',
+        message: 'Generating assessment for message 1914 (attempt 1)…',
+        messageId: 1914,
+        messageIndex: 1,
+        attempt: 1,
+        tokensPerSecond: 38.2,
+        generatedTokens: 60,
+      });
+    });
+    expect(hook.result.current.phase?.tokensPerSecond).toBe(38.2);
+
+    act(() => {
+      lastInstance().emit({
+        jobId: 7,
+        timestamp: Date.now(),
+        type: 'message_verified',
+        messageId: 1914,
+        tokensPerSecond: null,
+        generatedTokens: null,
+      });
+    });
+    expect(hook.result.current.phase).toMatchObject({
+      phase: 'generating',
+      tokensPerSecond: null,
+      generatedTokens: null,
+    });
+  });
+});
+
 describe('useVerificationStream reconnect semantics', () => {
   it('flags connection trouble (not a Judge failure) and refetches when the socket drops', () => {
     const { hook, invalidateSpy } = renderStream(7);

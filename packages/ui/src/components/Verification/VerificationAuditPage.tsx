@@ -140,6 +140,17 @@ function LiveJobBanner({ job }: { job: VerificationJob }) {
           <Text size="2" data-testid="audit-live-phase">
             {phaseText}
           </Text>
+          {livePhase?.tokensPerSecond != null &&
+            livePhase.tokensPerSecond > 0 && (
+              <Text
+                size="1"
+                color="gray"
+                data-testid="audit-live-tps"
+                style={{ fontVariantNumeric: 'tabular-nums' }}
+              >
+                ~{livePhase.tokensPerSecond.toFixed(1)} tokens/s
+              </Text>
+            )}
         </Flex>
 
         <Flex gap="2" wrap="wrap" align="center">

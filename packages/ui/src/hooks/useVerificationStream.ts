@@ -65,6 +65,8 @@ function phaseFromJob(job: VerificationJob): VerificationLivePhase | null {
     messageIndex: null,
     attempt: job.current_attempt ?? null,
     elapsedMs: null,
+    tokensPerSecond: null,
+    generatedTokens: null,
     updatedAt: job.phase_updated_at ?? Date.now(),
   };
 }
@@ -82,6 +84,10 @@ function phaseFromEvent(
     messageIndex: data.messageIndex ?? null,
     attempt: data.attempt ?? null,
     elapsedMs: data.elapsedMs ?? null,
+    // Throttled generating/retrying ticks carry the live speed; every
+    // other phase event (or a missing field) clears it.
+    tokensPerSecond: data.tokensPerSecond ?? null,
+    generatedTokens: data.generatedTokens ?? null,
     updatedAt: data.timestamp ?? Date.now(),
   };
 }
@@ -171,6 +177,25 @@ export function useVerificationStream(
 
         const eventPhase = phaseFromEvent(data);
         if (eventPhase) setPhase(eventPhase);
+
+        // Generation ended but the last phase detail stays: clear any
+        // lingering live speed (the terminal path below clears the phase
+        // itself). Survives worker events that omit the telemetry fields.
+        if (
+          data.type === 'message_verified' ||
+          data.type === 'complete' ||
+          data.type === 'error' ||
+          (data.type === 'status' &&
+            data.status &&
+            TERMINAL_STATUSES.has(data.status))
+        ) {
+          setPhase((prev) =>
+            prev &&
+            (prev.tokensPerSecond !== null || prev.generatedTokens !== null)
+              ? { ...prev, tokensPerSecond: null, generatedTokens: null }
+              : prev
+          );
+        }
 
         // Merge progress counters into the local job snapshot so the
         // banner stays live without refetching on every event.
