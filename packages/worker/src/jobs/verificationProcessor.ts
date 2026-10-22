@@ -1592,8 +1592,12 @@ export async function processVerificationJob(
   console.log(`[Verification Worker] Starting processing for job ID: ${jobId}`);
 
   // Resolved inside try; kept in outer scope so `finally` can unload it.
+  // `judgeModelAcquired` is set only after `loadLlmModelForWorker` resolves,
+  // so early-cancel / missing-job / default-model exits (which acquire
+  // nothing) never unload an endpoint they do not own.
   let judgeBaseUrl: string = config.llm.baseURL;
   let judgeModel = 'default';
+  let judgeModelAcquired = false;
 
   try {
     let jobRecord = verificationRepository.findVerificationJobById(jobId);
@@ -1635,6 +1639,7 @@ export async function processVerificationJob(
           judgeBaseUrl,
           jobRecord.num_gpu_layers
         );
+        judgeModelAcquired = true;
         console.log(`[Verification Worker ${jobId}] Model ready.`);
       } catch (loadError: any) {
         console.error(
@@ -2298,16 +2303,21 @@ export async function processVerificationJob(
     throw error;
   } finally {
     // Best-effort: never let an unload failure mask the job outcome.
-    try {
-      const unloaded = await unloadModelAtUrlForWorker(judgeBaseUrl);
-      console.log(
-        `[Verification Worker ${jobId}] Unloaded ${unloaded} model instance(s) from ${judgeBaseUrl}`
-      );
-    } catch (unloadError: any) {
-      console.warn(
-        `[Verification Worker ${jobId}] Failed to unload model from ${judgeBaseUrl}:`,
-        unloadError?.message ?? unloadError
-      );
+    // Only release the endpoint when this job actually acquired a model on
+    // it: early-cancel / missing-job / failed-load / default-model exits own
+    // nothing, and unloading would evict an unrelated chat model.
+    if (judgeModelAcquired) {
+      try {
+        const unloaded = await unloadModelAtUrlForWorker(judgeBaseUrl);
+        console.log(
+          `[Verification Worker ${jobId}] Unloaded ${unloaded} model instance(s) from ${judgeBaseUrl}`
+        );
+      } catch (unloadError: any) {
+        console.warn(
+          `[Verification Worker ${jobId}] Failed to unload model from ${judgeBaseUrl}:`,
+          unloadError?.message ?? unloadError
+        );
+      }
     }
   }
 }

@@ -102,6 +102,8 @@ const findSessionMock = data.sessionRepository.findById as unknown as Mock;
 const resolveBudgetStub =
   analysisStub.resolveEffectiveThinkingBudget as unknown as Mock;
 const loadModelMock = analysisStub.loadLlmModelForWorker as unknown as Mock;
+const unloadModelMock =
+  analysisStub.unloadModelAtUrlForWorker as unknown as Mock;
 const publisher = await import('../services/streamPublisher.js');
 const publishEventMock = publisher.publishVerificationEvent as unknown as Mock;
 
@@ -1507,4 +1509,195 @@ describe('processVerificationJob — cancellation during model loading', () => {
       ];
     });
   }
+});
+
+describe('processVerificationJob — early-cancel resource ownership', () => {
+  const REMOTE_JUDGE_URL = 'http://remote-judge:1234';
+  const LOCAL_DEFAULT_URL = 'http://localhost:1234';
+
+  const baseRecord = {
+    id: 1,
+    status: 'pending',
+    scope: 'all_unverified',
+    session_ids_json: null,
+    chat_id: null,
+    skip_verified: true,
+    total_messages: 0,
+    processed_messages: 0,
+    total_statements: 0,
+    flagged_statements: 0,
+    omissions_count: 0,
+    created_at: Date.now(),
+    completed_at: null,
+    error_message: null,
+    model_name: 'judge-model',
+    context_size: 8192,
+    thinking_budget: -1,
+    temperature: 0.3,
+    top_p: null,
+    repeat_penalty: null,
+    num_gpu_layers: null,
+    llm_base_url: REMOTE_JUDGE_URL,
+  };
+
+  let rowStatus: string;
+
+  async function* fakeStream(
+    chunks: Array<{ content?: string; thinking?: string }>,
+    result: { promptTokens?: number; completionTokens?: number }
+  ): AsyncGenerator<{ content?: string; thinking?: string }, unknown> {
+    for (const chunk of chunks) yield chunk;
+    return result;
+  }
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    rowStatus = 'pending';
+    const terminal = ['completed', 'failed', 'canceled'];
+    transitionToProcessingMock.mockImplementation(() => {
+      if (terminal.includes(rowStatus)) return false;
+      rowStatus = 'processing';
+      return true;
+    });
+    findJobMock.mockImplementation(() => ({
+      ...baseRecord,
+      status: rowStatus,
+    }));
+    updateJobStatusMock.mockImplementation((_jobId: number, status: string) => {
+      rowStatus = status;
+      return true;
+    });
+    extractVisibleAnswerMock.mockImplementation((text: string) => text);
+    calculateTokenCountMock.mockReturnValue(10);
+    resolveBudgetStub.mockReturnValue(1638);
+    findParagraphsMock.mockReturnValue([
+      {
+        id: 0,
+        timestamp: 866,
+        text: 'I take Sertraline every morning and I feel better.',
+        speaker: 'SPEAKER_00',
+      },
+    ]);
+    findSessionMock.mockReturnValue({ showSpeakers: 1 });
+    saveResultMock.mockReturnValue({});
+    streamWithRetryMock.mockImplementation(async function* (factory: any) {
+      return yield* factory();
+    });
+    streamLlmMock.mockImplementation(() =>
+      fakeStream([{ content: '{"summary_assessment": "ok"}' }], {
+        promptTokens: 90,
+        completionTokens: 40,
+      })
+    );
+    parseJsonMock.mockReturnValue({
+      summary_assessment: 'All supported.',
+      claims: [],
+      omissions: [],
+    });
+    findTemplateMock.mockReturnValue(null);
+    findCandidatesMock.mockReturnValue([
+      {
+        id: 11,
+        chatId: 5,
+        sessionId: 2,
+        sender: 'ai',
+        text: 'The client takes Sertraline every morning.',
+        timestamp: Date.now(),
+        model: 'author-model',
+        userQuestion: 'What did the client say?',
+      },
+    ]);
+    loadModelMock.mockResolvedValue(undefined);
+    unloadModelMock.mockResolvedValue(0);
+  });
+
+  const runJob = () =>
+    processVerificationJob({
+      data: { jobId: 1 },
+      updateProgress: vi.fn(),
+    } as any);
+
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 10));
+
+  it('makes no load/unload calls for a pre-canceled remote job', async () => {
+    // A queued job canceled while waiting for the worker mutex: the worker
+    // must exit without touching any model endpoint, so an unrelated local
+    // chat model stays loaded.
+    rowStatus = 'canceled';
+
+    await runJob();
+
+    expect(loadModelMock).not.toHaveBeenCalled();
+    expect(unloadModelMock).not.toHaveBeenCalled();
+    expect(streamLlmMock).not.toHaveBeenCalled();
+    expect(rowStatus).toBe('canceled');
+    expect(publishEventMock).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ status: 'canceled' })
+    );
+  });
+
+  it('makes no unload calls when the job row is missing', async () => {
+    findJobMock.mockReturnValue(null);
+
+    await expect(runJob()).rejects.toThrow('not found in database');
+
+    expect(loadModelMock).not.toHaveBeenCalled();
+    expect(unloadModelMock).not.toHaveBeenCalled();
+  });
+
+  it('still unloads the resolved remote endpoint after a normal acquired-model run', async () => {
+    await runJob();
+
+    expect(loadModelMock).toHaveBeenCalledWith(
+      'judge-model',
+      8192,
+      REMOTE_JUDGE_URL,
+      null
+    );
+    expect(unloadModelMock).toHaveBeenCalledTimes(1);
+    expect(unloadModelMock).toHaveBeenCalledWith(REMOTE_JUDGE_URL);
+    expect(unloadModelMock).not.toHaveBeenCalledWith(LOCAL_DEFAULT_URL);
+    expect(rowStatus).toBe('completed');
+  });
+
+  it('still cleans up the acquired model when canceled during loading', async () => {
+    // Task 4 interaction: the load genuinely succeeded, so the acquired
+    // remote model must still be released even though the job is canceled.
+    let resolveLoad!: () => void;
+    loadModelMock.mockImplementationOnce(
+      () => new Promise<void>((resolve) => void (resolveLoad = resolve))
+    );
+
+    const pending = runJob();
+    await tick();
+    // API cancels the row while the worker is still awaiting the load.
+    rowStatus = 'canceled';
+    resolveLoad();
+    await pending;
+
+    expect(streamLlmMock).not.toHaveBeenCalled();
+    expect(rowStatus).toBe('canceled');
+    expect(unloadModelMock).toHaveBeenCalledTimes(1);
+    expect(unloadModelMock).toHaveBeenCalledWith(REMOTE_JUDGE_URL);
+    expect(unloadModelMock).not.toHaveBeenCalledWith(LOCAL_DEFAULT_URL);
+  });
+
+  it('makes no unload calls for default-model jobs that acquire nothing', async () => {
+    // A `default` judge reuses whatever is already loaded; the job acquires
+    // no model resources of its own, so cleanup must leave the endpoint
+    // (and any unrelated chat model on it) untouched.
+    findJobMock.mockImplementation(() => ({
+      ...baseRecord,
+      model_name: 'default',
+      llm_base_url: null,
+      status: rowStatus,
+    }));
+
+    await runJob();
+
+    expect(loadModelMock).not.toHaveBeenCalled();
+    expect(unloadModelMock).not.toHaveBeenCalled();
+    expect(rowStatus).toBe('completed');
+  });
 });

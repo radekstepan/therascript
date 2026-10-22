@@ -68,6 +68,8 @@ The worker checks cancellation before awaiting model loading. If the user cancel
 
 ## 5. P1 — A job canceled before processing still unloads the default endpoint
 
+- [x] Task 5
+
 **Location:** `packages/worker/src/jobs/verificationProcessor.ts:1240–1255` and `1881–1889`.
 
 The early return for a canceled job still executes `finally`. At that point `judgeBaseUrl` remains `config.llm.baseURL`, even for a job configured for a remote judge, and no model has been acquired. `unloadModelAtUrlForWorker` unloads every loaded LLM instance at that endpoint. This can interrupt an unrelated local chat when a queued job is canceled while waiting for the worker mutex.
