@@ -425,6 +425,60 @@ describe('evidence hydration against ground-truth paragraphs', () => {
     });
   });
 
+  it('rejects a fabricated quote paired with a valid paragraph index', () => {
+    const direct = hydrateEvidenceItem(
+      {
+        paragraphIndex: 0,
+        timestampMs: 866,
+        speaker: 'SPEAKER_00',
+        quote: 'The client levitates every evening.',
+      },
+      { paragraphsById, showSpeakers: true }
+    );
+    expect(direct).toEqual({
+      paragraphIndex: null,
+      timestampMs: null,
+      speaker: null,
+      quote: 'The client levitates every evening.',
+    });
+  });
+
+  it('re-attributes a mismatched index to the paragraph containing the quote', () => {
+    const direct = hydrateEvidenceItem(
+      {
+        paragraphIndex: 1,
+        timestampMs: 18850,
+        speaker: 'UNKNOWN',
+        quote: 'I take Sertraline.',
+      },
+      { paragraphsById, showSpeakers: true }
+    );
+    expect(direct).toEqual({
+      paragraphIndex: 0,
+      timestampMs: 866,
+      speaker: 'SPEAKER_00',
+      quote: 'I take Sertraline.',
+    });
+  });
+
+  it('keeps a correctly matched citation on its indexed paragraph', () => {
+    const direct = hydrateEvidenceItem(
+      {
+        paragraphIndex: 0,
+        timestampMs: 80000,
+        speaker: 'SPEAKER_01',
+        quote: 'I take Sertraline.',
+      },
+      { paragraphsById, showSpeakers: true }
+    );
+    expect(direct).toEqual({
+      paragraphIndex: 0,
+      timestampMs: 866,
+      speaker: 'SPEAKER_00',
+      quote: 'I take Sertraline.',
+    });
+  });
+
   it('hydrates omission evidence as well', () => {
     const result = normalizeJudgeOutput(
       {

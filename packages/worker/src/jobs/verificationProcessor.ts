@@ -740,19 +740,49 @@ export interface EvidenceHydrationOptions {
   showSpeakers?: boolean;
 }
 
+/** Sentence punctuation a Judge quote may add at a clause boundary. */
+const TRAILING_QUOTE_PUNCT_RE = /[.!?;:,]+$/;
+
+/**
+ * Normalized search needle for a Judge-supplied quote: quote-cleaned,
+ * whitespace/case/markdown-normalized, with trailing sentence punctuation
+ * removed so a clause quote (`I take Sertraline.`) still matches the
+ * paragraph that continues past it (`I take Sertraline every morning.`).
+ */
+function quoteSearchNeedle(quote: string): string {
+  return normalizeTextWithMap(cleanExactQuote(quote)).normalized.replace(
+    TRAILING_QUOTE_PUNCT_RE,
+    ''
+  );
+}
+
+/**
+ * Whether the precomputed `needle` (see `quoteSearchNeedle`) appears in the
+ * paragraph text. Shared by index validation and quote search so both paths
+ * agree on what "matches" means.
+ */
+function paragraphContainsQuote(
+  para: TranscriptParagraphData,
+  needle: string
+): boolean {
+  if (!needle) return false;
+  return normalizeTextWithMap(para.text).normalized.includes(needle);
+}
+
 /**
  * Locate the transcript paragraph containing `quote` (normalized,
- * quote-cleaned comparison). Used when the Judge omits `paragraphIndex` or
- * cites an out-of-bounds index.
+ * quote-cleaned comparison). Used when the Judge omits `paragraphIndex`,
+ * cites an out-of-bounds index, or cites an index whose paragraph does not
+ * contain the quote.
  */
 export function findParagraphByQuote(
   paragraphsById: Map<number, TranscriptParagraphData>,
   quote: string
 ): TranscriptParagraphData | null {
-  const needle = normalizeTextWithMap(cleanExactQuote(quote)).normalized;
+  const needle = quoteSearchNeedle(quote);
   if (!needle) return null;
   for (const para of paragraphsById.values()) {
-    if (normalizeTextWithMap(para.text).normalized.includes(needle)) {
+    if (paragraphContainsQuote(para, needle)) {
       return para;
     }
   }
@@ -764,20 +794,29 @@ export function findParagraphByQuote(
  * paragraphs. The Judge only sees `[P#<index> MM:SS]` labels, so its
  * `timestampMs`/`speaker` values are estimates at best — always overwrite
  * them from the matched paragraph, and null out citations that match no
- * paragraph in this session.
+ * paragraph in this session. A cited `paragraphIndex` is only trusted when
+ * its paragraph actually contains the quote; otherwise the quote is
+ * searched across all paragraphs so a fabricated quote can never borrow a
+ * real speaker/timestamp via a valid index.
  */
 export function hydrateEvidenceItem(
   item: TranscriptEvidenceItem,
   options: EvidenceHydrationOptions
 ): TranscriptEvidenceItem {
   const showSpeakers = options.showSpeakers ?? true;
+  const needle = quoteSearchNeedle(item.quote);
   let para: TranscriptParagraphData | null = null;
-  if (
-    item.paragraphIndex !== null &&
-    options.paragraphsById.has(item.paragraphIndex)
-  ) {
-    para = options.paragraphsById.get(item.paragraphIndex) ?? null;
+  const indexed =
+    item.paragraphIndex !== null
+      ? (options.paragraphsById.get(item.paragraphIndex) ?? null)
+      : null;
+  if (indexed && paragraphContainsQuote(indexed, needle)) {
+    para = indexed;
   } else {
+    // The cited index is absent, invalid, or does not contain the quote —
+    // never attach its real speaker/time to unverified text. Search the
+    // other paragraphs instead; findParagraphByQuote re-checks the indexed
+    // paragraph too, but it already failed the same predicate above.
     para = findParagraphByQuote(options.paragraphsById, item.quote);
   }
   if (!para) {

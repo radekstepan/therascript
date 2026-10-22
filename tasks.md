@@ -44,6 +44,8 @@ Parsing only establishes JSON syntax. An object such as `{}` or `{"error":"unabl
 
 ## 3. P1 — Evidence hydration trusts a valid paragraph number even when its quote is fabricated
 
+- [x] Task 3
+
 **Location:** `packages/worker/src/jobs/verificationProcessor.ts:769–797`.
 
 When the judge supplies an existing `paragraphIndex`, hydration immediately accepts that paragraph and attaches its real timestamp/speaker to the supplied quote. Quote matching only happens if the index is absent or invalid. A fabricated quote paired with a valid index therefore appears to have a grounded citation.
