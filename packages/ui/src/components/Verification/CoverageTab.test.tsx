@@ -79,6 +79,26 @@ describe('CoverageTab failed verifications', () => {
     expect(screen.getByText(/4 \/ 6/)).toBeTruthy();
   });
 
+  it('renders the coverage count and failed badge on a single-line row', () => {
+    renderFailedTab(vi.fn());
+    const count = screen.getByText(/4 \/ 6/) as HTMLElement;
+    const badge = screen.getByText('2 failed') as HTMLElement;
+    const container = count.parentElement as HTMLElement | null;
+    expect(container).toBeTruthy();
+    // Both counts share one flex container (single row cell).
+    expect(badge.parentElement).toBe(container);
+    // Single-line row markers: Radix row direction class + nowrap styling.
+    expect(container!.className).toMatch(/rt-r-fd-row/);
+    expect(container!.style.whiteSpace).toBe('nowrap');
+    // Neither child wraps internally when table width is tight.
+    expect(count.style.whiteSpace).toBe('nowrap');
+    expect(count.style.flexShrink).toBe('0');
+    expect(badge.style.whiteSpace).toBe('nowrap');
+    expect(badge.style.flexShrink).toBe('0');
+    // Failed badge keeps its tooltip.
+    expect(badge.getAttribute('title')).toMatch(/failed verification/);
+  });
+
   it('calls onVerifySession when Retry Failed is clicked', () => {
     const onVerifySession = vi.fn();
     renderFailedTab(onVerifySession);

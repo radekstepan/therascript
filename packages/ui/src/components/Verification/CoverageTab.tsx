@@ -109,8 +109,18 @@ export function CoverageTab({
                   )}
                 </Table.Cell>
                 <Table.Cell justify="end">
-                  <Flex direction="column" align="end" gap="1">
-                    <Text size="2">
+                  <Flex
+                    direction="row"
+                    align="center"
+                    justify="end"
+                    gap="2"
+                    wrap="nowrap"
+                    style={{ whiteSpace: 'nowrap' }}
+                  >
+                    <Text
+                      size="2"
+                      style={{ whiteSpace: 'nowrap', flexShrink: 0 }}
+                    >
                       {session.verifiedAiMessages} / {session.totalAiMessages}{' '}
                       msgs
                     </Text>
@@ -119,6 +129,7 @@ export function CoverageTab({
                         color="red"
                         variant="soft"
                         size="1"
+                        style={{ whiteSpace: 'nowrap', flexShrink: 0 }}
                         title={`${session.failedAiMessages} message${session.failedAiMessages === 1 ? '' : 's'} failed verification (LLM error). Retry to re-audit ${session.failedAiMessages === 1 ? 'it' : 'them'}.`}
                       >
                         {session.failedAiMessages} failed

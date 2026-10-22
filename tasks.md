@@ -6,7 +6,7 @@ For background on the Verification Agent and LLM lifecycle, see `AGENTS.md` (§1
 
 ---
 
-### - [ ] Task 1: Keep Transcript Coverage message count and failed badge on a single line
+### - [x] Task 1: Keep Transcript Coverage message count and failed badge on a single line
 
 - **Problem & Investigation Context:**
   In the Fact Check (`/verification`) **Transcript Coverage** tab (`packages/ui/src/components/Verification/CoverageTab.tsx`, lines 111–128), the `Coverage` column cell (`<Table.Cell justify="end">`) currently wraps the message counter (`{session.verifiedAiMessages} / {session.totalAiMessages} msgs`) and the failure badge (`{session.failedAiMessages} failed`) inside `<Flex direction="column" align="end" gap="1">`. When `session.failedAiMessages > 0`, this stacks `0 / 1 msgs` on top and `1 failed` on a second line, inflating row height and misaligning the compact table layout. Both elements should sit side-by-side on a single horizontal line.
