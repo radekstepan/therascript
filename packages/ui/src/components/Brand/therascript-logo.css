@@ -1,15 +1,31 @@
 /* packages/ui/src/components/Brand/therascript-logo.css
  *
- * Shared Therascript brand lockup. Light values are plan-exact
- * (see plan-logo.md §1); dark values are designed tints, not
- * inversions, verified for legibility on the app's dark surfaces.
+ * Shared Therascript brand lockup. Geometry (sizes, spacing, weights)
+ * follows plan-logo.md §1; colors derive from the user's Radix accent
+ * preference instead of the fixed green brand palette:
+ *
+ *   mark  (waveform)  --accent-11  contrast-safe icon step on app surfaces
+ *   ink   (wordmark)  --accent-12  highest-contrast text step
+ *   dot   (terminal)  tint of --accent-11 toward white (signature accent)
+ *   focus (outline)   --accent-11  contrast-safe in both appearances
+ *
+ * Steps 11/12 are Radix's high-contrast text steps, so the lockup stays
+ * readable for pale accents (yellow, lime, sky, mint, amber) where the
+ * raw step-9 solid would wash out on light surfaces. The Radix theme
+ * root re-resolves --accent-* per appearance, so no .dark overrides are
+ * needed; light/dark/system all follow automatically. Fallbacks are the
+ * default (indigo, light) step values for contexts rendered outside the
+ * theme root.
+ *
+ * The logo never changes on hover; keyboard focus keeps a visible ring
+ * because global styles clear :focus-visible elsewhere.
  */
 
 .brand-logo {
-  --brand-logo-mark: #428366;
-  --brand-logo-ink: #284a3d;
-  --brand-logo-dot: #62a985;
-  --brand-logo-focus: #63b69a;
+  --brand-logo-mark: var(--accent-11, #3a5bc7);
+  --brand-logo-ink: var(--accent-12, #1f2d5c);
+  --brand-logo-dot: color-mix(in srgb, var(--accent-11, #3a5bc7), white 20%);
+  --brand-logo-focus: var(--accent-11, #3a5bc7);
 
   display: inline-flex;
   align-items: center;
@@ -22,17 +38,6 @@
     Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
-/* The Radix theme root carries .dark (+ .custom-dark-theme from App)
- * whenever the effective theme is dark, including system-resolved. */
-.dark .brand-logo,
-.dark-theme .brand-logo,
-.custom-dark-theme .brand-logo {
-  --brand-logo-mark: #6fae8f;
-  --brand-logo-ink: #dce9e2;
-  --brand-logo-dot: #7cc4a0;
-  --brand-logo-focus: #63b69a;
-}
-
 .brand-logo__mark {
   display: grid;
   place-items: center;
@@ -40,11 +45,6 @@
   height: 32px;
   flex: none;
   color: var(--brand-logo-mark);
-  transition: color 150ms ease;
-}
-
-.brand-logo:hover .brand-logo__mark {
-  color: var(--brand-logo-dot);
 }
 
 .brand-logo__wordmark {
@@ -77,10 +77,4 @@
 .brand-logo:focus-visible {
   outline: 3px solid var(--brand-logo-focus);
   outline-offset: 3px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .brand-logo__mark {
-    transition: none;
-  }
 }

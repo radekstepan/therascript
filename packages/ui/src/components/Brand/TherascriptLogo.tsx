@@ -1,12 +1,11 @@
 // packages/ui/src/components/Brand/TherascriptLogo.tsx
 //
 // Shared brand lockup: Lucide AudioLines waveform + lowercase wordmark
-// with a signature green terminal dot. Specs come from plan-logo.md
-// (light palette); dark values are designed tints so the lockup stays
-// legible under the app's existing light/dark theme switch.
-//
-// Colors are fixed brand greens on purpose — they never follow the
-// user's Radix accent preference, so the wordmark stays recognizable.
+// with a signature terminal dot. Geometry comes from plan-logo.md §1;
+// colors derive from the user's Radix accent preference (see
+// therascript-logo.css): coordinated 11/12 palette steps plus a tinted
+// dot, re-resolved per appearance by the theme root. The logo has no
+// hover state; keyboard focus keeps a visible outline.
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { AudioLines } from 'lucide-react';

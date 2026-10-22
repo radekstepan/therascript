@@ -6,10 +6,20 @@
 // mark-only variant keeps the link's accessible name for collapsed
 // layouts and icon-only contexts.
 import React from 'react';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { TherascriptLogo, type TherascriptLogoProps } from './TherascriptLogo';
+
+// NOTE: build a plain string path. Under jsdom `new URL(...)` returns a
+// jsdom URL object that node:fs cannot resolve back to a file.
+const logoCss = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), 'therascript-logo.css'),
+  'utf8'
+);
 
 function renderLogo(props: TherascriptLogoProps = {}) {
   return render(
@@ -61,5 +71,30 @@ describe('TherascriptLogo', () => {
     const { container } = renderLogo({ size: 'md' });
 
     expect(container.querySelector('svg')?.getAttribute('width')).toBe('23');
+  });
+});
+
+describe('TherascriptLogo palette', () => {
+  it('derives coordinated steps from the accent, not fixed greens', () => {
+    // Mark/ink/focus use distinct high-contrast palette steps; the dot
+    // is a tint mixed from the mark step.
+    expect(logoCss).toContain('var(--accent-11');
+    expect(logoCss).toContain('var(--accent-12');
+    expect(logoCss).toContain('color-mix');
+    expect(logoCss).toContain('--brand-logo-dot');
+
+    // Old fixed-green brand palette must not come back.
+    for (const hex of ['#428366', '#284a3d', '#62a985', '#63b69a']) {
+      expect(logoCss.toLowerCase()).not.toContain(hex);
+    }
+  });
+
+  it('has no hover styling', () => {
+    expect(logoCss).not.toContain(':hover');
+  });
+
+  it('keeps a visible keyboard focus indication', () => {
+    expect(logoCss).toContain('.brand-logo:focus-visible');
+    expect(logoCss).toMatch(/\.brand-logo:focus-visible\s*\{[^}]*outline:/);
   });
 });

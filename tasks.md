@@ -37,7 +37,7 @@ For each task, run `yarn test` and the builds listed under **Verification** with
 
 **Verification:** `yarn test`; `yarn build:ui`. Open the modal and inspect both filter states.
 
-### - [ ] Task 2: Derive logo colors from the accent and update matching favicons
+### - [x] Task 2: Derive logo colors from the accent and update matching favicons
 
 **Target Files:**
 - `packages/ui/src/components/Brand/TherascriptLogo.tsx`, `therascript-logo.css`, and `TherascriptLogo.test.tsx`
