@@ -1968,10 +1968,7 @@ export async function processVerificationJob(
 
         // Nothing verifiable (conversational acknowledgement / thinking-only):
         // record a clean completed row without spending a Judge call.
-        if (!visibleAnswer || paragraphs.length === 0) {
-          const reason = !visibleAnswer
-            ? 'No verifiable content in AI response.'
-            : 'Session transcript is empty.';
+        if (!visibleAnswer) {
           verificationRepository.saveMessageVerificationResult({
             messageId,
             chatId,
@@ -1980,7 +1977,7 @@ export async function processVerificationJob(
             authoredModel,
             judgeModel,
             accuracyScore: 1.0,
-            summaryAssessment: reason,
+            summaryAssessment: 'No verifiable content in AI response.',
             statements: [],
           });
           processed++;
@@ -2001,6 +1998,9 @@ export async function processVerificationJob(
 
         // Trivial conversational greeting: no factual claims possible, so
         // skip the Judge call entirely (zero tokens, instant clean row).
+        // Runs before the transcript check: greetings carry no claims to
+        // ground, so they keep this completed fast path even when the
+        // session transcript is missing.
         if (isTrivialConversationalMessage(visibleAnswer)) {
           verificationRepository.saveMessageVerificationResult({
             messageId,
@@ -2030,6 +2030,38 @@ export async function processVerificationJob(
             accuracyScore: 1.0,
             totalClaims: 0,
           });
+          continue;
+        }
+
+        // Missing ground truth: a substantive answer with no transcript
+        // paragraphs cannot be judged. Record a FAILED row (never a
+        // successful verification) so coverage ignores it and default
+        // audits retry it once the transcript exists. No message_verified
+        // event: only successful audits emit one.
+        if (paragraphs.length === 0) {
+          console.warn(
+            `[Verification Worker ${jobId}] Skipping judge call for message ${messageId}: session ${sessionId} has no transcript paragraphs.`
+          );
+          verificationRepository.saveMessageVerificationResult({
+            messageId,
+            chatId,
+            sessionId,
+            verificationJobId: jobId,
+            authoredModel,
+            judgeModel,
+            status: 'failed',
+            errorMessage:
+              'Session transcript has no paragraphs; cannot verify substantive claims without ground truth.',
+            promptTokens: 0,
+            completionTokens: 0,
+            durationMs: 0,
+            statements: [],
+          });
+          processed++;
+          await job.updateProgress(
+            Math.round((processed / candidates.length) * 100)
+          );
+          publishProgress();
           continue;
         }
 

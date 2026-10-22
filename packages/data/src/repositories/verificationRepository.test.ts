@@ -351,6 +351,24 @@ describe('findCandidateMessagesForVerification', () => {
     expect(forced.map((c) => c.id)).toEqual([a2, a1]);
   });
 
+  it('keeps failed messages eligible under the default skip so they retry', () => {
+    const { sessionId, chatId, a1, a2 } = seedScenario();
+    verificationRepository.saveMessageVerificationResult({
+      messageId: a2,
+      chatId,
+      sessionId,
+      authoredModel: 'model-b',
+      judgeModel: 'judge-1',
+      status: 'failed',
+      errorMessage: 'Session transcript has no paragraphs.',
+    });
+    const candidates =
+      verificationRepository.findCandidateMessagesForVerification({
+        scope: 'all_unverified',
+      });
+    expect(candidates.map((c) => c.id)).toEqual([a2, a1]);
+  });
+
   it('filters by selected sessions and single chat', () => {
     const first = seedScenario();
     const otherSession = insertSession('Other');

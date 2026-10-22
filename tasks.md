@@ -116,6 +116,8 @@ Completion tokens have a minimum of 4096 and transcript tokens a minimum of 512,
 
 ## 9. P2 — Missing transcripts are recorded as successfully verified
 
+- [x] Task 9
+
 **Location:** `packages/worker/src/jobs/verificationProcessor.ts:1455–1483`.
 
 A candidate from a completed session with no transcript paragraphs is saved as completed with accuracy 1.0, even when its answer contains substantive claims. Coverage treats it as verified and subsequent default audits skip it, including after transcript data is repaired.

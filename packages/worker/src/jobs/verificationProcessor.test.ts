@@ -1990,3 +1990,198 @@ describe('processVerificationJob — context budgeting', () => {
     );
   });
 });
+
+describe('processVerificationJob — missing transcript', () => {
+  const paragraphs: TranscriptParagraphData[] = [
+    {
+      id: 0,
+      timestamp: 866,
+      text: 'I take Sertraline every morning and I feel better.',
+      speaker: 'SPEAKER_00',
+    },
+  ];
+
+  const baseRecord = {
+    id: 1,
+    status: 'pending',
+    scope: 'all_unverified',
+    session_ids_json: null,
+    chat_id: null,
+    skip_verified: true,
+    total_messages: 0,
+    processed_messages: 0,
+    total_statements: 0,
+    flagged_statements: 0,
+    omissions_count: 0,
+    created_at: Date.now(),
+    completed_at: null,
+    error_message: null,
+    model_name: 'default',
+    context_size: 32768,
+    thinking_budget: -1,
+    temperature: 0.3,
+    top_p: null,
+    repeat_penalty: null,
+    num_gpu_layers: null,
+    llm_base_url: null,
+  };
+
+  const candidateFor = (id: number, text: string) => ({
+    id,
+    chatId: 5,
+    sessionId: 2,
+    sender: 'ai',
+    text,
+    timestamp: Date.now(),
+    model: 'author-model',
+    userQuestion: 'What did the client say?',
+  });
+
+  async function* fakeStream(
+    chunks: Array<{ content?: string; thinking?: string }>,
+    result: { promptTokens?: number; completionTokens?: number }
+  ): AsyncGenerator<{ content?: string; thinking?: string }, unknown> {
+    for (const chunk of chunks) yield chunk;
+    return result;
+  }
+
+  const validVerdict = {
+    summary_assessment: 'All supported.',
+    claims: [
+      {
+        exact_quote: 'The client takes Sertraline every morning',
+        normalized_claim: 'Client takes Sertraline every morning.',
+        verdict: 'supported',
+        severity: 'none',
+        confidence: 0.9,
+        reasoning: 'Stated verbatim in P#0.',
+        evidence: [],
+      },
+    ],
+    omissions: [],
+  };
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    extractVisibleAnswerMock.mockImplementation((text: string) => text);
+    calculateTokenCountMock.mockReturnValue(10);
+    resolveBudgetStub.mockReturnValue(512);
+    findJobMock.mockReturnValue({ ...baseRecord });
+    findTemplateMock.mockReturnValue(null);
+    findSessionMock.mockReturnValue({ showSpeakers: 1 });
+    updateJobStatusMock.mockReturnValue(true);
+    transitionToProcessingMock.mockReturnValue(true);
+    saveResultMock.mockReturnValue({});
+    // Transparent streamWithRetry: run the factory once, no retries.
+    streamWithRetryMock.mockImplementation(async function* (factory: any) {
+      return yield* factory();
+    });
+  });
+
+  const runJob = () =>
+    processVerificationJob({
+      data: { jobId: 1 },
+      updateProgress: vi.fn(),
+    } as any);
+
+  const messageVerifiedEvents = () =>
+    publishEventMock.mock.calls.filter(
+      (call) => call[1]?.type === 'message_verified'
+    );
+
+  it('fails (never succeeds) a factual answer when the session has no transcript paragraphs', async () => {
+    findParagraphsMock.mockReturnValue([]);
+    findCandidatesMock.mockReturnValue([
+      candidateFor(11, 'The client takes Sertraline every morning.'),
+    ]);
+
+    await runJob();
+
+    expect(streamLlmMock).not.toHaveBeenCalled();
+    expect(saveResultMock).toHaveBeenCalledTimes(1);
+    expect(saveResultMock.mock.calls[0][0]).toMatchObject({
+      messageId: 11,
+      status: 'failed',
+      promptTokens: 0,
+      completionTokens: 0,
+      durationMs: 0,
+    });
+    expect(saveResultMock.mock.calls[0][0].errorMessage).toMatch(/transcript/i);
+    // No successful-verification event: coverage must not treat it as verified.
+    expect(messageVerifiedEvents()).toHaveLength(0);
+  });
+
+  it('keeps the completed fast path for empty answers without a transcript', async () => {
+    findParagraphsMock.mockReturnValue([]);
+    findCandidatesMock.mockReturnValue([candidateFor(12, '   ')]);
+
+    await runJob();
+
+    expect(streamLlmMock).not.toHaveBeenCalled();
+    expect(saveResultMock).toHaveBeenCalledTimes(1);
+    expect(saveResultMock.mock.calls[0][0]).toMatchObject({
+      messageId: 12,
+      accuracyScore: 1.0,
+    });
+    expect(saveResultMock.mock.calls[0][0].status ?? 'completed').toBe(
+      'completed'
+    );
+  });
+
+  it('keeps the completed fast path for trivial greetings without a transcript', async () => {
+    findParagraphsMock.mockReturnValue([]);
+    findCandidatesMock.mockReturnValue([
+      candidateFor(13, 'Hello! How can I help you today?'),
+    ]);
+
+    await runJob();
+
+    expect(streamLlmMock).not.toHaveBeenCalled();
+    expect(saveResultMock).toHaveBeenCalledTimes(1);
+    expect(saveResultMock.mock.calls[0][0]).toMatchObject({
+      messageId: 13,
+      accuracyScore: 1.0,
+    });
+    expect(saveResultMock.mock.calls[0][0].status ?? 'completed').toBe(
+      'completed'
+    );
+  });
+
+  it('audits the same message normally once transcript paragraphs exist', async () => {
+    const candidate = candidateFor(
+      11,
+      'The client takes Sertraline every morning.'
+    );
+    // First audit: no ground truth → failed, never completed.
+    findParagraphsMock.mockReturnValue([]);
+    findCandidatesMock.mockReturnValue([candidate]);
+    await runJob();
+    expect(saveResultMock.mock.calls[0][0]).toMatchObject({
+      messageId: 11,
+      status: 'failed',
+    });
+
+    // Transcript repaired: the retry reaches the judge and completes.
+    saveResultMock.mockClear();
+    streamLlmMock.mockClear();
+    findParagraphsMock.mockReturnValue(paragraphs);
+    streamLlmMock.mockImplementationOnce(() =>
+      fakeStream([{ content: '{"summary_assessment": "ok"}' }], {
+        promptTokens: 90,
+        completionTokens: 40,
+      })
+    );
+    parseJsonMock.mockReturnValue(validVerdict);
+    await runJob();
+
+    expect(streamLlmMock).toHaveBeenCalledTimes(1);
+    expect(saveResultMock).toHaveBeenCalledTimes(1);
+    expect(saveResultMock.mock.calls[0][0]).toMatchObject({
+      messageId: 11,
+      accuracyScore: 1,
+    });
+    expect(saveResultMock.mock.calls[0][0].status ?? 'completed').toBe(
+      'completed'
+    );
+  });
+});
