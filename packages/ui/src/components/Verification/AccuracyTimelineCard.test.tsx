@@ -15,7 +15,7 @@
 // Assertions are structural (bars vs. gridline frame, label anchors)
 // rather than hardcoded pixel values, so padding tweaks that keep
 // the bars inside the frame stay green.
-import React from 'react';
+import React, { act } from 'react';
 import { describe, it, expect } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -167,8 +167,10 @@ describe('AccuracyTimelineCard chart padding', () => {
 // Per-data-point hover tooltips: every trend point renders its own
 // AppTooltip (Radix) readout — date, messages audited, accuracy,
 // and the claims breakdown — instead of the native SVG <title>.
-// The trigger is the focusable point group (dot + invisible
-// full-height hover rect), so keyboard focus opens it too.
+// The focusable point group (dot + invisible full-height hover
+// rect) drives the controlled open state, but the tooltip trigger
+// is just the dot circle so the readout anchors at the data point
+// instead of the middle of the chart.
 describe('AccuracyTimelineCard point tooltips', () => {
   const TOOLTIP_POINTS: VerificationTimepointStat[] = [
     makePoint({
@@ -260,7 +262,9 @@ describe('AccuracyTimelineCard point tooltips', () => {
 
     const triggers = pointTriggers(svg);
     expect(triggers[0].getAttribute('tabindex')).toBe('0');
-    triggers[1].focus();
+    act(() => {
+      triggers[1].focus();
+    });
     await waitFor(
       () => {
         const tooltip = screen.getByRole('tooltip');
@@ -278,5 +282,24 @@ describe('AccuracyTimelineCard point tooltips', () => {
       name: 'Accuracy trend across 3 days',
     }) as unknown as SVGSVGElement;
     expect(svg.querySelectorAll('title')).toHaveLength(0);
+  });
+
+  it('anchors each tooltip trigger to the dot circle, not the hover group', () => {
+    renderCard(TOOLTIP_POINTS);
+    const svg = screen.getByRole('img', {
+      name: 'Accuracy trend across 3 days',
+    }) as unknown as SVGSVGElement;
+
+    // Radix Trigger (asChild) marks its child with data-state. The
+    // trigger must be the dot circle: when the full-height hover
+    // group was the trigger, the tooltip anchored to the middle of
+    // the chart instead of the data point.
+    const triggers = pointTriggers(svg);
+    expect(triggers).toHaveLength(3);
+    for (const group of triggers) {
+      expect(group.hasAttribute('data-state')).toBe(false);
+      const dot = group.querySelector('circle');
+      expect(dot?.getAttribute('data-state')).toMatch(/^(open|closed)$/);
+    }
   });
 });

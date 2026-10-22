@@ -53,6 +53,13 @@ function trendPointLabel(p: VerificationTimepointStat): string {
 }
 
 function TrendChart({ points }: { points: VerificationTimepointStat[] }) {
+  // Controlled tooltip state: hovering (or keyboard-focusing) anywhere in
+  // a point's group — dot or bars — opens that point's tooltip, but the
+  // tooltip *anchor* is the dot itself so the readout appears at the data
+  // point instead of the middle of the chart.
+  const [hovered, setHovered] = useState<number | null>(null);
+  const clearIf = (i: number) => () =>
+    setHovered((prev) => (prev === i ? null : prev));
   const width = 640;
   const height = 180;
   const padL = 52;
@@ -185,6 +192,8 @@ function TrendChart({ points }: { points: VerificationTimepointStat[] }) {
         // cells tile without overlap), full plot height so hovering
         // the stacked bars reads out the same point. Transparent
         // fill still receives pointer events; zero layout shift.
+        // The group owns hover/focus state; the AppTooltip trigger is
+        // just the dot so the readout anchors at the data point.
         const spacing =
           points.length === 1
             ? Math.min(innerW, barW * 4)
@@ -194,23 +203,32 @@ function TrendChart({ points }: { points: VerificationTimepointStat[] }) {
           padL + innerW - spacing
         );
         return (
-          <AppTooltip
+          <g
             key={`dot-${p.date}`}
-            content={<TrendPointTooltipContent point={p} />}
+            tabIndex={0}
+            role="img"
+            aria-label={trendPointLabel(p)}
+            data-date={p.date}
+            onMouseEnter={() => setHovered(i)}
+            onMouseLeave={clearIf(i)}
+            onFocus={() => setHovered(i)}
+            onBlur={clearIf(i)}
           >
-            <g
-              tabIndex={0}
-              role="img"
-              aria-label={trendPointLabel(p)}
-              data-date={p.date}
+            <rect
+              x={hoverX}
+              y={padT}
+              width={spacing}
+              height={innerH}
+              fill="transparent"
+            />
+            <AppTooltip
+              content={<TrendPointTooltipContent point={p} />}
+              open={hovered === i}
+              onOpenChange={(next) =>
+                setHovered((prev) => (next ? i : prev === i ? null : prev))
+              }
+              delayDuration={0}
             >
-              <rect
-                x={hoverX}
-                y={padT}
-                width={spacing}
-                height={innerH}
-                fill="transparent"
-              />
               <circle
                 cx={x(i)}
                 cy={yAcc(p.accuracyPercent)}
@@ -219,8 +237,8 @@ function TrendChart({ points }: { points: VerificationTimepointStat[] }) {
                 stroke="var(--color-panel-solid)"
                 strokeWidth={1.5}
               />
-            </g>
-          </AppTooltip>
+            </AppTooltip>
+          </g>
         );
       })}
 

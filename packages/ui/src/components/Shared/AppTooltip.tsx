@@ -10,6 +10,10 @@ interface AppTooltipProps {
   align?: 'start' | 'center' | 'end';
   delayDuration?: number;
   disableHoverableContent?: boolean;
+  /** Controlled-mode passthrough (Radix Tooltip Root). Omit for uncontrolled. */
+  open?: boolean;
+  defaultOpen?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 /**
@@ -39,6 +43,9 @@ export function AppTooltip({
   align,
   delayDuration,
   disableHoverableContent,
+  open,
+  defaultOpen,
+  onOpenChange,
 }: AppTooltipProps) {
   if (content === undefined || content === null || content === '') {
     return <>{children}</>;
@@ -50,6 +57,9 @@ export function AppTooltip({
       align={align}
       delayDuration={delayDuration}
       disableHoverableContent={disableHoverableContent}
+      open={open}
+      defaultOpen={defaultOpen}
+      onOpenChange={onOpenChange}
     >
       {children as React.ReactElement}
     </Tooltip>

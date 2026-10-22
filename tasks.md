@@ -30,11 +30,13 @@ For background on the Verification Agent and LLM lifecycle, see `AGENTS.md` (§1
 
 ## Task 2: Accuracy / Hallucinations chart tooltips don't anchor to the data point
 
-- [ ] Done
+- [x] Done
 
 > In Accuracy and Hallucinations over time the tooltips don't show where the bar/data point is
 
-**Verification:** TBD
+**Verification:** `yarn vitest run packages/ui/src/components/Verification/AccuracyTimelineCard.test.tsx` (10/10 pass, incl. new trigger-anchor test); `npx tsc --noEmit -p packages/ui/tsconfig.json` passes. E2E spec (`verification-chart-tooltips.spec.ts`) untouched — Playwright browsers not installed, so not run; hover/focus behavior it asserts is preserved.
+
+**Writeup:** The tooltip trigger was the point's `<g>` containing the invisible full-plot-height hover rect, so Radix anchored the readout to that tall box's center (chart middle) rather than the dot/bars. `packages/ui/src/components/Verification/AccuracyTimelineCard.tsx` now drives a controlled open state from the group (hover + keyboard focus preserved, including bar-hover readout) while the `AppTooltip` trigger is just the dot circle, so the readout + arrow appear at the data point; `delayDuration={0}` keeps the readout tracking across adjacent cells. `packages/ui/src/components/Shared/AppTooltip.tsx` gains optional `open`/`defaultOpen`/`onOpenChange` passthrough (additive, no other callers affected). Tests: new jsdom assertion that the Radix trigger marker (`data-state`) sits on the circle and not the group, plus `act()`-wrapped focus to silence the controlled-state update warning. Changeset: `.changeset/chart-tooltip-dot-anchor.md`.
 
 ---
 
