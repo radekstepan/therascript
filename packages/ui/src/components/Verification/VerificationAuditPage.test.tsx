@@ -106,6 +106,24 @@ function renderPage() {
   );
 }
 
+describe('VerificationAuditPage header layout', () => {
+  it('keeps the title and actions on one row with the subtitle below', async () => {
+    renderPage();
+    await screen.findByRole('heading', { name: 'Fact Check' });
+
+    const row = screen.getByTestId('fact-check-header-row');
+    const heading = screen.getByRole('heading', { name: 'Fact Check' });
+    const runButton = screen.getByRole('button', {
+      name: 'Run Verification Audit',
+    });
+    const subtitle = screen.getByText(/Audit AI responses against session/);
+
+    expect(row.contains(heading)).toBe(true);
+    expect(row.contains(runButton)).toBe(true);
+    expect(row.contains(subtitle)).toBe(false);
+  });
+});
+
 describe('VerificationAuditPage live banner', () => {
   it('shows the in-progress banner without the Live connectivity pill', async () => {
     renderPage();

@@ -18,7 +18,7 @@ This document is structured as a sequential execution plan for an LLM orchestrat
 
 ## Tasks
 
-- [ ] Task 1: The buttons in the header of Fact Check need to be right aligned on the same row as the title that says "Fact Check"
+- [x] Task 1: The buttons in the header of Fact Check need to be right aligned on the same row as the title that says "Fact Check"
 - [ ] Task 2: I don't understand why say session "foo" has accuracy of 0.8%. Statements???
 - [ ] Task 3: Show accuracy by llm and the chart over time above rather than next to each other. The chart should go first.
 - [ ] Task 4: When I navigate from issue feed to that chat, it opens the Fact Check modal on the page 2x

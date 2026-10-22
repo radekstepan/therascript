@@ -239,18 +239,18 @@ export function VerificationAuditPage() {
       style={{ maxWidth: 1200, margin: '0 auto' }}
     >
       <Flex direction="column" gap="4">
-        <Flex align="center" justify="between" gap="3" wrap="wrap">
-          <Box>
-            <Flex align="center" gap="2">
-              <ShieldCheck size={22} />
-              <Heading size="6">Fact Check</Heading>
-            </Flex>
-            <Text size="2" color="gray" as="p" mt="1">
-              Audit AI responses against session transcripts, track
-              hallucinations, and compare model accuracy.
-            </Text>
-          </Box>
-          <Flex gap="2" wrap="wrap" align="center">
+        <Flex
+          align="center"
+          justify="between"
+          gap="3"
+          wrap="wrap"
+          data-testid="fact-check-header-row"
+        >
+          <Flex align="center" gap="2">
+            <ShieldCheck size={22} />
+            <Heading size="6">Fact Check</Heading>
+          </Flex>
+          <Flex gap="2" wrap="wrap" align="center" justify="end">
             {stats && failedCount > 0 && (
               <>
                 <Badge
@@ -341,6 +341,10 @@ export function VerificationAuditPage() {
             </Button>
           </Flex>
         </Flex>
+        <Text size="2" color="gray" as="p" mt="-2">
+          Audit AI responses against session transcripts, track hallucinations,
+          and compare model accuracy.
+        </Text>
 
         {activeJob && <LiveJobBanner job={activeJob} />}
 
