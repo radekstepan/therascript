@@ -30,6 +30,7 @@ import {
 } from '@radix-ui/react-icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
+import { AppTooltip } from '../Shared/AppTooltip';
 import type {
   StatementSeverity,
   VerifiedStatement,
@@ -55,8 +56,9 @@ export interface StatementVerdictModalProps {
   /** Therapist's prompt — shown as context for omissions. */
   userQuestion?: string | null;
   /**
-   * Owning chat message id. Enables the "Clear Verification" footer
-   * action (delete + invalidate + close) so the message can be re-audited.
+   * Owning chat message id. Enables the "Clear Response Fact Check"
+   * footer action (delete the whole response's verification + invalidate
+   * + close) so the message returns to the unverified pool for re-audit.
    */
   messageId?: number | null;
 }
@@ -457,17 +459,30 @@ export function StatementVerdictModal({
           <Flex justify="between" align="center" mt="4" gap="2" wrap="wrap">
             {messageId != null ? (
               <Flex direction="column" gap="1" align="start">
-                <Button
-                  size="2"
-                  variant="soft"
-                  color="red"
-                  disabled={clearMutation.isPending}
-                  onClick={() => clearMutation.mutate()}
-                  title="Delete this verification so the message can be re-audited"
+                {/* Scope + recheck behavior, since "Clear Verification"
+                    reads as if it might clear only the statement shown. */}
+                <AppTooltip
+                  content={
+                    sorted.length > 1
+                      ? `Deletes all ${sorted.length} fact-check statements for this response — not just the one shown above. The response returns to the unverified pool and will be re-checked on the next audit.`
+                      : `Deletes this response's fact-check statement. The response returns to the unverified pool and will be re-checked on the next audit.`
+                  }
                 >
-                  <TrashIcon />{' '}
-                  {clearMutation.isPending ? 'Clearing…' : 'Clear Verification'}
-                </Button>
+                  <span style={{ display: 'inline-block' }}>
+                    <Button
+                      size="2"
+                      variant="soft"
+                      color="red"
+                      disabled={clearMutation.isPending}
+                      onClick={() => clearMutation.mutate()}
+                    >
+                      <TrashIcon />{' '}
+                      {clearMutation.isPending
+                        ? 'Clearing…'
+                        : 'Clear Response Fact Check'}
+                    </Button>
+                  </span>
+                </AppTooltip>
                 {clearMutation.isError && (
                   <Text size="1" color="red">
                     Couldn&apos;t clear — try again.

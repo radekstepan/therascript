@@ -8,6 +8,7 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { Theme } from '@radix-ui/themes';
 import { StatementVerdictModal } from './StatementVerdictModal';
@@ -312,7 +313,7 @@ describe('StatementVerdictModal paragraph jump link', () => {
 });
 
 describe('StatementVerdictModal clear verification', () => {
-  it('invokes deleteMessageVerification and closes when Clear Verification is clicked', async () => {
+  it('invokes deleteMessageVerification and closes when Clear Response Fact Check is clicked', async () => {
     const onOpenChange = vi.fn();
     renderWithClient(
       <Theme>
@@ -330,7 +331,7 @@ describe('StatementVerdictModal clear verification', () => {
     );
 
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Clear Verification' })
+      await screen.findByRole('button', { name: 'Clear Response Fact Check' })
     );
 
     await waitFor(() => {
@@ -344,12 +345,44 @@ describe('StatementVerdictModal clear verification', () => {
     });
   });
 
-  it('renders no Clear Verification button without a message id', async () => {
+  it('renders no Clear Response Fact Check button without a message id', async () => {
     renderModal();
 
     expect(await screen.findByText('Fact Check')).toBeTruthy();
     expect(
-      screen.queryByRole('button', { name: 'Clear Verification' })
+      screen.queryByRole('button', { name: 'Clear Response Fact Check' })
     ).toBeNull();
+  });
+
+  it('tooltips the whole-response scope and recheck behavior', async () => {
+    const user = userEvent.setup();
+    const onOpenChange = vi.fn();
+    renderWithClient(
+      <Theme>
+        <StatementVerdictModal
+          open
+          onOpenChange={onOpenChange}
+          statements={[STATEMENT, { ...STATEMENT, id: 12, statement_index: 1 }]}
+          initialStatementId={STATEMENT.id}
+          authoredModel="author-model"
+          judgeModel="judge-model"
+          verifiedAt={Date.now()}
+          messageId={STATEMENT.message_id}
+        />
+      </Theme>
+    );
+
+    await user.hover(
+      await screen.findByRole('button', {
+        name: 'Clear Response Fact Check',
+      })
+    );
+    const tooltip = await screen.findByRole('tooltip', undefined, {
+      timeout: 3000,
+    });
+    expect(tooltip.textContent).toContain('all 2 fact-check statements');
+    expect(tooltip.textContent).toContain('not just the one shown');
+    expect(tooltip.textContent).toContain('unverified pool');
+    expect(tooltip.textContent).toContain('re-checked on the next audit');
   });
 });

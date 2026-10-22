@@ -103,8 +103,10 @@ For background on the Verification Agent and LLM lifecycle, see `AGENTS.md` (§1
 
 ## Task 8: Clarify "Clear Verification" scope (statement vs whole note) with tooltip
 
-- [ ] Done
+- [x] Done
 
 > On the Fact Check modal there is a "Clear Verification" button. Is that for the statement itself or the whole note? Would it then be rechecked on the next Fact Check run? I agree it would be good to clear certain findings of a Fact Check, just make it clear with the actions what you do. Provide a tooltip over the action too.
 
-**Verification:** TBD
+**Verification:** `yarn vitest run packages/ui/src/components/Verification/StatementVerdictModal.test.tsx` (11/11, incl. new tooltip test; 2 existing tests updated for the rename); `npx tsc --noEmit -p packages/ui/tsconfig.json` passes.
+
+**Writeup:** The action deletes the whole response's verification row + all its statements in one transaction (`deleteMessageVerification(messageId)`), returning the message to the unverified pool so the next audit re-checks it — but "Clear Verification" sat under "Statement N of M", reading as statement-scoped. `packages/ui/src/components/Verification/StatementVerdictModal.tsx` renames it to "Clear Response Fact Check" and replaces the native `title` with an `AppTooltip` stating the count/scope ("all N fact-check statements for this response — not just the one shown above", singular variant for N=1) and the recheck behavior ("returns to the unverified pool and will be re-checked on the next audit"); the tooltip wraps a span so it also works while the button is disabled mid-clear. Deliberately no per-statement dismiss action: that would need a new API endpoint plus accuracy recomputation and is a product decision — flagging as a possible follow-up. Changeset: `.changeset/clear-response-fact-check-label.md`.
