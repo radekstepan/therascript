@@ -26,3 +26,9 @@ Fact Check - Claim mix little bar is not vertically aligned in the table row
 
 On FAct Check Audit #5 most of the prompts worked, but this one didn't:
 Completed with errors: 18 of 19 checked, 1 failed (job 5, judge "qwen3.8-27b"). First failure [malformed_json]: [malformed_json] Judge returned invalid JSON for message 1819 (job 5, judge "qwen3.8-27b", retrying, attempt 2 of 2, 570.0s, 42747+57605 tokens): Judge LLM did not return valid JSON (unparseable output). Retries exhausted (1 retry).
+
+When looking at transcript chat with a transcript reference, make it easy to jump to that part of the transcript to check yourself.
+
+The colors of fact checks on a session note should be a bit more transparent and only the transparency should switch to the current color/transparency onhover. Do not modify underline, border or anything like that.
+
+On the Fact Check modal there is a "Clear Verification" button. Is that for the statement itself or the whole note? Would it then be rechecked on the next Fact Check run? I agree it would be good to clear certain findings of a Fact Check, just make it clear witht he actions what you do. Provide a tooltip over the action too.
