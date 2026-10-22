@@ -66,6 +66,13 @@ export interface LlmSettingsState {
   thinkingBudget: number;
 }
 
+export interface LlmSettingsSamplingDefaults {
+  temperature?: number;
+  topP?: number;
+  repeatPenalty?: number;
+  thinkingBudget?: number;
+}
+
 interface LlmSettingsFormProps {
   llmStatus?: LlmStatus;
   activeTranscriptTokens?: number | null;
@@ -73,6 +80,14 @@ interface LlmSettingsFormProps {
   onChange: (updater: (prev: LlmSettingsState) => LlmSettingsState) => void;
   isOpen: boolean;
   isSaving?: boolean;
+  /**
+   * Caller-provided sampling defaults used when the user picks a
+   * non-active model (instead of the chat defaults 0.7 / 0.9 / 1.1 /
+   * -1). Lets the Verification modal keep its Judge defaults
+   * (temperature 0.3) across model switches. Unset fields fall back to
+   * the chat defaults.
+   */
+  defaultSamplingParams?: LlmSettingsSamplingDefaults;
 }
 
 export function LlmSettingsForm({
@@ -82,6 +97,7 @@ export function LlmSettingsForm({
   onChange,
   isOpen,
   isSaving,
+  defaultSamplingParams,
 }: LlmSettingsFormProps) {
   const queryClient = useQueryClient();
   const [availableModels, setAvailableModels] = React.useState<LlmModelInfo[]>(
@@ -157,20 +173,30 @@ export function LlmSettingsForm({
   // SelectActiveModelModal behavior. The context size is also cleared so
   // the recommended-value effect below can repopulate it for the new model;
   // otherwise the previous model's value would leak into the new selection.
+  // A caller-provided `defaultSamplingParams` overrides the chat sampling
+  // defaults so e.g. the Verification modal keeps temperature 0.3.
   useEffect(() => {
     if (state.selectedModel !== llmStatus?.activeModel) {
       onChange((prev) => ({
         ...prev,
         contextSizeInput: '',
         numGpuLayers: undefined,
-        temperature: 0.7,
-        topP: 0.9,
-        repeatPenalty: 1.1,
-        thinkingBudget: -1,
+        temperature: defaultSamplingParams?.temperature ?? 0.7,
+        topP: defaultSamplingParams?.topP ?? 0.9,
+        repeatPenalty: defaultSamplingParams?.repeatPenalty ?? 1.1,
+        thinkingBudget: defaultSamplingParams?.thinkingBudget ?? -1,
       }));
       setUserTouchedContext(false);
     }
-  }, [state.selectedModel, llmStatus?.activeModel, onChange]);
+  }, [
+    state.selectedModel,
+    llmStatus?.activeModel,
+    onChange,
+    defaultSamplingParams?.temperature,
+    defaultSamplingParams?.topP,
+    defaultSamplingParams?.repeatPenalty,
+    defaultSamplingParams?.thinkingBudget,
+  ]);
 
   // --- Recommended Context Size (avoid max by default) ---
   const recommendedContextSize = useMemo(() => {

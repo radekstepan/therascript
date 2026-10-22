@@ -53,11 +53,11 @@ interface StartVerificationModalProps {
 
 type ModalScope = 'all_unverified' | 'all_force' | 'selected_sessions';
 
-// Judge LLM defaults: deterministic sampling plus a bounded thinking budget
-// so reasoning models cannot burn the whole completion allowance inside
-// `<think>` (unrestricted `-1` caused 85s/msg latency and truncated JSON).
-const JUDGE_DEFAULT_TEMPERATURE = 0.3;
-const JUDGE_DEFAULT_THINKING_BUDGET = 1024;
+// Judge LLM defaults: deterministic sampling (0.3) plus unrestricted
+// thinking (`-1`, like Session Chat) — reasoning models must think before
+// emitting JSON, so the worker never clamps or disables thinking.
+export const JUDGE_DEFAULT_TEMPERATURE = 0.3;
+const JUDGE_DEFAULT_THINKING_BUDGET = -1;
 
 /**
  * Parse a session `date` into epoch milliseconds.
@@ -212,11 +212,7 @@ export function StartVerificationModal({
         llmStatus.configuredNumGpuLayers != null
           ? llmStatus.configuredNumGpuLayers
           : undefined,
-      thinkingBudget:
-        llmStatus.configuredThinkingBudget == null ||
-        llmStatus.configuredThinkingBudget < 0
-          ? JUDGE_DEFAULT_THINKING_BUDGET
-          : llmStatus.configuredThinkingBudget,
+      thinkingBudget: llmStatus.configuredThinkingBudget ?? -1,
     });
     // ← persistedRemoteUrl intentionally excluded: the snapshot is taken
     // once per open (prevIsOpenRef guard) so another modal's discovery
@@ -514,6 +510,12 @@ export function StartVerificationModal({
               onChange={setFormState}
               isOpen={isOpen}
               isSaving={isMutationPending}
+              defaultSamplingParams={{
+                temperature: JUDGE_DEFAULT_TEMPERATURE,
+                topP: 0.9,
+                repeatPenalty: 1.1,
+                thinkingBudget: JUDGE_DEFAULT_THINKING_BUDGET,
+              }}
             />
             <Flex gap="1" align="center">
               <QuestionMarkCircledIcon

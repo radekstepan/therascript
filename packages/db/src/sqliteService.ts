@@ -147,6 +147,77 @@ REQUEST: "{{USER_PROMPT}}"`,
     title: 'system_verification_judge',
     text: `You are an expert fact-verification judge auditing an AI-generated therapy chat response against the ground-truth session transcript. You will be given:
 1. GROUND-TRUTH SESSION TRANSCRIPT: Paragraphs formatted as [P#<index> MM:SS] <SPEAKER>: <text>. Some transcripts have no speaker diarization; those paragraphs are formatted as [P#<index> MM:SS] <text> with no speaker label.
+2. THERAPIST'S PROMPT / QUESTION: The instructions that were given to the AI (it may be a long template). It is context only — never extract claims from it.
+3. AI RESPONSE TO AUDIT: The visible text of the AI message to verify. Extract claims ONLY from this text.
+
+REASONING GUIDANCE (for models that think before answering):
+- If you use <think> reasoning, keep your internal thinking brief and focused — do not draft full JSON or convert timestamps in <think>.
+- Group closely related details from the same sentence or bullet into a single factual claim. Aim for at most 15-25 core factual/clinical claims for long structured notes rather than splitting every clause.
+
+EVIDENCE CITATION RULES (must follow exactly):
+- "paragraphIndex" MUST be the exact integer <index> copied from the cited paragraph's [P#<index> MM:SS] label. Never invent or guess an index.
+- Each "evidence" item needs ONLY "paragraphIndex" and "quote". Do NOT include "timestampMs" or "speaker" — they are looked up automatically from the cited paragraph.
+
+Your tasks:
+1. Extract the key factual or clinical statements/claims made in the AI Response about the session, client, therapist, symptoms, events, quotes, or interventions. Group related clauses from one sentence or bullet into a single claim (at most ~15-25 claims for long structured notes).
+2. For each claim, copy the VERBATIM substring ("exact_quote") exactly as it appears in the AI Response so it can be highlighted in the UI. Do not paraphrase.
+3. Verify each claim strictly against the Ground-Truth Session Transcript and assign one verdict:
+   - "supported": Directly corroborated by the transcript.
+   - "partially_supported": Contains a kernel of truth from the transcript but exaggerates, overgeneralizes, or adds unsupported detail.
+   - "contradicted": Directly conflicts with what the transcript says (e.g., wrong speaker attribution, opposite clinical fact, wrong timeline).
+   - "fabricated": Completely made up / hallucinated; not mentioned anywhere in the transcript.
+4. Check for OMISSIONS: Did the AI fail to mention a major, explicit point from the transcript that directly answers the Therapist's Prompt? If so, include entries in the "omissions" array.
+
+Respond with ONLY a valid JSON object (no markdown fences, no commentary) matching this schema:
+{
+  "summary_assessment": "Brief 1-sentence overall audit summary.",
+  "claims": [
+    {
+      "exact_quote": "Verbatim sentence or clause from the AI response",
+      "normalized_claim": "Concise standalone statement of the claim",
+      "verdict": "supported | partially_supported | contradicted | fabricated",
+      "severity": "none | low | medium | high | critical",
+      "confidence": 0.95,
+      "reasoning": "One short sentence explaining the verdict.",
+      "evidence": [
+        {
+          "paragraphIndex": 14,
+          "quote": "Verbatim quote from the transcript"
+        }
+      ]
+    }
+  ],
+  "omissions": [
+    {
+      "normalized_claim": "What important fact from the transcript was omitted relative to the user's prompt",
+      "severity": "low | medium | high | critical",
+      "confidence": 0.9,
+      "reasoning": "One short sentence explaining why this omission matters.",
+      "evidence": [
+        {
+          "paragraphIndex": 22,
+          "quote": "Verbatim quote from the transcript that was missed"
+        }
+      ]
+    }
+  ]
+}`,
+  },
+};
+// --- END NEW SYSTEM PROMPTS ---
+
+/**
+ * Previous built-in `system_verification_judge` default(s). The seeder was
+ * insert-only, so existing databases still carry the old Judge prompt that
+ * asked the LLM to compute `timestampMs` by hand (which sent reasoning
+ * models into exhaustive per-paragraph `<think>` arithmetic). Rows whose
+ * text still matches one of these defaults are upgraded to the current
+ * `SYSTEM_PROMPT_TEMPLATES.VERIFICATION_JUDGE.text` on startup; any other
+ * text is treated as a genuine user edit and left untouched.
+ */
+export const LEGACY_VERIFICATION_JUDGE_PROMPT_TEXTS: readonly string[] = [
+  `You are an expert fact-verification judge auditing an AI-generated therapy chat response against the ground-truth session transcript. You will be given:
+1. GROUND-TRUTH SESSION TRANSCRIPT: Paragraphs formatted as [P#<index> MM:SS] <SPEAKER>: <text>. Some transcripts have no speaker diarization; those paragraphs are formatted as [P#<index> MM:SS] <text> with no speaker label.
 2. THERAPIST'S PROMPT / QUESTION: The user message the AI was answering.
 3. AI RESPONSE TO AUDIT: The visible text of the AI message to verify.
 
@@ -203,9 +274,7 @@ Respond with ONLY a valid JSON object (no markdown fences, no commentary) matchi
     }
   ]
 }`,
-  },
-};
-// --- END NEW SYSTEM PROMPTS ---
+];
 
 function seedSystemTemplates(dbInstance: DB) {
   console.log('[db Seeder] Checking for system prompt templates...');
@@ -214,6 +283,9 @@ function seedSystemTemplates(dbInstance: DB) {
   );
   const insertStmt = dbInstance.prepare(
     'INSERT INTO templates (title, text, createdAt) VALUES (?, ?, ?)'
+  );
+  const updateStmt = dbInstance.prepare(
+    'UPDATE templates SET text = ? WHERE title = ?'
   );
 
   for (const template of Object.values(SYSTEM_PROMPT_TEMPLATES)) {
@@ -226,6 +298,20 @@ function seedSystemTemplates(dbInstance: DB) {
     if (!existing) {
       insertStmt.run(template.title, template.text, Date.now());
       console.log(`[db Seeder] Seeded system template: "${template.title}"`);
+      continue;
+    }
+    // One exception: a `system_verification_judge` row that still matches a
+    // prior built-in default is upgraded to the fixed Judge prompt so
+    // existing databases get it. Genuinely custom text never matches and is
+    // preserved.
+    if (
+      template.title === SYSTEM_PROMPT_TEMPLATES.VERIFICATION_JUDGE.title &&
+      LEGACY_VERIFICATION_JUDGE_PROMPT_TEXTS.includes(existing.text)
+    ) {
+      updateStmt.run(template.text, template.title);
+      console.log(
+        `[db Seeder] Upgraded legacy system template: "${template.title}"`
+      );
     }
   }
 }

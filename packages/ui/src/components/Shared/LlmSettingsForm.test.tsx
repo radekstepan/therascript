@@ -23,7 +23,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Provider as JotaiProvider } from 'jotai';
 import { Theme } from '@radix-ui/themes';
 
-import { LlmSettingsForm, type LlmSettingsState } from './LlmSettingsForm';
+import {
+  LlmSettingsForm,
+  type LlmSettingsState,
+  type LlmSettingsSamplingDefaults,
+} from './LlmSettingsForm';
 import type { LlmModelInfo, LlmStatus } from '../../types';
 
 // --- Test fixtures -----------------------------------------------------
@@ -183,6 +187,7 @@ interface RenderOpts {
   activeTranscriptTokens?: number | null;
   isOpen?: boolean;
   onChange?: (updater: (prev: LlmSettingsState) => LlmSettingsState) => void;
+  defaultSamplingParams?: LlmSettingsSamplingDefaults;
 }
 
 function renderForm(opts: RenderOpts) {
@@ -211,6 +216,7 @@ function renderForm(opts: RenderOpts) {
         state={state}
         onChange={handleChange}
         isOpen={opts.isOpen ?? true}
+        defaultSamplingParams={opts.defaultSamplingParams}
       />
     );
   };
@@ -380,6 +386,116 @@ describe('LlmSettingsForm — user typing behaviour', () => {
     await user.type(input, '8192');
     expect(input.value).toBe('8192');
     expect(current.contextSizeInput).toBe('8192');
+  });
+});
+
+describe('LlmSettingsForm — defaultSamplingParams', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const trackState = (initial: LlmSettingsState) => {
+    let current = initial;
+    const onChange = (
+      updater: (prev: LlmSettingsState) => LlmSettingsState
+    ) => {
+      current = updater(current);
+    };
+    return { onChange, get: () => current };
+  };
+
+  it('keeps caller sampling defaults when the user picks a non-active model', async () => {
+    // Regression: the Verification modal seeds temperature 0.3, but the
+    // new-model reset used to clobber it with the chat default 0.7.
+    const initial: LlmSettingsState = {
+      ...baseState,
+      selectedModel: MODEL_A.name,
+      contextSizeInput: '16384',
+      temperature: 0.3,
+      thinkingBudget: -1,
+    };
+    const llmStatus = makeLlmStatus({ activeModel: MODEL_A.name });
+    const tracked = trackState(initial);
+    const user = userEvent.setup();
+    renderForm({
+      state: initial,
+      llmStatus,
+      activeTranscriptTokens: null,
+      onChange: tracked.onChange,
+      defaultSamplingParams: {
+        temperature: 0.3,
+        topP: 0.9,
+        repeatPenalty: 1.1,
+        thinkingBudget: -1,
+      },
+    });
+
+    await user.click(screen.getByTestId('pick-model-b'));
+
+    // The reset ran (context cleared, no refill without transcript tokens)
+    // but sampling kept the caller defaults instead of 0.7.
+    await waitFor(() => expect(tracked.get().selectedModel).toBe(MODEL_B.name));
+    expect(tracked.get().contextSizeInput).toBe('');
+    expect(tracked.get().temperature).toBe(0.3);
+    expect(tracked.get().thinkingBudget).toBe(-1);
+    expect(tracked.get().topP).toBe(0.9);
+    expect(tracked.get().repeatPenalty).toBe(1.1);
+  });
+
+  it('falls back to chat sampling defaults without defaultSamplingParams', async () => {
+    const initial: LlmSettingsState = {
+      ...baseState,
+      selectedModel: MODEL_A.name,
+      temperature: 0.3,
+    };
+    const llmStatus = makeLlmStatus({ activeModel: MODEL_A.name });
+    const tracked = trackState(initial);
+    const user = userEvent.setup();
+    renderForm({
+      state: initial,
+      llmStatus,
+      activeTranscriptTokens: null,
+      onChange: tracked.onChange,
+    });
+
+    await user.click(screen.getByTestId('pick-model-b'));
+
+    await waitFor(() => expect(tracked.get().selectedModel).toBe(MODEL_B.name));
+    expect(tracked.get().temperature).toBe(0.7);
+  });
+
+  it('does not clobber caller defaults when activeModel is default', async () => {
+    // The production case: `app_settings.llm_model_name` was 'default'
+    // while the picker auto-selected a real model, so the reset effect
+    // fired on open and overwrote the Judge temperature with 0.7.
+    const initial: LlmSettingsState = {
+      ...baseState,
+      selectedModel: MODEL_A.name,
+      contextSizeInput: '16384',
+      temperature: 0.3,
+      thinkingBudget: -1,
+    };
+    const llmStatus = makeLlmStatus({
+      activeModel: 'default',
+      modelChecked: 'default',
+    });
+    const tracked = trackState(initial);
+    renderForm({
+      state: initial,
+      llmStatus,
+      activeTranscriptTokens: null,
+      onChange: tracked.onChange,
+      defaultSamplingParams: {
+        temperature: 0.3,
+        topP: 0.9,
+        repeatPenalty: 1.1,
+        thinkingBudget: -1,
+      },
+    });
+
+    await waitFor(() => expect(tracked.get().contextSizeInput).toBe(''));
+    expect(tracked.get().temperature).toBe(0.3);
+    expect(tracked.get().thinkingBudget).toBe(-1);
   });
 });
 

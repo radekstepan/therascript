@@ -29,6 +29,7 @@ import {
   parseJsonObjectFromLlm,
   streamWithRetry,
   extractVisibleAnswer,
+  prepareLlmChatMessages,
   type StreamResult,
   type LlmChatChunk,
 } from '@therascript/services';
@@ -39,7 +40,6 @@ import {
   loadLlmModelForWorker,
   loadLlmApiTokenForWorker,
   unloadModelAtUrlForWorker,
-  resolveEffectiveThinkingBudget,
 } from './analysisProcessor.js';
 
 export const VERIFICATION_JUDGE_TEMPLATE_TITLE = 'system_verification_judge';
@@ -50,16 +50,19 @@ export const VERIFICATION_USAGE_SOURCE = 'verification_judge';
  *  Mirrors the seeded template's JSON contract. */
 export const DEFAULT_VERIFICATION_JUDGE_PROMPT = `You are an expert fact-verification judge auditing an AI-generated therapy chat response against the ground-truth session transcript. You will be given:
 1. GROUND-TRUTH SESSION TRANSCRIPT: Paragraphs formatted as [P#<index> MM:SS] <SPEAKER>: <text>. Some transcripts have no speaker diarization; those paragraphs are formatted as [P#<index> MM:SS] <text> with no speaker label.
-2. THERAPIST'S PROMPT / QUESTION: The user message the AI was answering.
-3. AI RESPONSE TO AUDIT: The visible text of the AI message to verify.
+2. THERAPIST'S PROMPT / QUESTION: The instructions that were given to the AI (it may be a long template). It is context only — never extract claims from it.
+3. AI RESPONSE TO AUDIT: The visible text of the AI message to verify. Extract claims ONLY from this text.
+
+REASONING GUIDANCE (for models that think before answering):
+- If you use <think> reasoning, keep your internal thinking brief and focused — do not draft full JSON or convert timestamps in <think>.
+- Group closely related details from the same sentence or bullet into a single factual claim. Aim for at most 15-25 core factual/clinical claims for long structured notes rather than splitting every clause.
 
 EVIDENCE CITATION RULES (must follow exactly):
 - "paragraphIndex" MUST be the exact integer <index> copied from the cited paragraph's [P#<index> MM:SS] label. Never invent or guess an index.
-- "timestampMs" should be your best estimate in milliseconds for the cited paragraph (the MM:SS label is minutes:seconds); it will be corrected against ground truth.
-- "speaker" MUST be null when the cited paragraph shows no speaker label. Only copy a speaker label that literally appears after the [P#<index> MM:SS] tag; never copy speaker names from these instructions or examples.
+- Each "evidence" item needs ONLY "paragraphIndex" and "quote". Do NOT include "timestampMs" or "speaker" — they are looked up automatically from the cited paragraph.
 
 Your tasks:
-1. Extract every distinct factual or clinical statement/claim made in the AI Response about the session, client, therapist, symptoms, events, quotes, or interventions.
+1. Extract the key factual or clinical statements/claims made in the AI Response about the session, client, therapist, symptoms, events, quotes, or interventions. Group related clauses from one sentence or bullet into a single claim (at most ~15-25 claims for long structured notes).
 2. For each claim, copy the VERBATIM substring ("exact_quote") exactly as it appears in the AI Response so it can be highlighted in the UI. Do not paraphrase.
 3. Verify each claim strictly against the Ground-Truth Session Transcript and assign one verdict:
    - "supported": Directly corroborated by the transcript.
@@ -78,12 +81,10 @@ Respond with ONLY a valid JSON object (no markdown fences, no commentary) matchi
       "verdict": "supported | partially_supported | contradicted | fabricated",
       "severity": "none | low | medium | high | critical",
       "confidence": 0.95,
-      "reasoning": "Why this claim is supported, contradicted, or fabricated based on the transcript.",
+      "reasoning": "One short sentence explaining the verdict.",
       "evidence": [
         {
           "paragraphIndex": 14,
-          "timestampMs": 84000,
-          "speaker": "SPEAKER_01",
           "quote": "Verbatim quote from the transcript"
         }
       ]
@@ -94,12 +95,10 @@ Respond with ONLY a valid JSON object (no markdown fences, no commentary) matchi
       "normalized_claim": "What important fact from the transcript was omitted relative to the user's prompt",
       "severity": "low | medium | high | critical",
       "confidence": 0.9,
-      "reasoning": "Why this omission matters for the therapist's question.",
+      "reasoning": "One short sentence explaining why this omission matters.",
       "evidence": [
         {
           "paragraphIndex": 22,
-          "timestampMs": 135000,
-          "speaker": "SPEAKER_01",
           "quote": "Verbatim quote from the transcript that was missed"
         }
       ]
@@ -932,20 +931,13 @@ export const JUDGE_DEFAULT_TEMPERATURE = 0.3;
 /** Low-variance temperature for the single JSON-repair retry attempt. */
 export const JUDGE_RETRY_TEMPERATURE = 0.1;
 
-/**
- * Hard ceiling for the Judge's thinking budget. An unrestricted budget
- * (`-1`) lets reasoning models spend the entire completion allowance inside
- * `<think>` and emit no JSON at all; 2048 thinking tokens are plenty for a
- * per-message verdict while leaving room for the JSON payload.
- */
-export const JUDGE_MAX_THINKING_BUDGET = 2048;
-
 /** Reminder appended to the Judge user message on the JSON-repair retry. */
 export const JUDGE_RETRY_REMINDER =
   '\n\nIMPORTANT REMINDER: Your previous response was not valid JSON. ' +
   'Respond with ONLY a valid JSON object matching the required schema. ' +
   'Properly escape all double quotes and newlines inside string values ' +
-  '(use \\" and \\n), and do not include trailing commas, markdown fences, or commentary.';
+  '(use \\" and \\n), and do not include trailing commas, markdown fences, or commentary. ' +
+  'Keep any <think> reasoning brief and emit the final JSON object immediately.';
 
 /**
  * Reminder appended to the Judge user message when the first attempt parsed
@@ -956,24 +948,23 @@ export const JUDGE_RETRY_SCHEMA_REMINDER =
   '\n\nIMPORTANT REMINDER: Your previous response was valid JSON but did not match the required schema. ' +
   'Respond with ONLY a JSON object containing "claims" (array) and "omissions" (array). ' +
   'Every claims entry must include "exact_quote" and "normalized_claim" strings; ' +
-  'every omissions entry must include a "normalized_claim" string.';
+  'every omissions entry must include a "normalized_claim" string. ' +
+  'Keep any <think> reasoning brief and emit the final JSON object immediately.';
 
 /**
- * Resolve the effective Judge thinking budget: the shared `-1`-clamp first
- * (unrestricted/unset becomes the phase cap, `0` stays disabled), then the
- * Judge-specific hard ceiling so reasoning models cannot consume the whole
- * completion allowance inside `<think>`.
+ * Resolve the effective Judge thinking budget: a straight passthrough of the
+ * job's configured budget, matching Session Chat (`sessionChatHandler.ts`
+ * passes `getConfiguredThinkingBudget()` to the LLM client untouched).
+ * Unset (`null`/`undefined`) defaults to `-1` (unrestricted thinking);
+ * `0` is honored only when the user explicitly disabled thinking.
+ * Thinking is never clamped or disabled by the worker — not even on retry.
  *
  * Pure function: no I/O. Exported for unit testing.
  */
 export function resolveJudgeThinkingBudget(
-  configuredBudget: number | null | undefined,
-  maxThinkingCap: number
+  configuredBudget: number | null | undefined
 ): number {
-  return Math.min(
-    resolveEffectiveThinkingBudget(configuredBudget, maxThinkingCap),
-    JUDGE_MAX_THINKING_BUDGET
-  );
+  return configuredBudget ?? -1;
 }
 
 /**
@@ -994,18 +985,10 @@ export const JUDGE_MIN_COMPLETION_TOKENS = 512;
  */
 export const JUDGE_MIN_TRANSCRIPT_TOKENS = 128;
 
-/** Preferred completion share of the context window when room allows. */
-const JUDGE_PREFERRED_COMPLETION_FRACTION = 0.3;
-
-/** Preferred completion floor when the window has room. */
-const JUDGE_PREFERRED_COMPLETION_TOKENS = 4096;
-
 export interface JudgeContextBudget {
   feasible: true;
   /** System prompt + question/answer skeleton + safety margin. */
   overheadTokens: number;
-  /** Completion cap for this Judge call. */
-  completionTokens: number;
   /** Transcript budget for `selectJudgeTranscriptContext`. */
   transcriptTokens: number;
 }
@@ -1021,10 +1004,12 @@ export type JudgeContextAllocation =
   | JudgeContextBudgetInfeasible;
 
 /**
- * Allocate one Judge call's completion and transcript budgets from the actual
- * remaining context window. Completion keeps its preferred size (30% of the
- * window, 4096 floor) only when room allows; otherwise it shrinks so that
- * `overhead + completion + transcript` never exceeds `contextSize`.
+ * Allocate one Judge call's transcript budget from the actual remaining
+ * context window. The transcript selection may use everything left after the
+ * fixed overhead except the minimum viable completion reserve; the
+ * completion cap itself is resolved afterwards from the *actual* selected
+ * transcript via `resolveJudgeCompletionBudget`, so a short prompt never
+ * starves `<think>` + JSON output with an artificial percentage cap.
  *
  * When the fixed prompt/answer overhead alone leaves insufficient room for
  * the minimum viable budgets, the allocation is infeasible: the caller must
@@ -1055,23 +1040,36 @@ export function allocateJudgeContextBudget(options: {
         `Increase the judge context size or shorten the answer.`,
     };
   }
-  const desiredCompletion = Math.max(
-    JUDGE_PREFERRED_COMPLETION_TOKENS,
-    Math.round(contextSize * JUDGE_PREFERRED_COMPLETION_FRACTION)
-  );
-  // Shrink completion to what actually remains (reserving the transcript
-  // minimum); the transcript selection gets whatever is left over.
-  const completionTokens = Math.min(
-    desiredCompletion,
-    remaining - JUDGE_MIN_TRANSCRIPT_TOKENS
-  );
-  const transcriptTokens = remaining - completionTokens;
+  // The transcript selection gets everything except the minimum completion
+  // reserve; completion is sized from the actual leftovers afterwards.
+  const transcriptTokens = remaining - JUDGE_MIN_COMPLETION_TOKENS;
   return {
     feasible: true,
     overheadTokens,
-    completionTokens,
     transcriptTokens,
   };
+}
+
+/**
+ * Resolve one Judge call's completion cap from the context capacity that
+ * actually remains after the prompt: `contextSize - overheadTokens -
+ * transcriptTokens` (transcript measured post-selection), floored at
+ * `JUDGE_MIN_COMPLETION_TOKENS`. Reasoning models get the full remaining
+ * window for `<think>` + JSON instead of a fixed 30% slice.
+ *
+ * Pure function: no I/O. Exported for unit testing.
+ */
+export function resolveJudgeCompletionBudget(options: {
+  contextSize: number;
+  overheadTokens: number;
+  /** Selected transcript block, measured in tokens. */
+  transcriptTokens: number;
+}): number {
+  const { contextSize, overheadTokens, transcriptTokens } = options;
+  return Math.max(
+    JUDGE_MIN_COMPLETION_TOKENS,
+    contextSize - overheadTokens - transcriptTokens
+  );
 }
 
 const JSON_CONTROL_ESCAPES: Record<number, string> = {
@@ -1169,7 +1167,7 @@ export function sanitizeJsonForParse(json: string): string {
  * fallback: when the strict parse throws (unescaped control characters,
  * trailing commas), the extracted candidate is sanitized and re-parsed
  * once. Returns `null` for truncated/empty output and unrecoverable syntax
- * errors — the caller decides whether to retry with thinking disabled.
+ * errors — the caller decides whether to retry (thinking stays enabled).
  */
 export function parseJudgeJson<T = unknown>(rawOutput: string): T | null {
   try {
@@ -1548,16 +1546,34 @@ function resolveJudgeApiToken(url: string | undefined): string | null {
   return loadLlmApiTokenForWorker();
 }
 
+/**
+ * Judge system prompt with the ground-truth transcript appended, mirroring
+ * Session Chat (`sessionChatHandler.ts` injects the transcript into the
+ * system prefix so the static prefix stays KV-cache-friendly across calls).
+ */
+function buildJudgeSystemPrompt(
+  basePrompt: string,
+  transcriptText: string
+): string {
+  return (
+    `${basePrompt}\n\n--- GROUND-TRUTH SESSION TRANSCRIPT ---\n` +
+    `"""\n${transcriptText}\n"""\n--- END TRANSCRIPT ---`
+  );
+}
+
+/**
+ * Focused Judge user turn: the therapist's prompt (the instructions given to
+ * the AI — possibly a long template, delimited as context only) and the AI
+ * response under audit (the sole text claims are extracted from).
+ */
 function buildJudgeUserMessage(
-  transcriptText: string,
   userQuestion: string | null,
   visibleAnswer: string
 ): string {
   return (
-    `GROUND-TRUTH SESSION TRANSCRIPT:\n"""${transcriptText}"""\n\n` +
-    `THERAPIST'S PROMPT / QUESTION:\n"""${userQuestion?.trim() || '(no therapist question found — audit the response on its own merits)'}"""\n\n` +
-    `AI RESPONSE TO AUDIT:\n"""${visibleAnswer}"""\n\n` +
-    `YOUR TASK: Extract every factual/clinical claim, verify each strictly against the transcript, ` +
+    `THERAPIST'S PROMPT / QUESTION (the instructions given to the AI — context only, never extract claims from this):\n"""${userQuestion?.trim() || '(no therapist question found — audit the response on its own merits)'}"""\n\n` +
+    `AI RESPONSE TO AUDIT (extract claims ONLY from this text):\n"""${visibleAnswer}"""\n\n` +
+    `YOUR TASK: Extract the key factual/clinical claims, verify each strictly against the transcript, ` +
     `check for omissions relative to the therapist's question, and respond with ONLY the JSON object.`
   );
 }
@@ -2208,7 +2224,7 @@ export async function processVerificationJob(
     const jobAllocation = allocateJudgeContextBudget({
       contextSize,
       systemPromptTokens: estimateTokens(judgeSystemPrompt),
-      skeletonTokens: estimateTokens(buildJudgeUserMessage('', null, '')),
+      skeletonTokens: estimateTokens(buildJudgeUserMessage(null, '')),
     });
     if (!jobAllocation.feasible) {
       throw new Error(
@@ -2590,7 +2606,6 @@ export async function processVerificationJob(
         // assessment instead of sending a request known to overflow.
         const userQuestion = candidate.userQuestion ?? null;
         const judgeUserSkeleton = buildJudgeUserMessage(
-          '',
           userQuestion,
           visibleAnswer
         );
@@ -2639,16 +2654,12 @@ export async function processVerificationJob(
           publishProgress();
           continue;
         }
-        const maxCompletionTokens = allocation.completionTokens;
         const transcriptBudget = allocation.transcriptTokens;
-        // The Judge thinking budget is 40% of this call's completion budget,
-        // hard-capped (2048) on top of the shared `-1` clamp so reasoning
-        // models cannot burn the whole completion allowance inside `<think>`
-        // before emitting JSON.
-        const maxThinkingTokens = Math.round(maxCompletionTokens * 0.4);
+        // Straight passthrough (Session Chat parity): unset means `-1`
+        // (unrestricted). Thinking is never clamped or disabled by the
+        // worker — not even on retry.
         const effectiveThinkingBudget = resolveJudgeThinkingBudget(
-          jobRecord.thinking_budget,
-          maxThinkingTokens
+          jobRecord.thinking_budget
         );
         const showSpeakers = getSessionShowSpeakers(sessionId);
         const transcriptContext = selectJudgeTranscriptContext(
@@ -2664,27 +2675,35 @@ export async function processVerificationJob(
               `${transcriptContext.includedParagraphs}/${transcriptContext.totalParagraphs} paragraphs for message ${messageId}.`
           );
         }
+        // Completion gets the full remaining window after the actual prompt
+        // (measured post-selection), never an artificial percentage cap.
+        const maxCompletionTokens = resolveJudgeCompletionBudget({
+          contextSize,
+          overheadTokens: allocation.overheadTokens,
+          transcriptTokens: estimateTokens(transcriptContext.text),
+        });
 
-        const judgeMessages: BackendChatMessage[] = [
+        // Session Chat layout: transcript in the system prefix (stable,
+        // KV-cache-friendly), question + answer in a focused user turn.
+        const judgeMessages = prepareLlmChatMessages([
           {
             id: 0,
             chatId: 0,
             sender: 'system',
-            text: judgeSystemPrompt,
+            text: buildJudgeSystemPrompt(
+              judgeSystemPrompt,
+              transcriptContext.text
+            ),
             timestamp: Date.now(),
           },
           {
             id: 1,
             chatId: 0,
             sender: 'user',
-            text: buildJudgeUserMessage(
-              transcriptContext.text,
-              userQuestion,
-              visibleAnswer
-            ),
+            text: buildJudgeUserMessage(userQuestion, visibleAnswer),
             timestamp: Date.now(),
           },
-        ];
+        ]);
 
         const isCanceled = (): boolean => {
           const fresh = verificationRepository.findVerificationJobById(jobId);
@@ -2773,15 +2792,16 @@ export async function processVerificationJob(
         let usedRetry = false;
         let lastRawOutput = firstAttempt.rawOutput;
         if ((!parsed || !structure.valid) && !isCanceled()) {
-          // One repair retry with thinking disabled and low-variance
-          // sampling: reasoning output is the usual reason the first call
-          // produced truncated/unparseable JSON, while parsed-but-invalid
-          // output gets a schema-shaped reminder instead.
+          // One repair retry with low-variance sampling and a brief-thinking
+          // reminder. Thinking stays at the job's configured budget:
+          // disabling it breaks reasoning models that must think before
+          // emitting JSON. Parsed-but-invalid output gets a schema-shaped
+          // reminder instead.
           console.warn(
             `[Verification Worker ${jobId}] Judge output for message ${messageId} ` +
               (parsed
-                ? `failed structural validation (${structure.reason}); retrying once with thinking disabled.`
-                : `failed JSON parsing; retrying once with thinking disabled.`)
+                ? `failed structural validation (${structure.reason}); retrying once.`
+                : `failed JSON parsing; retrying once.`)
           );
           publishPhase('retrying', {
             processed,
@@ -2792,13 +2812,13 @@ export async function processVerificationJob(
             attempt: 2,
             messagePreview: candidatePreview,
           });
-          const retryMessages: BackendChatMessage[] = [
+          const retryMessages = prepareLlmChatMessages([
             judgeMessages[0],
             {
               ...judgeMessages[1],
               text: `${judgeMessages[1].text}${parsed ? JUDGE_RETRY_SCHEMA_REMINDER : JUDGE_RETRY_REMINDER}`,
             },
-          ];
+          ]);
           const retryAttempt = await runJudgeStreamAttempt({
             jobId,
             messageId,
@@ -2809,7 +2829,7 @@ export async function processVerificationJob(
             topP: jobRecord?.top_p,
             repeatPenalty: jobRecord?.repeat_penalty,
             numGpuLayers: jobRecord?.num_gpu_layers,
-            thinkingBudget: 0,
+            thinkingBudget: effectiveThinkingBudget,
             maxCompletionTokens,
             isCanceled,
             streamTelemetry: {
@@ -2864,7 +2884,7 @@ export async function processVerificationJob(
               promptTokens: accPromptTokens,
               completionTokens: accCompletionTokens,
               detail: usedRetry
-                ? `${detail} Retries exhausted (1 retry with thinking disabled).`
+                ? `${detail} Retries exhausted (1 retry).`
                 : detail,
             })
           );
@@ -2887,7 +2907,7 @@ export async function processVerificationJob(
               promptTokens: accPromptTokens,
               completionTokens: accCompletionTokens,
               detail: usedRetry
-                ? `${detail} Retries exhausted (1 retry with thinking disabled).`
+                ? `${detail} Retries exhausted (1 retry).`
                 : detail,
             })
           );

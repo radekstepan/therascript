@@ -17,6 +17,7 @@ import type { Database as DB } from 'better-sqlite3';
 import {
   initializeDatabase,
   SYSTEM_PROMPT_TEMPLATES,
+  LEGACY_VERIFICATION_JUDGE_PROMPT_TEXTS,
 } from './sqliteService.js';
 
 function templateText(db: DB, title: string): string | undefined {
@@ -82,6 +83,48 @@ describe('seedSystemTemplates — insert-only seeding', () => {
 
     expect(templateText(db, deleted.title)).toBe(deleted.text);
     expect(templateText(db, edited.title)).toBe(customText);
+  });
+
+  it('upgrades a legacy system_verification_judge row to the fixed prompt', () => {
+    initializeDatabase(db);
+
+    const target = SYSTEM_PROMPT_TEMPLATES.VERIFICATION_JUDGE;
+    expect(LEGACY_VERIFICATION_JUDGE_PROMPT_TEXTS.length).toBeGreaterThan(0);
+    for (const legacyText of LEGACY_VERIFICATION_JUDGE_PROMPT_TEXTS) {
+      // Sanity: the legacy fixture must differ from the current default,
+      // otherwise this test would pass vacuously.
+      expect(legacyText).not.toBe(target.text);
+      // Simulate an existing database seeded by an older build.
+      db.prepare('UPDATE templates SET text = ? WHERE title = ?').run(
+        legacyText,
+        target.title
+      );
+      expect(templateText(db, target.title)).toBe(legacyText);
+
+      // Simulate an API/worker restart: the fixed Judge prompt (no
+      // timestampMs math, brief-thinking guidance) replaces the legacy row.
+      initializeDatabase(db);
+
+      expect(templateText(db, target.title)).toBe(target.text);
+    }
+  });
+
+  it('preserves a user-customized verification judge prompt across restarts', () => {
+    initializeDatabase(db);
+
+    // A genuine user edit matches no legacy default, so the upgrade path
+    // must leave it alone.
+    const target = SYSTEM_PROMPT_TEMPLATES.VERIFICATION_JUDGE;
+    const customText = 'Custom judge prompt. Be strict and terse.';
+    expect(LEGACY_VERIFICATION_JUDGE_PROMPT_TEXTS).not.toContain(customText);
+    db.prepare('UPDATE templates SET text = ? WHERE title = ?').run(
+      customText,
+      target.title
+    );
+
+    initializeDatabase(db);
+
+    expect(templateText(db, target.title)).toBe(customText);
   });
 
   it('is idempotent — re-running on an untouched DB changes nothing', () => {

@@ -11,14 +11,71 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Provider as JotaiProvider } from 'jotai';
 import { Theme } from '@radix-ui/themes';
 import type { SessionVerificationSummary } from '../../api/verification';
-import type { LlmStatus } from '../../types';
+import type { LlmModelInfo, LlmStatus } from '../../types';
 import {
   StartVerificationModal,
   sortVerificationSessionsNewestFirst,
 } from './StartVerificationModal';
 
 vi.mock('../Shared/LlmEndpointModelPicker', () => ({
-  LlmEndpointModelPicker: () => <div data-testid="llm-endpoint-model-picker" />,
+  LlmEndpointModelPicker: ({
+    selectedModel,
+    onSelectedModelChange,
+    onModelsChange,
+  }: {
+    selectedModel: string;
+    onSelectedModelChange: (model: string) => void;
+    onModelsChange?: (models: LlmModelInfo[]) => void;
+  }) => {
+    // Hand the form a fixture model list (the real picker resolves this
+    // via a models query) so `selectedModelDetails` resolves, the
+    // unknown-model guard stays quiet, and the Context Size input renders.
+    React.useEffect(() => {
+      const details = {
+        format: 'gguf',
+        family: 'test',
+        families: null,
+        parameter_size: '8B',
+        quantization_level: 'Q4_K_M',
+      };
+      onModelsChange?.([
+        {
+          name: 'judge-model',
+          modified_at: new Date().toISOString(),
+          size: 4_000_000_000,
+          digest: 'sha256:judge-model',
+          details,
+          defaultContextSize: 32768,
+          size_vram: 4_000_000_000,
+          expires_at: null,
+          architecture: null,
+        },
+        {
+          name: 'picked-model',
+          modified_at: new Date().toISOString(),
+          size: 4_000_000_000,
+          digest: 'sha256:picked-model',
+          details,
+          defaultContextSize: 8192,
+          size_vram: 4_000_000_000,
+          expires_at: null,
+          architecture: null,
+        },
+      ]);
+    }, [onModelsChange]);
+    return (
+      <div data-testid="llm-endpoint-model-picker">
+        <span data-testid="picker-selected-model">{selectedModel}</span>
+        <button
+          type="button"
+          data-testid="pick-model"
+          onClick={() => onSelectedModelChange('picked-model')}
+        >
+          Pick model
+        </button>
+      </div>
+    );
+  },
 }));
 
 const LLM_STATUS: LlmStatus = {
@@ -255,5 +312,65 @@ describe('StartVerificationModal transcript ordering', () => {
 
     await screen.findByText('Transcripts (0 selected)');
     expect(visibleSessionIds(sessions)).toEqual([12, 11]);
+  });
+});
+
+describe('StartVerificationModal Judge LLM defaults', () => {
+  // The Context Size input carries a "Default (...)" placeholder (same
+  // handle the LlmSettingsForm specs use). The modal snapshot seeds it
+  // with `configuredContextSize`, so its value marks snapshot settle.
+  function getContextSizeInput(): HTMLInputElement {
+    return screen.getByPlaceholderText(/Default/) as HTMLInputElement;
+  }
+
+  it('seeds temperature 0.3 and unrestricted thinking when nothing is configured', async () => {
+    const { fetchLlmStatus } = await import('../../api/api');
+    vi.mocked(fetchLlmStatus).mockResolvedValue({
+      ...LLM_STATUS,
+      configuredThinkingBudget: null,
+    });
+    renderModal(ORDER_FIXTURE);
+
+    await screen.findByText('Transcripts (0 selected)');
+    // Snapshot settled (context seeded from configuredContextSize) with
+    // Judge sampling intact: 0.3, and -1 instead of the old forced 1024.
+    await waitFor(() => expect(getContextSizeInput().value).toBe('32768'));
+    expect(screen.getByText('0.3')).toBeTruthy();
+    expect(screen.getByText('Unrestricted (-1)')).toBeTruthy();
+  });
+
+  it('preserves Judge sampling when a model is picked while activeModel is default', async () => {
+    // Production regression: `app_settings.llm_model_name` was 'default'
+    // while a real model was selected, so the form reset overwrote the
+    // Judge temperature 0.3 with the chat default 0.7 (Jobs 2 and 3).
+    const { fetchLlmStatus } = await import('../../api/api');
+    vi.mocked(fetchLlmStatus).mockResolvedValue({
+      ...LLM_STATUS,
+      activeModel: 'default',
+      modelChecked: 'default',
+      configuredTopP: 0.95,
+      configuredThinkingBudget: null,
+    });
+    renderModal(ORDER_FIXTURE);
+
+    await screen.findByText('Transcripts (0 selected)');
+    // Snapshot settled (topP seeded from the backend; nothing is selected
+    // yet because the active model is 'default').
+    await waitFor(() => expect(screen.getByText('0.95')).toBeTruthy());
+    expect(screen.getByText('0.3')).toBeTruthy();
+    expect(screen.getByText('Unrestricted (-1)')).toBeTruthy();
+
+    // Picking a model resets the form to Judge sampling defaults.
+    fireEvent.click(screen.getByTestId('pick-model'));
+    await waitFor(() =>
+      expect(screen.getByTestId('picker-selected-model').textContent).toBe(
+        'picked-model'
+      )
+    );
+    // The reset itself ran (topP back to the Judge default 0.9) and kept
+    // the Judge temperature instead of the chat 0.7.
+    await waitFor(() => expect(screen.getByText('0.90')).toBeTruthy());
+    expect(screen.getByText('0.3')).toBeTruthy();
+    expect(screen.getByText('Unrestricted (-1)')).toBeTruthy();
   });
 });

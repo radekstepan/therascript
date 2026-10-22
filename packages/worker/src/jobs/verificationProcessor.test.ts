@@ -52,6 +52,12 @@ vi.mock('@therascript/services', () => ({
   parseJsonObjectFromLlm: vi.fn(),
   streamWithRetry: vi.fn(),
   extractVisibleAnswer: vi.fn((text: string) => text),
+  // Plain passthrough (not a vi.fn): the job-running describes call
+  // `vi.resetAllMocks()` in `beforeEach`, which would wipe a mock
+  // implementation. The [system, user] fixtures are already well-formed,
+  // so passthrough is faithful; the layout is asserted behaviorally via
+  // the messages passed to `streamLlmChatDetailed`.
+  prepareLlmChatMessages: (messages: unknown) => messages,
 }));
 
 vi.mock('./analysisProcessor.js', () => ({
@@ -80,8 +86,10 @@ const {
   validateJudgeOutputStructure,
   isTrivialConversationalMessage,
   resolveJudgeThinkingBudget,
-  JUDGE_MAX_THINKING_BUDGET,
+  JUDGE_RETRY_REMINDER,
+  JUDGE_RETRY_SCHEMA_REMINDER,
   allocateJudgeContextBudget,
+  resolveJudgeCompletionBudget,
   estimateTokens,
   JUDGE_CONTEXT_SAFETY_MARGIN_TOKENS,
   JUDGE_MIN_COMPLETION_TOKENS,
@@ -392,6 +400,26 @@ describe('evidence hydration against ground-truth paragraphs', () => {
     ]);
   });
 
+  it('hydrates new-schema evidence that omits timestampMs/speaker', () => {
+    // The streamlined Judge prompt asks for paragraphIndex + quote only;
+    // hydration fills timestampMs/speaker from the ground-truth paragraph.
+    const result = normalizeJudgeOutput(
+      judgeClaim({
+        paragraphIndex: 0,
+        quote: 'I take Sertraline.',
+      }),
+      { paragraphsById, showSpeakers: true }
+    );
+    expect(result.claims[0].evidence).toEqual([
+      {
+        paragraphIndex: 0,
+        timestampMs: 866,
+        speaker: 'SPEAKER_00',
+        quote: 'I take Sertraline.',
+      },
+    ]);
+  });
+
   it('nulls speaker when showSpeakers is false', () => {
     const result = normalizeJudgeOutput(
       judgeClaim({
@@ -566,34 +594,52 @@ describe('evidence hydration against ground-truth paragraphs', () => {
 });
 
 describe('DEFAULT_VERIFICATION_JUDGE_PROMPT', () => {
-  it('tells the Judge how to cite paragraphIndex and null speakers', () => {
+  it('tells the Judge how to cite paragraphIndex', () => {
     expect(DEFAULT_VERIFICATION_JUDGE_PROMPT).toContain('[P#<index>');
     expect(DEFAULT_VERIFICATION_JUDGE_PROMPT).toContain('paragraphIndex');
-    expect(DEFAULT_VERIFICATION_JUDGE_PROMPT).toMatch(/speaker.*null when/i);
+  });
+
+  it('does not ask the Judge to compute timestampMs or copy speakers', () => {
+    // Evidence hydration fills both from ground truth via paragraphIndex,
+    // so the prompt explicitly tells the model NOT to emit them instead of
+    // asking for millisecond math that spirals reasoning models in <think>.
+    expect(DEFAULT_VERIFICATION_JUDGE_PROMPT).not.toMatch(
+      /best estimate in milliseconds/i
+    );
+    expect(DEFAULT_VERIFICATION_JUDGE_PROMPT).toContain(
+      'Do NOT include "timestampMs" or "speaker"'
+    );
+    expect(DEFAULT_VERIFICATION_JUDGE_PROMPT).not.toContain(
+      '"timestampMs": 84000'
+    );
+  });
+
+  it('guides reasoning models to brief thinking and grouped claims', () => {
+    expect(DEFAULT_VERIFICATION_JUDGE_PROMPT).toMatch(
+      /keep your internal thinking brief and focused/i
+    );
+    expect(DEFAULT_VERIFICATION_JUDGE_PROMPT).toMatch(/15-25/);
+    expect(DEFAULT_VERIFICATION_JUDGE_PROMPT).toMatch(
+      /one short sentence explaining the verdict/i
+    );
   });
 });
 
 describe('resolveJudgeThinkingBudget', () => {
-  beforeEach(() => {
-    vi.resetAllMocks();
+  it('passes the configured budget through untouched (no clamp)', () => {
+    expect(resolveJudgeThinkingBudget(-1)).toBe(-1);
+    expect(resolveJudgeThinkingBudget(512)).toBe(512);
+    expect(resolveJudgeThinkingBudget(4000)).toBe(4000);
+    expect(resolveJudgeThinkingBudget(16384)).toBe(16384);
   });
 
-  it('caps an unrestricted (-1-clamped) budget at 2048', () => {
-    resolveBudgetStub.mockReturnValue(4000);
-    expect(resolveJudgeThinkingBudget(-1, 4000)).toBe(
-      JUDGE_MAX_THINKING_BUDGET
-    );
-    expect(JUDGE_MAX_THINKING_BUDGET).toBe(2048);
+  it('defaults unset budgets to -1 (unrestricted, like Session Chat)', () => {
+    expect(resolveJudgeThinkingBudget(null)).toBe(-1);
+    expect(resolveJudgeThinkingBudget(undefined)).toBe(-1);
   });
 
-  it('passes through budgets already under the cap', () => {
-    resolveBudgetStub.mockReturnValue(512);
-    expect(resolveJudgeThinkingBudget(512, 1638)).toBe(512);
-  });
-
-  it('keeps thinking disabled when the shared resolver returns 0', () => {
-    resolveBudgetStub.mockReturnValue(0);
-    expect(resolveJudgeThinkingBudget(0, 1638)).toBe(0);
+  it('honors an explicit 0 (user-disabled thinking)', () => {
+    expect(resolveJudgeThinkingBudget(0)).toBe(0);
   });
 });
 
@@ -962,7 +1008,7 @@ describe('processVerificationJob — judge hardening', () => {
       updateProgress: vi.fn(),
     } as any);
 
-  it('retries once with thinking disabled when the first response is truncated inside <think>', async () => {
+  it('retries once with thinking still enabled when the first response is truncated inside <think>', async () => {
     findCandidatesMock.mockReturnValue([
       candidateFor('The client takes Sertraline every morning.'),
     ]);
@@ -1000,20 +1046,24 @@ describe('processVerificationJob — judge hardening', () => {
     await runJob();
 
     expect(streamLlmMock).toHaveBeenCalledTimes(2);
-    // Initial call uses the capped thinking budget, retry disables thinking
-    // with low-variance sampling.
+    // Both calls use the job's configured thinking budget (-1 passthrough);
+    // the retry only lowers the temperature. Thinking is never disabled.
     expect(streamLlmMock.mock.calls[0][1]).toMatchObject({
-      thinkingBudget: 1638,
+      thinkingBudget: -1,
       temperature: 0.3,
     });
     expect(streamLlmMock.mock.calls[1][1]).toMatchObject({
-      thinkingBudget: 0,
+      thinkingBudget: -1,
       temperature: 0.1,
-      chatTemplateKwargs: { enable_thinking: false },
+      chatTemplateKwargs: { enable_thinking: true },
     });
-    // Retry appends the strict-JSON reminder to the user message.
+    // Retry appends the strict-JSON reminder (with brief-thinking guidance)
+    // to the user message.
     const retryMessages = streamLlmMock.mock.calls[1][0];
     expect(retryMessages[1].text).toContain('valid JSON');
+    expect(retryMessages[1].text).toContain(
+      'Keep any <think> reasoning brief and emit the final JSON object immediately.'
+    );
     // Usage is logged per attempt; the message row accumulates both.
     expect(insertUsageMock).toHaveBeenCalledTimes(2);
     expect(saveResultMock).toHaveBeenCalledTimes(1);
@@ -1025,6 +1075,50 @@ describe('processVerificationJob — judge hardening', () => {
     });
     expect(saveResultMock.mock.calls[0][0].status ?? 'completed').toBe(
       'completed'
+    );
+  });
+
+  it('places the transcript in the system message and keeps the user turn focused', async () => {
+    findCandidatesMock.mockReturnValue([
+      candidateFor('The client takes Sertraline every morning.'),
+    ]);
+    streamLlmMock.mockImplementationOnce(() =>
+      fakeStream([{ content: '{"summary_assessment": "ok"}' }], {
+        promptTokens: 90,
+        completionTokens: 40,
+      })
+    );
+    parseJsonMock.mockReturnValueOnce({
+      summary_assessment: 'All supported.',
+      claims: [],
+      omissions: [],
+    });
+
+    await runJob();
+
+    expect(streamLlmMock).toHaveBeenCalledTimes(1);
+    const judgeMessages = streamLlmMock.mock.calls[0][0];
+    expect(judgeMessages).toHaveLength(2);
+    // Session Chat layout: the transcript rides in the system prefix so the
+    // static prefix stays stable (KV-cache-friendly) across audited messages.
+    expect(judgeMessages[0].sender).toBe('system');
+    expect(judgeMessages[0].text).toContain(
+      '--- GROUND-TRUTH SESSION TRANSCRIPT ---'
+    );
+    expect(judgeMessages[0].text).toContain('--- END TRANSCRIPT ---');
+    expect(judgeMessages[0].text).toContain('I take Sertraline every morning');
+    // The user turn carries only the therapist question + audited answer.
+    expect(judgeMessages[1].sender).toBe('user');
+    expect(judgeMessages[1].text).toContain("THERAPIST'S PROMPT / QUESTION");
+    expect(judgeMessages[1].text).toContain('AI RESPONSE TO AUDIT');
+    expect(judgeMessages[1].text).toContain(
+      'The client takes Sertraline every morning.'
+    );
+    expect(judgeMessages[1].text).not.toContain(
+      'GROUND-TRUTH SESSION TRANSCRIPT'
+    );
+    expect(judgeMessages[1].text).not.toContain(
+      'I take Sertraline every morning'
     );
   });
 
@@ -1236,7 +1330,7 @@ describe('processVerificationJob — judge hardening', () => {
 
     expect(streamLlmMock).toHaveBeenCalledTimes(2);
     expect(streamLlmMock.mock.calls[1][1]).toMatchObject({
-      thinkingBudget: 0,
+      thinkingBudget: -1,
       temperature: 0.1,
     });
     expect(saveResultMock).toHaveBeenCalledTimes(1);
@@ -1733,7 +1827,7 @@ describe('processVerificationJob — early-cancel resource ownership', () => {
 });
 
 describe('allocateJudgeContextBudget', () => {
-  it('grants the preferred completion budget when a normal request fits', () => {
+  it('reserves the transcript budget from the remaining window', () => {
     const allocation = allocateJudgeContextBudget({
       contextSize: 32768,
       systemPromptTokens: 800,
@@ -1742,18 +1836,19 @@ describe('allocateJudgeContextBudget', () => {
 
     expect(allocation.feasible).toBe(true);
     if (!allocation.feasible) return;
-    // 30% of 32768 = 9830 beats the 4096 preferred floor.
-    expect(allocation.completionTokens).toBe(9830);
+    // Transcript selection may use everything except the fixed overhead
+    // and the minimum completion reserve.
+    expect(allocation.transcriptTokens).toBe(
+      32768 -
+        800 -
+        1200 -
+        JUDGE_CONTEXT_SAFETY_MARGIN_TOKENS -
+        JUDGE_MIN_COMPLETION_TOKENS
+    );
     expect(allocation.transcriptTokens).toBeGreaterThan(0);
-    // Total estimated prompt plus completion stays within the window.
-    expect(
-      allocation.overheadTokens +
-        allocation.completionTokens +
-        allocation.transcriptTokens
-    ).toBeLessThanOrEqual(32768);
   });
 
-  it('scales completion down so a 4096-token context still fits', () => {
+  it('shrinks the transcript budget so a 4096-token context still fits', () => {
     const allocation = allocateJudgeContextBudget({
       contextSize: 4096,
       systemPromptTokens: 650,
@@ -1762,17 +1857,13 @@ describe('allocateJudgeContextBudget', () => {
 
     expect(allocation.feasible).toBe(true);
     if (!allocation.feasible) return;
-    // The old fixed floors (4096 completion + 512 transcript) overflowed a
-    // 4096 window before the system prompt, question, and answer were counted.
-    expect(4096 + 512 + 650 + 300 + 512).toBeGreaterThan(4096);
-    expect(allocation.completionTokens).toBeLessThan(4096);
     expect(allocation.transcriptTokens).toBeGreaterThanOrEqual(
       JUDGE_MIN_TRANSCRIPT_TOKENS
     );
     expect(
       allocation.overheadTokens +
-        allocation.completionTokens +
-        allocation.transcriptTokens
+        allocation.transcriptTokens +
+        JUDGE_MIN_COMPLETION_TOKENS
     ).toBeLessThanOrEqual(4096);
   });
 
@@ -1799,7 +1890,6 @@ describe('allocateJudgeContextBudget', () => {
     });
     expect(fitting.feasible).toBe(true);
     if (fitting.feasible) {
-      expect(fitting.completionTokens).toBe(JUDGE_MIN_COMPLETION_TOKENS);
       expect(fitting.transcriptTokens).toBe(JUDGE_MIN_TRANSCRIPT_TOKENS);
     }
 
@@ -1809,6 +1899,47 @@ describe('allocateJudgeContextBudget', () => {
       skeletonTokens: 1200,
     });
     expect(overflowing.feasible).toBe(false);
+  });
+});
+
+describe('resolveJudgeCompletionBudget', () => {
+  it('grants the full remaining window after a small prompt (no 30% cap)', () => {
+    // The production failure: a 50k window with a ~17k prompt used to cap
+    // completion at 30% (15,000 tokens) even though ~33k were free,
+    // truncating qwen3's <think> before the JSON arrived.
+    const completion = resolveJudgeCompletionBudget({
+      contextSize: 50000,
+      overheadTokens: 4000,
+      transcriptTokens: 13101,
+    });
+    expect(completion).toBe(50000 - 4000 - 13101);
+    expect(completion).toBeGreaterThan(28000);
+  });
+
+  it('floors at the minimum viable completion budget', () => {
+    expect(
+      resolveJudgeCompletionBudget({
+        contextSize: 4096,
+        overheadTokens: 1462,
+        transcriptTokens: 2500,
+      })
+    ).toBe(JUDGE_MIN_COMPLETION_TOKENS);
+  });
+});
+
+describe('JUDGE_RETRY_REMINDER / JUDGE_RETRY_SCHEMA_REMINDER', () => {
+  it('both reminders demand strict JSON plus brief thinking', () => {
+    for (const reminder of [
+      JUDGE_RETRY_REMINDER,
+      JUDGE_RETRY_SCHEMA_REMINDER,
+    ]) {
+      expect(reminder).toContain('ONLY');
+      expect(reminder).toContain(
+        'Keep any <think> reasoning brief and emit the final JSON object immediately.'
+      );
+    }
+    expect(JUDGE_RETRY_REMINDER).toContain('not valid JSON');
+    expect(JUDGE_RETRY_SCHEMA_REMINDER).toContain('did not match');
   });
 });
 
@@ -1976,11 +2107,9 @@ describe('processVerificationJob — context budgeting', () => {
 
     expect(streamLlmMock).toHaveBeenCalledTimes(1);
     const judgeOptions = streamLlmMock.mock.calls[0][1];
-    // Overhead is 10 + 10 + 512 = 532, leaving 3564; completion takes that
-    // minus the transcript minimum instead of the old blind 4096 floor.
-    expect(judgeOptions.maxCompletionTokens).toBe(
-      4096 - 532 - JUDGE_MIN_TRANSCRIPT_TOKENS
-    );
+    // Overhead is 10 + 10 + 512 = 532 and the selected transcript measures
+    // 10 tokens, so completion gets the actual remainder (3554).
+    expect(judgeOptions.maxCompletionTokens).toBe(4096 - 532 - 10);
     expect(judgeOptions.maxCompletionTokens).toBeLessThan(4096);
     const transcriptTokens = estimateTokens(
       formatTranscriptForJudge(paragraphs, true)

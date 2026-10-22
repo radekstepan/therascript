@@ -169,7 +169,7 @@ For background on the Verification Agent and LLM lifecycle, see `AGENTS.md` (§1
 
 ---
 
-### - [ ] Task 5: Fix Judge LLM thinking handling, sampling defaults, context budget, and prompt structure so reasoning models (`qwen3.8-27b`) succeed without ever disabling thinking
+### - [x] Task 5: Fix Judge LLM thinking handling, sampling defaults, context budget, and prompt structure so reasoning models (`qwen3.8-27b`) succeed without ever disabling thinking
 
 - **Problem & Investigation Context:**
   Audits #2 and #3 in production (`packages/api/data/therapy-analyzer-prod.sqlite`) audited `message 1914` (a SOAP note in `chatId = 1019`, `sessionId = 854` `"KD-Oct21-2026"`, 353 transcript paragraphs, `~17,101` prompt tokens) using Judge model `qwen3.8-27b` on an RTX 5090 with `context_size = 50000` (Job 3) and `60000` (Job 2). Both failed with:
