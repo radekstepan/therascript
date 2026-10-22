@@ -24,6 +24,7 @@ import type { FlaggedStatementsResult } from '@therascript/data';
 import {
   addVerificationJob,
   cancelVerificationJobFromQueue,
+  isVerificationJobQueued,
 } from '../services/jobQueueService.js';
 import { subscribeToVerificationStream } from '../services/streamSubscriber.js';
 import {
@@ -112,12 +113,72 @@ const parseOptionalString = (
 };
 
 /**
+ * Reconciles a rejected queue submission for an already-persisted
+ * verification job row. A rejection is ambiguous — the server may have
+ * accepted the job before the connection dropped — so the deterministic
+ * queue identity is checked first:
+ *
+ * - Queue holds the job: the submission actually succeeded; the row stays
+ *   pending for the worker and the caller reports success.
+ * - Otherwise (or when queue state itself is unreadable): the row is
+ *   marked terminal `failed` with the queue error so the active-job guard
+ *   cannot be blocked by an orphan no worker can process. Failing closed
+ *   is safe because the worker's conditional `transitionJobToProcessing`
+ *   never revives a terminal row — a stray queued job exits without
+ *   touching the failed row or duplicating a retried audit's work.
+ *
+ * Resolves when the job is live on the queue; otherwise throws an
+ * `InternalServerError` carrying the queue failure detail.
+ */
+const reconcileRejectedVerificationSubmission = async (
+  dbJobId: number,
+  queueError: unknown
+): Promise<void> => {
+  let queued = false;
+  try {
+    queued = await isVerificationJobQueued(dbJobId);
+  } catch (lookupError) {
+    console.warn(
+      `[VerificationHandler] Could not verify queue state for job ${dbJobId} after submission failure; marking it failed:`,
+      lookupError
+    );
+  }
+  if (queued) {
+    console.warn(
+      `[VerificationHandler] Queue submission for job ${dbJobId} reported an error but the job is queued; leaving it pending.`
+    );
+    return;
+  }
+  const detail =
+    queueError instanceof Error && queueError.message.length > 0
+      ? queueError.message
+      : String(queueError ?? 'unknown error');
+  const message = `Failed to submit verification job to the queue: ${detail}`;
+  try {
+    verificationRepository.updateJobStatus(dbJobId, 'failed', {
+      errorMessage: message,
+    });
+  } catch (dbError) {
+    console.error(
+      `[VerificationHandler] Failed to mark job ${dbJobId} failed after queue submission error:`,
+      dbError
+    );
+  }
+  throw new InternalServerError(
+    message,
+    queueError instanceof Error ? queueError : undefined
+  );
+};
+
+/**
  * Shared job-creation core used by both the global verification endpoint and
  * the single-chat "verify" action: validates scope filters, refuses to start
  * a second job while one is active, snapshots the Judge LLM config into the
  * job row (without touching the user's global chat model), persists the job
  * row, and enqueues the BullMQ job. The worker loads/unloads the Judge model
- * itself when it picks the job up.
+ * itself when it picks the job up. If queue submission rejects, the row is
+ * reconciled (ambiguous successes stay pending; anything else lands terminal
+ * `failed` with the queue error) instead of orphaning a pending job.
  */
 export const createVerificationJobRecord = async (
   body: CreateVerificationJobBody
@@ -232,7 +293,16 @@ export const createVerificationJobRecord = async (
     llmBaseUrl: jobLlmBaseUrl,
   });
 
-  await addVerificationJob({ jobId: job.id });
+  try {
+    await addVerificationJob({ jobId: job.id });
+  } catch (queueError) {
+    // The SQLite row is already committed: reconcile instead of leaving a
+    // pending orphan that would block the active-job guard with no worker
+    // able to process it. Resolves when the job is live on the queue
+    // (ambiguous success); otherwise marks the row terminal `failed` and
+    // rethrows the queue failure.
+    await reconcileRejectedVerificationSubmission(job.id, queueError);
+  }
   return job;
 };
 

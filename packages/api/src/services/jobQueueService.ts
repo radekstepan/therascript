@@ -100,6 +100,16 @@ export const addAnalysisJob = async (data: AnalysisJobData) => {
 };
 
 /**
+ * Deterministic BullMQ job id for a SQLite `verification_jobs` row.
+ * Re-adding the same row (e.g. after an ambiguous submission failure)
+ * returns the existing queued job instead of duplicating work — BullMQ
+ * dedupes `add` on `jobId` — and lets the API reconcile a rejected
+ * submission with an O(1) `getJob` lookup instead of a queue scan.
+ */
+export const getVerificationQueueJobId = (dbJobId: number): string =>
+  `verification-${dbJobId}`;
+
+/**
  * Adds a new verification job to the queue.
  * @param data - The data required for the verification job (e.g., jobId from the database).
  * @returns The added job instance from BullMQ.
@@ -109,6 +119,7 @@ export const addVerificationJob = async (data: VerificationJobData) => {
     `[JobQueueService] Adding verification job to queue for DB job ID: ${data.jobId}`
   );
   const job = await verificationQueue.add('process-verification', data, {
+    jobId: getVerificationQueueJobId(data.jobId),
     removeOnComplete: true,
     removeOnFail: 50,
   });
@@ -116,6 +127,21 @@ export const addVerificationJob = async (data: VerificationJobData) => {
     `[JobQueueService] Added job ${job.id} to queue "${VERIFICATION_QUEUE_NAME}"`
   );
   return job;
+};
+
+/**
+ * Returns true when the queue still holds the BullMQ job for a SQLite
+ * `verification_jobs` row (waiting, delayed, active, ...). Used to
+ * reconcile a rejected `addVerificationJob`: a rejection that arrives
+ * after the server accepted the job must not mark a live job failed.
+ */
+export const isVerificationJobQueued = async (
+  dbJobId: number
+): Promise<boolean> => {
+  const queued = await verificationQueue.getJob(
+    getVerificationQueueJobId(dbJobId)
+  );
+  return queued !== undefined && queued !== null;
 };
 
 /**

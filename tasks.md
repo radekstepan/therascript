@@ -92,6 +92,8 @@ The early return for a canceled job still executes `finally`. At that point `jud
 
 ## 7. P2 — Failed queue submission leaves an orphaned active job
 
+- [x] Task 7
+
 **Location:** `packages/api/src/api/verificationHandler.ts:219–236`.
 
 The pending SQLite row is committed before `addVerificationJob` is awaited. If queue submission rejects, the endpoint returns an error but leaves the row pending. The active-job guard then rejects subsequent audits even though no worker can process that row; the user must discover and cancel it manually.

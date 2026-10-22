@@ -14,7 +14,7 @@
 //
 // Reference: packages/api/src/api/verificationHandler.ts
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ConflictError } from '../errors.js';
+import { ConflictError, InternalServerError } from '../errors.js';
 
 const {
   mockVerificationRepo,
@@ -22,6 +22,7 @@ const {
   mockChatRepo,
   mockMessageRepo,
   mockAddVerificationJob,
+  mockIsVerificationJobQueued,
   mockCancelVerificationJobFromQueue,
   mockGetConfiguredTopP,
   mockGetConfiguredRepeatPenalty,
@@ -41,11 +42,13 @@ const {
     findAllVerificationJobs: vi.fn(),
     findVerificationJobById: vi.fn(),
     resetAllVerifications: vi.fn(),
+    updateJobStatus: vi.fn(),
   },
   mockSessionRepo: { findById: vi.fn() },
   mockChatRepo: { findChatById: vi.fn() },
   mockMessageRepo: { findMessageById: vi.fn() },
   mockAddVerificationJob: vi.fn(),
+  mockIsVerificationJobQueued: vi.fn(),
   mockCancelVerificationJobFromQueue: vi.fn(),
   mockGetConfiguredTopP: vi.fn(),
   mockGetConfiguredRepeatPenalty: vi.fn(),
@@ -69,6 +72,8 @@ vi.mock('@therascript/data', () => ({
 
 vi.mock('../services/jobQueueService.js', () => ({
   addVerificationJob: (...args: unknown[]) => mockAddVerificationJob(...args),
+  isVerificationJobQueued: (...args: unknown[]) =>
+    mockIsVerificationJobQueued(...args),
   cancelVerificationJobFromQueue: (...args: unknown[]) =>
     mockCancelVerificationJobFromQueue(...args),
 }));
@@ -420,5 +425,142 @@ describe('streamVerificationJobHandler terminal-event delivery', () => {
     expect(res.status).toBe(404);
     expect(set.status).toBe(404);
     expect(mockSubscribeToVerificationStream).not.toHaveBeenCalled();
+  });
+});
+
+describe('createVerificationJobHandler queue-submission reconciliation', () => {
+  beforeEach(() => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockVerificationRepo.hasActiveVerificationJobs.mockReturnValue(false);
+    mockVerificationRepo.updateJobStatus.mockReturnValue(true);
+  });
+
+  it('marks the job failed with the queue error and unblocks subsequent starts when submission rejects', async () => {
+    mockVerificationRepo.createVerificationJob.mockReturnValue({ id: 11 });
+    mockAddVerificationJob.mockRejectedValue(
+      new Error('connect ECONNREFUSED 127.0.0.1:6379')
+    );
+    mockIsVerificationJobQueued.mockResolvedValue(false);
+    const set: { status?: number | string } = {};
+
+    const failure = await createVerificationJobHandler({
+      body: { scope: 'all_unverified' },
+      set,
+    }).then(
+      () => null,
+      (error: unknown) => error
+    );
+
+    expect(failure).toBeInstanceOf(InternalServerError);
+    expect((failure as InternalServerError).status).toBe(500);
+    expect((failure as Error).message).toMatch(/queue/i);
+    expect((failure as Error).message).toMatch(/ECONNREFUSED/);
+    // The already-committed row must land terminal `failed` — never a
+    // pending orphan that blocks the active-job guard with no worker able
+    // to process it.
+    expect(mockIsVerificationJobQueued).toHaveBeenCalledWith(11);
+    expect(mockVerificationRepo.updateJobStatus).toHaveBeenCalledWith(
+      11,
+      'failed',
+      {
+        errorMessage: expect.stringContaining(
+          'connect ECONNREFUSED 127.0.0.1:6379'
+        ),
+      }
+    );
+    expect(mockVerificationRepo.updateJobStatus.mock.calls[0][2]).toMatchObject(
+      { errorMessage: expect.stringMatching(/queue/i) }
+    );
+
+    // A subsequent start is accepted once the orphaned row is terminal.
+    mockVerificationRepo.hasActiveVerificationJobs.mockReturnValue(false);
+    mockVerificationRepo.createVerificationJob.mockReturnValue({ id: 12 });
+    mockAddVerificationJob.mockResolvedValue({});
+    const retrySet: { status?: number | string } = {};
+
+    const retry = await createVerificationJobHandler({
+      body: { scope: 'all_unverified' },
+      set: retrySet,
+    });
+
+    expect(retry).toEqual({ jobId: 12 });
+    expect(retrySet.status).toBe(202);
+  });
+
+  it('keeps the job pending when a rejected submission actually reached the queue', async () => {
+    mockVerificationRepo.createVerificationJob.mockReturnValue({ id: 13 });
+    mockAddVerificationJob.mockRejectedValue(
+      new Error('socket hang up after submit')
+    );
+    mockIsVerificationJobQueued.mockResolvedValue(true);
+    const set: { status?: number | string } = {};
+
+    const result = await createVerificationJobHandler({
+      body: { scope: 'all_unverified' },
+      set,
+    });
+
+    // Ambiguous outcome resolved in favor of the live queued job: the
+    // worker will process it, so the row stays pending and the endpoint
+    // reports success instead of failing a job that is about to run.
+    expect(result).toEqual({ jobId: 13 });
+    expect(set.status).toBe(202);
+    expect(mockIsVerificationJobQueued).toHaveBeenCalledWith(13);
+    expect(mockVerificationRepo.updateJobStatus).not.toHaveBeenCalled();
+  });
+
+  it('fails the job when queue state cannot be verified after a rejected submission', async () => {
+    mockVerificationRepo.createVerificationJob.mockReturnValue({ id: 14 });
+    mockAddVerificationJob.mockRejectedValue(
+      new Error('Redis connection lost')
+    );
+    mockIsVerificationJobQueued.mockRejectedValue(
+      new Error('Redis connection lost')
+    );
+    const set: { status?: number | string } = {};
+
+    const failure = await createVerificationJobHandler({
+      body: { scope: 'all_unverified' },
+      set,
+    }).then(
+      () => null,
+      (error: unknown) => error
+    );
+
+    expect(failure).toBeInstanceOf(InternalServerError);
+    expect((failure as InternalServerError).status).toBe(500);
+    expect((failure as Error).message).toMatch(/queue/i);
+    expect(mockVerificationRepo.updateJobStatus).toHaveBeenCalledWith(
+      14,
+      'failed',
+      { errorMessage: expect.stringContaining('Redis connection lost') }
+    );
+    // Failing closed is safe: the worker's conditional
+    // `transitionJobToProcessing` never revives a terminal row, so even if
+    // a stray queued job exists it exits without touching the failed row
+    // or duplicating a retried audit's work.
+  });
+
+  it('still reports the queue failure when the reconciliation write itself fails', async () => {
+    mockVerificationRepo.createVerificationJob.mockReturnValue({ id: 15 });
+    mockAddVerificationJob.mockRejectedValue(new Error('ECONNREFUSED'));
+    mockIsVerificationJobQueued.mockResolvedValue(false);
+    mockVerificationRepo.updateJobStatus.mockImplementation(() => {
+      throw new Error('database is locked');
+    });
+    const set: { status?: number | string } = {};
+
+    const failure = await createVerificationJobHandler({
+      body: { scope: 'all_unverified' },
+      set,
+    }).then(
+      () => null,
+      (error: unknown) => error
+    );
+
+    // The endpoint must surface the queue failure, not crash on the
+    // best-effort reconciliation write.
+    expect(failure).toBeInstanceOf(InternalServerError);
+    expect((failure as Error).message).toMatch(/ECONNREFUSED/);
   });
 });
