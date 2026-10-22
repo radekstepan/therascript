@@ -906,6 +906,17 @@ export const JUDGE_RETRY_REMINDER =
   '(use \\" and \\n), and do not include trailing commas, markdown fences, or commentary.';
 
 /**
+ * Reminder appended to the Judge user message when the first attempt parsed
+ * as JSON but failed structural validation (missing/non-array `claims` or
+ * `omissions`, or entries with no usable quote text).
+ */
+export const JUDGE_RETRY_SCHEMA_REMINDER =
+  '\n\nIMPORTANT REMINDER: Your previous response was valid JSON but did not match the required schema. ' +
+  'Respond with ONLY a JSON object containing "claims" (array) and "omissions" (array). ' +
+  'Every claims entry must include "exact_quote" and "normalized_claim" strings; ' +
+  'every omissions entry must include a "normalized_claim" string.';
+
+/**
  * Resolve the effective Judge thinking budget: the shared `-1`-clamp first
  * (unrestricted/unset becomes the phase cap, `0` stays disabled), then the
  * Judge-specific hard ceiling so reasoning models cannot consume the whole
@@ -1036,6 +1047,76 @@ export function parseJudgeJson<T = unknown>(rawOutput: string): T | null {
   } catch {
     return null;
   }
+}
+
+/** Structural validation verdict for one parsed Judge JSON payload. */
+export interface JudgeStructureValidation {
+  valid: boolean;
+  /** Machine-readable reason; null when valid. */
+  reason: string | null;
+}
+
+function isUsableJudgeClaim(entry: unknown): boolean {
+  if (typeof entry !== 'object' || entry === null) return false;
+  const c = entry as RawJudgeClaim;
+  return (
+    asOptionalString(c.exact_quote) !== null ||
+    asOptionalString(c.normalized_claim) !== null
+  );
+}
+
+function isUsableJudgeOmission(entry: unknown): boolean {
+  if (typeof entry !== 'object' || entry === null) return false;
+  return (
+    asOptionalString((entry as RawJudgeOmission).normalized_claim) !== null
+  );
+}
+
+/**
+ * Validate the *structure* of parsed Judge JSON. Syntax parsing alone
+ * accepts objects such as `{}` or `{"error":"unable to assess"}`, which
+ * normalization would coerce into empty claim/omission lists and score as
+ * a perfect audit (accuracy 1.0). Likewise, a non-empty array whose
+ * entries are all unusable would normalize to zero statements and look
+ * clean.
+ *
+ * Requires a top-level object with array-typed `claims` and `omissions`
+ * (explicitly empty arrays stay valid — e.g. conversational answers with
+ * nothing to verify), plus at least one usable record in every non-empty
+ * array (a claim needs `exact_quote` or `normalized_claim` text, matching
+ * the normalization drop rule; an omission needs `normalized_claim`).
+ *
+ * Pure function: no I/O. Exported for unit testing.
+ */
+export function validateJudgeOutputStructure(
+  raw: unknown
+): JudgeStructureValidation {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return { valid: false, reason: 'top-level JSON value is not an object' };
+  }
+  const output = raw as RawJudgeOutput;
+  if (!Array.isArray(output.claims)) {
+    return { valid: false, reason: 'missing or non-array "claims"' };
+  }
+  if (!Array.isArray(output.omissions)) {
+    return { valid: false, reason: 'missing or non-array "omissions"' };
+  }
+  if (output.claims.length > 0 && !output.claims.some(isUsableJudgeClaim)) {
+    return {
+      valid: false,
+      reason: 'claims array has no usable claim records',
+    };
+  }
+  if (
+    output.omissions.length > 0 &&
+    !output.omissions.some(isUsableJudgeOmission)
+  ) {
+    return {
+      valid: false,
+      reason: 'omissions array has no usable omission records',
+    };
+  }
+  return { valid: true, reason: null };
 }
 
 /** Sentence/clause boundaries for the trivial-message fast path. */
@@ -1868,19 +1949,23 @@ export async function processVerificationJob(
         }
 
         let parsed = parseJudgeJson<RawJudgeOutput>(firstAttempt.rawOutput);
-        if (!parsed && !isCanceled()) {
+        let structure = validateJudgeOutputStructure(parsed);
+        if ((!parsed || !structure.valid) && !isCanceled()) {
           // One repair retry with thinking disabled and low-variance
           // sampling: reasoning output is the usual reason the first call
-          // produced truncated/unparseable JSON.
+          // produced truncated/unparseable JSON, while parsed-but-invalid
+          // output gets a schema-shaped reminder instead.
           console.warn(
             `[Verification Worker ${jobId}] Judge output for message ${messageId} ` +
-              `failed JSON parsing; retrying once with thinking disabled.`
+              (parsed
+                ? `failed structural validation (${structure.reason}); retrying once with thinking disabled.`
+                : `failed JSON parsing; retrying once with thinking disabled.`)
           );
           const retryMessages: BackendChatMessage[] = [
             judgeMessages[0],
             {
               ...judgeMessages[1],
-              text: `${judgeMessages[1].text}${JUDGE_RETRY_REMINDER}`,
+              text: `${judgeMessages[1].text}${parsed ? JUDGE_RETRY_SCHEMA_REMINDER : JUDGE_RETRY_REMINDER}`,
             },
           ];
           const retryAttempt = await runJudgeStreamAttempt({
@@ -1907,10 +1992,16 @@ export async function processVerificationJob(
             return;
           }
           parsed = parseJudgeJson<RawJudgeOutput>(retryAttempt.rawOutput);
+          structure = validateJudgeOutputStructure(parsed);
         }
         if (!parsed) {
           throw new Error(
             'Judge LLM did not return valid JSON (empty or unparseable output).'
+          );
+        }
+        if (!structure.valid) {
+          throw new Error(
+            `Judge LLM returned structurally invalid JSON (${structure.reason}); cannot audit reliably.`
           );
         }
         // Hydrate Judge evidence against ground-truth transcript paragraphs:

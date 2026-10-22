@@ -32,6 +32,8 @@ The fast path accepts any short answer matching a greeting/prompt substring, wit
 
 ## 2. P1 — Structurally invalid judge JSON becomes a perfect audit
 
+- [x] Task 2
+
 **Location:** `packages/worker/src/jobs/verificationProcessor.ts:829–884` and `1635–1751`.
 
 Parsing only establishes JSON syntax. An object such as `{}` or `{"error":"unable to assess"}` is truthy and bypasses the repair retry. Normalization converts absent/non-array claims and omissions into empty lists, which receive accuracy 1.0. Invalid entries can likewise all be discarded and produce a clean completed verification.

@@ -65,6 +65,7 @@ const {
   DEFAULT_VERIFICATION_JUDGE_PROMPT,
   sanitizeJsonForParse,
   parseJudgeJson,
+  validateJudgeOutputStructure,
   isTrivialConversationalMessage,
   resolveJudgeThinkingBudget,
   JUDGE_MAX_THINKING_BUDGET,
@@ -578,6 +579,93 @@ describe('parseJudgeJson', () => {
   });
 });
 
+describe('validateJudgeOutputStructure', () => {
+  it('rejects empty and error objects', () => {
+    expect(validateJudgeOutputStructure({}).valid).toBe(false);
+    expect(
+      validateJudgeOutputStructure({ error: 'unable to assess' }).valid
+    ).toBe(false);
+    expect(validateJudgeOutputStructure({}).reason).toMatch(/claims/);
+  });
+
+  it('rejects missing or non-array required arrays', () => {
+    expect(
+      validateJudgeOutputStructure({ claims: [], omissions: [] }).valid
+    ).toBe(true);
+    expect(validateJudgeOutputStructure({ claims: [] }).valid).toBe(false);
+    expect(validateJudgeOutputStructure({ omissions: [] }).valid).toBe(false);
+    expect(
+      validateJudgeOutputStructure({ claims: 'none', omissions: [] }).valid
+    ).toBe(false);
+    expect(
+      validateJudgeOutputStructure({ claims: [], omissions: {} }).valid
+    ).toBe(false);
+    expect(
+      validateJudgeOutputStructure({ claims: null, omissions: null }).valid
+    ).toBe(false);
+  });
+
+  it('rejects claim arrays with no usable records', () => {
+    expect(
+      validateJudgeOutputStructure({
+        claims: [{ foo: 1 }, 'not-an-object', null, 42],
+        omissions: [],
+      }).valid
+    ).toBe(false);
+    expect(
+      validateJudgeOutputStructure({
+        claims: [{ exact_quote: '   ', normalized_claim: '' }],
+        omissions: [],
+      }).valid
+    ).toBe(false);
+  });
+
+  it('rejects omission arrays with no usable records', () => {
+    expect(
+      validateJudgeOutputStructure({
+        claims: [],
+        omissions: [{ severity: 'high' }, null],
+      }).valid
+    ).toBe(false);
+  });
+
+  it('rejects non-object top-level values', () => {
+    expect(validateJudgeOutputStructure(null).valid).toBe(false);
+    expect(validateJudgeOutputStructure([]).valid).toBe(false);
+    expect(validateJudgeOutputStructure('claims').valid).toBe(false);
+    expect(validateJudgeOutputStructure(42).valid).toBe(false);
+  });
+
+  it('accepts explicitly valid empty arrays', () => {
+    expect(
+      validateJudgeOutputStructure({
+        summary_assessment:
+          'Conversational acknowledgement; nothing to verify.',
+        claims: [],
+        omissions: [],
+      })
+    ).toEqual({ valid: true, reason: null });
+  });
+
+  it('accepts arrays with at least one usable record', () => {
+    expect(
+      validateJudgeOutputStructure({
+        claims: [
+          { bogus: true },
+          { exact_quote: 'The client takes Sertraline.' },
+        ],
+        omissions: [],
+      }).valid
+    ).toBe(true);
+    expect(
+      validateJudgeOutputStructure({
+        claims: [],
+        omissions: [{ normalized_claim: 'Missed the dosage detail.' }],
+      }).valid
+    ).toBe(true);
+  });
+});
+
 describe('isTrivialConversationalMessage', () => {
   it('matches the canonical short greeting', () => {
     expect(
@@ -1016,5 +1104,149 @@ describe('processVerificationJob — judge hardening', () => {
     expect(saveResultMock.mock.calls[0][0].statements[0]).toMatchObject({
       verdict: 'fabricated',
     });
+  });
+
+  it('retries once when the first response is structurally invalid, then completes on a valid retry', async () => {
+    findCandidatesMock.mockReturnValue([
+      candidateFor('The client takes Sertraline every morning.'),
+    ]);
+    streamLlmMock
+      .mockImplementationOnce(() =>
+        fakeStream([{ content: '{}' }], {
+          promptTokens: 100,
+          completionTokens: 10,
+        })
+      )
+      .mockImplementationOnce(() =>
+        fakeStream([{ content: '{"summary_assessment": "ok"}' }], {
+          promptTokens: 120,
+          completionTokens: 60,
+        })
+      );
+    parseJsonMock.mockReturnValueOnce({}).mockReturnValueOnce({
+      summary_assessment: 'All supported.',
+      claims: [
+        {
+          exact_quote: 'The client takes Sertraline every morning',
+          normalized_claim: 'Client takes Sertraline every morning.',
+          verdict: 'supported',
+          severity: 'none',
+          confidence: 0.9,
+          reasoning: 'Stated verbatim in P#0.',
+          evidence: [],
+        },
+      ],
+      omissions: [],
+    });
+
+    await runJob();
+
+    expect(streamLlmMock).toHaveBeenCalledTimes(2);
+    expect(streamLlmMock.mock.calls[1][1]).toMatchObject({
+      thinkingBudget: 0,
+      temperature: 0.1,
+    });
+    expect(saveResultMock).toHaveBeenCalledTimes(1);
+    expect(saveResultMock.mock.calls[0][0]).toMatchObject({
+      messageId: 11,
+      accuracyScore: 1,
+      promptTokens: 220,
+      completionTokens: 70,
+    });
+    expect(saveResultMock.mock.calls[0][0].status ?? 'completed').toBe(
+      'completed'
+    );
+  });
+
+  it('persists a failed verification when both attempts return structurally invalid JSON', async () => {
+    findCandidatesMock.mockReturnValue([
+      candidateFor('The client takes Sertraline every morning.'),
+    ]);
+    streamLlmMock
+      .mockImplementationOnce(() =>
+        fakeStream([{ content: '{}' }], {
+          promptTokens: 100,
+          completionTokens: 10,
+        })
+      )
+      .mockImplementationOnce(() =>
+        fakeStream([{ content: '{"error": "unable to assess"}' }], {
+          promptTokens: 120,
+          completionTokens: 15,
+        })
+      );
+    parseJsonMock
+      .mockReturnValueOnce({})
+      .mockReturnValueOnce({ error: 'unable to assess' });
+
+    await runJob();
+
+    expect(streamLlmMock).toHaveBeenCalledTimes(2);
+    expect(insertUsageMock).toHaveBeenCalledTimes(2);
+    expect(saveResultMock).toHaveBeenCalledTimes(1);
+    expect(saveResultMock.mock.calls[0][0]).toMatchObject({
+      messageId: 11,
+      status: 'failed',
+      promptTokens: 220,
+      completionTokens: 25,
+    });
+    expect(saveResultMock.mock.calls[0][0].errorMessage).toMatch(
+      /structurally invalid/
+    );
+    expect(saveResultMock.mock.calls[0][0]).not.toMatchObject({
+      accuracyScore: 1,
+    });
+  });
+
+  it('persists a failed verification when claim entries are all malformed', async () => {
+    findCandidatesMock.mockReturnValue([
+      candidateFor('The client takes Sertraline every morning.'),
+    ]);
+    streamLlmMock.mockImplementation(() =>
+      fakeStream([{ content: '{"claims": [{}]}' }], {
+        promptTokens: 100,
+        completionTokens: 20,
+      })
+    );
+    parseJsonMock.mockReturnValue({
+      summary_assessment: 'No usable records.',
+      claims: [{ unrelated: 'field' }, 'junk', null],
+      omissions: [],
+    });
+
+    await runJob();
+
+    expect(streamLlmMock).toHaveBeenCalledTimes(2);
+    expect(saveResultMock).toHaveBeenCalledTimes(1);
+    expect(saveResultMock.mock.calls[0][0].status).toBe('failed');
+    expect(saveResultMock.mock.calls[0][0].errorMessage).toMatch(
+      /structurally invalid/
+    );
+  });
+
+  it('persists a failed verification when claims is not an array', async () => {
+    findCandidatesMock.mockReturnValue([
+      candidateFor('The client takes Sertraline every morning.'),
+    ]);
+    streamLlmMock.mockImplementation(() =>
+      fakeStream([{ content: '{"claims": "none"}' }], {
+        promptTokens: 100,
+        completionTokens: 20,
+      })
+    );
+    parseJsonMock.mockReturnValue({
+      summary_assessment: 'Wrong-typed claims.',
+      claims: 'none',
+      omissions: [],
+    });
+
+    await runJob();
+
+    expect(streamLlmMock).toHaveBeenCalledTimes(2);
+    expect(saveResultMock).toHaveBeenCalledTimes(1);
+    expect(saveResultMock.mock.calls[0][0].status).toBe('failed');
+    expect(saveResultMock.mock.calls[0][0].errorMessage).toMatch(
+      /structurally invalid/
+    );
   });
 });
