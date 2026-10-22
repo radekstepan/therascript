@@ -9,6 +9,12 @@
     "moduleResolution": "node", // Standard for frontend builds
     "isolatedModules": true,
     "noEmit": false,
+    // App bundle, not a library: no workspace package consumes @therascript/ui
+    // types, so skip declaration emit (ts-loader was writing .d.ts files into
+    // dist and paying the declaration cost on every production build).
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
     "lib": ["DOM", "DOM.Iterable", "ESNext"],
     "allowJs": false,
     "baseUrl": "./src", // For '@/' alias
