@@ -6,14 +6,18 @@
 //   - CreateAnalysisJobModal (Analyze Multiple Sessions dialog) — to choose
 //     which model + endpoint a one-off analysis job should use.
 //
-// The remote URL itself is *not* persisted by this picker. Both consumers
-// (SelectActiveModelModal, CreateAnalysisJobModal) write the URL into
-// `remoteBaseUrlAtom` (localStorage) at the moment of Save. The picker
-// reads the atom only to pre-fill the field on a Local→Remote toggle
-// within a session, so the user doesn't have to retype their last
-// saved URL. Cancel / Escape do not persist.
+// The remote URL is persisted by this picker — and only here — as the
+// last known good endpoint in `remoteBaseUrlAtom` (localStorage). The
+// write happens when a remote models request succeeds with a valid
+// models response (an empty list still counts), so saving a model is
+// not required for the URL to be remembered. Typing, clearing,
+// toggling to Local, and modal Save/Submit handlers never persist;
+// HTTP errors and malformed responses leave the remembered value
+// untouched. The picker also reads the atom to pre-fill the field on
+// a Local→Remote toggle, so the user doesn't have to retype their
+// last good URL. Cancel / Escape do not persist.
 import React, { useEffect, useMemo, useRef } from 'react';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useQuery } from '@tanstack/react-query';
 import {
   Box,
@@ -36,7 +40,11 @@ import prettyBytes from 'pretty-bytes';
 import { fetchAvailableModels } from '../../api/api';
 import { useDebounce } from '../../hooks/useDebounce';
 import { remoteBaseUrlAtom } from '../../store';
-import type { LlmModelInfo, LlmStatus } from '../../types';
+import type {
+  AvailableModelsResponse,
+  LlmModelInfo,
+  LlmStatus,
+} from '../../types';
 
 const EMPTY_MODELS: readonly LlmModelInfo[] = [];
 
@@ -96,6 +104,20 @@ const isValidHttpUrl = (value: string): boolean => {
   }
 };
 
+/**
+ * Whether a models response is valid enough to mark its endpoint as the
+ * last known good remote URL. An empty `models` array is a successful
+ * connection (the server answered), so it counts; anything without an
+ * array `models` field — null, a non-object, or a wrong-shaped payload —
+ * must not overwrite the remembered URL.
+ */
+export const isValidModelsListResponse = (
+  data: unknown
+): data is AvailableModelsResponse => {
+  if (typeof data !== 'object' || data === null) return false;
+  return Array.isArray((data as { models?: unknown }).models);
+};
+
 export const LlmEndpointModelPicker: React.FC<LlmEndpointModelPickerProps> = ({
   selectedModel,
   onSelectedModelChange,
@@ -113,6 +135,7 @@ export const LlmEndpointModelPicker: React.FC<LlmEndpointModelPickerProps> = ({
   onModelsChange,
 }) => {
   const persistedRemoteUrl = useAtomValue(remoteBaseUrlAtom);
+  const setPersistedRemoteUrl = useSetAtom(remoteBaseUrlAtom);
 
   const debouncedRemoteUrl = useDebounce(remoteUrl, 500);
   const isTyping = isRemote && remoteUrl !== debouncedRemoteUrl;
@@ -133,7 +156,31 @@ export const LlmEndpointModelPicker: React.FC<LlmEndpointModelPickerProps> = ({
       'availableLlmModels',
       isRemote ? `remote:${queryBaseUrl}` : `local:${queryBaseUrl}`,
     ],
-    queryFn: () => fetchAvailableModels(queryBaseUrl),
+    // Last-known-good persistence lives here — the single shared
+    // model-fetch path used by every modal — so a successful discovery
+    // is remembered without requiring a model save.
+    //
+    // Race safety: the closure captures the URL (and mode) that THIS
+    // request was issued for. A delayed response for URL A persists A,
+    // never the live input (which may already be URL B) — and local
+    // requests never touch the preference. Errors propagate to the
+    // query's error state without persisting.
+    queryFn: async () => {
+      const requestedUrl = queryBaseUrl;
+      const requestedRemote = isRemote;
+      const data = await fetchAvailableModels(requestedUrl);
+      if (requestedRemote) {
+        const normalized = requestedUrl.trim();
+        if (
+          normalized.length > 0 &&
+          isValidHttpUrl(normalized) &&
+          isValidModelsListResponse(data)
+        ) {
+          setPersistedRemoteUrl(normalized);
+        }
+      }
+      return data;
+    },
     enabled:
       enabled &&
       !isTyping &&
@@ -144,10 +191,14 @@ export const LlmEndpointModelPicker: React.FC<LlmEndpointModelPickerProps> = ({
     refetchOnMount: 'always',
   });
 
+  // A malformed payload (e.g. a non-array `models` field) renders as an
+  // empty catalog rather than crashing on `.map` — and, per `queryFn`
+  // above, never overwrites the remembered URL.
   const models = useMemo<LlmModelInfo[]>(
     () =>
-      (availableModelsData?.models as LlmModelInfo[] | undefined) ??
-      (EMPTY_MODELS as LlmModelInfo[]),
+      isValidModelsListResponse(availableModelsData)
+        ? availableModelsData.models
+        : (EMPTY_MODELS as LlmModelInfo[]),
     [availableModelsData]
   );
 
@@ -195,9 +246,9 @@ export const LlmEndpointModelPicker: React.FC<LlmEndpointModelPickerProps> = ({
   // Tracks whether the user has manually edited the remote URL in this
   // modal session (typing or clearing). Toggle-to-Remote pre-fills from
   // the atom only for an untouched field — otherwise an explicit Clear
-  // would be silently resurrected from the saved value. The ref resets
-  // with the component: dialog content unmounts on close, so each modal
-  // open starts untouched.
+  // would be silently resurrected from the remembered value. The ref
+  // resets with the component: dialog content unmounts on close, so
+  // each modal open starts untouched.
   const userEditedUrlRef = useRef(false);
 
   // Toggling to Remote should pre-fill the input from localStorage so the user
@@ -217,9 +268,9 @@ export const LlmEndpointModelPicker: React.FC<LlmEndpointModelPickerProps> = ({
     onSelectedModelChange('');
     if (goingRemote) {
       // Only pre-fill an untouched field. An explicit user edit —
-      // including clearing the field — wins over the saved value, so a
-      // cleared field survives a Local→Remote round trip instead of
-      // being silently re-populated (e2e: remote-llm-url-persistence).
+      // including clearing the field — wins over the remembered value,
+      // so a cleared field survives a Local→Remote round trip instead
+      // of being silently re-populated (e2e: remote-llm-url-persistence).
       if (
         (!remoteUrl || remoteUrl.trim().length === 0) &&
         !userEditedUrlRef.current
@@ -243,11 +294,12 @@ export const LlmEndpointModelPicker: React.FC<LlmEndpointModelPickerProps> = ({
     // new endpoint's list comes back from the server.
   };
 
-  // Typing into the remote URL input is purely local form state. The URL is
-  // persisted to `remoteBaseUrlAtom` by the modal's Save handler, not here,
-  // so Cancel / Escape discard any unsaved typing. Any manual edit marks
-  // the field touched so a later Local→Remote toggle won't clobber it
-  // with the saved value.
+  // Typing into the remote URL input is purely local form state. The URL
+  // reaches `remoteBaseUrlAtom` only after a models request for it
+  // succeeds (see `queryFn` above) — never from typing itself — so
+  // Cancel / Escape and failed discoveries leave the last known good
+  // value untouched. Any manual edit marks the field touched so a
+  // later Local→Remote toggle won't clobber it with the remembered value.
   const handleRemoteUrlChange = (next: string) => {
     userEditedUrlRef.current = true;
     setRemoteUrl(next);

@@ -73,7 +73,7 @@ For each task, run `yarn test` and the builds listed under **Verification** with
 
 **Verification:** `yarn test`; `yarn build:ui` (also `yarn build:api` if API changes are necessary).
 
-### - [ ] Task 4: Remember the last successfully queried remote LM Studio URL throughout the app
+### - [x] Task 4: Remember the last successfully queried remote LM Studio URL throughout the app
 
 **Target Files:**
 - `packages/ui/src/store/ui/remoteBaseUrlAtom.ts`

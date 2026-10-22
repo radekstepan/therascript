@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useMutation, useQueries, useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import {
   Dialog,
   Button,
@@ -164,7 +164,11 @@ export function CreateAnalysisJobModal({
 }: CreateAnalysisJobModalProps) {
   const navigate = useNavigate();
   const setToast = useSetAtom(toastMessageAtom);
-  const setPersistedRemoteUrl = useSetAtom(remoteBaseUrlAtom);
+  // Last known good remote endpoint, for pre-filling the (possibly hidden)
+  // remote URL field when the open-cycle snapshot is taken below. Later
+  // atom updates from another modal's discovery never rewrite this
+  // form's in-progress field.
+  const persistedRemoteUrl = useAtomValue(remoteBaseUrlAtom);
   const [prompt, setPrompt] = useState('');
   const [mapPhaseSystemPrompt, setMapPhaseSystemPrompt] = useState('');
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -246,6 +250,14 @@ export function CreateAnalysisJobModal({
     setIsTemplatePopoverOpen(false);
     setUseAdvancedStrategy(true); // Reset to default
 
+    // The backend's active remote URL wins when present (it is the live
+    // endpoint); otherwise pre-fill from the last known good URL so a
+    // Local→Remote toggle — or an already-remote form — starts there.
+    const activeRemoteUrl =
+      llmStatus.isRemoteBaseUrl && llmStatus.activeBaseUrl?.trim()
+        ? llmStatus.activeBaseUrl
+        : null;
+
     setFormState({
       selectedModel:
         llmStatus.activeModel && llmStatus.activeModel !== 'default'
@@ -255,8 +267,7 @@ export function CreateAnalysisJobModal({
         ? String(llmStatus.configuredContextSize)
         : '',
       isRemote: llmStatus.isRemoteBaseUrl ?? false,
-      remoteUrl:
-        (llmStatus.isRemoteBaseUrl ? llmStatus.activeBaseUrl : '') ?? '',
+      remoteUrl: activeRemoteUrl ?? persistedRemoteUrl ?? '',
       // Token is never sent back from the server; the user must re-enter
       // to change it. The form's "is a token set?" comes from
       // llmStatus.hasRemoteApiToken, surfaced via the picker's placeholder.
@@ -275,6 +286,9 @@ export function CreateAnalysisJobModal({
       textAreaRef.current?.focus();
     }, 100);
     return () => clearTimeout(timer);
+    // ← persistedRemoteUrl intentionally excluded: the snapshot is taken
+    // once per open (prevIsOpenRef guard) so another modal's discovery
+    // never clobbers an in-progress edit.
   }, [isOpen, llmStatus]);
 
   const isValidHttpUrl = React.useCallback((value: string): boolean => {
@@ -339,12 +353,10 @@ export function CreateAnalysisJobModal({
       baseUrl = llmStatus.defaultBaseUrl;
     }
 
-    // Persist the confirmed URL (or the cleared state) into the
-    // localStorage-backed atom so the next dialog — chat or analysis —
-    // pre-fills it. Empty string is a valid intentional state and survives
-    // across reloads. Skipped on the invalid-URL early-return above so a
-    // blocked submit never overwrites a good value.
-    setPersistedRemoteUrl(formState.remoteUrl.trim());
+    // No atom write here: the last known good URL is persisted by the
+    // shared discovery path only after a models request succeeds, so an
+    // untested (or cleared) typed value can never replace a good one —
+    // and submitting in Local mode preserves it. See `remoteBaseUrlAtom`.
 
     const contextSize = formState.contextSizeInput
       ? parseInt(formState.contextSizeInput, 10)

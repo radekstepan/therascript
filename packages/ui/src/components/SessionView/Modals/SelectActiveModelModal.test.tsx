@@ -1,31 +1,26 @@
 // @vitest-environment jsdom
 // packages/ui/src/components/SessionView/Modals/SelectActiveModelModal.test.tsx
 //
-// Pins the persistence contract of the remote LM Studio URL field on the
-// modal side. The picker is read-only with respect to localStorage; the
-// modal's `handleSave` is the single owner of `remoteBaseUrlAtom` and
-// decides what the next session sees.
+// Pins the modal side of the last-known-good remote URL contract. The
+// picker is the single owner of `remoteBaseUrlAtom` writes (persisted
+// only after a models request succeeds); the modal's `handleSave` must
+// NEVER write the atom:
 //
-// Pre-fix bug:
-//   1. The picker wrote every non-empty URL to the atom on every keystroke.
-//   2. The empty-string case was gated out.
-//   3. Result: clearing the field had no observable effect, and the next
-//      Local→Remote toggle silently re-populated the input with the last
-//      non-empty value — the "always resets to the original value" bug.
-//
-// Post-fix:
-//   1. The picker is a pure controlled child — typing does not touch the atom.
-//   2. `handleSave` writes the trimmed URL (or '' for the empty case) to
-//      the atom exactly once per save, regardless of validity: an
-//      invalid-URL save is rejected early and does not overwrite a good
-//      stored value.
+//   1. Saving a typed-but-untested URL must not replace the remembered
+//      good value.
+//   2. Saving in Local mode preserves (not clears) the remembered URL —
+//      the preference is "last known good", not "last saved".
 //   3. Cancel / Escape do not persist — they have no atom side effect.
+//
+// The modal only READS the atom: on open it pre-fills the remote URL
+// field from the remembered value, unless the backend reports an
+// active remote URL (live endpoint truth wins).
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Provider as JotaiProvider, useAtomValue } from 'jotai';
+import { Provider as JotaiProvider, createStore, useAtomValue } from 'jotai';
 import { Theme } from '@radix-ui/themes';
 
 import { SelectActiveModelModal } from './SelectActiveModelModal';
@@ -74,6 +69,10 @@ const LOCAL_MODEL: LlmModelInfo = LOCAL_MODEL_FIXTURE;
 // surfaces the model selection through a simple <select> for tests
 // that need to set the model. The picker's own persistence behaviour
 // is covered by LlmEndpointModelPicker.test.tsx.
+//
+// NOTE: because the picker is mocked, no model discovery ever runs in
+// these tests — every typed URL is definitionally "untested", which is
+// exactly what the no-save-write assertions need.
 vi.mock('../../Shared/LlmEndpointModelPicker', async () => {
   const React = await import('react');
   return {
@@ -214,6 +213,13 @@ interface RenderOpts {
   initialModel?: string;
   onOpenChange?: (open: boolean) => void;
   onModelSuccessfullySet?: () => void;
+  /**
+   * Optional pre-configured Jotai store. Pass a store with
+   * `remoteBaseUrlAtom` pre-set to simulate an already-hydrated
+   * session (avoids the mount-time localStorage rehydration race for
+   * open-cycle pre-fill assertions).
+   */
+  store?: ReturnType<typeof createStore>;
 }
 
 function renderModal(opts: RenderOpts) {
@@ -230,9 +236,10 @@ function renderModal(opts: RenderOpts) {
       mutations: { retry: false },
     },
   });
+  const store = opts.store ?? createStore();
   return render(
     <QueryClientProvider client={queryClient}>
-      <JotaiProvider>
+      <JotaiProvider store={store}>
         <Theme>
           <SelectActiveModelModal
             isOpen
@@ -272,38 +279,61 @@ describe('SelectActiveModelModal — remote URL persistence', () => {
     localStorage.removeItem(STORAGE_KEY);
   });
 
-  it('persists a typed remote URL to the atom on Save', async () => {
+  it('does not persist a typed-but-untested URL to the atom on Save', async () => {
+    // The picker is mocked, so no discovery ever runs: the typed URL
+    // is untested by construction. Saving it must not replace the
+    // remembered good value — persistence belongs to successful
+    // discovery, not to Save.
+    localStorage.setItem(STORAGE_KEY, JSON.stringify('http://good-host:1234'));
+
     renderModal({ llmStatus: makeLlmStatus() });
 
     const user = userEvent.setup();
     await clickRemoteSegment(user);
 
     const field = getRemoteUrlField();
-    await user.type(field, 'http://new-host:1234');
-
-    // The atom MUST still be '' before Save — typing is transient.
-    expect(screen.getByTestId('atom-value').textContent).toBe('""');
+    await user.type(field, 'http://untested-host:1234');
 
     const saveButton = screen.getByRole('button', {
       name: /Save & Load Model/,
     });
     await user.click(saveButton);
 
-    // After Save, the atom is the trimmed URL — this is the only
-    // moment persistence happens.
+    // Give the save mutation a chance to settle (and any stray atom
+    // write a chance to land), then assert nothing changed.
     await waitFor(() =>
       expect(screen.getByTestId('atom-value').textContent).toBe(
-        '"http://new-host:1234"'
+        '"http://good-host:1234"'
       )
     );
     expect(localStorage.getItem(STORAGE_KEY)).toBe(
-      JSON.stringify('http://new-host:1234')
+      JSON.stringify('http://good-host:1234')
     );
   });
 
+  it('does not write an empty value on Save when nothing is remembered', async () => {
+    // With no prior discovery, saving must not create a preference
+    // entry at all — the atom stays at its default ''.
+    renderModal({ llmStatus: makeLlmStatus() });
+
+    const user = userEvent.setup();
+    await clickRemoteSegment(user);
+    await user.type(getRemoteUrlField(), 'http://untested-host:1234');
+
+    const saveButton = screen.getByRole('button', {
+      name: /Save & Load Model/,
+    });
+    await user.click(saveButton);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('atom-value').textContent).toBe('""')
+    );
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+  });
+
   it('does not persist when Save is blocked by an invalid URL', async () => {
-    // An invalid URL short-circuits the save handler before the atom
-    // write, so a good previously-saved value survives a bad attempt.
+    // An invalid URL short-circuits the save handler; the previously
+    // remembered good value survives a bad attempt.
     localStorage.setItem(STORAGE_KEY, JSON.stringify('http://good-host:1234'));
 
     renderModal({ llmStatus: makeLlmStatus() });
@@ -329,31 +359,64 @@ describe('SelectActiveModelModal — remote URL persistence', () => {
     );
   });
 
-  it('persists the cleared state when the user saves in Local mode', async () => {
-    // The user previously saved a remote URL, then decides to go
+  it('preserves the remembered URL when saving in Local mode', async () => {
+    // The user previously discovered a remote URL, then decides to go
     // back to local. Saving in Local mode sends baseUrl=null to the
-    // backend, and the modal must also clear the atom so the next
-    // Local→Remote toggle does not re-surface the stale URL.
-    localStorage.setItem(STORAGE_KEY, JSON.stringify('http://stale-host:1234'));
+    // backend but must NOT clear the last-known-good preference — the
+    // next Local→Remote toggle still pre-fills it.
+    localStorage.setItem(STORAGE_KEY, JSON.stringify('http://good-host:1234'));
 
     renderModal({ llmStatus: makeLlmStatus() });
     const user = userEvent.setup();
 
     // The modal opens in Local mode (status says local). Confirm and
-    // save directly. The form is pre-seeded with REMOTE_MODEL.name,
-    // but `llmStatus.isRemoteBaseUrl` is false, so the modal will
-    // send `baseUrl = null` to the backend and write '' to the atom.
+    // save directly.
     await clickLocalSegment(user);
     const saveButton = screen.getByRole('button', {
       name: /Save & Load Model/,
     });
     await user.click(saveButton);
 
-    // Saving in Local mode clears the atom — the "always remember
-    // the latest" rule.
     await waitFor(() =>
-      expect(screen.getByTestId('atom-value').textContent).toBe('""')
+      expect(screen.getByTestId('atom-value').textContent).toBe(
+        '"http://good-host:1234"'
+      )
     );
-    expect(localStorage.getItem(STORAGE_KEY)).toBe(JSON.stringify(''));
+    expect(localStorage.getItem(STORAGE_KEY)).toBe(
+      JSON.stringify('http://good-host:1234')
+    );
+  });
+
+  it('pre-fills the remote URL field from the remembered value on open', async () => {
+    // Pre-hydrate the store (in-session state): the open-cycle
+    // snapshot seeds the field from the atom, so toggling to Remote
+    // shows the last known good URL.
+    const store = createStore();
+    store.set(remoteBaseUrlAtom, 'http://good-host:1234');
+
+    renderModal({ llmStatus: makeLlmStatus(), store });
+    const user = userEvent.setup();
+
+    await clickRemoteSegment(user);
+    expect(getRemoteUrlField().value).toBe('http://good-host:1234');
+  });
+
+  it('prefers the backend active remote URL over the remembered value on open', async () => {
+    // When the backend reports a live remote endpoint, the form must
+    // reflect that truth — not a stale (or merely unsaved) preference.
+    const store = createStore();
+    store.set(remoteBaseUrlAtom, 'http://remembered-host:1234');
+
+    renderModal({
+      llmStatus: makeLlmStatus({
+        activeBaseUrl: 'http://live-remote:1234',
+        isRemoteBaseUrl: true,
+      }),
+      store,
+    });
+
+    // The modal opens already in Remote mode; the field shows the live
+    // endpoint without any toggle.
+    expect(getRemoteUrlField().value).toBe('http://live-remote:1234');
   });
 });

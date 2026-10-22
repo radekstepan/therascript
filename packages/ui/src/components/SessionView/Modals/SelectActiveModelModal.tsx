@@ -1,7 +1,7 @@
 /* packages/ui/src/components/SessionView/Modals/SelectActiveModelModal.tsx */
 import React, { useState, useEffect, useRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useSetAtom } from 'jotai';
+import { useAtomValue } from 'jotai';
 import { Dialog, Button, Flex, Text, Spinner, Callout } from '@radix-ui/themes';
 import { InfoCircledIcon, Cross2Icon, CheckIcon } from '@radix-ui/react-icons';
 import { setLlmApiToken, setLlmModel } from '../../../api/api';
@@ -34,7 +34,11 @@ export function SelectActiveModelModal({
   const queryClient = useQueryClient();
   const prevIsOpenRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
-  const setPersistedRemoteUrl = useSetAtom(remoteBaseUrlAtom);
+  // Last known good remote endpoint, for pre-filling the (possibly hidden)
+  // remote URL field on open. Read once per open-cycle (see the init
+  // effect below); later atom updates from another modal's discovery
+  // never rewrite this form's in-progress field.
+  const persistedRemoteUrl = useAtomValue(remoteBaseUrlAtom);
 
   const [formState, setFormState] = useState<LlmSettingsState>({
     selectedModel: currentActiveModelName || '',
@@ -111,15 +115,21 @@ export function SelectActiveModelModal({
   // Decouple from llmStatus polling by using ref-based guard
   useEffect(() => {
     if (isOpen && !prevIsOpenRef.current) {
-      // Modal just opened — snapshot current backend state into local form
+      // Modal just opened — snapshot current backend state into local form.
+      // The backend's active remote URL wins when present (it is the live
+      // endpoint); otherwise pre-fill from the last known good URL so a
+      // Local→Remote toggle — or an already-remote form — starts there.
+      const activeRemoteUrl =
+        llmStatus?.isRemoteBaseUrl && llmStatus?.activeBaseUrl?.trim()
+          ? llmStatus.activeBaseUrl
+          : null;
       setFormState({
         selectedModel: currentActiveModelName || '',
         contextSizeInput: currentConfiguredContextSize
           ? String(currentConfiguredContextSize)
           : '',
         isRemote: llmStatus?.isRemoteBaseUrl ?? false,
-        remoteUrl:
-          (llmStatus?.isRemoteBaseUrl ? llmStatus?.activeBaseUrl : '') ?? '',
+        remoteUrl: activeRemoteUrl ?? persistedRemoteUrl ?? '',
         // Token is never sent back from the server; the user must re-enter
         // to change it. The form's "is a token set?" comes from
         // llmStatus.hasRemoteApiToken, surfaced via the picker's placeholder.
@@ -136,7 +146,10 @@ export function SelectActiveModelModal({
       setError(null);
     }
     prevIsOpenRef.current = isOpen;
-  }, [isOpen]); // ← llmStatus properties intentionally excluded
+    // ← llmStatus properties + persistedRemoteUrl intentionally excluded:
+    // the snapshot is taken once per open so later backend polls or
+    // another modal's discovery never clobber an in-progress edit.
+  }, [isOpen]);
 
   const handleSave = () => {
     setError(null);
@@ -171,12 +184,10 @@ export function SelectActiveModelModal({
       baseUrl = trimmed;
     }
 
-    // Persist the URL the user just confirmed (or the cleared state) into
-    // the localStorage-backed atom so the next dialog — chat or analysis —
-    // pre-fills it. Empty string is a valid intentional state ("no remote
-    // URL saved") and survives across reloads. Skipped on the invalid-URL
-    // early-return above so a blocked save never overwrites a good value.
-    setPersistedRemoteUrl(formState.remoteUrl.trim());
+    // No atom write here: the last known good URL is persisted by the
+    // shared discovery path only after a models request succeeds, so an
+    // untested (or cleared) typed value can never replace a good one —
+    // and saving in Local mode preserves it. See `remoteBaseUrlAtom`.
 
     // Token change semantics:
     // - apiToken !== ''  -> set/replace (saves the typed value to the DB)
