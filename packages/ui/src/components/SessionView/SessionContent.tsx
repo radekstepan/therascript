@@ -84,6 +84,7 @@ export function SessionContent({
               onOpenLlmModal={onOpenLlmModal}
               transcriptTokenCount={transcriptTokenCount} // <-- PASS PROP
               activeModelDefaultContextSize={activeModelDefaultContextSize} // <-- PASS PROP
+              layout="desktop"
             />
           ) : hasChats ? (
             <Box
@@ -208,6 +209,7 @@ export function SessionContent({
                   isTabActive={activeTab === 'chat'}
                   transcriptTokenCount={transcriptTokenCount} // <-- PASS PROP
                   activeModelDefaultContextSize={activeModelDefaultContextSize} // <-- PASS PROP
+                  layout="mobile"
                 />
               ) : hasChats ? (
                 <Flex align="center" justify="center" className="h-full">

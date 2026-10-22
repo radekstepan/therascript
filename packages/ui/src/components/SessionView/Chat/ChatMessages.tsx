@@ -42,6 +42,12 @@ interface ChatMessagesProps {
   activeSessionId: number | null;
   isAiResponding: boolean;
   streamingTokensPerSecond?: number | null;
+  /**
+   * Which responsive layout this instance belongs to. SessionContent
+   * mounts a desktop and a mobile instance simultaneously (CSS-toggled);
+   * only the viewport-matching instance consumes ?highlightMsg.
+   */
+  layout?: 'desktop' | 'mobile';
 }
 
 interface TemplateFormState {
@@ -52,6 +58,29 @@ interface TemplateFormState {
 interface VerdictModalState {
   messageId: number;
   statementId: number | null;
+}
+
+// Tailwind `lg` breakpoint backing SessionContent's `hidden lg:flex` /
+// `flex lg:hidden` responsive layouts (tailwind.config.ts customizes only
+// `2xl`, so `lg` keeps the 1024px default).
+const DESKTOP_VIEWPORT_QUERY = '(min-width: 1024px)';
+
+/**
+ * True when this instance's responsive layout matches the current
+ * viewport. SessionContent mounts a desktop and a mobile ChatMessages
+ * simultaneously (CSS-toggled); the hidden twin must ignore
+ * ?highlightMsg or two stacked verdict modals open (Radix Dialogs
+ * portal to the body, so CSS `display: none` ancestors don't hide them).
+ */
+function isLayoutViewportMatch(layout: 'desktop' | 'mobile'): boolean {
+  if (
+    typeof window === 'undefined' ||
+    typeof window.matchMedia !== 'function'
+  ) {
+    return true;
+  }
+  const isDesktopViewport = window.matchMedia(DESKTOP_VIEWPORT_QUERY).matches;
+  return layout === 'desktop' ? isDesktopViewport : !isDesktopViewport;
 }
 
 // Helper function to strip HTML tags for plain text fallback
@@ -74,6 +103,7 @@ export function ChatMessages({
   streamingPhase,
   streamingTokensPerSecond,
   activeSessionId,
+  layout = 'desktop',
 }: ChatMessagesProps) {
   const queryClient = useQueryClient();
   const setToast = useSetAtom(toastMessageAtom);
@@ -161,6 +191,7 @@ export function ChatMessages({
   useEffect(() => {
     if (highlightMsgId === null) return;
     if (handledHighlightRef.current === highlightMsgId) return;
+    if (!isLayoutViewportMatch(layout)) return;
     if (verificationsLoading) return;
     const idx = messages.findIndex((m) => m.id === highlightMsgId);
     if (idx < 0) return;
@@ -201,6 +232,7 @@ export function ChatMessages({
     return () => clearTimeout(timer);
   }, [
     highlightMsgId,
+    layout,
     messages,
     verificationByMessageId,
     verificationsLoading,

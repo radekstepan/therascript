@@ -46,6 +46,12 @@ interface ChatInterfaceProps {
   isTabActive?: boolean; // For tabbed layout on small screens
   transcriptTokenCount?: number | null; // <-- ADDED
   activeModelDefaultContextSize?: number | null; // <-- ADDED
+  /**
+   * Which responsive layout this instance belongs to. SessionContent
+   * mounts two instances (desktop side-by-side + mobile tabs); the
+   * value lets ChatMessages ignore deep-links in the hidden twin.
+   */
+  layout?: 'desktop' | 'mobile';
 }
 
 const createTemporaryId = (): number => -Math.floor(Math.random() * 1000000);
@@ -62,6 +68,7 @@ export function ChatInterface({
   isTabActive,
   transcriptTokenCount, // <-- DESTRUCTURED
   activeModelDefaultContextSize, // <-- DESTRUCTURED
+  layout = 'desktop',
 }: ChatInterfaceProps) {
   const activeSessionId = session?.id ?? null;
 
@@ -841,6 +848,7 @@ export function ChatInterface({
               activeChatId={activeChatId}
               activeSessionId={activeSessionId}
               isStandalone={isStandalone}
+              layout={layout}
               streamingMessageId={streamingAiMessageId}
               streamingPhase={streamPhase}
               isAiResponding={isAiResponding}
