@@ -89,6 +89,14 @@ describe('CoverageTab failed verifications', () => {
     expect(onVerifySession).toHaveBeenCalledWith(FAILED_SUMMARY.sessionId);
   });
 
+  it('retry tooltip explains the audit dialog flow', () => {
+    renderFailedTab(vi.fn());
+
+    expect(
+      screen.getByRole('button', { name: 'Retry Failed' }).getAttribute('title')
+    ).toContain('opens the audit dialog');
+  });
+
   it('renders no failed badge or retry button when nothing failed', () => {
     render(
       <MemoryRouter>

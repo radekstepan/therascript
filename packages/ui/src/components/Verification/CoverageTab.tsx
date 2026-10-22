@@ -19,8 +19,9 @@ export function CoverageTab({
   /** True while an audit job is running (mirrors the header button). */
   auditDisabled?: boolean;
   /**
-   * One-click retry for failed messages (runs with skipVerified: true).
-   * When omitted, no retry button is rendered.
+   * Retry entry-point for failed messages: opens the audit dialog
+   * pre-scoped to the session (skip-verified on by default). When
+   * omitted, no retry button is rendered.
    */
   onVerifySession?: (sessionId: number) => void;
 }) {
@@ -169,7 +170,7 @@ export function CoverageTab({
                         title={
                           auditDisabled
                             ? 'An audit is already running'
-                            : `Retry the ${session.failedAiMessages} failed message${session.failedAiMessages === 1 ? '' : 's'} (skips already-verified ones)`
+                            : `Retry the ${session.failedAiMessages} failed message${session.failedAiMessages === 1 ? '' : 's'} (opens the audit dialog, skipping already-verified ones)`
                         }
                         onClick={() => onVerifySession(session.sessionId)}
                       >

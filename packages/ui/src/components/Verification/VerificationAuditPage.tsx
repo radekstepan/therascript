@@ -22,10 +22,9 @@ import {
   Spinner,
 } from '@radix-ui/themes';
 import { ExclamationTriangleIcon, Cross2Icon } from '@radix-ui/react-icons';
-import { ShieldCheck, Play, Trash2, RotateCcw } from 'lucide-react';
+import { ShieldCheck, Play, Trash2 } from 'lucide-react';
 import {
   cancelVerificationJob,
-  createVerificationJob,
   fetchVerificationJobs,
   fetchVerificationStats,
   resetVerifications,
@@ -200,36 +199,11 @@ export function VerificationAuditPage() {
     setIsModalOpen(true);
   };
 
-  // One-click retry for failed messages: skipVerified keeps completed
-  // verdicts while failed (and any remaining unverified) messages are
-  // re-audited with the active Judge model. The backend refuses (409)
-  // while another job runs, so the buttons stay disabled then.
-  const retryFailedMutation = useMutation({
-    mutationFn: (sessionIds?: number[]) =>
-      sessionIds
-        ? createVerificationJob({
-            scope: 'selected_sessions',
-            sessionIds,
-            skipVerified: true,
-          })
-        : createVerificationJob({
-            scope: 'all_unverified',
-            skipVerified: true,
-          }),
-    onSuccess: () => {
-      setToast('Retrying failed verifications — auditing newest first.');
-      queryClient.invalidateQueries({ queryKey: ['verificationJobs'] });
-      queryClient.invalidateQueries({ queryKey: ['verificationStats'] });
-    },
-    onError: (error: Error) => {
-      setToast(`Failed to retry verifications: ${error.message}`);
-    },
-  });
-
-  const handleVerifySession = (sessionId: number) => {
-    retryFailedMutation.mutate([sessionId]);
-  };
-
+  // Coverage-tab retries route through the same audit dialog as the
+  // per-session Audit action: the dialog opens pre-scoped to the session
+  // with skip-verified on, so failed messages are re-audited while
+  // completed verdicts are kept. There is no one-click retry mutation —
+  // the header Retry Failed button was removed in favor of this flow.
   const stats = statsQuery.data;
   const unverifiedCount = stats?.unverifiedMessagesCount ?? 0;
   const unverifiedTranscripts =
@@ -253,48 +227,13 @@ export function VerificationAuditPage() {
             <ShieldCheck size={22} />
             <Heading size="6">Fact Check</Heading>
           </Flex>
-          <Flex gap="2" wrap="wrap" align="center" justify="end">
-            {stats && failedCount > 0 && (
-              <>
-                <Badge
-                  color="red"
-                  variant="soft"
-                  size="2"
-                  style={{ alignSelf: 'center' }}
-                  title={`${failedCount} message${failedCount === 1 ? '' : 's'} failed verification with LLM errors`}
-                >
-                  {failedCount} verification{failedCount === 1 ? '' : 's'}{' '}
-                  failed
-                </Badge>
-                <Button
-                  size="2"
-                  variant="soft"
-                  color="red"
-                  disabled={!!activeJob || retryFailedMutation.isPending}
-                  title={
-                    activeJob
-                      ? 'An audit is already running'
-                      : 'Re-audit failed messages (skips already-verified ones)'
-                  }
-                  onClick={() => retryFailedMutation.mutate(undefined)}
-                >
-                  <RotateCcw size={15} />{' '}
-                  {retryFailedMutation.isPending ? 'Retrying…' : 'Retry Failed'}
-                </Button>
-              </>
-            )}
-            {stats && (
-              <Badge
-                color={unverifiedCount > 0 ? 'amber' : 'green'}
-                variant="soft"
-                size="2"
-                style={{ alignSelf: 'center' }}
-              >
-                {unverifiedCount === 0
-                  ? 'Everything verified'
-                  : `${unverifiedCount} unverified message${unverifiedCount === 1 ? '' : 's'} across ${unverifiedTranscripts} transcript${unverifiedTranscripts === 1 ? '' : 's'}`}
-              </Badge>
-            )}
+          <Flex
+            gap="2"
+            wrap="wrap"
+            align="center"
+            justify="end"
+            data-testid="fact-check-header-actions"
+          >
             <AlertDialog.Root>
               <AlertDialog.Trigger>
                 <Button
@@ -344,6 +283,37 @@ export function VerificationAuditPage() {
             </Button>
           </Flex>
         </Flex>
+        {stats && (
+          <Flex
+            gap="2"
+            wrap="wrap"
+            align="center"
+            mt="-2"
+            data-testid="fact-check-header-labels"
+          >
+            {failedCount > 0 && (
+              <Badge
+                color="red"
+                variant="soft"
+                size="2"
+                style={{ alignSelf: 'center' }}
+                title={`${failedCount} message${failedCount === 1 ? '' : 's'} failed verification with LLM errors`}
+              >
+                {failedCount} verification{failedCount === 1 ? '' : 's'} failed
+              </Badge>
+            )}
+            <Badge
+              color={unverifiedCount > 0 ? 'amber' : 'green'}
+              variant="soft"
+              size="2"
+              style={{ alignSelf: 'center' }}
+            >
+              {unverifiedCount === 0
+                ? 'Everything verified'
+                : `${unverifiedCount} unverified message${unverifiedCount === 1 ? '' : 's'} across ${unverifiedTranscripts} transcript${unverifiedTranscripts === 1 ? '' : 's'}`}
+            </Badge>
+          </Flex>
+        )}
         <Text size="2" color="gray" as="p" mt="-2">
           Audit AI responses against session transcripts, track hallucinations,
           and compare model accuracy.
@@ -409,8 +379,8 @@ export function VerificationAuditPage() {
                 <CoverageTab
                   sessions={stats?.sessionsSummary ?? []}
                   onAuditSession={openModalForSession}
-                  auditDisabled={!!activeJob || retryFailedMutation.isPending}
-                  onVerifySession={handleVerifySession}
+                  auditDisabled={!!activeJob}
+                  onVerifySession={openModalForSession}
                 />
               )}
             </Tabs.Content>

@@ -93,7 +93,7 @@ For each task, run `yarn test` and the builds listed under **Verification** with
 
 **Verification:** `yarn test`; `yarn build:ui`.
 
-### - [ ] Task 5: Separate Fact Check header actions from labels and remove Retry Failed
+### - [x] Task 5: Separate Fact Check header actions from labels and remove Retry Failed
 
 **Target Files:**
 - `packages/ui/src/components/Verification/VerificationAuditPage.tsx` and its tests
