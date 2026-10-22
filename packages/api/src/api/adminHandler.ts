@@ -608,7 +608,7 @@ export const importDataService = async (
         );
         const res = db
           .prepare(
-            'INSERT INTO verification_jobs (status, scope, session_ids_json, chat_id, skip_verified, total_messages, processed_messages, total_statements, flagged_statements, omissions_count, created_at, completed_at, error_message, model_name, context_size, thinking_budget, temperature, top_p, repeat_penalty, num_gpu_layers, llm_base_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            'INSERT INTO verification_jobs (status, scope, session_ids_json, chat_id, skip_verified, total_messages, processed_messages, succeeded_messages, failed_messages, skipped_messages, total_statements, flagged_statements, omissions_count, created_at, completed_at, error_message, model_name, context_size, thinking_budget, temperature, top_p, repeat_penalty, num_gpu_layers, llm_base_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
           )
           .run(
             wasInterrupted ? 'failed' : rest.status,
@@ -618,6 +618,12 @@ export const importDataService = async (
             rest.skip_verified ? 1 : 0,
             rest.total_messages,
             rest.processed_messages,
+            // Pre-V21 backups lack outcome counters; inactive rows keep
+            // whatever was backed up while interrupted rows are already
+            // terminal `failed` with their attempts preserved.
+            (rest as { succeeded_messages?: number }).succeeded_messages ?? 0,
+            (rest as { failed_messages?: number }).failed_messages ?? 0,
+            (rest as { skipped_messages?: number }).skipped_messages ?? 0,
             rest.total_statements,
             rest.flagged_statements,
             rest.omissions_count,
@@ -650,7 +656,7 @@ export const importDataService = async (
             : null;
         const res = db
           .prepare(
-            'INSERT INTO message_verifications (message_id, chat_id, session_id, verification_job_id, authored_model, judge_model, status, total_claims, supported_claims, partial_claims, contradicted_claims, fabricated_claims, omissions_count, accuracy_score, summary_assessment, prompt_tokens, completion_tokens, duration_ms, verified_at, error_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            'INSERT INTO message_verifications (message_id, chat_id, session_id, verification_job_id, authored_model, judge_model, status, total_claims, supported_claims, partial_claims, contradicted_claims, fabricated_claims, omissions_count, accuracy_score, summary_assessment, prompt_tokens, completion_tokens, duration_ms, verified_at, error_message, error_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
           )
           .run(
             newMessageId,
@@ -672,7 +678,9 @@ export const importDataService = async (
             mv.completion_tokens,
             mv.duration_ms,
             mv.verified_at,
-            mv.error_message
+            mv.error_message,
+            // Pre-V21 backups lack failure codes.
+            (mv as { error_code?: string | null }).error_code ?? null
           );
         oldToNewMessageVerificationIdMap[mv.id] = res.lastInsertRowid as number;
       });

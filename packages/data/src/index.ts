@@ -29,6 +29,8 @@ export type {
   VerificationStatementInput,
   SaveMessageVerificationInput,
   SessionVerificationDetail,
+  UpdateVerificationJobPhaseFields,
+  FailedVerificationItem,
   VerificationAnalyticsFilters,
   FlaggedStatementsQuery,
   FlaggedStatementItem,

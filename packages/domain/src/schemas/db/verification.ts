@@ -15,6 +15,24 @@ export const verificationJobScopeSchema = z.enum([
   'single_chat',
 ]);
 
+export const verificationPhaseSchema = z.enum([
+  'waiting_for_lock',
+  'loading_judge',
+  'checking_message',
+  'generating',
+  'retrying',
+  'finishing',
+]);
+
+export const verificationFailureCodeSchema = z.enum([
+  'empty_output',
+  'malformed_json',
+  'invalid_structure',
+  'provider_error',
+  'context_budget',
+  'missing_transcript',
+]);
+
 export const verificationJobSchema = z.object({
   id: z.number().int().positive(),
   status: verificationJobStatusSchema,
@@ -24,6 +42,31 @@ export const verificationJobSchema = z.object({
   skip_verified: z.boolean(),
   total_messages: z.number().int().nonnegative(),
   processed_messages: z.number().int().nonnegative(),
+  succeeded_messages: z.number().int().nonnegative().optional().default(0),
+  failed_messages: z.number().int().nonnegative().optional().default(0),
+  skipped_messages: z.number().int().nonnegative().optional().default(0),
+  current_phase: verificationPhaseSchema.nullable().optional().default(null),
+  current_message_id: z
+    .number()
+    .int()
+    .positive()
+    .nullable()
+    .optional()
+    .default(null),
+  current_attempt: z
+    .number()
+    .int()
+    .positive()
+    .nullable()
+    .optional()
+    .default(null),
+  phase_updated_at: z
+    .number()
+    .int()
+    .nonnegative()
+    .nullable()
+    .optional()
+    .default(null),
   total_statements: z.number().int().nonnegative(),
   flagged_statements: z.number().int().nonnegative(),
   omissions_count: z.number().int().nonnegative(),
@@ -68,6 +111,7 @@ export const messageVerificationSchema = z.object({
   duration_ms: z.number().int().nonnegative().nullable(),
   verified_at: z.number().int().nonnegative(),
   error_message: z.string().nullable(),
+  error_code: verificationFailureCodeSchema.nullable().optional().default(null),
 });
 
 export const statementKindSchema = z.enum(['claim', 'omission']);
@@ -155,3 +199,7 @@ export type VerificationJobScopeRow = z.infer<
 >;
 export type StatementVerdictRow = z.infer<typeof statementVerdictSchema>;
 export type StatementSeverityRow = z.infer<typeof statementSeveritySchema>;
+export type VerificationPhaseRow = z.infer<typeof verificationPhaseSchema>;
+export type VerificationFailureCodeRow = z.infer<
+  typeof verificationFailureCodeSchema
+>;

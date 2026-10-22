@@ -17,6 +17,9 @@ vi.mock('@therascript/data', () => ({
     findVerificationJobById: vi.fn(),
     findCandidateMessagesForVerification: vi.fn(),
     updateJobStatus: vi.fn(),
+    updateJobPhase: vi.fn(),
+    clearJobPhase: vi.fn(),
+    incrementJobCounters: vi.fn(),
     transitionJobToProcessing: vi.fn(),
     saveMessageVerificationResult: vi.fn(),
   },
@@ -75,6 +78,13 @@ const {
   JUDGE_CONTEXT_SAFETY_MARGIN_TOKENS,
   JUDGE_MIN_COMPLETION_TOKENS,
   JUDGE_MIN_TRANSCRIPT_TOKENS,
+  buildMessageFailureMessage,
+  buildJobFailureSummary,
+  describeVerificationPhase,
+  truncateVerificationDetail,
+  verificationFailureLabel,
+  CodedVerificationError,
+  readVerificationFailureCode,
   processVerificationJob,
 } = await import('./verificationProcessor.js');
 
@@ -95,6 +105,12 @@ const findCandidatesMock = data.verificationRepository
   .findCandidateMessagesForVerification as unknown as Mock;
 const updateJobStatusMock = data.verificationRepository
   .updateJobStatus as unknown as Mock;
+const updateJobPhaseMock = data.verificationRepository
+  .updateJobPhase as unknown as Mock;
+const clearJobPhaseMock = data.verificationRepository
+  .clearJobPhase as unknown as Mock;
+const incrementJobCountersMock = data.verificationRepository
+  .incrementJobCounters as unknown as Mock;
 const transitionToProcessingMock = data.verificationRepository
   .transitionJobToProcessing as unknown as Mock;
 const saveResultMock = data.verificationRepository
@@ -2183,5 +2199,712 @@ describe('processVerificationJob — missing transcript', () => {
     expect(saveResultMock.mock.calls[0][0].status ?? 'completed').toBe(
       'completed'
     );
+  });
+});
+
+describe('verification failure diagnostics (pure builders)', () => {
+  it('labels every failure category', () => {
+    expect(verificationFailureLabel('empty_output')).toBe(
+      'Judge returned no output'
+    );
+    expect(verificationFailureLabel('malformed_json')).toBe(
+      'Judge returned invalid JSON'
+    );
+    expect(verificationFailureLabel('invalid_structure')).toBe(
+      'Judge JSON failed schema validation'
+    );
+    expect(verificationFailureLabel('provider_error')).toBe(
+      'Judge provider request failed'
+    );
+    expect(verificationFailureLabel('context_budget')).toBe(
+      'Judge context window too small'
+    );
+    expect(verificationFailureLabel('missing_transcript')).toBe(
+      'Session transcript unavailable'
+    );
+  });
+
+  it('builds a per-message record with job/message IDs, model, phase, attempt, duration, and usage', () => {
+    const message = buildMessageFailureMessage({
+      code: 'malformed_json',
+      jobId: 2,
+      messageId: 1914,
+      judgeModel: 'judge-model',
+      phase: 'retrying',
+      attempt: 2,
+      attemptsTotal: 2,
+      durationMs: 1500,
+      promptTokens: 500,
+      completionTokens: 120,
+      detail: 'Unparseable output.',
+    });
+    expect(message).toContain('[malformed_json]');
+    expect(message).toContain('message 1914');
+    expect(message).toContain('job 2');
+    expect(message).toContain('judge "judge-model"');
+    expect(message).toContain('retrying');
+    expect(message).toContain('attempt 2 of 2');
+    expect(message).toContain('1.5s');
+    expect(message).toContain('500+120 tokens');
+    expect(message).toContain('Unparseable output.');
+  });
+
+  it('bounds detail so transcripts and reasoning can never leak into errors', () => {
+    const leak = `TRANSCRIPT: ${'session text '.repeat(200)}`;
+    const message = buildMessageFailureMessage({
+      code: 'provider_error',
+      jobId: 1,
+      messageId: 11,
+      judgeModel: 'judge-model',
+      phase: 'generating',
+      attempt: 1,
+      attemptsTotal: 2,
+      durationMs: 100,
+      promptTokens: 0,
+      completionTokens: 0,
+      detail: leak,
+    });
+    expect(message.length).toBeLessThanOrEqual(300 + 300);
+    // The full 2600-char "transcript" never survives: only a bounded head.
+    expect(message).not.toContain(leak);
+    expect(message).toContain('TRANSCRIPT: session text');
+    expect(truncateVerificationDetail('a\nb\tc')).toBe('a b c');
+  });
+
+  it('builds distinct all-failed and mixed-outcome job summaries', () => {
+    const allFailed = buildJobFailureSummary({
+      jobId: 2,
+      judgeModel: 'judge-model',
+      succeeded: 0,
+      failed: 3,
+      total: 3,
+      firstFailureCode: 'empty_output',
+      firstFailureDetail: 'No visible output.',
+    });
+    expect(allFailed).toMatch(/^All 3 attempted assessments failed/);
+    expect(allFailed).toContain('job 2');
+    expect(allFailed).toContain('[empty_output]');
+
+    const mixed = buildJobFailureSummary({
+      jobId: 2,
+      judgeModel: 'judge-model',
+      succeeded: 2,
+      failed: 1,
+      total: 3,
+      firstFailureCode: 'malformed_json',
+      firstFailureDetail: 'Bad JSON.',
+    });
+    expect(mixed).toMatch(/^Completed with errors: 2 of 3 checked, 1 failed/);
+    expect(mixed).toContain('[malformed_json]');
+    expect(mixed.length).toBeLessThanOrEqual(600);
+  });
+
+  it('reads failure codes only from coded errors', () => {
+    expect(
+      readVerificationFailureCode(
+        new CodedVerificationError('empty_output', 'x')
+      )
+    ).toBe('empty_output');
+    expect(readVerificationFailureCode(new Error('socket hang up'))).toBeNull();
+    expect(readVerificationFailureCode({ code: 'bogus' })).toBeNull();
+    expect(readVerificationFailureCode(null)).toBeNull();
+  });
+
+  it('describes each worker phase, distinguishing the retry attempt', () => {
+    expect(describeVerificationPhase({ phase: 'waiting_for_lock' })).toMatch(
+      /lock/
+    );
+    expect(describeVerificationPhase({ phase: 'loading_judge' })).toMatch(
+      /Judge/
+    );
+    expect(
+      describeVerificationPhase({
+        phase: 'checking_message',
+        messageIndex: 2,
+        totalMessages: 5,
+      })
+    ).toBe('Checking message 2 of 5…');
+    expect(
+      describeVerificationPhase({ phase: 'generating', messageId: 11 })
+    ).toContain('attempt 1');
+    expect(
+      describeVerificationPhase({
+        phase: 'retrying',
+        messageId: 11,
+        attempt: 2,
+      })
+    ).toContain('thinking disabled');
+    expect(describeVerificationPhase({ phase: 'finishing' })).toMatch(
+      /Finishing/
+    );
+  });
+});
+
+describe('processVerificationJob — progress phases and outcome semantics', () => {
+  const paragraphs: TranscriptParagraphData[] = [
+    {
+      id: 0,
+      timestamp: 866,
+      text: 'I take Sertraline every morning and I feel better.',
+      speaker: 'SPEAKER_00',
+    },
+  ];
+
+  const baseRecord = {
+    id: 1,
+    status: 'pending',
+    scope: 'all_unverified',
+    session_ids_json: null,
+    chat_id: null,
+    skip_verified: true,
+    total_messages: 0,
+    processed_messages: 0,
+    total_statements: 0,
+    flagged_statements: 0,
+    omissions_count: 0,
+    created_at: Date.now(),
+    completed_at: null,
+    error_message: null,
+    model_name: 'default',
+    context_size: 32768,
+    thinking_budget: -1,
+    temperature: 0.3,
+    top_p: null,
+    repeat_penalty: null,
+    num_gpu_layers: null,
+    llm_base_url: null,
+  };
+
+  const candidateFor = (id: number, text: string) => ({
+    id,
+    chatId: 5,
+    sessionId: 2,
+    sender: 'ai',
+    text,
+    timestamp: Date.now(),
+    model: 'author-model',
+    userQuestion: 'What did the client say?',
+  });
+
+  async function* fakeStream(
+    chunks: Array<{ content?: string; thinking?: string }>,
+    result: { promptTokens?: number; completionTokens?: number }
+  ): AsyncGenerator<{ content?: string; thinking?: string }, unknown> {
+    for (const chunk of chunks) yield chunk;
+    return result;
+  }
+
+  const validVerdict = {
+    summary_assessment: 'All supported.',
+    claims: [
+      {
+        exact_quote: 'The client takes Sertraline every morning',
+        normalized_claim: 'Client takes Sertraline every morning.',
+        verdict: 'supported',
+        severity: 'none',
+        confidence: 0.9,
+        reasoning: 'Stated verbatim in P#0.',
+        evidence: [],
+      },
+    ],
+    omissions: [],
+  };
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    extractVisibleAnswerMock.mockImplementation((text: string) => text);
+    calculateTokenCountMock.mockReturnValue(10);
+    resolveBudgetStub.mockReturnValue(512);
+    findJobMock.mockReturnValue({ ...baseRecord });
+    findParagraphsMock.mockReturnValue(paragraphs);
+    findTemplateMock.mockReturnValue(null);
+    findSessionMock.mockReturnValue({ showSpeakers: 1 });
+    updateJobStatusMock.mockReturnValue(true);
+    updateJobPhaseMock.mockReturnValue(true);
+    clearJobPhaseMock.mockReturnValue(true);
+    incrementJobCountersMock.mockReturnValue(true);
+    transitionToProcessingMock.mockReturnValue(true);
+    saveResultMock.mockReturnValue({});
+    streamWithRetryMock.mockImplementation(async function* (factory: any) {
+      return yield* factory();
+    });
+  });
+
+  const runJob = () =>
+    processVerificationJob({
+      data: { jobId: 1 },
+      updateProgress: vi.fn(),
+    } as any);
+
+  const phaseEvents = () =>
+    publishEventMock.mock.calls
+      .filter((call) => call[1]?.type === 'phase')
+      .map((call) => call[1]);
+  const terminalEvents = () =>
+    publishEventMock.mock.calls
+      .filter((call) => ['complete', 'error'].includes(call[1]?.type as string))
+      .map((call) => call[1]);
+  const terminalStatusCall = () =>
+    updateJobStatusMock.mock.calls.find((call) =>
+      ['completed', 'failed', 'canceled'].includes(call[1] as string)
+    );
+
+  it('publishes checking/generating phases before the processed count increments on a slow successful run', async () => {
+    findCandidatesMock.mockReturnValue([
+      candidateFor(11, 'The client takes Sertraline every morning.'),
+    ]);
+    streamLlmMock.mockImplementationOnce(() =>
+      fakeStream([{ content: '{"summary_assessment": "ok"}' }], {
+        promptTokens: 90,
+        completionTokens: 40,
+      })
+    );
+    parseJsonMock.mockReturnValue(validVerdict);
+
+    await runJob();
+
+    const phases = phaseEvents();
+    // checking_message (setup) then generating (attempt 1), both while
+    // processed is still 0; finishing closes the run.
+    expect(phases.map((e) => e.phase)).toEqual([
+      'checking_message',
+      'generating',
+      'finishing',
+    ]);
+    expect(phases[0]).toMatchObject({
+      messageId: 11,
+      messageIndex: 1,
+      attempt: 1,
+      processedMessages: 0,
+      totalMessages: 1,
+    });
+    expect(phases[1]).toMatchObject({
+      messageId: 11,
+      messageIndex: 1,
+      attempt: 1,
+      processedMessages: 0,
+    });
+    expect(typeof phases[1].elapsedMs).toBe('number');
+    // The durable snapshot mirrors the transient events for reloads.
+    expect(updateJobPhaseMock).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        currentPhase: 'generating',
+        currentMessageId: 11,
+        currentAttempt: 1,
+      })
+    );
+    // Accurate final result: clean completed with a 1/0 split.
+    expect(terminalStatusCall()).toEqual([
+      1,
+      'completed',
+      expect.objectContaining({
+        succeededMessages: 1,
+        failedMessages: 0,
+        skippedMessages: 0,
+      }),
+    ]);
+    expect(terminalEvents()[0]).toMatchObject({
+      type: 'complete',
+      status: 'completed',
+      succeededMessages: 1,
+      failedMessages: 0,
+    });
+    expect(clearJobPhaseMock).toHaveBeenCalledWith(1);
+  });
+
+  it('publishes a distinct retrying phase with attempt 2 on the JSON-repair retry', async () => {
+    findCandidatesMock.mockReturnValue([
+      candidateFor(11, 'The client takes Sertraline every morning.'),
+    ]);
+    streamLlmMock
+      .mockImplementationOnce(() =>
+        fakeStream([{ content: 'not json at all' }], {
+          promptTokens: 100,
+          completionTokens: 10,
+        })
+      )
+      .mockImplementationOnce(() =>
+        fakeStream([{ content: '{"summary_assessment": "ok"}' }], {
+          promptTokens: 120,
+          completionTokens: 60,
+        })
+      );
+    parseJsonMock.mockReturnValueOnce(null).mockReturnValueOnce(validVerdict);
+
+    await runJob();
+
+    expect(phaseEvents().map((e) => e.phase)).toEqual([
+      'checking_message',
+      'generating',
+      'retrying',
+      'finishing',
+    ]);
+    const retry = phaseEvents().find((e) => e.phase === 'retrying');
+    expect(retry).toMatchObject({ attempt: 2, messageId: 11 });
+    expect(retry.message).toContain('thinking disabled');
+    expect(updateJobPhaseMock).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        currentPhase: 'retrying',
+        currentAttempt: 2,
+      })
+    );
+  });
+
+  it('marks an all-failed run failed with a persisted error summary and counts', async () => {
+    findCandidatesMock.mockReturnValue([
+      candidateFor(11, 'The client takes Sertraline every morning.'),
+    ]);
+    // Both attempts return blank output: empty_output after retry.
+    streamLlmMock.mockImplementation(() =>
+      fakeStream([{ content: '   ' }], {
+        promptTokens: 100,
+        completionTokens: 5,
+      })
+    );
+    parseJsonMock.mockReturnValue(null);
+
+    await runJob();
+
+    expect(saveResultMock.mock.calls[0][0]).toMatchObject({
+      messageId: 11,
+      status: 'failed',
+      errorCode: 'empty_output',
+    });
+    expect(saveResultMock.mock.calls[0][0].errorMessage).toContain(
+      '[empty_output]'
+    );
+    expect(terminalStatusCall()).toEqual([
+      1,
+      'failed',
+      expect.objectContaining({
+        succeededMessages: 0,
+        failedMessages: 1,
+        skippedMessages: 0,
+        errorMessage: expect.stringMatching(
+          /^All 1 attempted assessment failed/
+        ),
+      }),
+    ]);
+    const terminal = terminalEvents()[0];
+    expect(terminal).toMatchObject({
+      type: 'error',
+      status: 'failed',
+      succeededMessages: 0,
+      failedMessages: 1,
+    });
+    expect(terminal.message).toMatch(/^All 1 attempted assessment failed/);
+  });
+
+  it('reports a mixed run as completed with errors while retaining successful assessments', async () => {
+    findCandidatesMock.mockReturnValue([
+      candidateFor(11, 'The client takes Sertraline every morning.'),
+      candidateFor(12, 'The client feels better after journaling.'),
+    ]);
+    // Message 11 succeeds; message 12 fails structurally on both attempts.
+    streamLlmMock
+      .mockImplementationOnce(() =>
+        fakeStream([{ content: '{"summary_assessment": "ok"}' }], {
+          promptTokens: 90,
+          completionTokens: 40,
+        })
+      )
+      .mockImplementation(() =>
+        fakeStream([{ content: '{"error": "nope"}' }], {
+          promptTokens: 100,
+          completionTokens: 10,
+        })
+      );
+    parseJsonMock
+      .mockReturnValueOnce(validVerdict)
+      .mockReturnValue({ error: 'unable to assess' });
+
+    await runJob();
+
+    expect(saveResultMock).toHaveBeenCalledTimes(2);
+    expect(saveResultMock.mock.calls[0][0].status ?? 'completed').toBe(
+      'completed'
+    );
+    expect(saveResultMock.mock.calls[1][0]).toMatchObject({
+      messageId: 12,
+      status: 'failed',
+      errorCode: 'invalid_structure',
+    });
+    // Mixed: completed status but an explicit error summary + split counts,
+    // never unqualified success.
+    expect(terminalStatusCall()).toEqual([
+      1,
+      'completed',
+      expect.objectContaining({
+        succeededMessages: 1,
+        failedMessages: 1,
+        skippedMessages: 0,
+        errorMessage: expect.stringMatching(
+          /^Completed with errors: 1 of 2 checked, 1 failed/
+        ),
+      }),
+    ]);
+    expect(terminalEvents()[0]).toMatchObject({
+      type: 'complete',
+      status: 'completed',
+      succeededMessages: 1,
+      failedMessages: 1,
+    });
+  });
+
+  it('distinguishes malformed JSON from empty output and records usage on failed attempts', async () => {
+    findCandidatesMock.mockReturnValue([
+      candidateFor(11, 'The client takes Sertraline every morning.'),
+    ]);
+    streamLlmMock.mockImplementation(() =>
+      fakeStream([{ content: 'not json at all {{{' }], {
+        promptTokens: 100,
+        completionTokens: 25,
+      })
+    );
+    parseJsonMock.mockReturnValue(null);
+
+    await runJob();
+
+    expect(streamLlmMock).toHaveBeenCalledTimes(2);
+    expect(insertUsageMock).toHaveBeenCalledTimes(2);
+    expect(saveResultMock.mock.calls[0][0]).toMatchObject({
+      status: 'failed',
+      errorCode: 'malformed_json',
+      promptTokens: 200,
+      completionTokens: 50,
+    });
+    expect(saveResultMock.mock.calls[0][0].errorMessage).toContain(
+      'Retries exhausted'
+    );
+  });
+
+  it('records provider_error with bounded detail when the Judge stream throws', async () => {
+    findCandidatesMock.mockReturnValue([
+      candidateFor(11, 'The client takes Sertraline every morning.'),
+    ]);
+    // Synchronous throw inside the factory: the transparent streamWithRetry
+    // rethrows it out of `next()`, like a transport failure would.
+    streamLlmMock.mockImplementation(() => {
+      throw new Error('socket hang up');
+    });
+
+    await runJob();
+
+    expect(saveResultMock.mock.calls[0][0]).toMatchObject({
+      status: 'failed',
+      errorCode: 'provider_error',
+    });
+    expect(saveResultMock.mock.calls[0][0].errorMessage).toContain(
+      'socket hang up'
+    );
+    // Provider failure on the only candidate: the run itself fails.
+    expect(terminalStatusCall()?.[1]).toBe('failed');
+  });
+
+  it('counts trivial and empty fast paths as succeeded and context-budget failures as failed', async () => {
+    findCandidatesMock.mockReturnValue([
+      candidateFor(11, 'Hello! How can I help you today?'),
+      candidateFor(12, '   '),
+      candidateFor(13, 'The client discussed xylophone practice routines.'),
+    ]);
+    // The job-level allocation (empty question/answer skeleton) stays
+    // feasible, but the third candidate's full skeleton overflows: token
+    // counting explodes only for text containing the long answer.
+    calculateTokenCountMock.mockImplementation((text: string) =>
+      text.includes('xylophone') ? 40000 : 10
+    );
+
+    await runJob();
+
+    expect(streamLlmMock).not.toHaveBeenCalled();
+    expect(saveResultMock).toHaveBeenCalledTimes(3);
+    expect(saveResultMock.mock.calls[2][0]).toMatchObject({
+      messageId: 13,
+      status: 'failed',
+      errorCode: 'context_budget',
+    });
+    expect(terminalStatusCall()).toEqual([
+      1,
+      'completed',
+      expect.objectContaining({
+        succeededMessages: 2,
+        failedMessages: 1,
+        skippedMessages: 0,
+      }),
+    ]);
+  });
+
+  it('counts missing-transcript failures distinctly from successes', async () => {
+    findParagraphsMock.mockReturnValue([]);
+    findCandidatesMock.mockReturnValue([
+      candidateFor(11, 'The client takes Sertraline every morning.'),
+      candidateFor(12, 'Hello! How can I help you today?'),
+    ]);
+
+    await runJob();
+
+    expect(saveResultMock.mock.calls[0][0]).toMatchObject({
+      status: 'failed',
+      errorCode: 'missing_transcript',
+    });
+    expect(terminalStatusCall()).toEqual([
+      1,
+      'completed',
+      expect.objectContaining({ succeededMessages: 1, failedMessages: 1 }),
+    ]);
+  });
+
+  it('completes a zero-candidate run cleanly without an error summary', async () => {
+    findCandidatesMock.mockReturnValue([]);
+
+    await runJob();
+
+    expect(terminalStatusCall()).toEqual([
+      1,
+      'completed',
+      expect.objectContaining({
+        succeededMessages: 0,
+        failedMessages: 0,
+        skippedMessages: 0,
+      }),
+    ]);
+    // No errorMessage field: zero candidates is a clean no-op, not a failure.
+    expect(terminalStatusCall()?.[2]).not.toHaveProperty('errorMessage');
+    expect(terminalEvents()[0]).toMatchObject({
+      type: 'complete',
+      status: 'completed',
+      totalMessages: 0,
+    });
+  });
+
+  it('persists skipped counts for unattempted candidates on cancellation', async () => {
+    findCandidatesMock.mockReturnValue([
+      candidateFor(11, 'The client takes Sertraline every morning.'),
+      candidateFor(12, 'The client feels better after journaling.'),
+      candidateFor(13, 'Hello! How can I help you today?'),
+    ]);
+    streamLlmMock.mockImplementation(() =>
+      fakeStream([{ content: '{"summary_assessment": "ok"}' }], {
+        promptTokens: 90,
+        completionTokens: 40,
+      })
+    );
+    parseJsonMock.mockReturnValue(validVerdict);
+    // Cancel lands after the first message completes: flip the row on the
+    // sixth status read (initial + post-load + iter1 check + post-stream
+    // check + progress read, then the iter2 cancel check observes it).
+    let statusReads = 0;
+    findJobMock.mockImplementation(() => {
+      statusReads++;
+      return {
+        ...baseRecord,
+        status: statusReads >= 6 ? 'canceled' : 'processing',
+      };
+    });
+
+    await runJob();
+
+    expect(saveResultMock).toHaveBeenCalledTimes(1);
+    expect(terminalStatusCall()).toEqual([
+      1,
+      'canceled',
+      expect.objectContaining({
+        succeededMessages: 1,
+        failedMessages: 0,
+        skippedMessages: 2,
+      }),
+    ]);
+    expect(clearJobPhaseMock).toHaveBeenCalledWith(1);
+  });
+
+  it('continues past failure-persistence errors and keeps terminal counts accurate', async () => {
+    findCandidatesMock.mockReturnValue([
+      candidateFor(11, 'The client takes Sertraline every morning.'),
+      candidateFor(12, 'The client feels better after journaling.'),
+    ]);
+    streamLlmMock.mockImplementation(() =>
+      fakeStream([{ content: '   ' }], {
+        promptTokens: 100,
+        completionTokens: 5,
+      })
+    );
+    parseJsonMock.mockReturnValue(null);
+    // The first failed-row save throws (DB outage); the second succeeds.
+    saveResultMock
+      .mockImplementationOnce(() => {
+        throw new Error('database is locked');
+      })
+      .mockImplementation(() => ({}));
+
+    await runJob();
+
+    // Both attempts still ran; the run fails with accurate counts even
+    // though one failure row never persisted.
+    expect(streamLlmMock).toHaveBeenCalledTimes(4);
+    expect(terminalStatusCall()).toEqual([
+      1,
+      'failed',
+      expect.objectContaining({ succeededMessages: 0, failedMessages: 2 }),
+    ]);
+    // The unpersisted attempt repaired `processed_messages` manually.
+    expect(incrementJobCountersMock).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ processedMessages: 1, failedMessages: 1 })
+    );
+  });
+
+  it('unloads the Judge model on all-failed, mixed, and canceled terminal paths', async () => {
+    findJobMock.mockReturnValue({ ...baseRecord, model_name: 'judge-model' });
+    loadModelMock.mockResolvedValue(undefined);
+    unloadModelMock.mockResolvedValue(1);
+
+    // All-failed run.
+    findCandidatesMock.mockReturnValue([
+      candidateFor(11, 'The client takes Sertraline every morning.'),
+    ]);
+    streamLlmMock.mockImplementation(() =>
+      fakeStream([{ content: '   ' }], {
+        promptTokens: 100,
+        completionTokens: 5,
+      })
+    );
+    parseJsonMock.mockReturnValue(null);
+    await runJob();
+    expect(terminalStatusCall()?.[1]).toBe('failed');
+    expect(unloadModelMock).toHaveBeenCalledTimes(1);
+
+    // Mixed run.
+    vi.resetAllMocks();
+    extractVisibleAnswerMock.mockImplementation((text: string) => text);
+    calculateTokenCountMock.mockReturnValue(10);
+    resolveBudgetStub.mockReturnValue(512);
+    findJobMock.mockReturnValue({ ...baseRecord, model_name: 'judge-model' });
+    findParagraphsMock.mockReturnValue(paragraphs);
+    findTemplateMock.mockReturnValue(null);
+    findSessionMock.mockReturnValue({ showSpeakers: 1 });
+    updateJobStatusMock.mockReturnValue(true);
+    transitionToProcessingMock.mockReturnValue(true);
+    saveResultMock.mockReturnValue({});
+    streamWithRetryMock.mockImplementation(async function* (factory: any) {
+      return yield* factory();
+    });
+    loadModelMock.mockResolvedValue(undefined);
+    unloadModelMock.mockResolvedValue(1);
+    findCandidatesMock.mockReturnValue([
+      candidateFor(11, 'The client takes Sertraline every morning.'),
+      candidateFor(12, 'Hello! How can I help you today?'),
+    ]);
+    streamLlmMock.mockImplementation(() =>
+      fakeStream([{ content: '   ' }], {
+        promptTokens: 100,
+        completionTokens: 5,
+      })
+    );
+    parseJsonMock.mockReturnValue(null);
+    await runJob();
+    expect(terminalStatusCall()?.[1]).toBe('completed');
+    expect(unloadModelMock).toHaveBeenCalledTimes(1);
   });
 });

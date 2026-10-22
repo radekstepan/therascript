@@ -95,7 +95,7 @@ export const schema = `
 `;
 
 // --- NEW MIGRATION LOGIC ---
-export const LATEST_SCHEMA_VERSION = 20;
+export const LATEST_SCHEMA_VERSION = 21;
 
 // --- NEW SYSTEM PROMPTS ---
 export const SYSTEM_PROMPT_TEMPLATES = {
@@ -805,6 +805,13 @@ function runMigrations(dbInstance: DB) {
               skip_verified INTEGER NOT NULL DEFAULT 1,
               total_messages INTEGER NOT NULL DEFAULT 0,
               processed_messages INTEGER NOT NULL DEFAULT 0,
+              succeeded_messages INTEGER NOT NULL DEFAULT 0,
+              failed_messages INTEGER NOT NULL DEFAULT 0,
+              skipped_messages INTEGER NOT NULL DEFAULT 0,
+              current_phase TEXT NULL,
+              current_message_id INTEGER NULL,
+              current_attempt INTEGER NULL,
+              phase_updated_at INTEGER NULL,
               total_statements INTEGER NOT NULL DEFAULT 0,
               flagged_statements INTEGER NOT NULL DEFAULT 0,
               omissions_count INTEGER NOT NULL DEFAULT 0,
@@ -846,6 +853,7 @@ function runMigrations(dbInstance: DB) {
               duration_ms INTEGER NULL,
               verified_at INTEGER NOT NULL,
               error_message TEXT NULL,
+              error_code TEXT NULL,
               FOREIGN KEY (message_id) REFERENCES messages (id) ON DELETE CASCADE,
               FOREIGN KEY (chat_id) REFERENCES chats (id) ON DELETE CASCADE,
               FOREIGN KEY (session_id) REFERENCES sessions (id) ON DELETE CASCADE,
@@ -887,6 +895,75 @@ function runMigrations(dbInstance: DB) {
         dbInstance.pragma(`user_version = 20`);
         currentVersion = 20;
         console.log('[db Migrator] Version 20 applied.');
+      }
+
+      // NEW MIGRATION: Version 21 for verification progress + failure
+      // diagnostics. Adds per-outcome counters and the live phase snapshot
+      // to verification_jobs (so reconnects/reloads stay understandable),
+      // plus a machine-readable failure category to message_verifications.
+      // Fresh databases already carry these columns via the V20 CREATE
+      // TABLE block above; this ALTER path only upgrades existing DBs.
+      if (currentVersion < 21) {
+        console.log('[db Migrator] Applying version 21...');
+        const verJobColumns = dbInstance.pragma(
+          'table_info(verification_jobs)'
+        ) as { name: string }[];
+        const hasVerJobColumn = (name: string): boolean =>
+          verJobColumns.some((col) => col.name === name);
+        const addVerJobColumn = (ddl: string): void => {
+          dbInstance.exec(`ALTER TABLE verification_jobs ADD COLUMN ${ddl}`);
+        };
+        if (!hasVerJobColumn('succeeded_messages')) {
+          addVerJobColumn('succeeded_messages INTEGER NOT NULL DEFAULT 0');
+        }
+        if (!hasVerJobColumn('failed_messages')) {
+          addVerJobColumn('failed_messages INTEGER NOT NULL DEFAULT 0');
+        }
+        if (!hasVerJobColumn('skipped_messages')) {
+          addVerJobColumn('skipped_messages INTEGER NOT NULL DEFAULT 0');
+        }
+        if (!hasVerJobColumn('current_phase')) {
+          addVerJobColumn('current_phase TEXT NULL');
+        }
+        if (!hasVerJobColumn('current_message_id')) {
+          addVerJobColumn('current_message_id INTEGER NULL');
+        }
+        if (!hasVerJobColumn('current_attempt')) {
+          addVerJobColumn('current_attempt INTEGER NULL');
+        }
+        if (!hasVerJobColumn('phase_updated_at')) {
+          addVerJobColumn('phase_updated_at INTEGER NULL');
+        }
+        // Backfill outcome counters for pre-V21 jobs from their persisted
+        // message rows (verification_job_id survives unless re-audited).
+        dbInstance.exec(`
+          UPDATE verification_jobs
+          SET succeeded_messages = (
+            SELECT COUNT(*) FROM message_verifications mv
+            WHERE mv.verification_job_id = verification_jobs.id
+              AND mv.status = 'completed'
+          ),
+          failed_messages = (
+            SELECT COUNT(*) FROM message_verifications mv
+            WHERE mv.verification_job_id = verification_jobs.id
+              AND mv.status = 'failed'
+          )
+          WHERE succeeded_messages = 0 AND failed_messages = 0
+        `);
+        const verMsgColumns = dbInstance.pragma(
+          'table_info(message_verifications)'
+        ) as { name: string }[];
+        if (!verMsgColumns.some((col) => col.name === 'error_code')) {
+          console.log(
+            '[db Migrator V21] Adding "error_code" to message_verifications...'
+          );
+          dbInstance.exec(
+            'ALTER TABLE message_verifications ADD COLUMN error_code TEXT NULL'
+          );
+        }
+        dbInstance.pragma(`user_version = 21`);
+        currentVersion = 21;
+        console.log('[db Migrator] Version 21 applied.');
       }
     })();
     console.log(

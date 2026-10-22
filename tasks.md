@@ -159,7 +159,7 @@ For each task, run `yarn test` and the builds listed under **Verification** with
 
 **Verification:** `yarn test`; `yarn build:ui`; `yarn build:api` if the endpoint changes. Manually reproduce external file deletion and ordinary in-app deletion.
 
-### - [ ] Task 9: Make verification progress, failures, and history useful for debugging
+### - [x] Task 9: Make verification progress, failures, and history useful for debugging
 
 **Reported Failure:** A one-note run remains at “Processed 0 / 1 messages — auditing newest first” while the LLM generates output. The worker then reports `Judge LLM did not return valid JSON (empty or unparseable output)` for message `1914` in job `2`, but the job is marked completed and the UI provides no useful explanation or history action. These IDs are reproduction context, not values to hard-code.
 

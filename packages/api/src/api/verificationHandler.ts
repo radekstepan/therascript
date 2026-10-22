@@ -21,7 +21,10 @@ import type {
   VerificationGlobalStats,
   VerificationJobScope,
 } from '@therascript/domain';
-import type { FlaggedStatementsResult } from '@therascript/data';
+import type {
+  FailedVerificationItem,
+  FlaggedStatementsResult,
+} from '@therascript/data';
 import {
   addVerificationJob,
   cancelVerificationJobFromQueue,
@@ -381,6 +384,36 @@ export const getVerificationJobHandler = ({
     if (error instanceof ApiError) throw error;
     throw new InternalServerError(
       'Failed to get verification job details.',
+      error instanceof Error ? error : undefined
+    );
+  }
+};
+
+export const getVerificationJobFailuresHandler = ({
+  params,
+  set,
+}: VerificationHandlerContext): {
+  jobId: number;
+  failures: FailedVerificationItem[];
+} => {
+  const jobId = parseJobId(params.jobId);
+  try {
+    const job = verificationRepository.findVerificationJobById(jobId);
+    if (!job) {
+      throw new NotFoundError(`Verification job with ID ${jobId}`);
+    }
+    const failures =
+      verificationRepository.findFailedVerificationsByJobId(jobId);
+    set.status = 200;
+    return { jobId, failures };
+  } catch (error) {
+    console.error(
+      `[VerificationHandler] Error getting failures for verification job ${jobId}:`,
+      error
+    );
+    if (error instanceof ApiError) throw error;
+    throw new InternalServerError(
+      'Failed to get verification job failures.',
       error instanceof Error ? error : undefined
     );
   }

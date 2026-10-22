@@ -640,12 +640,12 @@ describe('importDataService interrupted verification jobs (Task 11)', () => {
 
     const inserts = verificationJobInserts();
     expect(inserts).toHaveLength(2);
-    // INSERT column order: status is args[0], completed_at args[11],
-    // error_message args[12].
+    // INSERT column order: status is args[0], succeeded/failed/skipped
+    // args[7..9], completed_at args[14], error_message args[15].
     for (const { args } of inserts) {
       expect(args[0]).toBe('failed');
-      expect(args[11]).toEqual(expect.any(Number));
-      expect(args[12]).toMatch(/interrupted by backup restore/i);
+      expect(args[14]).toEqual(expect.any(Number));
+      expect(args[15]).toMatch(/interrupted by backup restore/i);
     }
     // No restored row may remain active: the hasActiveVerificationJobs()
     // guard (pending/processing/canceling) must not block new audits.
@@ -680,9 +680,15 @@ describe('importDataService interrupted verification jobs (Task 11)', () => {
       'canceled',
     ]);
     // Untouched rows keep their original completion metadata.
-    expect(inserts[0].args[11]).toBe(300);
-    expect(inserts[0].args[12]).toBeNull();
-    expect(inserts[1].args[12]).toBe('Judge model timed out');
-    expect(inserts[2].args[11]).toBe(302);
+    expect(inserts[0].args[14]).toBe(300);
+    expect(inserts[0].args[15]).toBeNull();
+    expect(inserts[1].args[15]).toBe('Judge model timed out');
+    expect(inserts[2].args[14]).toBe(302);
+    // Pre-V21 backups lack outcome counters: restored as zeros.
+    for (const { args } of inserts) {
+      expect(args[7]).toBe(0);
+      expect(args[8]).toBe(0);
+      expect(args[9]).toBe(0);
+    }
   });
 });

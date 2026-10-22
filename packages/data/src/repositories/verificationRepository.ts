@@ -37,6 +37,9 @@ export interface UpdateVerificationJobFields {
   errorMessage?: string | null;
   totalMessages?: number;
   processedMessages?: number;
+  succeededMessages?: number;
+  failedMessages?: number;
+  skippedMessages?: number;
   totalStatements?: number;
   flaggedStatements?: number;
   omissionsCount?: number;
@@ -46,9 +49,25 @@ export interface UpdateVerificationJobFields {
 export interface VerificationJobCounterDeltas {
   totalMessages?: number;
   processedMessages?: number;
+  succeededMessages?: number;
+  failedMessages?: number;
+  skippedMessages?: number;
   totalStatements?: number;
   flaggedStatements?: number;
   omissionsCount?: number;
+}
+
+export interface UpdateVerificationJobPhaseFields {
+  currentPhase:
+    | 'waiting_for_lock'
+    | 'loading_judge'
+    | 'checking_message'
+    | 'generating'
+    | 'retrying'
+    | 'finishing'
+    | null;
+  currentMessageId?: number | null;
+  currentAttempt?: number | null;
 }
 
 export interface VerificationCandidateFilters {
@@ -98,7 +117,32 @@ export interface SaveMessageVerificationInput {
   completionTokens?: number | null;
   durationMs?: number | null;
   errorMessage?: string | null;
+  errorCode?:
+    | 'empty_output'
+    | 'malformed_json'
+    | 'invalid_structure'
+    | 'provider_error'
+    | 'context_budget'
+    | 'missing_transcript'
+    | null;
   statements?: VerificationStatementInput[];
+}
+
+export interface FailedVerificationItem {
+  messageId: number;
+  chatId: number;
+  sessionId: number;
+  sessionName: string;
+  clientName: string;
+  verificationJobId: number | null;
+  authoredModel: string | null;
+  judgeModel: string;
+  errorCode: string | null;
+  errorMessage: string | null;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  durationMs: number | null;
+  verifiedAt: number;
 }
 
 export interface SessionVerificationDetail {
@@ -189,8 +233,8 @@ const insertJobSql = `
 const selectJobByIdSql = 'SELECT * FROM verification_jobs WHERE id = ?';
 
 const upsertMessageVerificationSql = `
-    INSERT INTO message_verifications (message_id, chat_id, session_id, verification_job_id, authored_model, judge_model, status, total_claims, supported_claims, partial_claims, contradicted_claims, fabricated_claims, omissions_count, accuracy_score, summary_assessment, prompt_tokens, completion_tokens, duration_ms, verified_at, error_message)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO message_verifications (message_id, chat_id, session_id, verification_job_id, authored_model, judge_model, status, total_claims, supported_claims, partial_claims, contradicted_claims, fabricated_claims, omissions_count, accuracy_score, summary_assessment, prompt_tokens, completion_tokens, duration_ms, verified_at, error_message, error_code)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(message_id) DO UPDATE SET
       chat_id = excluded.chat_id,
       session_id = excluded.session_id,
@@ -210,7 +254,8 @@ const upsertMessageVerificationSql = `
       completion_tokens = excluded.completion_tokens,
       duration_ms = excluded.duration_ms,
       verified_at = excluded.verified_at,
-      error_message = excluded.error_message
+      error_message = excluded.error_message,
+      error_code = excluded.error_code
 `;
 const selectVerificationIdByMessageIdSql =
   'SELECT id FROM message_verifications WHERE message_id = ?';
@@ -224,6 +269,15 @@ const insertStatementSql = `
 const mapJobRow = (row: any): BackendVerificationJob => ({
   ...(row as Omit<BackendVerificationJob, 'skip_verified'>),
   skip_verified: row.skip_verified === 1,
+  // V21 columns default defensively so rows selected through older
+  // projections (or partially migrated DBs) still map.
+  succeeded_messages: row.succeeded_messages ?? 0,
+  failed_messages: row.failed_messages ?? 0,
+  skipped_messages: row.skipped_messages ?? 0,
+  current_phase: row.current_phase ?? null,
+  current_message_id: row.current_message_id ?? null,
+  current_attempt: row.current_attempt ?? null,
+  phase_updated_at: row.phase_updated_at ?? null,
 });
 
 const mapMessageRow = (row: any): BackendChatMessage => ({
@@ -403,6 +457,18 @@ export const verificationRepository = {
         sets.push('processed_messages = ?');
         params.push(fields.processedMessages);
       }
+      if (fields.succeededMessages !== undefined) {
+        sets.push('succeeded_messages = ?');
+        params.push(fields.succeededMessages);
+      }
+      if (fields.failedMessages !== undefined) {
+        sets.push('failed_messages = ?');
+        params.push(fields.failedMessages);
+      }
+      if (fields.skippedMessages !== undefined) {
+        sets.push('skipped_messages = ?');
+        params.push(fields.skippedMessages);
+      }
       if (fields.totalStatements !== undefined) {
         sets.push('total_statements = ?');
         params.push(fields.totalStatements);
@@ -427,6 +493,61 @@ export const verificationRepository = {
         error
       );
       throw new Error('Database error updating verification job status.');
+    }
+  },
+
+  /**
+   * Status-preserving phase snapshot write. Records the worker's live phase
+   * (plus the current message/attempt) without touching `status`, so SSE
+   * snapshots and refetches stay truthful across reconnects and reloads.
+   * Terminal transitions clear the phase via `clearJobPhase`.
+   */
+  updateJobPhase: (
+    jobId: number,
+    phase: UpdateVerificationJobPhaseFields
+  ): boolean => {
+    try {
+      const info = run(
+        `UPDATE verification_jobs
+         SET current_phase = ?, current_message_id = ?, current_attempt = ?, phase_updated_at = ?
+         WHERE id = ?`,
+        phase.currentPhase,
+        phase.currentMessageId ?? null,
+        phase.currentAttempt ?? null,
+        Date.now(),
+        jobId
+      );
+      return info.changes > 0;
+    } catch (error) {
+      console.error(
+        `[VerificationRepo] Error updating phase for verification job ${jobId}:`,
+        error
+      );
+      throw new Error('Database error updating verification job phase.');
+    }
+  },
+
+  /**
+   * Clears the live phase snapshot on terminal transitions. Outcome counts
+   * and the error summary (set via `updateJobStatus`) carry the durable
+   * record; a stale "generating" phase must not linger on a finished row.
+   */
+  clearJobPhase: (jobId: number): boolean => {
+    try {
+      const info = run(
+        `UPDATE verification_jobs
+         SET current_phase = NULL, current_message_id = NULL,
+             current_attempt = NULL, phase_updated_at = NULL
+         WHERE id = ?`,
+        jobId
+      );
+      return info.changes > 0;
+    } catch (error) {
+      console.error(
+        `[VerificationRepo] Error clearing phase for verification job ${jobId}:`,
+        error
+      );
+      throw new Error('Database error clearing verification job phase.');
     }
   },
 
@@ -477,6 +598,9 @@ export const verificationRepository = {
       };
       add('total_messages', deltas.totalMessages);
       add('processed_messages', deltas.processedMessages);
+      add('succeeded_messages', deltas.succeededMessages);
+      add('failed_messages', deltas.failedMessages);
+      add('skipped_messages', deltas.skippedMessages);
       add('total_statements', deltas.totalStatements);
       add('flagged_statements', deltas.flaggedStatements);
       add('omissions_count', deltas.omissionsCount);
@@ -596,7 +720,8 @@ export const verificationRepository = {
           payload.completionTokens ?? null,
           payload.durationMs ?? null,
           Date.now(),
-          payload.errorMessage ?? null
+          payload.errorMessage ?? null,
+          payload.errorCode ?? null
         );
         const idRow = get<{ id: number }>(
           selectVerificationIdByMessageIdSql,
@@ -708,6 +833,58 @@ export const verificationRepository = {
         error
       );
       throw new Error('Database error fetching chat verifications.');
+    }
+  },
+
+  /**
+   * Failed message assessments attributable to one job run, newest first.
+   * Powers the Job History "View details" dialog. Rows are matched by
+   * `verification_job_id`, so a later re-audit that overwrites a message's
+   * verification removes it from the earlier job's failure list (the job's
+   * persisted `failed_messages` counter keeps the historical count).
+   */
+  findFailedVerificationsByJobId: (jobId: number): FailedVerificationItem[] => {
+    try {
+      const rows = all<any>(
+        `SELECT mv.message_id AS messageId, mv.chat_id AS chatId,
+                mv.session_id AS sessionId, s.sessionName AS sessionName,
+                s.clientName AS clientName,
+                mv.verification_job_id AS verificationJobId,
+                mv.authored_model AS authoredModel, mv.judge_model AS judgeModel,
+                mv.error_code AS errorCode, mv.error_message AS errorMessage,
+                mv.prompt_tokens AS promptTokens,
+                mv.completion_tokens AS completionTokens,
+                mv.duration_ms AS durationMs, mv.verified_at AS verifiedAt
+         FROM message_verifications mv
+         INNER JOIN sessions s ON s.id = mv.session_id
+         WHERE mv.verification_job_id = ? AND mv.status = 'failed'
+         ORDER BY mv.message_id DESC`,
+        jobId
+      );
+      return rows.map(
+        (row): FailedVerificationItem => ({
+          messageId: row.messageId as number,
+          chatId: row.chatId as number,
+          sessionId: row.sessionId as number,
+          sessionName: row.sessionName as string,
+          clientName: row.clientName as string,
+          verificationJobId: (row.verificationJobId as number | null) ?? null,
+          authoredModel: (row.authoredModel as string | null) ?? null,
+          judgeModel: row.judgeModel as string,
+          errorCode: (row.errorCode as string | null) ?? null,
+          errorMessage: (row.errorMessage as string | null) ?? null,
+          promptTokens: (row.promptTokens as number | null) ?? null,
+          completionTokens: (row.completionTokens as number | null) ?? null,
+          durationMs: (row.durationMs as number | null) ?? null,
+          verifiedAt: row.verifiedAt as number,
+        })
+      );
+    } catch (error) {
+      console.error(
+        `[VerificationRepo] Error finding failed verifications for job ${jobId}:`,
+        error
+      );
+      throw new Error('Database error fetching failed job verifications.');
     }
   },
 

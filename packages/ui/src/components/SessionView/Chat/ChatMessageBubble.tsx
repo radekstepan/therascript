@@ -26,7 +26,10 @@ import type {
   MessageVerification,
   VerifiedStatement,
 } from '../../../api/verification';
-import { deleteMessageVerification } from '../../../api/verification';
+import {
+  deleteMessageVerification,
+  verificationFailureCodeLabel,
+} from '../../../api/verification';
 import {
   VERIFIED_MARK_CLASS,
   getVerdictLabel,
@@ -297,6 +300,12 @@ export function ChatMessageBubble({
   const failedTooltip =
     verification?.status === 'failed'
       ? (verification.error_message ?? 'Verification failed for this message')
+      : null;
+  // Specific persisted failure category (V21+ rows); legacy rows without a
+  // code keep the generic badge text with the full error in the tooltip.
+  const failedBadgeLabel =
+    verification?.status === 'failed'
+      ? verificationFailureCodeLabel(verification.error_code)
       : null;
   const hallucinationCount = showVerificationFooter
     ? verification.contradicted_claims + verification.fabricated_claims
@@ -618,7 +627,7 @@ export function ChatMessageBubble({
                     title={failedTooltip}
                     style={{ flexShrink: 0 }}
                   >
-                    Fact-check failed
+                    {failedBadgeLabel ?? 'Fact-check failed'}
                   </Badge>
                   <Button
                     size="1"

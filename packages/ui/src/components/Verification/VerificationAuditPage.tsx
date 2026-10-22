@@ -28,8 +28,10 @@ import {
   fetchVerificationJobs,
   fetchVerificationStats,
   resetVerifications,
+  verificationJobOutcome,
   type VerificationJob,
   type VerificationJobScope,
+  type VerificationLivePhase,
 } from '../../api/verification';
 import { useVerificationStream } from '../../hooks/useVerificationStream';
 import { toastMessageAtom } from '../../store';
@@ -38,15 +40,33 @@ import { StartVerificationModal } from './StartVerificationModal';
 import { IssuesFeedTab } from './IssuesFeedTab';
 import { CoverageTab } from './CoverageTab';
 import { JobHistoryTab } from './JobHistoryTab';
+import { JobFailuresDialog } from './JobFailuresDialog';
 
 function isActiveJob(job: VerificationJob): boolean {
   return job.status === 'pending' || job.status === 'processing';
 }
 
+function phaseFallbackText(job: VerificationJob): string | null {
+  if (job.status === 'pending') return 'Waiting to start…';
+  if (job.current_phase === 'waiting_for_lock')
+    return 'Waiting for the LLM worker lock…';
+  if (job.current_phase === 'loading_judge') return 'Loading the Judge model…';
+  if (job.current_phase === 'finishing') return 'Finishing audit…';
+  if (job.current_phase && job.current_message_id != null)
+    return `Working on message ${job.current_message_id}…`;
+  if (job.current_phase) return 'Audit in progress…';
+  return null;
+}
+
 function LiveJobBanner({ job }: { job: VerificationJob }) {
   const queryClient = useQueryClient();
   const setToast = useSetAtom(toastMessageAtom);
-  const { job: liveJob, streamError } = useVerificationStream(job.id, {
+  const {
+    job: liveJob,
+    phase,
+    streamError,
+    connectionLost,
+  } = useVerificationStream(job.id, {
     enabled: isActiveJob(job),
   });
   const display = liveJob ?? job;
@@ -54,6 +74,14 @@ function LiveJobBanner({ job }: { job: VerificationJob }) {
     display.total_messages > 0
       ? Math.round((display.processed_messages / display.total_messages) * 100)
       : 0;
+  const succeeded = display.succeeded_messages ?? 0;
+  const failed = display.failed_messages ?? 0;
+  // Live SSE phase first, durable snapshot columns after a reload, then a
+  // static fallback. Never invent token percentages: this is indeterminate
+  // activity while `processed` legitimately stays flat during generation.
+  const livePhase: VerificationLivePhase | null = phase;
+  const phaseText =
+    livePhase?.message ?? phaseFallbackText(display) ?? 'Starting audit…';
 
   const cancelMutation = useMutation({
     mutationFn: cancelVerificationJob,
@@ -108,7 +136,22 @@ function LiveJobBanner({ job }: { job: VerificationJob }) {
           <Progress value={pct} size="2" />
         </Box>
 
+        <Flex align="center" gap="2">
+          <Spinner size="1" aria-hidden="true" />
+          <Text size="2" data-testid="audit-live-phase">
+            {phaseText}
+          </Text>
+        </Flex>
+
         <Flex gap="2" wrap="wrap" align="center">
+          <Badge color="green" variant="soft" size="1">
+            {succeeded} checked
+          </Badge>
+          {failed > 0 && (
+            <Badge color="red" variant="soft" size="1">
+              {failed} failed
+            </Badge>
+          )}
           <Badge color="blue" variant="soft" size="1">
             {display.total_statements} claims verified
           </Badge>
@@ -133,6 +176,63 @@ function LiveJobBanner({ job }: { job: VerificationJob }) {
             Stream notice: {streamError}
           </Text>
         )}
+        {connectionLost && !streamError && (
+          <Text size="1" color="amber">
+            Live updates interrupted — reconnecting; progress reconciles
+            automatically.
+          </Text>
+        )}
+      </Flex>
+    </Card>
+  );
+}
+
+function LastRunResultCard({
+  job,
+  onViewDetails,
+}: {
+  job: VerificationJob;
+  onViewDetails: (job: VerificationJob) => void;
+}) {
+  const outcome = verificationJobOutcome(job);
+  const succeeded = job.succeeded_messages ?? 0;
+  const failed = job.failed_messages ?? 0;
+  const isFailed = outcome === 'failed';
+  return (
+    <Card
+      size="3"
+      style={{
+        borderColor: isFailed ? 'var(--red-a7)' : 'var(--amber-a7)',
+      }}
+    >
+      <Flex direction="column" gap="2">
+        <Flex align="center" justify="between" gap="3" wrap="wrap">
+          <Flex align="center" gap="2">
+            <ExclamationTriangleIcon
+              width={18}
+              height={18}
+              color={isFailed ? 'var(--red-11)' : 'var(--amber-11)'}
+            />
+            <Heading size="3">
+              {isFailed
+                ? `Audit #${job.id} failed`
+                : `Audit #${job.id} completed with errors`}
+            </Heading>
+          </Flex>
+          <Button size="2" variant="soft" onClick={() => onViewDetails(job)}>
+            View details
+          </Button>
+        </Flex>
+        <Text size="2" color="gray">
+          {isFailed
+            ? `All ${failed} attempted assessment${failed === 1 ? '' : 's'} failed — no new verdicts were recorded.`
+            : `${succeeded} of ${job.total_messages} checked, ${failed} failed — successful assessments were kept.`}
+        </Text>
+        {job.error_message && (
+          <Text size="2" as="p" title={job.error_message}>
+            {job.error_message}
+          </Text>
+        )}
       </Flex>
     </Card>
   );
@@ -148,6 +248,7 @@ export function VerificationAuditPage() {
   const [modalSessionIds, setModalSessionIds] = useState<number[] | undefined>(
     undefined
   );
+  const [detailsJob, setDetailsJob] = useState<VerificationJob | null>(null);
 
   const jobsQuery = useQuery({
     queryKey: ['verificationJobs'],
@@ -162,6 +263,19 @@ export function VerificationAuditPage() {
     () => jobsQuery.data?.find(isActiveJob) ?? null,
     [jobsQuery.data]
   );
+
+  // Persistent terminal result for the most recent run: jobs arrive newest
+  // first, so jobs[0] is the last run. Shown only when it ended failed or
+  // mixed — derived from the jobs query, so it survives page reloads.
+  const lastRunResult = useMemo(() => {
+    if (activeJob) return null;
+    const latest = jobsQuery.data?.[0] ?? null;
+    if (!latest) return null;
+    const outcome = verificationJobOutcome(latest);
+    return outcome === 'failed' || outcome === 'completed_with_errors'
+      ? latest
+      : null;
+  }, [activeJob, jobsQuery.data]);
 
   const statsQuery = useQuery({
     queryKey: ['verificationStats'],
@@ -321,6 +435,13 @@ export function VerificationAuditPage() {
 
         {activeJob && <LiveJobBanner job={activeJob} />}
 
+        {!activeJob && lastRunResult && (
+          <LastRunResultCard
+            job={lastRunResult}
+            onViewDetails={setDetailsJob}
+          />
+        )}
+
         {statsQuery.isLoading ? (
           <Flex direction="column" gap="4">
             <Flex gap="4" wrap="wrap">
@@ -400,6 +521,13 @@ export function VerificationAuditPage() {
         onJobCreated={() => {
           queryClient.invalidateQueries({ queryKey: ['verificationJobs'] });
           queryClient.invalidateQueries({ queryKey: ['verificationStats'] });
+        }}
+      />
+
+      <JobFailuresDialog
+        job={detailsJob}
+        onOpenChange={(open) => {
+          if (!open) setDetailsJob(null);
         }}
       />
     </Box>

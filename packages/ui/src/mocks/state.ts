@@ -423,6 +423,13 @@ export interface E2EVerificationJob {
   skip_verified: boolean;
   total_messages: number;
   processed_messages: number;
+  succeeded_messages?: number;
+  failed_messages?: number;
+  skipped_messages?: number;
+  current_phase?: string | null;
+  current_message_id?: number | null;
+  current_attempt?: number | null;
+  phase_updated_at?: number | null;
   total_statements: number;
   flagged_statements: number;
   omissions_count: number;

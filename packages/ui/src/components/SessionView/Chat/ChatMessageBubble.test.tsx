@@ -476,6 +476,27 @@ describe('ChatMessageBubble failed verification', () => {
     );
   });
 
+  it('shows the specific persisted failure category when error_code is present', () => {
+    renderFailedBubble({
+      ...FAILED,
+      error_code: 'malformed_json',
+      error_message:
+        '[malformed_json] Judge returned invalid JSON for message 11: unparseable output. Retries exhausted.',
+    });
+
+    const badge = screen.getByText('Invalid Judge JSON');
+    expect(badge.getAttribute('title')).toContain('[malformed_json]');
+    expect(screen.queryByText('Fact-check failed')).toBeNull();
+    // The Clear action stays available next to the specific label.
+    expect(screen.getByRole('button', { name: 'Clear' })).not.toBeNull();
+  });
+
+  it('keeps the generic badge for legacy rows without an error_code', () => {
+    renderFailedBubble({ ...FAILED, error_code: undefined });
+
+    expect(screen.getByText('Fact-check failed')).not.toBeNull();
+  });
+
   it('calls deleteMessageVerification when Clear is clicked', async () => {
     renderFailedBubble();
 

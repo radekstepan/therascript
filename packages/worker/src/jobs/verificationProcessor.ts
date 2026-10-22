@@ -18,7 +18,9 @@ import type {
   StructuredTranscript,
   TranscriptEvidenceItem,
   TranscriptParagraphData,
+  VerificationFailureCode,
 } from '@therascript/domain';
+import type { VerificationStreamPhase } from '@therascript/queue';
 import {
   streamLlmChatDetailed,
   calculateTokenCount,
@@ -1678,6 +1680,202 @@ async function runJudgeStreamAttempt(options: {
   return { rawOutput, streamResult, durationMs, canceled: isCanceled() };
 }
 
+/**
+ * Maximum characters of provider/parse detail kept in a persisted per-message
+ * error. Diagnostics stay concise and can never leak a full transcript or
+ * raw model reasoning (only bounded summaries and error text are stored).
+ */
+export const VERIFICATION_MAX_ERROR_DETAIL_CHARS = 300;
+
+/** Maximum characters for a persisted job-level error summary. */
+export const VERIFICATION_MAX_JOB_SUMMARY_CHARS = 600;
+
+/** Delay before an uncontended lock wait publishes `waiting_for_lock`. */
+export const VERIFICATION_LOCK_WAIT_PUBLISH_MS = 500;
+
+export function truncateVerificationDetail(detail: string): string {
+  const singleLine = detail.replace(/\s+/g, ' ').trim();
+  if (singleLine.length <= VERIFICATION_MAX_ERROR_DETAIL_CHARS) {
+    return singleLine;
+  }
+  return `${singleLine.slice(0, VERIFICATION_MAX_ERROR_DETAIL_CHARS - 1)}…`;
+}
+
+/** Short human-readable label for a per-message failure category. */
+export function verificationFailureLabel(
+  code: VerificationFailureCode
+): string {
+  switch (code) {
+    case 'empty_output':
+      return 'Judge returned no output';
+    case 'malformed_json':
+      return 'Judge returned invalid JSON';
+    case 'invalid_structure':
+      return 'Judge JSON failed schema validation';
+    case 'provider_error':
+      return 'Judge provider request failed';
+    case 'context_budget':
+      return 'Judge context window too small';
+    case 'missing_transcript':
+      return 'Session transcript unavailable';
+  }
+}
+
+/**
+ * Error carrying a machine-readable per-message failure category. Thrown for
+ * classified Judge failures so the persistence path records `error_code`
+ * alongside the human-readable `error_message`.
+ */
+export class CodedVerificationError extends Error {
+  readonly code: VerificationFailureCode;
+
+  constructor(code: VerificationFailureCode, message: string) {
+    super(message);
+    this.name = 'CodedVerificationError';
+    this.code = code;
+  }
+}
+
+export function readVerificationFailureCode(
+  error: unknown
+): VerificationFailureCode | null {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    typeof (error as { code: unknown }).code === 'string'
+  ) {
+    const code = (error as { code: string }).code;
+    if (
+      code === 'empty_output' ||
+      code === 'malformed_json' ||
+      code === 'invalid_structure' ||
+      code === 'provider_error' ||
+      code === 'context_budget' ||
+      code === 'missing_transcript'
+    ) {
+      return code;
+    }
+  }
+  return null;
+}
+
+function formatVerificationDuration(durationMs: number): string {
+  if (durationMs < 1000) return `${Math.max(0, Math.round(durationMs))}ms`;
+  return `${(durationMs / 1000).toFixed(1)}s`;
+}
+
+/**
+ * Bounded per-message failure record: job/message IDs plus the Judge model,
+ * phase/attempt, duration, and token usage that identify the failed call.
+ * Never includes transcripts or raw reasoning — only the bounded detail.
+ */
+export function buildMessageFailureMessage(options: {
+  code: VerificationFailureCode;
+  jobId: number;
+  messageId: number;
+  judgeModel: string;
+  phase: 'checking_message' | 'generating' | 'retrying';
+  attempt: number;
+  attemptsTotal: number;
+  durationMs: number;
+  promptTokens: number;
+  completionTokens: number;
+  detail: string;
+}): string {
+  const {
+    code,
+    jobId,
+    messageId,
+    judgeModel,
+    phase,
+    attempt,
+    attemptsTotal,
+    durationMs,
+    promptTokens,
+    completionTokens,
+    detail,
+  } = options;
+  const phaseLabel = phase === 'checking_message' ? 'setup' : phase;
+  return (
+    `[${code}] ${verificationFailureLabel(code)} for message ${messageId} ` +
+    `(job ${jobId}, judge "${judgeModel}", ${phaseLabel}, ` +
+    `attempt ${attempt} of ${attemptsTotal}, ` +
+    `${formatVerificationDuration(durationMs)}, ` +
+    `${promptTokens}+${completionTokens} tokens): ` +
+    truncateVerificationDetail(detail)
+  );
+}
+
+/**
+ * Bounded job-level error summary for all-failed and mixed-outcome runs.
+ * Carries counts plus the first failure's category so history rows and the
+ * terminal banner stay debuggable without opening every message.
+ */
+export function buildJobFailureSummary(options: {
+  jobId: number;
+  judgeModel: string;
+  succeeded: number;
+  failed: number;
+  total: number;
+  firstFailureCode: VerificationFailureCode | null;
+  firstFailureDetail: string | null;
+}): string {
+  const {
+    jobId,
+    judgeModel,
+    succeeded,
+    failed,
+    total,
+    firstFailureCode,
+    firstFailureDetail,
+  } = options;
+  const headline =
+    succeeded === 0
+      ? `All ${failed} attempted assessment${failed === 1 ? '' : 's'} failed`
+      : `Completed with errors: ${succeeded} of ${total} checked, ${failed} failed`;
+  let summary =
+    `${headline} (job ${jobId}, judge "${judgeModel}"). ` +
+    (firstFailureCode && firstFailureDetail
+      ? `First failure [${firstFailureCode}]: ${truncateVerificationDetail(firstFailureDetail)}`
+      : 'No failure detail recorded.');
+  if (summary.length > VERIFICATION_MAX_JOB_SUMMARY_CHARS) {
+    summary = `${summary.slice(0, VERIFICATION_MAX_JOB_SUMMARY_CHARS - 1)}…`;
+  }
+  return summary;
+}
+
+/** Human-readable one-liner for a worker phase publish. */
+export function describeVerificationPhase(options: {
+  phase: VerificationStreamPhase;
+  messageIndex?: number;
+  totalMessages?: number;
+  messageId?: number;
+  attempt?: number;
+}): string {
+  const { phase, messageIndex, totalMessages, messageId, attempt } = options;
+  switch (phase) {
+    case 'waiting_for_lock':
+      return 'Waiting for the LLM worker lock…';
+    case 'loading_judge':
+      return 'Loading the Judge model…';
+    case 'checking_message':
+      return messageIndex !== undefined && totalMessages !== undefined
+        ? `Checking message ${messageIndex} of ${totalMessages}…`
+        : 'Checking message…';
+    case 'generating':
+      return messageId !== undefined
+        ? `Generating assessment for message ${messageId} (attempt 1)…`
+        : 'Generating assessment (attempt 1)…';
+    case 'retrying':
+      return messageId !== undefined
+        ? `Retrying message ${messageId} with thinking disabled (attempt ${attempt ?? 2})…`
+        : `Retrying with thinking disabled (attempt ${attempt ?? 2})…`;
+    case 'finishing':
+      return 'Finishing audit…';
+  }
+}
+
 export async function processVerificationJob(
   job: Job<VerificationJobData, any, string>
 ) {
@@ -1697,14 +1895,171 @@ export async function processVerificationJob(
   let judgeModel = 'default';
   let judgeModelAcquired = false;
 
+  // Finished-attempt outcome split. `processed` stays the count of finished
+  // attempts (successes + failures); these counters break it down so failed
+  // attempts are never equated with successful checks. In-memory values are
+  // authoritative at terminal transitions (persisted absolutely), while
+  // incremental DB writes keep reloads truthful mid-run.
+  let succeeded = 0;
+  let failed = 0;
+  let totalCandidates = 0;
+  const processingStartTime = Date.now();
+  // Holder object (not a narrowed `let`) so closure writes in
+  // `noteFirstFailure` are visible at the terminal transition below.
+  const firstFailureHolder: {
+    current: { code: VerificationFailureCode; detail: string } | null;
+  } = { current: null };
+
+  /**
+   * Publish a lifecycle phase change: transient SSE event plus a durable
+   * phase snapshot on the job row (reconnects/page reloads read the row).
+   * Phase persistence failures are logged, never fatal — the audit itself
+   * must not fail because a progress write failed.
+   */
+  const publishPhase = (
+    phase: VerificationStreamPhase,
+    options: {
+      processed: number;
+      messageId?: number;
+      chatId?: number;
+      sessionId?: number;
+      messageIndex?: number;
+      attempt?: number;
+    }
+  ): void => {
+    const { processed, messageId, chatId, sessionId, messageIndex, attempt } =
+      options;
+    try {
+      verificationRepository.updateJobPhase(jobId, {
+        currentPhase: phase,
+        currentMessageId: messageId ?? null,
+        currentAttempt: attempt ?? null,
+      });
+    } catch (phaseError) {
+      console.warn(
+        `[Verification Worker ${jobId}] Failed to persist phase ${phase}:`,
+        phaseError
+      );
+    }
+    publishVerificationEvent(jobId, {
+      type: 'phase',
+      phase,
+      message: describeVerificationPhase({
+        phase,
+        messageIndex,
+        totalMessages: totalCandidates > 0 ? totalCandidates : undefined,
+        messageId,
+        attempt,
+      }),
+      totalMessages: totalCandidates > 0 ? totalCandidates : undefined,
+      processedMessages: processed,
+      succeededMessages: succeeded,
+      failedMessages: failed,
+      skippedMessages: 0,
+      messageId,
+      chatId,
+      sessionId,
+      messageIndex,
+      attempt,
+      elapsedMs: Date.now() - processingStartTime,
+    });
+  };
+
+  /**
+   * Terminal transition helper: persists the authoritative outcome split
+   * absolutely (self-healing any missed incremental write), clears the
+   * live phase snapshot, and publishes the terminal event with counts.
+   */
+  const finishJobTerminal = async (
+    status: 'completed' | 'failed' | 'canceled',
+    options: {
+      errorMessage?: string | null;
+      eventType: 'complete' | 'error' | 'status';
+      message?: string;
+    }
+  ): Promise<void> => {
+    const skipped = Math.max(0, totalCandidates - succeeded - failed);
+    try {
+      verificationRepository.updateJobStatus(jobId, status, {
+        succeededMessages: succeeded,
+        failedMessages: failed,
+        skippedMessages: skipped,
+        ...(options.errorMessage !== undefined
+          ? { errorMessage: options.errorMessage }
+          : {}),
+      });
+    } catch (statusError) {
+      console.error(
+        `[Verification Worker ${jobId}] Failed to persist terminal ${status} counters:`,
+        statusError
+      );
+    }
+    try {
+      verificationRepository.clearJobPhase(jobId);
+    } catch (phaseError) {
+      console.warn(
+        `[Verification Worker ${jobId}] Failed to clear terminal phase:`,
+        phaseError
+      );
+    }
+    await job.updateProgress(100);
+    const fresh = (() => {
+      try {
+        return verificationRepository.findVerificationJobById(jobId);
+      } catch {
+        return null;
+      }
+    })();
+    publishVerificationEvent(jobId, {
+      type: options.eventType,
+      status,
+      ...(options.message !== undefined ? { message: options.message } : {}),
+      totalMessages: totalCandidates,
+      processedMessages: succeeded + failed,
+      succeededMessages: succeeded,
+      failedMessages: failed,
+      skippedMessages: skipped,
+      totalStatements: fresh?.total_statements ?? 0,
+      flaggedStatements: fresh?.flagged_statements ?? 0,
+      omissionsCount: fresh?.omissions_count ?? 0,
+      elapsedMs: Date.now() - processingStartTime,
+    });
+  };
+
+  /** Best-effort incremental outcome write; warns and continues on failure. */
+  const tallyOutcome = (outcome: 'succeeded' | 'failed'): void => {
+    if (outcome === 'succeeded') succeeded++;
+    else failed++;
+    try {
+      verificationRepository.incrementJobCounters(
+        jobId,
+        outcome === 'succeeded'
+          ? { succeededMessages: 1 }
+          : { failedMessages: 1 }
+      );
+    } catch (counterError) {
+      console.warn(
+        `[Verification Worker ${jobId}] Failed to increment ${outcome} counter:`,
+        counterError
+      );
+    }
+  };
+
+  const noteFirstFailure = (
+    code: VerificationFailureCode,
+    detail: string
+  ): void => {
+    if (!firstFailureHolder.current) {
+      firstFailureHolder.current = { code, detail };
+    }
+  };
+
   try {
     let jobRecord = verificationRepository.findVerificationJobById(jobId);
     if (!jobRecord) throw new Error(`Job ${jobId} not found in database.`);
     if (jobRecord.status === 'canceled') {
-      await job.updateProgress(100);
-      publishVerificationEvent(jobId, {
-        type: 'status',
-        status: 'canceled',
+      await finishJobTerminal('canceled', {
+        eventType: 'status',
         message: 'Job was canceled before processing started.',
       });
       return;
@@ -1741,6 +2096,7 @@ export async function processVerificationJob(
 
     // --- LOAD MODEL ---
     if (jobRecord.model_name && jobRecord.model_name !== 'default') {
+      publishPhase('loading_judge', { processed: 0 });
       try {
         console.log(
           `[Verification Worker ${jobId}] Ensuring model is loaded... (baseUrl=${judgeBaseUrl})`
@@ -1766,21 +2122,18 @@ export async function processVerificationJob(
         ) {
           // The user canceled while the model was loading: preserve the
           // cancellation instead of overwriting it with `failed`.
-          verificationRepository.updateJobStatus(jobId, 'canceled');
-          await job.updateProgress(100);
-          publishVerificationEvent(jobId, {
-            type: 'status',
-            status: 'canceled',
+          await finishJobTerminal('canceled', {
+            eventType: 'status',
             message: 'Job canceled by user.',
           });
           return;
         }
-        verificationRepository.updateJobStatus(jobId, 'failed', {
+        // finishJobTerminal publishes the terminal `failed` event; the
+        // rethrow below only marks the BullMQ job failed (the outer catch
+        // skips already-terminal rows, so no duplicate event is sent).
+        await finishJobTerminal('failed', {
+          eventType: 'error',
           errorMessage: `Failed to load model: ${loadError.message}`,
-        });
-        publishVerificationEvent(jobId, {
-          type: 'error',
-          status: 'failed',
           message: `Failed to load model: ${loadError.message}`,
         });
         throw loadError;
@@ -1791,11 +2144,8 @@ export async function processVerificationJob(
     // row so the `processing` transition below cannot overwrite `canceled`.
     jobRecord = verificationRepository.findVerificationJobById(jobId);
     if (!jobRecord || jobRecord.status === 'canceled') {
-      await job.updateProgress(100);
-      verificationRepository.updateJobStatus(jobId, 'canceled');
-      publishVerificationEvent(jobId, {
-        type: 'status',
-        status: 'canceled',
+      await finishJobTerminal('canceled', {
+        eventType: 'status',
         message: 'Job canceled by user.',
       });
       return;
@@ -1836,21 +2186,21 @@ export async function processVerificationJob(
       // Lost a race with a terminal transition (e.g. the user canceled
       // after the post-load re-read): never revive the terminal row.
       const fresh = verificationRepository.findVerificationJobById(jobId);
-      await job.updateProgress(100);
+      totalCandidates = candidates.length;
       if (!fresh || fresh.status === 'canceled') {
-        verificationRepository.updateJobStatus(jobId, 'canceled');
-        publishVerificationEvent(jobId, {
-          type: 'status',
-          status: 'canceled',
+        await finishJobTerminal('canceled', {
+          eventType: 'status',
           message: 'Job canceled by user.',
         });
       } else {
         console.warn(
           `[Verification Worker ${jobId}] Job became ${fresh.status} before processing started; leaving terminal state untouched.`
         );
+        await job.updateProgress(100);
       }
       return;
     }
+    totalCandidates = candidates.length;
     await job.updateProgress(2);
     publishVerificationEvent(jobId, {
       type: 'status',
@@ -1858,19 +2208,17 @@ export async function processVerificationJob(
       message: `Auditing ${candidates.length} message(s), newest first.`,
       totalMessages: candidates.length,
       processedMessages: 0,
+      succeededMessages: 0,
+      failedMessages: 0,
+      skippedMessages: 0,
     });
 
     if (candidates.length === 0) {
-      verificationRepository.updateJobStatus(jobId, 'completed');
-      await job.updateProgress(100);
-      publishVerificationEvent(jobId, {
-        type: 'complete',
-        status: 'completed',
-        totalMessages: 0,
-        processedMessages: 0,
-        totalStatements: 0,
-        flaggedStatements: 0,
-        omissionsCount: 0,
+      // Zero-candidate run: a clean no-op, distinct from all-failed (which
+      // has attempted assessments and lands on `failed`).
+      await finishJobTerminal('completed', {
+        eventType: 'complete',
+        message: 'No messages needed verification.',
       });
       console.log(
         `[Verification Worker] Job ${jobId} completed (no candidates).`
@@ -1928,24 +2276,28 @@ export async function processVerificationJob(
         type: 'progress',
         totalMessages: candidates.length,
         processedMessages: processed,
+        succeededMessages: succeeded,
+        failedMessages: failed,
+        skippedMessages: 0,
         totalStatements: fresh?.total_statements ?? 0,
         flaggedStatements: fresh?.flagged_statements ?? 0,
         omissionsCount: fresh?.omissions_count ?? 0,
+        elapsedMs: Date.now() - processingStartTime,
         ...extra,
       });
     };
 
-    for (const candidate of candidates) {
+    for (
+      let candidateIndex = 0;
+      candidateIndex < candidates.length;
+      candidateIndex++
+    ) {
+      const candidate = candidates[candidateIndex];
       jobRecord = verificationRepository.findVerificationJobById(jobId);
       if (!jobRecord || jobRecord.status === 'canceled') {
-        await job.updateProgress(100);
-        verificationRepository.updateJobStatus(jobId, 'canceled');
-        publishVerificationEvent(jobId, {
-          type: 'status',
-          status: 'canceled',
+        await finishJobTerminal('canceled', {
+          eventType: 'status',
           message: 'Job canceled by user.',
-          totalMessages: candidates.length,
-          processedMessages: processed,
         });
         return;
       }
@@ -1954,6 +2306,19 @@ export async function processVerificationJob(
       const chatId = candidate.chatId;
       const sessionId = candidate.sessionId;
       const authoredModel = candidate.model ?? null;
+      const messageIndex = candidateIndex + 1;
+
+      // Per-message setup phase (fast-path checks, transcript load,
+      // context budgeting) — published before any LLM work so a slow
+      // run shows activity while `processed` legitimately stays flat.
+      publishPhase('checking_message', {
+        processed,
+        messageId,
+        chatId,
+        sessionId,
+        messageIndex,
+        attempt: 1,
+      });
 
       // Token/duration accumulators across the initial Judge call + the
       // single JSON-repair retry. Declared outside `try` so the failure
@@ -1980,6 +2345,7 @@ export async function processVerificationJob(
             summaryAssessment: 'No verifiable content in AI response.',
             statements: [],
           });
+          tallyOutcome('succeeded');
           processed++;
           await job.updateProgress(
             Math.round((processed / candidates.length) * 100)
@@ -2017,6 +2383,7 @@ export async function processVerificationJob(
             durationMs: 0,
             statements: [],
           });
+          tallyOutcome('succeeded');
           processed++;
           await job.updateProgress(
             Math.round((processed / candidates.length) * 100)
@@ -2042,6 +2409,8 @@ export async function processVerificationJob(
           console.warn(
             `[Verification Worker ${jobId}] Skipping judge call for message ${messageId}: session ${sessionId} has no transcript paragraphs.`
           );
+          const missingDetail =
+            'Session transcript has no paragraphs; cannot verify substantive claims without ground truth.';
           verificationRepository.saveMessageVerificationResult({
             messageId,
             chatId,
@@ -2050,13 +2419,27 @@ export async function processVerificationJob(
             authoredModel,
             judgeModel,
             status: 'failed',
-            errorMessage:
-              'Session transcript has no paragraphs; cannot verify substantive claims without ground truth.',
+            errorMessage: buildMessageFailureMessage({
+              code: 'missing_transcript',
+              jobId,
+              messageId,
+              judgeModel,
+              phase: 'checking_message',
+              attempt: 1,
+              attemptsTotal: 1,
+              durationMs: 0,
+              promptTokens: 0,
+              completionTokens: 0,
+              detail: missingDetail,
+            }),
+            errorCode: 'missing_transcript',
             promptTokens: 0,
             completionTokens: 0,
             durationMs: 0,
             statements: [],
           });
+          noteFirstFailure('missing_transcript', missingDetail);
+          tallyOutcome('failed');
           processed++;
           await job.updateProgress(
             Math.round((processed / candidates.length) * 100)
@@ -2092,12 +2475,27 @@ export async function processVerificationJob(
             authoredModel,
             judgeModel,
             status: 'failed',
-            errorMessage: allocation.reason,
+            errorMessage: buildMessageFailureMessage({
+              code: 'context_budget',
+              jobId,
+              messageId,
+              judgeModel,
+              phase: 'checking_message',
+              attempt: 1,
+              attemptsTotal: 1,
+              durationMs: 0,
+              promptTokens: 0,
+              completionTokens: 0,
+              detail: allocation.reason,
+            }),
+            errorCode: 'context_budget',
             promptTokens: 0,
             completionTokens: 0,
             durationMs: 0,
             statements: [],
           });
+          noteFirstFailure('context_budget', allocation.reason);
+          tallyOutcome('failed');
           processed++;
           await job.updateProgress(
             Math.round((processed / candidates.length) * 100)
@@ -2157,14 +2555,9 @@ export async function processVerificationJob(
           return !fresh || fresh.status === 'canceled';
         };
         const finishCanceled = async (): Promise<void> => {
-          await job.updateProgress(100);
-          verificationRepository.updateJobStatus(jobId, 'canceled');
-          publishVerificationEvent(jobId, {
-            type: 'status',
-            status: 'canceled',
+          await finishJobTerminal('canceled', {
+            eventType: 'status',
             message: 'Job canceled by user.',
-            totalMessages: candidates.length,
-            processedMessages: processed,
           });
         };
         // Log usage immediately after each LLM call (before JSON parsing)
@@ -2193,6 +2586,17 @@ export async function processVerificationJob(
           }
         };
 
+        // First Judge attempt (attempt 1 of 2): thinking enabled per the
+        // job budget. Unclassified stream errors become `provider_error` in
+        // the catch below; classified JSON failures throw coded errors.
+        publishPhase('generating', {
+          processed,
+          messageId,
+          chatId,
+          sessionId,
+          messageIndex,
+          attempt: 1,
+        });
         const firstAttempt = await runJudgeStreamAttempt({
           jobId,
           messageId,
@@ -2216,6 +2620,8 @@ export async function processVerificationJob(
 
         let parsed = parseJudgeJson<RawJudgeOutput>(firstAttempt.rawOutput);
         let structure = validateJudgeOutputStructure(parsed);
+        let usedRetry = false;
+        let lastRawOutput = firstAttempt.rawOutput;
         if ((!parsed || !structure.valid) && !isCanceled()) {
           // One repair retry with thinking disabled and low-variance
           // sampling: reasoning output is the usual reason the first call
@@ -2227,6 +2633,14 @@ export async function processVerificationJob(
                 ? `failed structural validation (${structure.reason}); retrying once with thinking disabled.`
                 : `failed JSON parsing; retrying once with thinking disabled.`)
           );
+          publishPhase('retrying', {
+            processed,
+            messageId,
+            chatId,
+            sessionId,
+            messageIndex,
+            attempt: 2,
+          });
           const retryMessages: BackendChatMessage[] = [
             judgeMessages[0],
             {
@@ -2257,17 +2671,61 @@ export async function processVerificationJob(
             await finishCanceled();
             return;
           }
+          usedRetry = true;
+          lastRawOutput = retryAttempt.rawOutput;
           parsed = parseJudgeJson<RawJudgeOutput>(retryAttempt.rawOutput);
           structure = validateJudgeOutputStructure(parsed);
         }
         if (!parsed) {
-          throw new Error(
-            'Judge LLM did not return valid JSON (empty or unparseable output).'
+          // Empty visible output (thinking-only / blank) vs. malformed JSON
+          // are distinct debuggable failures; both exhausted the retries.
+          const visibleContent = extractVisibleAnswer(lastRawOutput).trim();
+          const code: VerificationFailureCode =
+            visibleContent.length === 0 ? 'empty_output' : 'malformed_json';
+          const detail =
+            code === 'empty_output'
+              ? 'Judge LLM returned no visible output (empty or thinking-only response).'
+              : 'Judge LLM did not return valid JSON (unparseable output).';
+          throw new CodedVerificationError(
+            code,
+            buildMessageFailureMessage({
+              code,
+              jobId,
+              messageId,
+              judgeModel,
+              phase: usedRetry ? 'retrying' : 'generating',
+              attempt: usedRetry ? 2 : 1,
+              attemptsTotal: 2,
+              durationMs: accDurationMs,
+              promptTokens: accPromptTokens,
+              completionTokens: accCompletionTokens,
+              detail: usedRetry
+                ? `${detail} Retries exhausted (1 retry with thinking disabled).`
+                : detail,
+            })
           );
         }
         if (!structure.valid) {
-          throw new Error(
-            `Judge LLM returned structurally invalid JSON (${structure.reason}); cannot audit reliably.`
+          const detail =
+            `Judge LLM returned structurally invalid JSON (${structure.reason}); ` +
+            'cannot audit reliably.';
+          throw new CodedVerificationError(
+            'invalid_structure',
+            buildMessageFailureMessage({
+              code: 'invalid_structure',
+              jobId,
+              messageId,
+              judgeModel,
+              phase: usedRetry ? 'retrying' : 'generating',
+              attempt: usedRetry ? 2 : 1,
+              attemptsTotal: 2,
+              durationMs: accDurationMs,
+              promptTokens: accPromptTokens,
+              completionTokens: accCompletionTokens,
+              detail: usedRetry
+                ? `${detail} Retries exhausted (1 retry with thinking disabled).`
+                : detail,
+            })
           );
         }
         // Hydrate Judge evidence against ground-truth transcript paragraphs:
@@ -2362,6 +2820,7 @@ export async function processVerificationJob(
           statements,
         });
 
+        tallyOutcome('succeeded');
         processed++;
         await job.updateProgress(
           Math.round((processed / candidates.length) * 100)
@@ -2391,6 +2850,39 @@ export async function processVerificationJob(
           `[Verification Worker ${jobId}] Failed to verify message ${messageId}:`,
           messageError
         );
+        // Classified Judge failures throw CodedVerificationError with a
+        // pre-built message; anything else (provider/transport errors from
+        // the stream, unexpected bugs) becomes `provider_error` with the
+        // bounded raw detail. Either way the failed row carries job/message
+        // IDs, the Judge model, attempt, duration, and token usage.
+        const codedMessage =
+          messageError instanceof CodedVerificationError
+            ? messageError.message
+            : null;
+        const code: VerificationFailureCode =
+          readVerificationFailureCode(messageError) ?? 'provider_error';
+        const rawDetail =
+          messageError?.message ?? String(messageError ?? 'unknown error');
+        const failureMessage =
+          codedMessage ??
+          buildMessageFailureMessage({
+            code,
+            jobId,
+            messageId,
+            judgeModel,
+            phase: 'generating',
+            attempt: 1,
+            attemptsTotal: 2,
+            durationMs: accDurationMs,
+            promptTokens: accPromptTokens,
+            completionTokens: accCompletionTokens,
+            detail:
+              code === 'provider_error'
+                ? `Judge provider request failed: ${rawDetail}`
+                : rawDetail,
+          });
+        noteFirstFailure(code, rawDetail);
+        let failurePersisted = false;
         try {
           verificationRepository.saveMessageVerificationResult({
             messageId,
@@ -2400,16 +2892,35 @@ export async function processVerificationJob(
             authoredModel,
             judgeModel,
             status: 'failed',
-            errorMessage: messageError?.message ?? String(messageError),
+            errorMessage: failureMessage,
+            errorCode: code,
             promptTokens: accPromptTokens,
             completionTokens: accCompletionTokens,
             durationMs: accDurationMs,
             statements: [],
           });
+          failurePersisted = true;
         } catch (persistError) {
           console.error(
             `[Verification Worker ${jobId}] Failed to persist failure for message ${messageId}:`,
             persistError
+          );
+        }
+        // The failed-row save already bumps `processed_messages`; only when
+        // that save itself threw must the counters be repaired manually.
+        // Either way the failure counts toward `failed`, never `succeeded`.
+        failed++;
+        try {
+          verificationRepository.incrementJobCounters(
+            jobId,
+            failurePersisted
+              ? { failedMessages: 1 }
+              : { processedMessages: 1, failedMessages: 1 }
+          );
+        } catch (counterError) {
+          console.warn(
+            `[Verification Worker ${jobId}] Failed to increment failure counters for message ${messageId}:`,
+            counterError
           );
         }
         processed++;
@@ -2422,46 +2933,105 @@ export async function processVerificationJob(
 
     jobRecord = verificationRepository.findVerificationJobById(jobId);
     if (!jobRecord || jobRecord.status === 'canceled') {
-      await job.updateProgress(100);
-      verificationRepository.updateJobStatus(jobId, 'canceled');
-      publishVerificationEvent(jobId, {
-        type: 'status',
-        status: 'canceled',
+      await finishJobTerminal('canceled', {
+        eventType: 'status',
         message: 'Job canceled by user.',
-        totalMessages: candidates.length,
-        processedMessages: processed,
       });
       return;
     }
 
-    const finalJob = verificationRepository.findVerificationJobById(jobId);
-    await job.updateProgress(100);
-    verificationRepository.updateJobStatus(jobId, 'completed');
-    publishVerificationEvent(jobId, {
-      type: 'complete',
-      status: 'completed',
-      totalMessages: candidates.length,
-      processedMessages: processed,
-      totalStatements: finalJob?.total_statements ?? 0,
-      flaggedStatements: finalJob?.flagged_statements ?? 0,
-      omissionsCount: finalJob?.omissions_count ?? 0,
-    });
-    console.log(`[Verification Worker] Job ${jobId} completed successfully.`);
+    publishPhase('finishing', { processed });
+    // Terminal outcome from the finished-attempt split — never unqualified
+    // success when failures happened:
+    // - every attempted assessment failed -> `failed` with an error summary;
+    // - mixed run -> `completed` with "Completed with errors" summary and
+    //   counts (UI renders the mixed label from `failed_messages > 0`);
+    // - clean run -> `completed` with no error summary.
+    if (failed > 0 && succeeded === 0) {
+      const summary = buildJobFailureSummary({
+        jobId,
+        judgeModel,
+        succeeded,
+        failed,
+        total: candidates.length,
+        firstFailureCode: firstFailureHolder.current?.code ?? null,
+        firstFailureDetail: firstFailureHolder.current?.detail ?? null,
+      });
+      await finishJobTerminal('failed', {
+        eventType: 'error',
+        errorMessage: summary,
+        message: summary,
+      });
+      console.error(
+        `[Verification Worker] Job ${jobId} failed: ${succeeded} succeeded, ${failed} failed.`
+      );
+    } else if (failed > 0) {
+      const summary = buildJobFailureSummary({
+        jobId,
+        judgeModel,
+        succeeded,
+        failed,
+        total: candidates.length,
+        firstFailureCode: firstFailureHolder.current?.code ?? null,
+        firstFailureDetail: firstFailureHolder.current?.detail ?? null,
+      });
+      await finishJobTerminal('completed', {
+        eventType: 'complete',
+        errorMessage: summary,
+        message: summary,
+      });
+      console.warn(
+        `[Verification Worker] Job ${jobId} completed with errors: ${succeeded} succeeded, ${failed} failed.`
+      );
+    } else {
+      await finishJobTerminal('completed', { eventType: 'complete' });
+      console.log(
+        `[Verification Worker] Job ${jobId} completed successfully (${succeeded}/${candidates.length} checked).`
+      );
+    }
   } catch (error: any) {
     console.error(`[Verification Worker] FAILED job ${jobId}:`, error);
     try {
       const jobRecord = verificationRepository.findVerificationJobById(jobId);
-      if (jobRecord && jobRecord.status !== 'canceled') {
+      if (
+        jobRecord &&
+        jobRecord.status !== 'canceled' &&
+        jobRecord.status !== 'completed' &&
+        jobRecord.status !== 'failed'
+      ) {
+        // Unexpected failure before (or outside) the per-message loop:
+        // persist the partial outcome split so the terminal row stays
+        // consistent with the incremental counters.
+        const skipped = Math.max(0, totalCandidates - succeeded - failed);
         verificationRepository.updateJobStatus(jobId, 'failed', {
           errorMessage: error?.message ?? String(error),
+          succeededMessages: succeeded,
+          failedMessages: failed,
+          skippedMessages: skipped,
         });
+        try {
+          verificationRepository.clearJobPhase(jobId);
+        } catch {
+          // Best-effort; the failed status above is the durable record.
+        }
         publishVerificationEvent(jobId, {
           type: 'error',
           status: 'failed',
           message: error?.message ?? String(error),
+          totalMessages: totalCandidates,
+          processedMessages: succeeded + failed,
+          succeededMessages: succeeded,
+          failedMessages: failed,
+          skippedMessages: skipped,
+          elapsedMs: Date.now() - processingStartTime,
         });
       } else if (jobRecord) {
-        verificationRepository.updateJobStatus(jobId, 'canceled');
+        // Already terminal (a `finishJobTerminal` path published the
+        // terminal event before rethrowing, or the job was canceled):
+        // never overwrite the outcome or emit a duplicate event.
+        console.log(
+          `[Verification Worker] Job ${jobId} already terminal (${jobRecord.status}); leaving outcome untouched.`
+        );
       }
     } catch (statusError) {
       console.error(
@@ -2494,7 +3064,47 @@ export async function processVerificationJob(
 /**
  * BullMQ processor entry: serialized against analysis jobs via the shared
  * LLM worker mutex so the two queues never load/unload models concurrently.
+ *
+ * When the lock is actually contended (not acquired within
+ * `VERIFICATION_LOCK_WAIT_PUBLISH_MS`), a `waiting_for_lock` phase is
+ * published so the banner explains the stall truthfully instead of
+ * sitting on `pending` with no activity.
  */
 export default async function (job: Job<VerificationJobData, any, string>) {
-  return runWithLlmWorkerLock(() => processVerificationJob(job));
+  const pendingJobId = (job.data as VerificationJobData | undefined)?.jobId;
+  let lockAcquired = false;
+  const waitTimer =
+    typeof pendingJobId === 'number' && Number.isInteger(pendingJobId)
+      ? setTimeout(() => {
+          if (lockAcquired) return;
+          try {
+            verificationRepository.updateJobPhase(pendingJobId, {
+              currentPhase: 'waiting_for_lock',
+            });
+          } catch {
+            // Best-effort; the event below is the primary signal.
+          }
+          publishVerificationEvent(pendingJobId, {
+            type: 'phase',
+            phase: 'waiting_for_lock',
+            message: describeVerificationPhase({ phase: 'waiting_for_lock' }),
+            processedMessages: 0,
+            succeededMessages: 0,
+            failedMessages: 0,
+            skippedMessages: 0,
+          });
+        }, VERIFICATION_LOCK_WAIT_PUBLISH_MS)
+      : null;
+  try {
+    return await runWithLlmWorkerLock(async () => {
+      // The lock is held from here: a long audit must not publish
+      // `waiting_for_lock` mid-run when the timer fires.
+      lockAcquired = true;
+      if (waitTimer) clearTimeout(waitTimer);
+      return processVerificationJob(job);
+    });
+  } finally {
+    lockAcquired = true;
+    if (waitTimer) clearTimeout(waitTimer);
+  }
 }

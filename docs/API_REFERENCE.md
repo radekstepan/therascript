@@ -88,6 +88,7 @@ LLM Fact-Verification & Hallucination Audit ("LLM Judge") job management, analyt
 | `GET` | `/api/verification/jobs` | List recent verification jobs (newest first) |
 | `GET` | `/api/verification/jobs/:jobId` | Get status and counters of a single verification job |
 | `GET` | `/api/verification/jobs/:jobId/stream` | Stream job progress events (**SSE stream**) |
+| `GET` | `/api/verification/jobs/:jobId/failures` | List failed message assessments attributable to one job run (`{ jobId, failures[] }`, `404` if the job does not exist) |
 | `POST` | `/api/verification/jobs/:jobId/cancel` | Request cancellation of a pending/processing job (`202`; `409` if already terminal) |
 | `GET` | `/api/verification/stats` | Global verification analytics (KPIs, per-model accuracy, trends, session coverage) |
 | `GET` | `/api/verification/statements` | List paginated/filterable flagged statements |
@@ -107,6 +108,12 @@ LLM Fact-Verification & Hallucination Audit ("LLM Judge") job management, analyt
 
 **Statements Query Parameters (`GET /api/verification/statements`):**
 - `verdict`, `severity`, `authoredModel`, `sessionId`, `search`, `limit`, `offset` — Optional filters (`verdict`/`severity` accept comma-separated lists).
+
+**Job Outcome Fields (`verification_jobs` rows):**
+- `succeeded_messages` / `failed_messages` / `skipped_messages` — Finished-attempt outcome split. `processed_messages` counts finished attempts only (successes + failures).
+- `current_phase` (`waiting_for_lock` | `loading_judge` | `checking_message` | `generating` | `retrying` | `finishing`), `current_message_id`, `current_attempt`, `phase_updated_at` — Live phase snapshot for active jobs; cleared on terminal transitions. Reconnects and reloads read these from the SSE snapshot / `GET` endpoints.
+- A run where every attempted assessment fails lands on `failed`; a mixed run stays `completed` with an `error_message` starting "Completed with errors: …" and `failed_messages > 0` (clients must render the mixed label, never unqualified success).
+- Failed `message_verifications` rows carry a bounded `error_message` plus a machine-readable `error_code` (`empty_output` | `malformed_json` | `invalid_structure` | `provider_error` | `context_budget` | `missing_transcript`).
 
 ---
 
@@ -296,4 +303,4 @@ The following endpoints return Server-Sent Events (SSE) streams:
 - `POST /api/sessions/:sessionId/chats/:chatId/messages` - Chat message streaming
 - `POST /api/chats/:chatId/messages` - Standalone chat message streaming
 - `GET /api/analysis-jobs/:jobId/stream` - Analysis progress streaming
-- `GET /api/verification/jobs/:jobId/stream` - Verification job progress streaming (`snapshot` / `status` / `progress` / `message_verified` / `complete` / `error` events)
+- `GET /api/verification/jobs/:jobId/stream` - Verification job progress streaming (`snapshot` / `status` / `progress` / `phase` / `message_verified` / `complete` / `error` events; `phase` carries the worker lifecycle phase with current message identity, attempt, outcome split, and elapsed ms)

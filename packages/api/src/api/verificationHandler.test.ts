@@ -42,6 +42,7 @@ const {
     createVerificationJob: vi.fn(),
     findAllVerificationJobs: vi.fn(),
     findVerificationJobById: vi.fn(),
+    findFailedVerificationsByJobId: vi.fn(),
     resetAllVerifications: vi.fn(),
     updateJobStatus: vi.fn(),
   },
@@ -122,6 +123,7 @@ vi.mock('../services/llamaCppService.js', () => ({
 const {
   createVerificationJobHandler,
   createVerificationJobRecord,
+  getVerificationJobFailuresHandler,
   resetVerificationsHandler,
   streamVerificationJobHandler,
 } = await import('./verificationHandler.js');
@@ -659,4 +661,103 @@ describe('createVerificationJobRecord scope/skipVerified resolution', () => {
       expect(await persistedSkipVerified(body)).toBe(expected);
     }
   );
+});
+
+describe('getVerificationJobFailuresHandler', () => {
+  const jobRow = {
+    id: 2,
+    status: 'failed',
+    scope: 'all_unverified',
+    session_ids_json: null,
+    chat_id: null,
+    skip_verified: true,
+    total_messages: 1,
+    processed_messages: 1,
+    succeeded_messages: 0,
+    failed_messages: 1,
+    skipped_messages: 0,
+    current_phase: null,
+    current_message_id: null,
+    current_attempt: null,
+    phase_updated_at: null,
+    total_statements: 0,
+    flagged_statements: 0,
+    omissions_count: 0,
+    created_at: Date.now(),
+    completed_at: Date.now(),
+    error_message: 'All 1 attempted assessment failed',
+    model_name: 'judge-model',
+    context_size: 8192,
+    thinking_budget: null,
+    temperature: 0.3,
+    top_p: null,
+    repeat_penalty: null,
+    num_gpu_layers: null,
+    llm_base_url: null,
+  };
+
+  it('returns the job failures for history details', () => {
+    const failures = [
+      {
+        messageId: 1914,
+        chatId: 5,
+        sessionId: 2,
+        sessionName: 'Intake Session',
+        clientName: 'Jane Doe',
+        verificationJobId: 2,
+        authoredModel: 'author-model',
+        judgeModel: 'judge-model',
+        errorCode: 'empty_output',
+        errorMessage: '[empty_output] Judge returned no output',
+        promptTokens: 100,
+        completionTokens: 5,
+        durationMs: 1200,
+        verifiedAt: Date.now(),
+      },
+    ];
+    mockVerificationRepo.findVerificationJobById.mockReturnValue(jobRow);
+    mockVerificationRepo.findFailedVerificationsByJobId.mockReturnValue(
+      failures
+    );
+
+    const set: { status?: number | string } = {};
+    const result = getVerificationJobFailuresHandler({
+      params: { jobId: '2' },
+      set,
+    });
+
+    expect(set.status).toBe(200);
+    expect(result).toEqual({ jobId: 2, failures });
+    expect(
+      mockVerificationRepo.findFailedVerificationsByJobId
+    ).toHaveBeenCalledWith(2);
+  });
+
+  it('returns 404 when the job does not exist', () => {
+    mockVerificationRepo.findVerificationJobById.mockReturnValue(null);
+
+    expect(() =>
+      getVerificationJobFailuresHandler({
+        params: { jobId: '99' },
+        set: {},
+      })
+    ).toThrow('Verification job with ID 99');
+    expect(
+      mockVerificationRepo.findFailedVerificationsByJobId
+    ).not.toHaveBeenCalled();
+  });
+
+  it('returns an empty list when later re-audits orphaned the failures', () => {
+    mockVerificationRepo.findVerificationJobById.mockReturnValue(jobRow);
+    mockVerificationRepo.findFailedVerificationsByJobId.mockReturnValue([]);
+
+    const set: { status?: number | string } = {};
+    const result = getVerificationJobFailuresHandler({
+      params: { jobId: 2 },
+      set,
+    });
+
+    expect(set.status).toBe(200);
+    expect(result).toEqual({ jobId: 2, failures: [] });
+  });
 });

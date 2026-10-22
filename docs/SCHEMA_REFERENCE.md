@@ -151,9 +151,9 @@ Stores the result of the "Map" phase for each session.
 
 **Indices:** `idx_intermediate_summaries_job_id`
 
-### Verification Tables (Added in V20)
+### Verification Tables (Added in V20, Extended in V21)
 
-Migration V20 adds the LLM Fact-Verification & Hallucination Audit ("LLM Judge") system: audit-run tracking (`verification_jobs`), per-message audit summaries (`message_verifications`), and atomic claim/omission verdicts (`verified_statements`), plus the `messages.model` authoring-model column above.
+Migration V20 adds the LLM Fact-Verification & Hallucination Audit ("LLM Judge") system: audit-run tracking (`verification_jobs`), per-message audit summaries (`message_verifications`), and atomic claim/omission verdicts (`verified_statements`), plus the `messages.model` authoring-model column above. Migration V21 adds the per-outcome counters and live phase snapshot columns to `verification_jobs` (backfilled from each job's message rows) plus the `error_code` failure category on `message_verifications`.
 
 #### `verification_jobs`
 Tracks fact-verification audit runs. The Judge LLM config is snapshotted into the row at creation time so the worker (a separate process) honours the user's Judge settings without touching the global chat model.
@@ -167,7 +167,14 @@ Tracks fact-verification audit runs. The Judge LLM config is snapshotted into th
 | `chat_id` | INTEGER | NULL | Target chat (for `single_chat` scope) |
 | `skip_verified` | INTEGER | NOT NULL, DEFAULT 1 | 1 = skip already-verified messages |
 | `total_messages` | INTEGER | NOT NULL, DEFAULT 0 | Candidate AI messages at job start |
-| `processed_messages` | INTEGER | NOT NULL, DEFAULT 0 | Messages audited so far |
+| `processed_messages` | INTEGER | NOT NULL, DEFAULT 0 | Finished attempts so far (successes + failures) |
+| `succeeded_messages` | INTEGER | NOT NULL, DEFAULT 0 | Finished attempts with a completed assessment (V21) |
+| `failed_messages` | INTEGER | NOT NULL, DEFAULT 0 | Finished attempts that failed (V21) |
+| `skipped_messages` | INTEGER | NOT NULL, DEFAULT 0 | Candidates never attempted, e.g. canceled remainder (V21) |
+| `current_phase` | TEXT | NULL | Live worker phase for active jobs; NULL once terminal (V21) |
+| `current_message_id` | INTEGER | NULL | Message the live phase is working on (V21) |
+| `current_attempt` | INTEGER | NULL | Judge attempt number for the live phase (V21) |
+| `phase_updated_at` | INTEGER | NULL | Last phase-snapshot timestamp (V21) |
 | `total_statements` | INTEGER | NOT NULL, DEFAULT 0 | Claims extracted so far |
 | `flagged_statements` | INTEGER | NOT NULL, DEFAULT 0 | Claims with a non-clean verdict so far |
 | `omissions_count` | INTEGER | NOT NULL, DEFAULT 0 | Omissions detected so far |
@@ -211,6 +218,7 @@ Per-message audit summary: one row per audited AI message (`message_id` is UNIQU
 | `duration_ms` | INTEGER | NULL | Judge wall-clock time in ms |
 | `verified_at` | INTEGER | NOT NULL | Verification timestamp |
 | `error_message` | TEXT | NULL | Error details when `status = 'failed'` |
+| `error_code` | TEXT | NULL | Machine-readable failure category when `status = 'failed'` (V21) |
 
 **Indices:** `idx_msg_verifications_session`, `idx_msg_verifications_chat`, `idx_msg_verifications_authored_model`, `idx_msg_verifications_verified_at`
 

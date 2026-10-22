@@ -4,6 +4,7 @@ import {
   createVerificationJobHandler,
   listVerificationJobsHandler,
   getVerificationJobHandler,
+  getVerificationJobFailuresHandler,
   cancelVerificationJobHandler,
   streamVerificationJobHandler,
   getVerificationStatsHandler,
@@ -27,6 +28,15 @@ const VerificationJobScopeSchema = t.Union([
   t.Literal('single_chat'),
 ]);
 
+const VerificationPhaseSchema = t.Union([
+  t.Literal('waiting_for_lock'),
+  t.Literal('loading_judge'),
+  t.Literal('checking_message'),
+  t.Literal('generating'),
+  t.Literal('retrying'),
+  t.Literal('finishing'),
+]);
+
 const VerificationJobSchema = t.Object({
   id: t.Number(),
   status: VerificationJobStatusSchema,
@@ -36,6 +46,13 @@ const VerificationJobSchema = t.Object({
   skip_verified: t.Boolean(),
   total_messages: t.Number(),
   processed_messages: t.Number(),
+  succeeded_messages: t.Number(),
+  failed_messages: t.Number(),
+  skipped_messages: t.Number(),
+  current_phase: t.Union([VerificationPhaseSchema, t.Null()]),
+  current_message_id: t.Union([t.Number(), t.Null()]),
+  current_attempt: t.Union([t.Number(), t.Null()]),
+  phase_updated_at: t.Union([t.Number(), t.Null()]),
   total_statements: t.Number(),
   flagged_statements: t.Number(),
   omissions_count: t.Number(),
@@ -208,6 +225,30 @@ const VerificationStatementsQuerySchema = t.Object({
   offset: t.Optional(t.String()),
 });
 
+const FailedVerificationItemSchema = t.Object({
+  messageId: t.Number(),
+  chatId: t.Number(),
+  sessionId: t.Number(),
+  sessionName: t.String(),
+  clientName: t.String(),
+  verificationJobId: t.Union([t.Number(), t.Null()]),
+  authoredModel: t.Union([t.String(), t.Null()]),
+  judgeModel: t.String(),
+  // Plain string (not a closed union): unknown future codes must still
+  // render in history details instead of failing response validation.
+  errorCode: t.Union([t.String(), t.Null()]),
+  errorMessage: t.Union([t.String(), t.Null()]),
+  promptTokens: t.Union([t.Number(), t.Null()]),
+  completionTokens: t.Union([t.Number(), t.Null()]),
+  durationMs: t.Union([t.Number(), t.Null()]),
+  verifiedAt: t.Number(),
+});
+
+const JobFailuresResponseSchema = t.Object({
+  jobId: t.Number(),
+  failures: t.Array(FailedVerificationItemSchema),
+});
+
 export const verificationRoutes = new Elysia({ prefix: '/api/verification' })
   .model({
     verificationJob: VerificationJobSchema,
@@ -241,6 +282,14 @@ export const verificationRoutes = new Elysia({ prefix: '/api/verification' })
         params: 'jobIdParam',
         detail: {
           summary: 'Stream verification job progress via SSE',
+        },
+      })
+      .get('/jobs/:jobId/failures', getVerificationJobFailuresHandler, {
+        params: 'jobIdParam',
+        response: { 200: JobFailuresResponseSchema },
+        detail: {
+          summary:
+            'List failed message assessments attributable to one verification job run',
         },
       })
       .post('/jobs/:jobId/cancel', cancelVerificationJobHandler, {

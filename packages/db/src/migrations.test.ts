@@ -211,3 +211,61 @@ describe('initializeDatabase — upgrade from v18 (additive migration)', () => {
     expect(cols.filter((c) => c.name === 'llm_api_token')).toHaveLength(1);
   });
 });
+
+describe('initializeDatabase — v21 verification diagnostics columns', () => {
+  let db: DB;
+
+  beforeEach(() => {
+    db = new Database(':memory:');
+    initializeDatabase(db);
+  });
+
+  const columnNames = (table: string): string[] =>
+    (
+      db.pragma(`table_info(${table})`, { simple: false }) as Array<{
+        name: string;
+      }>
+    ).map((c) => c.name);
+
+  it('ends at schema version 21', () => {
+    expect(userVersion(db)).toBe(21);
+    expect(LATEST_SCHEMA_VERSION).toBe(21);
+  });
+
+  it('creates verification_jobs with outcome counters and phase snapshot columns', () => {
+    const cols = columnNames('verification_jobs');
+    for (const name of [
+      'succeeded_messages',
+      'failed_messages',
+      'skipped_messages',
+      'current_phase',
+      'current_message_id',
+      'current_attempt',
+      'phase_updated_at',
+    ]) {
+      expect(cols).toContain(name);
+    }
+    // Counters default to 0; phase snapshot defaults to NULL.
+    db.prepare(
+      `INSERT INTO verification_jobs (status, scope, created_at) VALUES ('pending', 'all_unverified', ?)`
+    ).run(Date.now());
+    const row = db
+      .prepare(
+        `SELECT succeeded_messages, failed_messages, skipped_messages,
+                current_phase, current_message_id, current_attempt, phase_updated_at
+         FROM verification_jobs LIMIT 1`
+      )
+      .get() as Record<string, number | null>;
+    expect(row.succeeded_messages).toBe(0);
+    expect(row.failed_messages).toBe(0);
+    expect(row.skipped_messages).toBe(0);
+    expect(row.current_phase).toBeNull();
+    expect(row.current_message_id).toBeNull();
+    expect(row.current_attempt).toBeNull();
+    expect(row.phase_updated_at).toBeNull();
+  });
+
+  it('creates message_verifications with a nullable error_code column', () => {
+    expect(columnNames('message_verifications')).toContain('error_code');
+  });
+});

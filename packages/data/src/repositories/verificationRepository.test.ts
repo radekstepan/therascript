@@ -75,7 +75,7 @@ const insertMessage = (opts: {
 beforeAll(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'verification-repo-test-'));
   configureDb({ dbPath: path.join(tmpDir, 'test.db'), isDev: false });
-  // Trigger lazy DB init (migrations to V20 + template seeding).
+  // Trigger lazy DB init (migrations to V21 + template seeding).
   run('SELECT 1');
 });
 
@@ -1384,5 +1384,243 @@ describe('findFlaggedStatements', () => {
       verificationRepository.findFlaggedStatements({ clientName: 'Nobody' })
         .total
     ).toBe(0);
+  });
+});
+
+describe('verification job outcome counters and phase snapshot', () => {
+  it('defaults outcome counters to zero and phase to null on new jobs', () => {
+    const job = verificationRepository.createVerificationJob({
+      scope: 'all_unverified',
+    });
+    expect(job.succeeded_messages).toBe(0);
+    expect(job.failed_messages).toBe(0);
+    expect(job.skipped_messages).toBe(0);
+    expect(job.current_phase).toBeNull();
+    expect(job.current_message_id).toBeNull();
+    expect(job.current_attempt).toBeNull();
+    expect(job.phase_updated_at).toBeNull();
+  });
+
+  it('increments outcome counters without touching the finished-attempt total twice', () => {
+    const job = verificationRepository.createVerificationJob({
+      scope: 'all_unverified',
+    });
+    verificationRepository.incrementJobCounters(job.id, {
+      succeededMessages: 2,
+      failedMessages: 1,
+    });
+    const row = verificationRepository.findVerificationJobById(job.id);
+    expect(row?.succeeded_messages).toBe(2);
+    expect(row?.failed_messages).toBe(1);
+    expect(row?.skipped_messages).toBe(0);
+    // Outcome increments never move processed_messages (the per-message
+    // save owns that write).
+    expect(row?.processed_messages).toBe(0);
+  });
+
+  it('sets absolute outcome counts on terminal transitions', () => {
+    const job = verificationRepository.createVerificationJob({
+      scope: 'all_unverified',
+    });
+    verificationRepository.updateJobStatus(job.id, 'completed', {
+      succeededMessages: 4,
+      failedMessages: 1,
+      skippedMessages: 0,
+      errorMessage: 'Completed with errors: 4 of 5 checked, 1 failed',
+    });
+    const row = verificationRepository.findVerificationJobById(job.id);
+    expect(row?.status).toBe('completed');
+    expect(row?.succeeded_messages).toBe(4);
+    expect(row?.failed_messages).toBe(1);
+    expect(row?.error_message).toContain('Completed with errors');
+  });
+
+  it('writes and clears the live phase snapshot without touching status', () => {
+    const job = verificationRepository.createVerificationJob({
+      scope: 'all_unverified',
+    });
+    verificationRepository.updateJobStatus(job.id, 'processing');
+    expect(
+      verificationRepository.updateJobPhase(job.id, {
+        currentPhase: 'generating',
+        currentMessageId: 1914,
+        currentAttempt: 1,
+      })
+    ).toBe(true);
+    const live = verificationRepository.findVerificationJobById(job.id);
+    expect(live?.status).toBe('processing');
+    expect(live?.current_phase).toBe('generating');
+    expect(live?.current_message_id).toBe(1914);
+    expect(live?.current_attempt).toBe(1);
+    expect(live?.phase_updated_at).not.toBeNull();
+
+    expect(verificationRepository.clearJobPhase(job.id)).toBe(true);
+    const terminal = verificationRepository.findVerificationJobById(job.id);
+    expect(terminal?.current_phase).toBeNull();
+    expect(terminal?.current_message_id).toBeNull();
+    expect(terminal?.current_attempt).toBeNull();
+    expect(terminal?.phase_updated_at).toBeNull();
+  });
+});
+
+describe('message verification failure codes', () => {
+  it('persists and re-saves the machine-readable error code', () => {
+    const sessionId = insertSession('Failure Codes');
+    const chatId = insertChat(sessionId);
+    const userId = insertMessage({
+      chatId,
+      sender: 'user',
+      text: 'Hi',
+      timestamp: T0,
+    });
+    const aiId = insertMessage({
+      chatId,
+      sender: 'ai',
+      text: 'The client takes Sertraline.',
+      timestamp: T0 + 1000,
+    });
+    expect(userId).toBeGreaterThan(0);
+
+    const job = verificationRepository.createVerificationJob({
+      scope: 'single_chat',
+      chatId,
+    });
+    verificationRepository.saveMessageVerificationResult({
+      messageId: aiId,
+      chatId,
+      sessionId,
+      verificationJobId: job.id,
+      authoredModel: 'author-model',
+      judgeModel: 'judge-model',
+      status: 'failed',
+      errorMessage: '[malformed_json] Judge returned invalid JSON',
+      errorCode: 'malformed_json',
+      promptTokens: 100,
+      completionTokens: 20,
+      durationMs: 1500,
+      statements: [],
+    });
+
+    const byChat = verificationRepository.findVerificationsByChatId(chatId);
+    expect(byChat).toHaveLength(1);
+    expect(byChat[0]?.error_code).toBe('malformed_json');
+    expect(byChat[0]?.error_message).toContain('[malformed_json]');
+
+    // Re-saving without a code clears it (a later success must not inherit
+    // a stale failure category).
+    verificationRepository.saveMessageVerificationResult({
+      messageId: aiId,
+      chatId,
+      sessionId,
+      verificationJobId: job.id,
+      authoredModel: 'author-model',
+      judgeModel: 'judge-model',
+      accuracyScore: 1.0,
+      statements: [],
+    });
+    const after = verificationRepository.findVerificationsByChatId(chatId);
+    expect(after[0]?.status).toBe('completed');
+    expect(after[0]?.error_code).toBeNull();
+  });
+});
+
+describe('findFailedVerificationsByJobId', () => {
+  it('returns failed rows for one job with session names, excluding successes and other jobs', () => {
+    const sessionId = insertSession(
+      'Intake Session',
+      'completed',
+      '2024-05-10',
+      'Jane Doe'
+    );
+    const chatId = insertChat(sessionId);
+    insertMessage({ chatId, sender: 'user', text: 'Hi', timestamp: T0 });
+    const failedMsg = insertMessage({
+      chatId,
+      sender: 'ai',
+      text: 'The client takes Sertraline.',
+      timestamp: T0 + 1000,
+    });
+    const okMsg = insertMessage({
+      chatId,
+      sender: 'ai',
+      text: 'The client feels better.',
+      timestamp: T0 + 2000,
+    });
+    const otherMsg = insertMessage({
+      chatId,
+      sender: 'ai',
+      text: 'The client journals nightly.',
+      timestamp: T0 + 3000,
+    });
+
+    const job = verificationRepository.createVerificationJob({
+      scope: 'single_chat',
+      chatId,
+    });
+    const otherJob = verificationRepository.createVerificationJob({
+      scope: 'single_chat',
+      chatId,
+    });
+    verificationRepository.saveMessageVerificationResult({
+      messageId: failedMsg,
+      chatId,
+      sessionId,
+      verificationJobId: job.id,
+      authoredModel: 'author-model',
+      judgeModel: 'judge-model',
+      status: 'failed',
+      errorMessage: '[empty_output] no output',
+      errorCode: 'empty_output',
+      promptTokens: 90,
+      completionTokens: 0,
+      durationMs: 1200,
+      statements: [],
+    });
+    verificationRepository.saveMessageVerificationResult({
+      messageId: okMsg,
+      chatId,
+      sessionId,
+      verificationJobId: job.id,
+      authoredModel: 'author-model',
+      judgeModel: 'judge-model',
+      accuracyScore: 1.0,
+      statements: [],
+    });
+    verificationRepository.saveMessageVerificationResult({
+      messageId: otherMsg,
+      chatId,
+      sessionId,
+      verificationJobId: otherJob.id,
+      authoredModel: 'author-model',
+      judgeModel: 'judge-model',
+      status: 'failed',
+      errorMessage: '[provider_error] down',
+      errorCode: 'provider_error',
+      statements: [],
+    });
+
+    const failures = verificationRepository.findFailedVerificationsByJobId(
+      job.id
+    );
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toMatchObject({
+      messageId: failedMsg,
+      chatId,
+      sessionId,
+      sessionName: 'Intake Session',
+      clientName: 'Jane Doe',
+      verificationJobId: job.id,
+      judgeModel: 'judge-model',
+      errorCode: 'empty_output',
+      promptTokens: 90,
+      durationMs: 1200,
+    });
+
+    expect(
+      verificationRepository.findFailedVerificationsByJobId(otherJob.id)
+    ).toHaveLength(1);
+    expect(
+      verificationRepository.findFailedVerificationsByJobId(999999)
+    ).toHaveLength(0);
   });
 });

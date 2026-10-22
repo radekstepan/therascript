@@ -6,4 +6,8 @@ export {
   getAnalysisChannel,
   getVerificationChannel,
 } from './constants.js';
-export type { StreamEvent, VerificationStreamEvent } from './types.js';
+export type {
+  StreamEvent,
+  VerificationStreamEvent,
+  VerificationStreamPhase,
+} from './types.js';

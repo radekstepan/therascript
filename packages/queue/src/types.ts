@@ -25,6 +25,20 @@ export interface StreamEvent {
 }
 
 /**
+ * Worker lifecycle phase for a verification job. Published on `phase`
+ * events (and echoed on terminal events) so the UI can show truthful
+ * indeterminate activity while `processedMessages` legitimately stays
+ * flat during LLM generation.
+ */
+export type VerificationStreamPhase =
+  | 'waiting_for_lock'
+  | 'loading_judge'
+  | 'checking_message'
+  | 'generating'
+  | 'retrying'
+  | 'finishing';
+
+/**
  * Progress event published by the verification worker (`verification-jobs`)
  * on the `verification-stream:<jobId>` channel. Consumed by
  * `GET /api/verification/jobs/:jobId/stream` (SSE) and the /verification
@@ -33,13 +47,23 @@ export interface StreamEvent {
 export interface VerificationStreamEvent {
   jobId: number;
   timestamp: number;
-  type: 'status' | 'progress' | 'message_verified' | 'complete' | 'error';
+  type:
+    | 'status'
+    | 'progress'
+    | 'phase'
+    | 'message_verified'
+    | 'complete'
+    | 'error';
   /** Job lifecycle status (present on `status` / `complete` / `error`). */
   status?: string;
-  /** Human-readable detail (present on `status` / `error`). */
+  /** Human-readable detail (present on `status` / `phase` / `error`). */
   message?: string;
   totalMessages?: number;
   processedMessages?: number;
+  /** Finished-attempt outcome split (present on `progress` / `phase` / terminal events). */
+  succeededMessages?: number;
+  failedMessages?: number;
+  skippedMessages?: number;
   totalStatements?: number;
   flaggedStatements?: number;
   omissionsCount?: number;
@@ -49,4 +73,12 @@ export interface VerificationStreamEvent {
   sessionId?: number;
   accuracyScore?: number;
   totalClaims?: number;
+  /** Live phase detail (present on `phase`; `phase` also echoed on terminal events). */
+  phase?: VerificationStreamPhase;
+  /** 1-based index of the message being worked on within this run. */
+  messageIndex?: number;
+  /** Judge LLM attempt number for the current message (1 = initial call, 2 = retry with thinking disabled). */
+  attempt?: number;
+  /** Milliseconds elapsed since the worker started processing this job. */
+  elapsedMs?: number;
 }

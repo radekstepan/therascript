@@ -109,6 +109,12 @@ export const verificationHandlers = [
   http.get('/api/verification/jobs', () =>
     HttpResponse.json(e2eVerificationJobs)
   ),
+  http.get('/api/verification/jobs/:jobId/failures', ({ params }) =>
+    HttpResponse.json({
+      jobId: Number(params.jobId),
+      failures: [],
+    })
+  ),
   http.get('/api/verification/stats', () => HttpResponse.json(STATS_FIXTURE)),
   http.get('/api/verification/statements', () =>
     HttpResponse.json({ items: [], total: 0, limit: 50, offset: 0 })

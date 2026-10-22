@@ -309,6 +309,22 @@ export type VerificationJobScope =
   | 'selected_sessions'
   | 'single_chat';
 
+export type VerificationPhase =
+  | 'waiting_for_lock'
+  | 'loading_judge'
+  | 'checking_message'
+  | 'generating'
+  | 'retrying'
+  | 'finishing';
+
+export type VerificationFailureCode =
+  | 'empty_output'
+  | 'malformed_json'
+  | 'invalid_structure'
+  | 'provider_error'
+  | 'context_budget'
+  | 'missing_transcript';
+
 export interface BackendVerificationJob {
   id: number;
   status: VerificationJobStatus;
@@ -318,6 +334,13 @@ export interface BackendVerificationJob {
   skip_verified: boolean;
   total_messages: number;
   processed_messages: number;
+  succeeded_messages: number;
+  failed_messages: number;
+  skipped_messages: number;
+  current_phase: VerificationPhase | null;
+  current_message_id: number | null;
+  current_attempt: number | null;
+  phase_updated_at: number | null;
   total_statements: number;
   flagged_statements: number;
   omissions_count: number;
@@ -395,6 +418,7 @@ export interface BackendMessageVerification {
   duration_ms: number | null;
   verified_at: number;
   error_message: string | null;
+  error_code: VerificationFailureCode | null;
   /** Nested statements. Populated by repository/API layers, not a DB column. */
   statements?: BackendVerifiedStatement[];
 }

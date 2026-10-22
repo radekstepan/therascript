@@ -70,6 +70,8 @@ export interface MessageVerification {
   duration_ms: number | null;
   verified_at: number;
   error_message: string | null;
+  /** Machine-readable failure category (present on `failed` rows). */
+  error_code?: string | null;
   statements?: VerifiedStatement[];
 }
 
@@ -148,6 +150,14 @@ export type VerificationJobScope =
   | 'selected_sessions'
   | 'single_chat';
 
+export type VerificationPhase =
+  | 'waiting_for_lock'
+  | 'loading_judge'
+  | 'checking_message'
+  | 'generating'
+  | 'retrying'
+  | 'finishing';
+
 export interface VerificationJob {
   id: number;
   status: VerificationJobStatus;
@@ -157,6 +167,15 @@ export interface VerificationJob {
   skip_verified: boolean;
   total_messages: number;
   processed_messages: number;
+  /** Finished-attempt outcome split (V21+; default 0 for older fixtures). */
+  succeeded_messages?: number;
+  failed_messages?: number;
+  skipped_messages?: number;
+  /** Live phase snapshot (active jobs only; null once terminal). */
+  current_phase?: VerificationPhase | null;
+  current_message_id?: number | null;
+  current_attempt?: number | null;
+  phase_updated_at?: number | null;
   total_statements: number;
   flagged_statements: number;
   omissions_count: number;
@@ -171,6 +190,78 @@ export interface VerificationJob {
   repeat_penalty: number | null;
   num_gpu_layers: number | null;
   llm_base_url: string | null;
+}
+
+/**
+ * Display outcome for a job row. Mixed runs stay `completed` at the API
+ * level; the UI must never render them as unqualified success.
+ */
+export type VerificationJobOutcome =
+  | 'active'
+  | 'completed'
+  | 'completed_with_errors'
+  | 'failed'
+  | 'canceled';
+
+export function verificationJobOutcome(
+  job: VerificationJob
+): VerificationJobOutcome {
+  if (job.status === 'pending' || job.status === 'processing') return 'active';
+  if (job.status === 'failed') return 'failed';
+  if (job.status === 'canceled') return 'canceled';
+  return (job.failed_messages ?? 0) > 0 ? 'completed_with_errors' : 'completed';
+}
+
+export function verificationJobOutcomeLabel(job: VerificationJob): string {
+  const outcome = verificationJobOutcome(job);
+  if (outcome === 'completed_with_errors') return 'Completed with errors';
+  if (outcome === 'completed') return 'completed';
+  return job.status;
+}
+
+/** Short human-readable label for a per-message failure category. */
+export function verificationFailureCodeLabel(
+  code: string | null | undefined
+): string {
+  switch (code) {
+    case 'empty_output':
+      return 'Empty Judge output';
+    case 'malformed_json':
+      return 'Invalid Judge JSON';
+    case 'invalid_structure':
+      return 'Invalid Judge response structure';
+    case 'provider_error':
+      return 'Judge provider error';
+    case 'context_budget':
+      return 'Judge context too small';
+    case 'missing_transcript':
+      return 'Transcript unavailable';
+    default:
+      return 'Fact-check failed';
+  }
+}
+
+/** Failed message assessment attributable to one job run. */
+export interface FailedVerificationItem {
+  messageId: number;
+  chatId: number;
+  sessionId: number;
+  sessionName: string;
+  clientName: string;
+  verificationJobId: number | null;
+  authoredModel: string | null;
+  judgeModel: string;
+  errorCode: string | null;
+  errorMessage: string | null;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  durationMs: number | null;
+  verifiedAt: number;
+}
+
+export interface JobFailuresResult {
+  jobId: number;
+  failures: FailedVerificationItem[];
 }
 
 /** Alias kept for dashboard components (same shape as MessageVerification). */
@@ -259,6 +350,7 @@ export interface VerificationStreamEvent {
     | 'snapshot'
     | 'status'
     | 'progress'
+    | 'phase'
     | 'message_verified'
     | 'complete'
     | 'error';
@@ -266,6 +358,9 @@ export interface VerificationStreamEvent {
   message?: string;
   totalMessages?: number;
   processedMessages?: number;
+  succeededMessages?: number;
+  failedMessages?: number;
+  skippedMessages?: number;
   totalStatements?: number;
   flaggedStatements?: number;
   omissionsCount?: number;
@@ -274,7 +369,24 @@ export interface VerificationStreamEvent {
   sessionId?: number;
   accuracyScore?: number;
   totalClaims?: number;
+  phase?: VerificationPhase;
+  messageIndex?: number;
+  attempt?: number;
+  elapsedMs?: number;
   job?: VerificationJob;
+}
+
+/** Live phase detail surfaced by `useVerificationStream`. */
+export interface VerificationLivePhase {
+  phase: VerificationPhase;
+  message: string | null;
+  messageId: number | null;
+  chatId: number | null;
+  sessionId: number | null;
+  messageIndex: number | null;
+  attempt: number | null;
+  elapsedMs: number | null;
+  updatedAt: number;
 }
 
 export interface CreateVerificationJobPayload {
@@ -348,6 +460,19 @@ export const cancelVerificationJob = async (
   jobId: number
 ): Promise<{ message: string }> => {
   const response = await axios.post(`/api/verification/jobs/${jobId}/cancel`);
+  return response.data;
+};
+
+/**
+ * Fetches failed message assessments attributable to one job run
+ * (powers the Job History "View details" dialog).
+ */
+export const fetchVerificationJobFailures = async (
+  jobId: number
+): Promise<JobFailuresResult> => {
+  const response = await axios.get<JobFailuresResult>(
+    `/api/verification/jobs/${jobId}/failures`
+  );
   return response.data;
 };
 

@@ -2,7 +2,7 @@
 //
 // History of verification runs: Judge model, scope, progress, duration,
 // and per-job cancellation.
-import React from 'react';
+import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSetAtom } from 'jotai';
 import {
@@ -21,20 +21,25 @@ import { History } from 'lucide-react';
 import {
   cancelVerificationJob,
   fetchVerificationJobs,
+  verificationJobOutcome,
+  verificationJobOutcomeLabel,
   type VerificationJob,
 } from '../../api/verification';
 import { toastMessageAtom } from '../../store';
 import { formatTimestamp } from '../../helpers';
+import { JobFailuresDialog } from './JobFailuresDialog';
 
 function statusBadgeColor(
-  status: VerificationJob['status']
-): 'blue' | 'green' | 'red' | 'gray' {
-  switch (status) {
-    case 'pending':
-    case 'processing':
+  job: VerificationJob
+): 'blue' | 'green' | 'red' | 'gray' | 'amber' {
+  const outcome = verificationJobOutcome(job);
+  switch (outcome) {
+    case 'active':
       return 'blue';
     case 'completed':
       return 'green';
+    case 'completed_with_errors':
+      return 'amber';
     case 'failed':
       return 'red';
     default:
@@ -68,6 +73,7 @@ function formatDuration(job: VerificationJob): string {
 export function JobHistoryTab() {
   const queryClient = useQueryClient();
   const setToast = useSetAtom(toastMessageAtom);
+  const [detailsJob, setDetailsJob] = useState<VerificationJob | null>(null);
 
   const query = useQuery({
     queryKey: ['verificationJobs'],
@@ -143,7 +149,7 @@ export function JobHistoryTab() {
 
   return (
     <div style={{ overflowX: 'auto' }}>
-      <Table.Root size="2" style={{ minWidth: '820px' }}>
+      <Table.Root size="2" style={{ minWidth: '860px' }}>
         <Table.Header>
           <Table.Row>
             <Table.ColumnHeaderCell>Job</Table.ColumnHeaderCell>
@@ -169,6 +175,11 @@ export function JobHistoryTab() {
           {jobs.map((job) => {
             const isActive =
               job.status === 'pending' || job.status === 'processing';
+            const outcome = verificationJobOutcome(job);
+            const hasFailures =
+              outcome === 'failed' || outcome === 'completed_with_errors';
+            const succeeded = job.succeeded_messages ?? 0;
+            const failedCount = job.failed_messages ?? 0;
             const pct =
               job.total_messages > 0
                 ? Math.round(
@@ -182,17 +193,19 @@ export function JobHistoryTab() {
                 <Table.RowHeaderCell>#{job.id}</Table.RowHeaderCell>
                 <Table.Cell>
                   <Badge
-                    color={statusBadgeColor(job.status)}
+                    color={statusBadgeColor(job)}
                     variant="soft"
                     size="1"
                     title={
                       job.error_message ??
-                      (job.status === 'failed'
-                        ? 'The audit run failed'
-                        : `Job ${job.status}`)
+                      (outcome === 'completed_with_errors'
+                        ? `${succeeded} of ${job.total_messages} checked, ${failedCount} failed`
+                        : job.status === 'failed'
+                          ? 'The audit run failed'
+                          : `Job ${job.status}`)
                     }
                   >
-                    {job.status}
+                    {verificationJobOutcomeLabel(job)}
                   </Badge>
                   {job.error_message && (
                     <Text
@@ -230,6 +243,17 @@ export function JobHistoryTab() {
                       {job.processed_messages}/{job.total_messages}
                     </Text>
                   </Flex>
+                  {!isActive && (succeeded > 0 || failedCount > 0) && (
+                    <Text
+                      size="1"
+                      color={failedCount > 0 ? 'red' : 'gray'}
+                      as="p"
+                      mt="1"
+                    >
+                      {succeeded} checked
+                      {failedCount > 0 ? ` · ${failedCount} failed` : ''}
+                    </Text>
+                  )}
                 </Table.Cell>
                 <Table.Cell justify="end">
                   <Text
@@ -265,6 +289,14 @@ export function JobHistoryTab() {
                     >
                       <Cross2Icon /> Cancel
                     </Button>
+                  ) : hasFailures ? (
+                    <Button
+                      size="1"
+                      variant="soft"
+                      onClick={() => setDetailsJob(job)}
+                    >
+                      View details
+                    </Button>
                   ) : (
                     <Text size="1" color="gray">
                       —
@@ -276,6 +308,13 @@ export function JobHistoryTab() {
           })}
         </Table.Body>
       </Table.Root>
+
+      <JobFailuresDialog
+        job={detailsJob}
+        onOpenChange={(open) => {
+          if (!open) setDetailsJob(null);
+        }}
+      />
     </div>
   );
 }
