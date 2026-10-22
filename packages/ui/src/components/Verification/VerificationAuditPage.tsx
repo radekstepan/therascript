@@ -74,7 +74,15 @@ function LiveJobBanner({ job }: { job: VerificationJob }) {
         <Flex align="center" justify="between" gap="3" wrap="wrap">
           <Flex align="center" gap="2">
             <Spinner size="2" />
-            <Heading size="3">Audit #{display.id} in progress</Heading>
+            <Heading size="3">
+              Audit #{display.id} in progress
+              {display.model_name && (
+                <Text size="2" color="gray" weight="regular">
+                  {' '}
+                  · Judge {display.model_name}
+                </Text>
+              )}
+            </Heading>
           </Flex>
           <Button
             size="2"
@@ -119,11 +127,6 @@ function LiveJobBanner({ job }: { job: VerificationJob }) {
           >
             {display.omissions_count} omissions
           </Badge>
-          {display.model_name && (
-            <Badge color="purple" variant="soft" size="1">
-              Judge: {display.model_name}
-            </Badge>
-          )}
         </Flex>
 
         {streamError && (

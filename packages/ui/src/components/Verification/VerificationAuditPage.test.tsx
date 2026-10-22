@@ -127,7 +127,7 @@ describe('VerificationAuditPage header layout', () => {
 describe('VerificationAuditPage live banner', () => {
   it('shows the in-progress banner without the Live connectivity pill', async () => {
     renderPage();
-    await screen.findByRole('heading', { name: 'Audit #7 in progress' });
+    await screen.findByRole('heading', { name: /Audit #7 in progress/ });
 
     expect(screen.queryByText('Live')).toBeNull();
     expect(screen.queryByText(/Connecting/)).toBeNull();
@@ -135,5 +135,15 @@ describe('VerificationAuditPage live banner', () => {
     // The banner itself stays intact: progress text + cancel action.
     expect(screen.getByText(/Processed 4 \/ 10 messages/)).not.toBeNull();
     expect(screen.getByRole('button', { name: 'Cancel Job' })).not.toBeNull();
+  });
+
+  it('names the judge in the heading instead of a badge', async () => {
+    renderPage();
+    const heading = await screen.findByRole('heading', {
+      name: /Audit #7 in progress/,
+    });
+
+    expect(heading.textContent).toContain('Judge e2e-judge-model');
+    expect(screen.queryByText('Judge: e2e-judge-model')).toBeNull();
   });
 });
