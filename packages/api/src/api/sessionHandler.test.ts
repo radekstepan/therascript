@@ -11,6 +11,9 @@
 //
 // Reference: packages/api/src/api/sessionHandler.ts
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { BadRequestError, NotFoundError } from '../errors.js';
 
 const {
@@ -19,6 +22,7 @@ const {
   mockChatRepo,
   mockMessageRepo,
   mockEsUpdateByQuery,
+  mockGetAudioAbsolutePath,
 } = vi.hoisted(() => ({
   mockSessionRepo: {
     findById: vi.fn(),
@@ -38,6 +42,7 @@ const {
     findMessagesByChatId: vi.fn(),
   },
   mockEsUpdateByQuery: vi.fn(),
+  mockGetAudioAbsolutePath: vi.fn(),
 }));
 
 vi.mock('@therascript/config', () => ({
@@ -55,6 +60,7 @@ vi.mock('@therascript/services', () => ({
   deleteUploadedAudioFile: vi.fn(),
   saveUploadedAudio: vi.fn(),
   calculateTokenCount: vi.fn(() => 10),
+  getAudioAbsolutePath: mockGetAudioAbsolutePath,
 }));
 
 vi.mock('@therascript/elasticsearch-client', () => ({
@@ -75,6 +81,7 @@ const {
   updateSessionMetadata,
   updateTranscriptParagraph,
   deleteTranscriptParagraph,
+  getSessionAudioAvailability,
 } = await import('./sessionHandler.js');
 const { bulkIndexDocuments, indexDocument, deleteDocument } = await import(
   '@therascript/elasticsearch-client'
@@ -509,5 +516,55 @@ describe('deleteTranscriptParagraph', () => {
     expect(calculateTokenCount).toHaveBeenCalledWith(
       'SPEAKER_01: I feel anxious'
     );
+  });
+});
+
+describe('getSessionAudioAvailability', () => {
+  // Real temp files so the existence check runs for real; only the
+  // relative->absolute path resolution is mocked.
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'audio-avail-'));
+  const existingFile = path.join(tmpDir, 'present.mp3');
+  fs.writeFileSync(existingFile, 'fake-audio');
+
+  it('reports available when the referenced file exists on disk', () => {
+    mockGetAudioAbsolutePath.mockReturnValue(existingFile);
+    const set: Record<string, unknown> = {};
+    const result = getSessionAudioAvailability(
+      ctx({
+        sessionData: { ...completedSession, audioPath: 'present.mp3' },
+        set,
+      }) as any
+    );
+    expect(set.status).toBe(200);
+    expect(result).toEqual({ available: true });
+  });
+
+  it('reports missing for a stale path whose file no longer exists', () => {
+    mockGetAudioAbsolutePath.mockReturnValue(
+      path.join(tmpDir, 'externally-deleted.mp3')
+    );
+    const set: Record<string, unknown> = {};
+    const result = getSessionAudioAvailability(
+      ctx({
+        sessionData: { ...completedSession, audioPath: 'stale.mp3' },
+        set,
+      }) as any
+    );
+    expect(set.status).toBe(200);
+    expect(result).toEqual({ available: false });
+  });
+
+  it('reports missing when the session has no audio path', () => {
+    mockGetAudioAbsolutePath.mockReturnValue(null);
+    const set: Record<string, unknown> = {};
+    const result = getSessionAudioAvailability(
+      ctx({
+        sessionData: { ...completedSession, audioPath: null },
+        set,
+      }) as any
+    );
+    expect(set.status).toBe(200);
+    expect(result).toEqual({ available: false });
+    expect(mockGetAudioAbsolutePath).toHaveBeenCalledWith(null);
   });
 });

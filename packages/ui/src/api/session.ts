@@ -187,6 +187,29 @@ export const deleteTranscriptParagraph = async (
 };
 
 /**
+ * Checks whether the original uploaded audio file for a session still exists
+ * on the server. A populated `audioPath` alone is not proof: the file may
+ * have been deleted outside the app. This lightweight probe lets the
+ * transcript player show a specific missing-file warning instead of
+ * mislabeling the failure as an unsupported format, without downloading
+ * the recording just to observe a 404.
+ *
+ * Makes a GET request to `/api/sessions/{sessionId}/audio/status`.
+ *
+ * @param {number} sessionId - The ID of the session whose audio to probe.
+ * @returns {Promise<boolean>} `true` when the file exists and is streamable.
+ * @throws {Error} If the API request itself fails (network/server error).
+ */
+export const checkSessionAudioAvailability = async (
+  sessionId: number
+): Promise<boolean> => {
+  const response = await axios.get<{ available: boolean }>(
+    `/api/sessions/${sessionId}/audio/status`
+  );
+  return response.data?.available === true;
+};
+
+/**
  * Deletes the original uploaded audio file associated with a session.
  * Makes a DELETE request to `/api/sessions/{sessionId}/audio`.
  * Note: This only deletes the file; the session record itself remains unless deleted separately.

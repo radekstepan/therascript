@@ -13,6 +13,7 @@ import {
   deleteSessionAudioHandler,
   deleteTranscriptParagraph,
   renameSpeakersHandler,
+  getSessionAudioAvailability,
 } from '../api/sessionHandler.js';
 import {
   deleteUploadedAudioFile,
@@ -401,6 +402,21 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
               params: 'sessionAndParagraphParams',
               response: { 200: 'transcriptResponse' },
               detail: { summary: 'Delete a single transcript paragraph' },
+            }
+          )
+          .get(
+            '/:sessionId/audio/status',
+            async (context) => getSessionAudioAvailability(context as any),
+            {
+              response: {
+                200: t.Object({ available: t.Boolean() }),
+                404: t.Any(),
+                500: t.Any(),
+              },
+              detail: {
+                summary:
+                  'Check whether the original session audio file exists on disk',
+              },
             }
           )
           .get(

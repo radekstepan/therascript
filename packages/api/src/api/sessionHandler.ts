@@ -8,7 +8,9 @@ import {
 import {
   deleteUploadedAudioFile,
   saveUploadedAudio,
+  getAudioAbsolutePath,
 } from '@therascript/services';
+import fsSync from 'node:fs';
 import type {
   BackendSession,
   StructuredTranscript,
@@ -681,6 +683,34 @@ export const renameSpeakersHandler = async ({
     if (error instanceof ApiError) throw error;
     throw new InternalServerError(
       `Failed to rename speakers for session ${sessionId}`,
+      error instanceof Error ? error : undefined
+    );
+  }
+};
+
+export const getSessionAudioAvailability = ({
+  sessionData,
+  set,
+}: SessionHandlerContext) => {
+  // Lightweight availability probe for the transcript audio player. It
+  // reuses the same existence check as the streaming endpoint
+  // (GET /api/sessions/:sessionId/audio) so the UI can distinguish a
+  // missing file (deleted outside the app while the DB still references
+  // it) from a genuinely unsupported format without downloading the
+  // recording just to observe a 404.
+  try {
+    const absPath = getAudioAbsolutePath(sessionData.audioPath);
+    const available = !!absPath && fsSync.existsSync(absPath);
+    set.status = 200;
+    return { available };
+  } catch (error) {
+    console.error(
+      `[API Error] getSessionAudioAvailability (ID: ${sessionData?.id}):`,
+      error
+    );
+    if (error instanceof ApiError) throw error;
+    throw new InternalServerError(
+      'Failed to check session audio availability',
       error instanceof Error ? error : undefined
     );
   }

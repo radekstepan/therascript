@@ -50,6 +50,7 @@ import {
   deleteTranscriptParagraph,
   updateParagraphSpeaker,
   updateSessionMetadata,
+  checkSessionAudioAvailability,
 } from '../../../api/api';
 import { sessionColorMap, therapyColorMap } from '../../../constants';
 import { debounce, formatIsoDateToYMD, formatDuration } from '../../../helpers';
@@ -167,6 +168,23 @@ export function Transcription({
   const [audioError, setAudioError] = useState<string | null>(null);
   const [audioReady, setAudioReady] = useState(false);
   const [isAudioLoading, setIsAudioLoading] = useState(false);
+  // Server-confirmed audio availability. A populated `audioPath` alone is
+  // not proof the file exists (it may have been deleted outside the app),
+  // and browser media error code 4 is ambiguous (missing file vs. truly
+  // unsupported format), so availability is confirmed via a lightweight
+  // server probe before the media element is allowed to load.
+  const [audioAvailability, setAudioAvailability] = useState<
+    'unknown' | 'available' | 'missing'
+  >('unknown');
+  // Resolved + in-flight availability probes keyed by session/audio source.
+  // The in-flight map keeps StrictMode remounts and concurrent renders to
+  // a single request per source.
+  const availabilityCacheRef = useRef(
+    new Map<string, 'available' | 'missing'>()
+  );
+  const availabilityInflightRef = useRef(
+    new Map<string, Promise<'available' | 'missing'>>()
+  );
   const [isDeleteAudioConfirmOpen, setIsDeleteAudioConfirmOpen] =
     useState(false);
 
@@ -178,7 +196,15 @@ export function Transcription({
     useState(false);
 
   const transcriptTokenCount = session?.transcriptTokenCount;
-  const isAudioAvailable = !!session?.audioPath;
+  const sessionId = session?.id;
+  const hasAudioPath = !!session?.audioPath;
+  const audioSrc = session?.audioPath
+    ? `${API_BASE_URL}/api/sessions/${session.id}/audio`
+    : null;
+  // Confirmed-missing covers both normal in-app deletion (no `audioPath`)
+  // and external deletion (stale path whose file no longer exists).
+  const audioMissing = !hasAudioPath || audioAvailability === 'missing';
+  const isPlaybackAvailable = hasAudioPath && audioAvailability === 'available';
 
   const handleAudioCanPlay = useCallback(() => {
     setAudioReady(true);
@@ -188,6 +214,9 @@ export function Transcription({
 
   const handleAudioError = useCallback(
     (e: React.SyntheticEvent<HTMLAudioElement>) => {
+      // The media element only mounts after the server confirms the file
+      // exists, so code 4 here means a genuinely unsupported format — not
+      // a missing file. Missing files never reach this handler.
       const error = (e.target as HTMLAudioElement).error;
       let errorMessage = 'Unknown audio error';
       if (error) {
@@ -260,10 +289,6 @@ export function Transcription({
     }
   }, [transcriptContent, playingParagraphIndex, isPlaying]);
 
-  const audioSrc = session?.audioPath
-    ? `${API_BASE_URL}/api/sessions/${session.id}/audio`
-    : null;
-
   const playAudioFromTimestamp = useCallback(
     (timestampMs: number, index: number) => {
       if (!audioRef.current || !audioSrc) {
@@ -323,7 +348,7 @@ export function Transcription({
 
   const togglePlayback = useCallback(
     (timestampMs: number, index: number) => {
-      if (!isAudioAvailable) return;
+      if (!isPlaybackAvailable) return;
       if (playingParagraphIndex === index && isPlaying) pauseAudio();
       else playAudioFromTimestamp(timestampMs, index);
     },
@@ -332,7 +357,7 @@ export function Transcription({
       playingParagraphIndex,
       pauseAudio,
       playAudioFromTimestamp,
-      isAudioAvailable,
+      isPlaybackAvailable,
     ]
   );
 
@@ -464,6 +489,7 @@ export function Transcription({
       setPlayingParagraphIndex(null);
       setAudioReady(false);
       setAudioError(null);
+      setAudioAvailability('unknown');
       setIsAudioLoading(false);
     },
     onError: (error) => {
@@ -508,8 +534,75 @@ export function Transcription({
     }
   }, [isTabActive, initialScrollTop]);
 
+  // Reset stale error/availability state whenever the session or audio
+  // source changes so a previous failure never leaks into the next view.
   useEffect(() => {
-    if (audioRef.current && audioSrc && audioRef.current.src !== audioSrc) {
+    setAudioError(null);
+    setAudioReady(false);
+    setIsPlaying(false);
+    setPlayingParagraphIndex(null);
+    setAudioAvailability('unknown');
+    setIsAudioLoading(!!audioSrc);
+  }, [sessionId, audioSrc]);
+
+  // Confirm file existence with one lightweight server probe per source
+  // (no full download). Only a confirmed-missing result shows the
+  // missing-file warning; an inconclusive probe (offline/server error)
+  // falls through to the media element so genuine network, decode, and
+  // unsupported-format failures keep their own messages.
+  useEffect(() => {
+    if (!audioSrc || sessionId === undefined) return;
+    const cacheKey = `${sessionId}:${audioSrc}`;
+    const cached = availabilityCacheRef.current.get(cacheKey);
+    if (cached) {
+      setAudioAvailability(cached);
+      if (cached === 'missing') {
+        setAudioReady(false);
+        setIsAudioLoading(false);
+      }
+      return;
+    }
+    let request = availabilityInflightRef.current.get(cacheKey);
+    if (!request) {
+      request = checkSessionAudioAvailability(sessionId).then(
+        (available) => {
+          const resolved: 'available' | 'missing' = available
+            ? 'available'
+            : 'missing';
+          availabilityCacheRef.current.set(cacheKey, resolved);
+          availabilityInflightRef.current.delete(cacheKey);
+          return resolved;
+        },
+        () => {
+          availabilityInflightRef.current.delete(cacheKey);
+          return 'available' as const;
+        }
+      );
+      availabilityInflightRef.current.set(cacheKey, request);
+    }
+    let active = true;
+    request.then((resolved) => {
+      if (!active) return;
+      setAudioAvailability(resolved);
+      if (resolved === 'missing') {
+        setAudioReady(false);
+        setIsPlaying(false);
+        setPlayingParagraphIndex(null);
+        setIsAudioLoading(false);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [audioSrc, sessionId]);
+
+  useEffect(() => {
+    if (
+      audioRef.current &&
+      audioSrc &&
+      audioAvailability === 'available' &&
+      audioRef.current.src !== audioSrc
+    ) {
       audioRef.current.src = audioSrc;
       audioRef.current.load();
       setIsAudioLoading(true);
@@ -523,7 +616,7 @@ export function Transcription({
       setAudioError(null);
       setIsAudioLoading(false);
     }
-  }, [audioSrc]);
+  }, [audioSrc, audioAvailability]);
 
   if (!session)
     return (
@@ -624,6 +717,17 @@ export function Transcription({
     setToast('Transcription copied to clipboard.');
   };
 
+  // Banner state: a confirmed-missing file always shows the amber warning
+  // (never a stale error or spinner); genuine media failures stay red and
+  // distinguishable.
+  const audioStatus: 'missing' | 'error' | 'loading' | 'idle' = audioMissing
+    ? 'missing'
+    : audioError
+      ? 'error'
+      : isAudioLoading
+        ? 'loading'
+        : 'idle';
+
   return (
     <>
       <style>
@@ -644,8 +748,9 @@ export function Transcription({
           backgroundColor: 'var(--color-panel-translucent)',
         }}
       >
-        {isAudioAvailable && (
+        {isPlaybackAvailable && (
           <audio
+            key={audioSrc}
             ref={audioRef}
             preload="metadata"
             onCanPlay={handleAudioCanPlay}
@@ -771,7 +876,7 @@ export function Transcription({
                 <DropdownMenu.Item
                   color="red"
                   onSelect={handleDeleteAudioClick}
-                  disabled={!isAudioAvailable || deleteAudioMutation.isPending}
+                  disabled={!hasAudioPath || deleteAudioMutation.isPending}
                 >
                   <TrashIcon className="mr-2 h-4 w-4" /> Delete Original Audio
                 </DropdownMenu.Item>
@@ -784,26 +889,46 @@ export function Transcription({
           px="3"
           py="1"
           style={{
-            backgroundColor: audioError
-              ? 'var(--red-a3)'
-              : isAudioLoading
-                ? 'var(--amber-a3)'
-                : 'transparent',
+            backgroundColor:
+              audioStatus === 'error'
+                ? 'var(--red-a3)'
+                : audioStatus !== 'idle'
+                  ? 'var(--amber-a3)'
+                  : 'transparent',
             borderBottom:
-              audioError || isAudioLoading
-                ? `1px solid ${audioError ? 'var(--red-a6)' : 'var(--amber-a6)'}`
+              audioStatus !== 'idle'
+                ? `1px solid ${audioStatus === 'error' ? 'var(--red-a6)' : 'var(--amber-a6)'}`
                 : 'none',
-            display: audioError || isAudioLoading ? 'block' : 'none',
+            display: audioStatus !== 'idle' ? 'block' : 'none',
             transition: 'background-color 0.3s ease',
           }}
         >
           <Flex align="center" gap="2">
-            {isAudioLoading && <Spinner size="1" />}
+            {audioStatus === 'loading' && <Spinner size="1" />}
+            {audioStatus === 'missing' && (
+              <ExclamationTriangleIcon
+                width="14"
+                height="14"
+                style={{ color: 'var(--amber-a11)', flexShrink: 0 }}
+              />
+            )}
             <Text
               size="1"
-              color={audioError ? 'red' : isAudioLoading ? 'amber' : 'gray'}
+              color={audioStatus === 'error' ? 'red' : 'amber'}
+              data-testid={
+                audioStatus === 'missing'
+                  ? 'audio-missing-warning'
+                  : audioStatus === 'error'
+                    ? 'audio-error-message'
+                    : audioStatus === 'loading'
+                      ? 'audio-loading-message'
+                      : undefined
+              }
             >
-              {audioError || (isAudioLoading ? 'Loading audio...' : '')}
+              {audioStatus === 'missing'
+                ? "The audio file doesn't exist."
+                : audioError ||
+                  (audioStatus === 'loading' ? 'Loading audio...' : '')}
             </Text>
           </Flex>
         </Box>
@@ -892,7 +1017,7 @@ export function Transcription({
                     }
                     onPlayToggle={togglePlayback}
                     isPlaying={isPlaying && playingParagraphIndex === index}
-                    isAudioAvailable={isAudioAvailable}
+                    isAudioAvailable={isPlaybackAvailable}
                     isHighlighted={highlightedParagraphIndex === index}
                     showSpeaker={speakersVisible}
                     onSpeakerCycle={

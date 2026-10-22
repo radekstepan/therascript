@@ -142,7 +142,7 @@ For each task, run `yarn test` and the builds listed under **Verification** with
 
 **Verification:** `yarn test`; `yarn build:ui`; visually inspect hover/focus and narrow layouts (DOM assertions alone cannot establish absence of painted overlap).
 
-### - [ ] Task 8: Show missing audio as a specific warning instead of an unsupported-format error
+### - [x] Task 8: Show missing audio as a specific warning instead of an unsupported-format error
 
 **Target Files:**
 - `packages/ui/src/components/SessionView/Transcription/Transcription.tsx` and nearby regression tests

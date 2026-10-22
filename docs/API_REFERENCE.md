@@ -20,6 +20,7 @@ Session CRUD operations, audio file upload, and transcript access.
 | `PATCH` | `/api/sessions/:sessionId/transcript` | Update a specific transcript paragraph |
 | `DELETE` | `/api/sessions/:sessionId/transcript/:paragraphIndex` | Delete a single transcript paragraph |
 | `GET` | `/api/sessions/:sessionId/audio` | Stream the original session audio file (supports range requests) |
+| `GET` | `/api/sessions/:sessionId/audio/status` | Lightweight `{ available }` probe: does the referenced audio file exist on disk |
 | `DELETE` | `/api/sessions/:sessionId/audio` | Delete only the original audio file |
 
 **Upload Body Notes (`POST /api/sessions/upload`):**
