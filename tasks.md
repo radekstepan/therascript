@@ -104,6 +104,8 @@ The pending SQLite row is committed before `addVerificationJob` is awaited. If q
 
 ## 8. P2 — Context budgeting can exceed the configured context window
 
+- [x] Task 8
+
 **Location:** `packages/worker/src/jobs/verificationProcessor.ts:1359` and `1523–1537`.
 
 Completion tokens have a minimum of 4096 and transcript tokens a minimum of 512, regardless of remaining capacity. A permitted 4096-token context therefore reserves more than its entire window before the system prompt, question, and answer are counted. Larger windows also overflow when the answer/question consumes the remaining prompt budget. The comment promising that context never overflows is not met by the arithmetic.

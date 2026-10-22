@@ -70,6 +70,11 @@ const {
   isTrivialConversationalMessage,
   resolveJudgeThinkingBudget,
   JUDGE_MAX_THINKING_BUDGET,
+  allocateJudgeContextBudget,
+  estimateTokens,
+  JUDGE_CONTEXT_SAFETY_MARGIN_TOKENS,
+  JUDGE_MIN_COMPLETION_TOKENS,
+  JUDGE_MIN_TRANSCRIPT_TOKENS,
   processVerificationJob,
 } = await import('./verificationProcessor.js');
 
@@ -1699,5 +1704,289 @@ describe('processVerificationJob — early-cancel resource ownership', () => {
     expect(loadModelMock).not.toHaveBeenCalled();
     expect(unloadModelMock).not.toHaveBeenCalled();
     expect(rowStatus).toBe('completed');
+  });
+});
+
+describe('allocateJudgeContextBudget', () => {
+  it('grants the preferred completion budget when a normal request fits', () => {
+    const allocation = allocateJudgeContextBudget({
+      contextSize: 32768,
+      systemPromptTokens: 800,
+      skeletonTokens: 1200,
+    });
+
+    expect(allocation.feasible).toBe(true);
+    if (!allocation.feasible) return;
+    // 30% of 32768 = 9830 beats the 4096 preferred floor.
+    expect(allocation.completionTokens).toBe(9830);
+    expect(allocation.transcriptTokens).toBeGreaterThan(0);
+    // Total estimated prompt plus completion stays within the window.
+    expect(
+      allocation.overheadTokens +
+        allocation.completionTokens +
+        allocation.transcriptTokens
+    ).toBeLessThanOrEqual(32768);
+  });
+
+  it('scales completion down so a 4096-token context still fits', () => {
+    const allocation = allocateJudgeContextBudget({
+      contextSize: 4096,
+      systemPromptTokens: 650,
+      skeletonTokens: 300,
+    });
+
+    expect(allocation.feasible).toBe(true);
+    if (!allocation.feasible) return;
+    // The old fixed floors (4096 completion + 512 transcript) overflowed a
+    // 4096 window before the system prompt, question, and answer were counted.
+    expect(4096 + 512 + 650 + 300 + 512).toBeGreaterThan(4096);
+    expect(allocation.completionTokens).toBeLessThan(4096);
+    expect(allocation.transcriptTokens).toBeGreaterThanOrEqual(
+      JUDGE_MIN_TRANSCRIPT_TOKENS
+    );
+    expect(
+      allocation.overheadTokens +
+        allocation.completionTokens +
+        allocation.transcriptTokens
+    ).toBeLessThanOrEqual(4096);
+  });
+
+  it('rejects a large answer that leaves no room in a normal context', () => {
+    const allocation = allocateJudgeContextBudget({
+      contextSize: 32768,
+      systemPromptTokens: 800,
+      skeletonTokens: 40000,
+    });
+
+    expect(allocation.feasible).toBe(false);
+    if (allocation.feasible) return;
+    expect(allocation.reason).toContain('context');
+  });
+
+  it('treats exactly-minimum remaining capacity as feasible', () => {
+    const overhead = 800 + 1200 + JUDGE_CONTEXT_SAFETY_MARGIN_TOKENS;
+    const minimum = JUDGE_MIN_COMPLETION_TOKENS + JUDGE_MIN_TRANSCRIPT_TOKENS;
+
+    const fitting = allocateJudgeContextBudget({
+      contextSize: overhead + minimum,
+      systemPromptTokens: 800,
+      skeletonTokens: 1200,
+    });
+    expect(fitting.feasible).toBe(true);
+    if (fitting.feasible) {
+      expect(fitting.completionTokens).toBe(JUDGE_MIN_COMPLETION_TOKENS);
+      expect(fitting.transcriptTokens).toBe(JUDGE_MIN_TRANSCRIPT_TOKENS);
+    }
+
+    const overflowing = allocateJudgeContextBudget({
+      contextSize: overhead + minimum - 1,
+      systemPromptTokens: 800,
+      skeletonTokens: 1200,
+    });
+    expect(overflowing.feasible).toBe(false);
+  });
+});
+
+describe('processVerificationJob — context budgeting', () => {
+  const paragraphs: TranscriptParagraphData[] = [
+    {
+      id: 0,
+      timestamp: 866,
+      text: 'I take Sertraline every morning and I feel better.',
+      speaker: 'SPEAKER_00',
+    },
+  ];
+
+  const baseRecord = {
+    id: 1,
+    status: 'pending',
+    scope: 'all_unverified',
+    session_ids_json: null,
+    chat_id: null,
+    skip_verified: true,
+    total_messages: 0,
+    processed_messages: 0,
+    total_statements: 0,
+    flagged_statements: 0,
+    omissions_count: 0,
+    created_at: Date.now(),
+    completed_at: null,
+    error_message: null,
+    model_name: 'default',
+    context_size: 32768,
+    thinking_budget: -1,
+    temperature: 0.3,
+    top_p: null,
+    repeat_penalty: null,
+    num_gpu_layers: null,
+    llm_base_url: null,
+  };
+
+  const candidateFor = (id: number, text: string) => ({
+    id,
+    chatId: 5,
+    sessionId: 2,
+    sender: 'ai',
+    text,
+    timestamp: Date.now(),
+    model: 'author-model',
+    userQuestion: 'What did the client say?',
+  });
+
+  async function* fakeStream(
+    chunks: Array<{ content?: string; thinking?: string }>,
+    result: { promptTokens?: number; completionTokens?: number }
+  ): AsyncGenerator<{ content?: string; thinking?: string }, unknown> {
+    for (const chunk of chunks) yield chunk;
+    return result;
+  }
+
+  const validVerdict = {
+    summary_assessment: 'All supported.',
+    claims: [
+      {
+        exact_quote: 'The client takes Sertraline every morning',
+        normalized_claim: 'Client takes Sertraline every morning.',
+        verdict: 'supported',
+        severity: 'none',
+        confidence: 0.9,
+        reasoning: 'Stated verbatim in P#0.',
+        evidence: [],
+      },
+    ],
+    omissions: [],
+  };
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    extractVisibleAnswerMock.mockImplementation((text: string) => text);
+    // Small texts estimate cheaply; huge answers blow the context budget.
+    calculateTokenCountMock.mockImplementation((text: string) =>
+      text.length > 5000 ? 40000 : 10
+    );
+    resolveBudgetStub.mockReturnValue(512);
+    findJobMock.mockReturnValue({ ...baseRecord });
+    findParagraphsMock.mockReturnValue(paragraphs);
+    findTemplateMock.mockReturnValue(null);
+    findSessionMock.mockReturnValue({ showSpeakers: 1 });
+    updateJobStatusMock.mockReturnValue(true);
+    transitionToProcessingMock.mockReturnValue(true);
+    saveResultMock.mockReturnValue({});
+    // Transparent streamWithRetry: run the factory once, no retries.
+    streamWithRetryMock.mockImplementation(async function* (factory: any) {
+      return yield* factory();
+    });
+  });
+
+  const runJob = () =>
+    processVerificationJob({
+      data: { jobId: 1 },
+      updateProgress: vi.fn(),
+    } as any);
+
+  it('fails the oversized message without a judge call but still audits the fitting one', async () => {
+    const hugeAnswer = `word `.repeat(20000).trim();
+    findCandidatesMock.mockReturnValue([
+      candidateFor(21, hugeAnswer),
+      candidateFor(22, 'The client takes Sertraline every morning.'),
+    ]);
+    streamLlmMock.mockImplementationOnce(() =>
+      fakeStream([{ content: '{"summary_assessment": "ok"}' }], {
+        promptTokens: 90,
+        completionTokens: 40,
+      })
+    );
+    parseJsonMock.mockReturnValue(validVerdict);
+
+    await runJob();
+
+    // Only the fitting message reaches the judge.
+    expect(streamLlmMock).toHaveBeenCalledTimes(1);
+    expect(saveResultMock).toHaveBeenCalledTimes(2);
+    // Oversized message: failed row with a clear explanation, zero tokens.
+    expect(saveResultMock.mock.calls[0][0]).toMatchObject({
+      messageId: 21,
+      status: 'failed',
+      promptTokens: 0,
+      completionTokens: 0,
+    });
+    expect(saveResultMock.mock.calls[0][0].errorMessage).toContain('context');
+    // Fitting message: normal completed audit.
+    expect(saveResultMock.mock.calls[1][0]).toMatchObject({
+      messageId: 22,
+      accuracyScore: 1,
+    });
+    expect(saveResultMock.mock.calls[1][0].status ?? 'completed').toBe(
+      'completed'
+    );
+    // The judge request for the fitting message stays within the window:
+    // mocked overhead (10 + 10 + margin) + transcript estimate + completion.
+    const judgeOptions = streamLlmMock.mock.calls[0][1];
+    const transcriptTokens = estimateTokens(
+      formatTranscriptForJudge(paragraphs, true)
+    );
+    expect(
+      10 +
+        10 +
+        JUDGE_CONTEXT_SAFETY_MARGIN_TOKENS +
+        transcriptTokens +
+        judgeOptions.maxCompletionTokens
+    ).toBeLessThanOrEqual(32768);
+  });
+
+  it('scales the completion budget down for a 4096-token context', async () => {
+    findJobMock.mockReturnValue({ ...baseRecord, context_size: 4096 });
+    findCandidatesMock.mockReturnValue([
+      candidateFor(11, 'The client takes Sertraline every morning.'),
+    ]);
+    streamLlmMock.mockImplementationOnce(() =>
+      fakeStream([{ content: '{"summary_assessment": "ok"}' }], {
+        promptTokens: 90,
+        completionTokens: 40,
+      })
+    );
+    parseJsonMock.mockReturnValue(validVerdict);
+
+    await runJob();
+
+    expect(streamLlmMock).toHaveBeenCalledTimes(1);
+    const judgeOptions = streamLlmMock.mock.calls[0][1];
+    // Overhead is 10 + 10 + 512 = 532, leaving 3564; completion takes that
+    // minus the transcript minimum instead of the old blind 4096 floor.
+    expect(judgeOptions.maxCompletionTokens).toBe(
+      4096 - 532 - JUDGE_MIN_TRANSCRIPT_TOKENS
+    );
+    expect(judgeOptions.maxCompletionTokens).toBeLessThan(4096);
+    const transcriptTokens = estimateTokens(
+      formatTranscriptForJudge(paragraphs, true)
+    );
+    expect(
+      10 +
+        10 +
+        JUDGE_CONTEXT_SAFETY_MARGIN_TOKENS +
+        transcriptTokens +
+        judgeOptions.maxCompletionTokens
+    ).toBeLessThanOrEqual(4096);
+    expect(saveResultMock.mock.calls[0][0].status ?? 'completed').toBe(
+      'completed'
+    );
+  });
+
+  it('rejects a job whose context window cannot fit even an empty request', async () => {
+    findJobMock.mockReturnValue({ ...baseRecord, context_size: 1024 });
+
+    await expect(runJob()).rejects.toThrow(/context/i);
+
+    expect(findCandidatesMock).not.toHaveBeenCalled();
+    expect(loadModelMock).not.toHaveBeenCalled();
+    expect(streamLlmMock).not.toHaveBeenCalled();
+    expect(saveResultMock).not.toHaveBeenCalled();
+    expect(updateJobStatusMock).toHaveBeenCalledWith(
+      1,
+      'failed',
+      expect.objectContaining({
+        errorMessage: expect.stringContaining('context'),
+      })
+    );
   });
 });

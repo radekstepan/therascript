@@ -973,6 +973,104 @@ export function resolveJudgeThinkingBudget(
   );
 }
 
+/**
+ * Safety margin (tokens) kept free inside the Judge context window for
+ * tokenizer-estimate drift plus the JSON-repair retry reminder.
+ */
+export const JUDGE_CONTEXT_SAFETY_MARGIN_TOKENS = 512;
+
+/**
+ * Minimum viable completion budget. Structured JSON verdicts below this size
+ * truncate too aggressively to audit reliably.
+ */
+export const JUDGE_MIN_COMPLETION_TOKENS = 512;
+
+/**
+ * Minimum transcript budget. Below this the Judge has no ground truth to
+ * cite, so the request is not worth sending.
+ */
+export const JUDGE_MIN_TRANSCRIPT_TOKENS = 128;
+
+/** Preferred completion share of the context window when room allows. */
+const JUDGE_PREFERRED_COMPLETION_FRACTION = 0.3;
+
+/** Preferred completion floor when the window has room. */
+const JUDGE_PREFERRED_COMPLETION_TOKENS = 4096;
+
+export interface JudgeContextBudget {
+  feasible: true;
+  /** System prompt + question/answer skeleton + safety margin. */
+  overheadTokens: number;
+  /** Completion cap for this Judge call. */
+  completionTokens: number;
+  /** Transcript budget for `selectJudgeTranscriptContext`. */
+  transcriptTokens: number;
+}
+
+export interface JudgeContextBudgetInfeasible {
+  feasible: false;
+  overheadTokens: number;
+  reason: string;
+}
+
+export type JudgeContextAllocation =
+  | JudgeContextBudget
+  | JudgeContextBudgetInfeasible;
+
+/**
+ * Allocate one Judge call's completion and transcript budgets from the actual
+ * remaining context window. Completion keeps its preferred size (30% of the
+ * window, 4096 floor) only when room allows; otherwise it shrinks so that
+ * `overhead + completion + transcript` never exceeds `contextSize`.
+ *
+ * When the fixed prompt/answer overhead alone leaves insufficient room for
+ * the minimum viable budgets, the allocation is infeasible: the caller must
+ * record a failed assessment instead of sending a request known to overflow.
+ *
+ * Pure function: no I/O. Exported for unit testing.
+ */
+export function allocateJudgeContextBudget(options: {
+  contextSize: number;
+  systemPromptTokens: number;
+  /** Question/answer wrapper with an empty transcript. */
+  skeletonTokens: number;
+}): JudgeContextAllocation {
+  const { contextSize, systemPromptTokens, skeletonTokens } = options;
+  const overheadTokens =
+    systemPromptTokens + skeletonTokens + JUDGE_CONTEXT_SAFETY_MARGIN_TOKENS;
+  const remaining = contextSize - overheadTokens;
+  const minimum = JUDGE_MIN_COMPLETION_TOKENS + JUDGE_MIN_TRANSCRIPT_TOKENS;
+  if (remaining < minimum) {
+    return {
+      feasible: false,
+      overheadTokens,
+      reason:
+        `Judge context window (${contextSize} tokens) cannot fit this request: ` +
+        `the system prompt, question, and answer need ~${overheadTokens} tokens, ` +
+        `leaving ${remaining} for completion plus transcript ` +
+        `(minimum ${minimum}). ` +
+        `Increase the judge context size or shorten the answer.`,
+    };
+  }
+  const desiredCompletion = Math.max(
+    JUDGE_PREFERRED_COMPLETION_TOKENS,
+    Math.round(contextSize * JUDGE_PREFERRED_COMPLETION_FRACTION)
+  );
+  // Shrink completion to what actually remains (reserving the transcript
+  // minimum); the transcript selection gets whatever is left over.
+  const completionTokens = Math.min(
+    desiredCompletion,
+    remaining - JUDGE_MIN_TRANSCRIPT_TOKENS
+  );
+  const transcriptTokens = remaining - completionTokens;
+  return {
+    feasible: true,
+    overheadTokens,
+    completionTokens,
+    transcriptTokens,
+  };
+}
+
 const JSON_CONTROL_ESCAPES: Record<number, string> = {
   8: '\\b',
   9: '\\t',
@@ -1627,6 +1725,20 @@ export async function processVerificationJob(
       );
     }
 
+    // Reject impossible settings before loading a model: if the context
+    // window cannot fit the system prompt plus the minimum viable budgets
+    // even with an empty question/answer, no candidate could ever fit.
+    const jobAllocation = allocateJudgeContextBudget({
+      contextSize,
+      systemPromptTokens: estimateTokens(judgeSystemPrompt),
+      skeletonTokens: estimateTokens(buildJudgeUserMessage('', null, '')),
+    });
+    if (!jobAllocation.feasible) {
+      throw new Error(
+        `Cannot start verification audit: ${jobAllocation.reason}`
+      );
+    }
+
     // --- LOAD MODEL ---
     if (jobRecord.model_name && jobRecord.model_name !== 'default') {
       try {
@@ -1766,18 +1878,9 @@ export async function processVerificationJob(
       return;
     }
 
-    // Judge completion budget: structured JSON verdicts need room, so mirror
-    // the analysis map cap (30% of context, floor 4096) with the same 40%
-    // thinking reserve and low-variance default temperature.
-    const maxCompletionTokens = Math.max(4096, Math.round(contextSize * 0.3));
-    const maxThinkingTokens = Math.round(maxCompletionTokens * 0.4);
-    // The Judge budget is hard-capped (2048) on top of the shared `-1`
-    // clamp so reasoning models cannot burn the whole completion allowance
-    // inside `<think>` before emitting JSON.
-    const effectiveThinkingBudget = resolveJudgeThinkingBudget(
-      jobRecord.thinking_budget,
-      maxThinkingTokens
-    );
+    // Judge sampling temperature (low-variance default for verdicts).
+    // Completion, thinking, and transcript budgets are allocated per message
+    // below from the actual remaining context window.
     const temperature = jobRecord.temperature ?? JUDGE_DEFAULT_TEMPERATURE;
 
     const transcriptCache = new Map<number, SessionTranscriptCache>();
@@ -1930,22 +2033,56 @@ export async function processVerificationJob(
           continue;
         }
 
-        // Transcript context budgeting: reserve the completion cap plus the
-        // prompt overhead (system prompt + question + answer + margin) so the
-        // Judge call never overflows its context window.
+        // Context budgeting: allocate completion and transcript budgets
+        // from the actual remaining window so the Judge call never overflows
+        // it. When the fixed prompt/answer cannot fit, record a failed
+        // assessment instead of sending a request known to overflow.
         const userQuestion = candidate.userQuestion ?? null;
         const judgeUserSkeleton = buildJudgeUserMessage(
           '',
           userQuestion,
           visibleAnswer
         );
-        const overheadTokens =
-          estimateTokens(judgeSystemPrompt) +
-          estimateTokens(judgeUserSkeleton) +
-          512;
-        const transcriptBudget = Math.max(
-          512,
-          contextSize - maxCompletionTokens - overheadTokens
+        const allocation = allocateJudgeContextBudget({
+          contextSize,
+          systemPromptTokens: estimateTokens(judgeSystemPrompt),
+          skeletonTokens: estimateTokens(judgeUserSkeleton),
+        });
+        if (!allocation.feasible) {
+          console.warn(
+            `[Verification Worker ${jobId}] Skipping judge call for message ${messageId}: ${allocation.reason}`
+          );
+          verificationRepository.saveMessageVerificationResult({
+            messageId,
+            chatId,
+            sessionId,
+            verificationJobId: jobId,
+            authoredModel,
+            judgeModel,
+            status: 'failed',
+            errorMessage: allocation.reason,
+            promptTokens: 0,
+            completionTokens: 0,
+            durationMs: 0,
+            statements: [],
+          });
+          processed++;
+          await job.updateProgress(
+            Math.round((processed / candidates.length) * 100)
+          );
+          publishProgress();
+          continue;
+        }
+        const maxCompletionTokens = allocation.completionTokens;
+        const transcriptBudget = allocation.transcriptTokens;
+        // The Judge thinking budget is 40% of this call's completion budget,
+        // hard-capped (2048) on top of the shared `-1` clamp so reasoning
+        // models cannot burn the whole completion allowance inside `<think>`
+        // before emitting JSON.
+        const maxThinkingTokens = Math.round(maxCompletionTokens * 0.4);
+        const effectiveThinkingBudget = resolveJudgeThinkingBudget(
+          jobRecord.thinking_budget,
+          maxThinkingTokens
         );
         const showSpeakers = getSessionShowSpeakers(sessionId);
         const transcriptContext = selectJudgeTranscriptContext(
