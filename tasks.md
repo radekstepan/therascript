@@ -54,11 +54,13 @@ For background on the Verification Agent and LLM lifecycle, see `AGENTS.md` (§1
 
 ## Task 4: Claim mix bar not vertically aligned in the table row
 
-- [ ] Done
+- [x] Done
 
 > Fact Check - Claim mix little bar is not vertically aligned in the table row
 
-**Verification:** TBD
+**Verification:** `yarn vitest run packages/ui/src/components/Verification/ModelAccuracyCard.test.tsx` (5/5 pass); `npx tsc --noEmit -p packages/ui/tsconfig.json` passes. No new maintained test — one-line style tweak (jsdom cannot assert layout); visual confirmation needs a browser run of `/verification`.
+
+**Writeup:** Radix table cells use `vertical-align: inherit` (baseline), so the 10px `ProportionBar` block — which has no text baseline — sat its bottom edge on the row's text baseline instead of centering. `packages/ui/src/components/Verification/ModelAccuracyCard.tsx` now sets `vertical-align: middle` on the Claim mix cell only. Changeset: `.changeset/claim-mix-bar-alignment.md`.
 
 ---
 

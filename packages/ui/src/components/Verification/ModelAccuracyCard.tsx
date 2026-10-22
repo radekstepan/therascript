@@ -129,7 +129,10 @@ export function ModelAccuracyCard({ stats }: { stats: ModelAccuracyStat[] }) {
                         {stat.model}
                       </Text>
                     </Table.RowHeaderCell>
-                    <Table.Cell>
+                    {/* Middle-align: cells inherit baseline alignment, which
+                        pins the 10px bar's bottom edge to the text
+                        baseline instead of centering it in the row. */}
+                    <Table.Cell style={{ verticalAlign: 'middle' }}>
                       <ProportionBar stat={stat} />
                     </Table.Cell>
                     <Table.Cell justify="end">
