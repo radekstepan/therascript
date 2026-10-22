@@ -156,7 +156,7 @@ Stores the result of the "Map" phase for each session.
 Migration V20 adds the LLM Fact-Verification & Hallucination Audit ("LLM Judge") system: audit-run tracking (`verification_jobs`), per-message audit summaries (`message_verifications`), and atomic claim/omission verdicts (`verified_statements`), plus the `messages.model` authoring-model column above. Migration V21 adds the per-outcome counters and live phase snapshot columns to `verification_jobs` (backfilled from each job's message rows) plus the `error_code` failure category on `message_verifications`.
 
 #### `verification_jobs`
-Tracks fact-verification audit runs. The Judge LLM config is snapshotted into the row at creation time so the worker (a separate process) honours the user's Judge settings without touching the global chat model.
+Tracks fact-verification audit runs. The Judge LLM config is snapshotted into the row at creation time so the worker (a separate process) honours the user's Judge settings; once the Judge model is confirmed loaded, the worker adopts that config into the global `app_settings` (see `buildJudgeActiveSettingsUpdate` in `verificationProcessor.ts`) and keeps the model loaded after the job finishes.
 
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|

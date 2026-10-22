@@ -56,7 +56,7 @@ Located in `packages/worker`, these agents run asynchronously to handle heavy co
 *   **Prompt Template:** `system_verification_judge` (in `packages/db/src/sqliteService.ts`, with a `DEFAULT_VERIFICATION_JUDGE_PROMPT` fallback in the processor)
 *   **Responsibility:** "The Judge" — audits session-bound AI chat responses against the ground-truth session transcript and records per-claim verdicts for the Hallucination Audit (`/verification` UI hub).
 *   **Workflow:**
-    1.  Receives a `jobId` from the API (`POST /api/verification/jobs` or single-chat verify). The job row snapshots the Judge LLM config (model, context size, temperature default `0.3`, thinking budget capped at `2048`) so the worker never touches the user's global chat model.
+    1.  Receives a `jobId` from the API (`POST /api/verification/jobs` or single-chat verify). The job row snapshots the Judge LLM config (model, context size, temperature default `0.3`, thinking budget capped at `2048`) so the worker loads exactly the configured Judge; job *creation* never touches the user's global chat model.
     2.  Loads the Judge model via `loadLlmModelForWorker` under the cross-worker LLM mutex (`packages/worker/src/llmWorkerMutex.ts`), so analysis and verification jobs never load/unload models concurrently.
     3.  For each candidate AI message (newest-first, skipping already-verified unless forced):
         *   **Fast-path:** trivial conversational greetings (`isTrivialConversationalMessage`) complete immediately with zero LLM calls.
@@ -66,7 +66,7 @@ Located in `packages/worker`, these agents run asynchronously to handle heavy co
         *   **Evidence hydration:** overwrites LLM-guessed `timestampMs`/`speaker` with ground-truth `transcript_paragraphs` values (`hydrateEvidenceItem`); unresolvable citations are nulled.
         *   **Accuracy scoring:** persists a `message_verifications` row (`computeVerificationAccuracy`) plus `verified_statements` rows, and updates the job counters.
     4.  **Progress streaming:** publishes `status` / `progress` / `message_verified` / `complete` / `error` events to Redis channel `verification-stream:<jobId>` (`@therascript/queue`), consumed by `GET /api/verification/jobs/:jobId/stream` (SSE) and the `useVerificationStream` UI hook.
-    5.  Unloads the Judge model in `finally` and marks the job `completed` / `failed` / `canceled` (cancellation is cooperative: the worker polls job status before each message).
+    5.  Keeps the Judge model loaded when the job finishes and marks the job `completed` / `failed` / `canceled` (cancellation is cooperative: the worker polls job status before each message). There is no `finally` unload: once the Judge model is confirmed loaded, the worker adopts its snapshotted config into the global `app_settings` (best-effort, via `buildJudgeActiveSettingsUpdate`), so Session/Standalone chat and the next Fact Check start with settings preset and reuse the warm model. Starting a job with a different model still evicts the previous one at load time, like Session Chat; only worker shutdown or an explicit unload evicts the retained model.
 *   **Storage:** `verification_jobs`, `message_verifications`, `verified_statements` (Migration V20); per-message authoring model in `messages.model`.
 
 ## 2. System & Utility Agents

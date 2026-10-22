@@ -280,7 +280,7 @@ The `currentProcess !== devProcess` guard in the concurrently event handlers is 
     - User launches an audit from `StartVerificationModal.tsx` (scope picker + Judge LLM settings). The session chat header shows only a passive all-verified status icon (`ChatVerifiedStatusIcon.tsx`); it never starts verification.
     - `POST /api/verification/jobs` (or `POST /api/sessions/:id/chats/:chatId/verify`) creates a `verification_jobs` row (`verification_jobs` table).
     - **Single-job guard:** `createVerificationJobRecord` refuses with `409 Conflict` when `verificationRepository.hasActiveVerificationJobs()` is true (a job is `pending`/`processing`/`canceling`).
-    - **LLM Param Snapshot:** like analysis jobs, the API snapshots the Judge config (`model_name`, `context_size`, `thinking_budget`, `temperature` defaulting to `0.3`, `top_p`, `repeat_penalty`, `num_gpu_layers`, `llm_base_url`) into the job row. Job creation never mutates the user's global chat model — the worker loads/unloads the Judge model itself.
+    - **LLM Param Snapshot:** like analysis jobs, the API snapshots the Judge config (`model_name`, `context_size`, `thinking_budget`, `temperature` defaulting to `0.3`, `top_p`, `repeat_penalty`, `num_gpu_layers`, `llm_base_url`) into the job row. Job creation never mutates the user's global chat model — the worker loads the Judge model itself when it picks the job up, then adopts it as the active settings (see step 3).
     - **File:** `packages/api/src/api/verificationHandler.ts`.
 
 2.  **Job Enqueue (API -> Redis)**
@@ -292,7 +292,7 @@ The `currentProcess !== devProcess` guard in the concurrently event handlers is 
 3.  **Per-Message Audit (Worker)**
 
     - Worker picks up the job in `processVerificationJob` (`packages/worker/src/jobs/verificationProcessor.ts`), wrapped in `runWithLlmWorkerLock` (`llmWorkerMutex.ts`) so it never loads/unloads models concurrently with an analysis job.
-    - Loads the snapshotted Judge model via `loadLlmModelForWorker` (thinking budget capped at `2048` via `resolveJudgeThinkingBudget`).
+    - Loads the snapshotted Judge model via `loadLlmModelForWorker` (thinking budget capped at `2048` via `resolveJudgeThinkingBudget`; a previous/differing model is evicted at load time, like Session Chat). Once the model is confirmed loaded, the worker adopts its config into the global `app_settings` (best-effort, range-guarded via `buildJudgeActiveSettingsUpdate`), so chat and the next Fact Check start with settings preset and reuse the warm model instead of evicting it — including mid-audit.
     - Iterates candidate AI messages newest-first (skipping already-verified unless `skipVerified` is false), polling job status before each message for cooperative cancellation:
         - **Greeting fast-path:** trivial conversational messages (`isTrivialConversationalMessage`) complete with zero LLM calls.
         - **Judge call:** transcript context is budgeted per message (`selectJudgeTranscriptContext`, `showSpeakers`-aware `[P#<index> MM:SS]` formatting) and sent with the therapist question + visible AI answer to the Judge LLM under the `system_verification_judge` prompt. The Judge returns atomic claims (`supported` / `partially_supported` / `contradicted` / `fabricated`), omissions, severity, and transcript evidence.
@@ -301,7 +301,7 @@ The `currentProcess !== devProcess` guard in the concurrently event handlers is 
         - **Evidence hydration:** LLM-guessed `timestampMs`/`speaker` are overwritten with ground-truth `transcript_paragraphs` values (`hydrateEvidenceItem`); unresolvable citations are nulled.
         - **Persistence:** a `message_verifications` row (accuracy score via `computeVerificationAccuracy`) plus `verified_statements` rows; job counters (`processed_messages`, `flagged_statements`, ...) advance.
     - **Outcome semantics:** every finished attempt is tallied as `succeeded` or `failed` (`succeeded_messages` / `failed_messages` / `skipped_messages` on the job row, migration V21). A run where every attempted assessment fails lands on `failed`; a mixed run stays `completed` but persists a "Completed with errors: X of Y checked, Z failed" summary plus the split counts (the UI renders the mixed label from `failed_messages > 0`, never unqualified success); canceled runs persist `skipped_messages` for unattempted candidates; zero-candidate runs complete cleanly with no error summary. Per-message failures persist a bounded `error_message` (job/message IDs, Judge model, phase/attempt, duration, token usage — never transcripts or raw reasoning) plus a machine-readable `error_code` (`empty_output` / `malformed_json` / `invalid_structure` / `provider_error` / `context_budget` / `missing_transcript`).
-    - Unloads the Judge model in `finally` on every terminal path; marks the job `completed` / `failed` / `canceled`.
+    - Keeps the Judge model loaded with its context on every terminal path (no `finally` unload); marks the job `completed` / `failed` / `canceled`. The retained model is evicted only by worker shutdown (`loadedModelsTracker`), an explicit unload, or a later job/chat that loads a different model.
 
 4.  **Real-time Updates (Redis Pub/Sub -> SSE)**
 
