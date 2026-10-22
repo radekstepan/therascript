@@ -152,6 +152,8 @@ Verification backups include pending/processing jobs and restore their status ve
 
 ## 12. P2 — The all_force API scope does not enforce re-auditing
 
+- [x] Task 12
+
 **Location:** `packages/api/src/api/verificationHandler.ts:224` and `packages/data/src/repositories/verificationRepository.ts:459–464`.
 
 A request with `scope: 'all_force'` and omitted `skipVerified` is persisted with `skip_verified = true`. Candidate selection applies that flag independently of scope, excluding completed verifications. Thus the force scope silently behaves like an unverified-only audit. The current modal masks this by explicitly sending false, but the API itself exposes the contradictory behavior.

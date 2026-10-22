@@ -273,6 +273,24 @@ const pooledAccuracyPercent = (
   omissions: number
 ): number => safePercent(supported + 0.5 * partial, totalClaims + omissions);
 
+/**
+ * Resolves the effective skip-verified behavior for a verification scope.
+ * The global scopes own their semantics: `all_force` always re-audits
+ * completed verifications and `all_unverified` always skips them,
+ * regardless of an omitted or conflicting `skipVerified` flag, so a
+ * force audit can never silently behave like an unverified-only one.
+ * The narrowed scopes (`selected_sessions`, `single_chat`) honor the
+ * flag explicitly, defaulting to skip when it is omitted.
+ */
+export const resolveVerificationSkipVerified = (
+  scope: VerificationJobScope,
+  skipVerified?: boolean | null
+): boolean => {
+  if (scope === 'all_force') return false;
+  if (scope === 'all_unverified') return true;
+  return skipVerified !== false;
+};
+
 export const verificationRepository = {
   createVerificationJob: (
     options: CreateVerificationJobOptions
@@ -488,7 +506,13 @@ export const verificationRepository = {
         'c.sessionId IS NOT NULL',
         "s.status = 'completed'",
       ];
-      if (filters.skipVerified !== false) {
+      // Scope is authoritative for the global audits: a contradictory
+      // stored flag (e.g. a pre-fix or restored all_force row with
+      // skip_verified=true) must not downgrade a force re-audit into an
+      // unverified-only one at selection time.
+      if (
+        resolveVerificationSkipVerified(filters.scope, filters.skipVerified)
+      ) {
         conditions.push(
           `NOT EXISTS (SELECT 1 FROM message_verifications mv WHERE mv.message_id = m.id AND mv.status = 'completed')`
         );

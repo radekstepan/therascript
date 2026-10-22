@@ -1,6 +1,7 @@
 // packages/api/src/api/verificationHandler.ts
 import {
   verificationRepository,
+  resolveVerificationSkipVerified,
   sessionRepository,
   chatRepository,
   messageRepository,
@@ -278,11 +279,20 @@ export const createVerificationJobRecord = async (
   // unloads that model around the job itself.
   const judgeModelName = modelName || getActiveModel();
 
+  // Scope owns skip semantics for the global audits: all_force always
+  // re-audits and all_unverified always skips, regardless of an omitted
+  // or conflicting skipVerified flag, so the persisted row can never
+  // contradict its scope. The narrowed scopes honor the flag explicitly.
+  const resolvedSkipVerified = resolveVerificationSkipVerified(
+    scope,
+    skipVerified
+  );
+
   const job = verificationRepository.createVerificationJob({
     scope,
     sessionIds: scope === 'selected_sessions' ? (sessionIds ?? null) : null,
     chatId: scope === 'single_chat' ? (chatId ?? null) : null,
-    skipVerified: skipVerified !== false,
+    skipVerified: resolvedSkipVerified,
     modelName: judgeModelName,
     contextSize: contextSizeToUse,
     thinkingBudget: llmParams.thinkingBudget,

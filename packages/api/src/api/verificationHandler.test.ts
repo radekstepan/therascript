@@ -35,6 +35,7 @@ const {
   mockUnloadModelAtUrl,
   mockSubscribeToVerificationStream,
   mockStreamUnsubscribe,
+  mockResolveVerificationSkipVerified,
 } = vi.hoisted(() => ({
   mockVerificationRepo: {
     hasActiveVerificationJobs: vi.fn(),
@@ -44,6 +45,17 @@ const {
     resetAllVerifications: vi.fn(),
     updateJobStatus: vi.fn(),
   },
+  // Mirrors the real resolveVerificationSkipVerified truth table (pinned
+  // by the data-package candidate-selection tests); the wiring under test
+  // here is that the handler delegates to the shared resolver and
+  // persists its return value.
+  mockResolveVerificationSkipVerified: vi.fn(
+    (scope: string, skipVerified?: boolean) => {
+      if (scope === 'all_force') return false;
+      if (scope === 'all_unverified') return true;
+      return skipVerified !== false;
+    }
+  ),
   mockSessionRepo: { findById: vi.fn() },
   mockChatRepo: { findChatById: vi.fn() },
   mockMessageRepo: { findMessageById: vi.fn() },
@@ -65,6 +77,10 @@ const {
 
 vi.mock('@therascript/data', () => ({
   verificationRepository: mockVerificationRepo,
+  resolveVerificationSkipVerified: (...args: unknown[]) =>
+    (mockResolveVerificationSkipVerified as (...a: unknown[]) => unknown)(
+      ...args
+    ),
   sessionRepository: mockSessionRepo,
   chatRepository: mockChatRepo,
   messageRepository: mockMessageRepo,
@@ -563,4 +579,84 @@ describe('createVerificationJobHandler queue-submission reconciliation', () => {
     expect(failure).toBeInstanceOf(InternalServerError);
     expect((failure as Error).message).toMatch(/ECONNREFUSED/);
   });
+});
+
+describe('createVerificationJobRecord scope/skipVerified resolution', () => {
+  // Task 12: scope semantics are resolved server-side. The global scopes
+  // own their skip behavior (all_force always re-audits, all_unverified
+  // always skips completed) regardless of an omitted or conflicting
+  // skipVerified flag; selected_sessions/single_chat honor the flag
+  // explicitly (defaulting to skip when omitted).
+  beforeEach(() => {
+    mockVerificationRepo.hasActiveVerificationJobs.mockReturnValue(false);
+    mockVerificationRepo.createVerificationJob.mockReturnValue({ id: 21 });
+    mockAddVerificationJob.mockResolvedValue({});
+    mockSessionRepo.findById.mockReturnValue({ id: 1 });
+    mockChatRepo.findChatById.mockReturnValue({ id: 5, sessionId: 1 });
+  });
+
+  const persistedSkipVerified = async (
+    body: Record<string, unknown>
+  ): Promise<unknown> => {
+    await createVerificationJobRecord(body as never);
+    // The handler must delegate to the shared scope resolver with the
+    // raw request values and persist whatever it returns.
+    expect(mockResolveVerificationSkipVerified).toHaveBeenCalledWith(
+      body.scope,
+      body.skipVerified
+    );
+    expect(mockVerificationRepo.createVerificationJob).toHaveBeenCalledTimes(1);
+    return mockVerificationRepo.createVerificationJob.mock.calls[0][0]
+      .skipVerified;
+  };
+
+  it.each([undefined, true, false])(
+    'all_force persists skipVerified=false when the flag is %s',
+    async (skipVerified) => {
+      const body: Record<string, unknown> = { scope: 'all_force' };
+      if (skipVerified !== undefined) body.skipVerified = skipVerified;
+      expect(await persistedSkipVerified(body)).toBe(false);
+    }
+  );
+
+  it.each([undefined, true, false])(
+    'all_unverified persists skipVerified=true when the flag is %s',
+    async (skipVerified) => {
+      const body: Record<string, unknown> = { scope: 'all_unverified' };
+      if (skipVerified !== undefined) body.skipVerified = skipVerified;
+      expect(await persistedSkipVerified(body)).toBe(true);
+    }
+  );
+
+  it.each([
+    { skipVerified: undefined, expected: true },
+    { skipVerified: true, expected: true },
+    { skipVerified: false, expected: false },
+  ])(
+    'selected_sessions honors the explicit flag (flag=$skipVerified persists $expected)',
+    async ({ skipVerified, expected }) => {
+      const body: Record<string, unknown> = {
+        scope: 'selected_sessions',
+        sessionIds: [1],
+      };
+      if (skipVerified !== undefined) body.skipVerified = skipVerified;
+      expect(await persistedSkipVerified(body)).toBe(expected);
+    }
+  );
+
+  it.each([
+    { skipVerified: undefined, expected: true },
+    { skipVerified: true, expected: true },
+    { skipVerified: false, expected: false },
+  ])(
+    'single_chat honors the explicit flag (flag=$skipVerified persists $expected)',
+    async ({ skipVerified, expected }) => {
+      const body: Record<string, unknown> = {
+        scope: 'single_chat',
+        chatId: 5,
+      };
+      if (skipVerified !== undefined) body.skipVerified = skipVerified;
+      expect(await persistedSkipVerified(body)).toBe(expected);
+    }
+  );
 });

@@ -7,6 +7,7 @@ export { analysisRepository } from './repositories/analysisRepository.js';
 export { templateRepository } from './repositories/templateRepository.js';
 export { appSettingsRepository } from './repositories/appSettingsRepository.js';
 export { verificationRepository } from './repositories/verificationRepository.js';
+export { resolveVerificationSkipVerified } from './repositories/verificationRepository.js';
 
 export type {
   UsageLog,

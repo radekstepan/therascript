@@ -351,6 +351,111 @@ describe('findCandidateMessagesForVerification', () => {
     expect(forced.map((c) => c.id)).toEqual([a2, a1]);
   });
 
+  it.each([undefined, true, false])(
+    // Task 12: all_force owns its skip behavior — completed verifications
+    // are always re-selected, even with an omitted or conflicting flag
+    // (e.g. a pre-fix or restored row with skip_verified=true).
+    'all_force includes previously completed messages with skipVerified=%s',
+    (skipVerified) => {
+      const { sessionId, chatId, a1, a2 } = seedScenario();
+      verificationRepository.saveMessageVerificationResult({
+        messageId: a2,
+        chatId,
+        sessionId,
+        authoredModel: 'model-b',
+        judgeModel: 'judge-1',
+        totalClaims: 1,
+        supportedClaims: 1,
+        accuracyScore: 1,
+      });
+      const candidates =
+        verificationRepository.findCandidateMessagesForVerification({
+          scope: 'all_force',
+          ...(skipVerified === undefined ? {} : { skipVerified }),
+        });
+      expect(candidates.map((c) => c.id)).toEqual([a2, a1]);
+    }
+  );
+
+  it.each([undefined, true, false])(
+    // Task 12 invariant: all_unverified always excludes completed
+    // verifications, even with an explicitly conflicting flag.
+    'all_unverified excludes completed messages with skipVerified=%s',
+    (skipVerified) => {
+      const { sessionId, chatId, a1, a2 } = seedScenario();
+      verificationRepository.saveMessageVerificationResult({
+        messageId: a2,
+        chatId,
+        sessionId,
+        authoredModel: 'model-b',
+        judgeModel: 'judge-1',
+        totalClaims: 1,
+        supportedClaims: 1,
+        accuracyScore: 1,
+      });
+      const candidates =
+        verificationRepository.findCandidateMessagesForVerification({
+          scope: 'all_unverified',
+          ...(skipVerified === undefined ? {} : { skipVerified }),
+        });
+      expect(candidates.map((c) => c.id)).toEqual([a1]);
+    }
+  );
+
+  it.each([undefined, true, false])(
+    // Task 12: the narrowed scopes keep explicit flag behavior — the flag
+    // controls selection, defaulting to skip when omitted.
+    'selected_sessions honors the explicit skip flag (skipVerified=%s)',
+    (skipVerified) => {
+      const { sessionId, chatId, a1, a2 } = seedScenario();
+      verificationRepository.saveMessageVerificationResult({
+        messageId: a2,
+        chatId,
+        sessionId,
+        authoredModel: 'model-b',
+        judgeModel: 'judge-1',
+        totalClaims: 1,
+        supportedClaims: 1,
+        accuracyScore: 1,
+      });
+      const candidates =
+        verificationRepository.findCandidateMessagesForVerification({
+          scope: 'selected_sessions',
+          sessionIds: [sessionId],
+          ...(skipVerified === undefined ? {} : { skipVerified }),
+        });
+      expect(candidates.map((c) => c.id)).toEqual(
+        skipVerified === false ? [a2, a1] : [a1]
+      );
+    }
+  );
+
+  it.each([undefined, true, false])(
+    'single_chat honors the explicit skip flag (skipVerified=%s)',
+    (skipVerified) => {
+      const { sessionId, chatId, a1, a2 } = seedScenario();
+      verificationRepository.saveMessageVerificationResult({
+        messageId: a2,
+        chatId,
+        sessionId,
+        authoredModel: 'model-b',
+        judgeModel: 'judge-1',
+        totalClaims: 1,
+        supportedClaims: 1,
+        accuracyScore: 1,
+      });
+      const candidates =
+        verificationRepository.findCandidateMessagesForVerification({
+          scope: 'single_chat',
+          chatId,
+          ...(skipVerified === undefined ? {} : { skipVerified }),
+        });
+      expect(candidates.map((c) => c.id)).toEqual(
+        skipVerified === false ? [a2, a1] : [a1]
+      );
+    }
+  );
+
   it('keeps failed messages eligible under the default skip so they retry', () => {
     const { sessionId, chatId, a1, a2 } = seedScenario();
     verificationRepository.saveMessageVerificationResult({
