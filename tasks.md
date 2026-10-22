@@ -20,6 +20,8 @@ This document is structured as a sequential execution plan for an LLM orchestrat
 
 ## 1. P1 — Greeting detection silently approves factual answers
 
+- [x] Task 1
+
 **Location:** `packages/worker/src/jobs/verificationProcessor.ts:1060–1086`, consumed at `1488–1519`.
 
 The fast path accepts any short answer matching a greeting/prompt substring, without requiring the entire answer to be conversational. For example, `Hello! The patient reported suicidal thoughts.` meets the length, word-count, punctuation, and greeting checks. It is saved as completed with accuracy 1.0 and no claims without consulting the transcript. Default future audits then skip it.

@@ -1038,16 +1038,244 @@ export function parseJudgeJson<T = unknown>(rawOutput: string): T | null {
   }
 }
 
-const TRIVIAL_GREETING_PATTERNS: RegExp[] = [
-  /^(?:hi|hey|hello|greetings|good\s+(?:morning|afternoon|evening))\b/i,
-  /how can i help/i,
-  /what would you like to know/i,
-  /how may i (?:help|assist)/i,
-  /what can i (?:do|help)/i,
-  /let me know/i,
-  /(?:happy to help|glad to (?:help|assist)|feel free to ask)/i,
-  /is there anything (?:else )?i can/i,
-];
+/** Sentence/clause boundaries for the trivial-message fast path. */
+const TRIVIAL_CLAUSE_SPLIT_RE = /[.!?…;:\n]+/;
+
+/** Optional conversational openers stripped from the start of a clause. */
+const TRIVIAL_OPENER_RE = /^(?:please|just|do|so|well|now|ok|okay|and|but)\b/;
+
+/**
+ * Recognized nonfactual utterance leads. A clause is trivial only when it
+ * starts with one of these and continues with nothing but filler words
+ * (see `TRIVIAL_FILLER_WORDS`).
+ */
+const TRIVIAL_LEAD_RE =
+  /^(?:hi|hey|hello|greetings|good\s+(?:morning|afternoon|evening)|how can i help|what would you like to know|how may i (?:help|assist)|what can i (?:do|help)|let me know|happy to help|glad to (?:help|assist)|feel free to ask|is there anything (?:else )?i can|how are you)\b/;
+
+/**
+ * Words that cannot form a factual claim on their own: pronouns,
+ * determiners, auxiliaries, prepositions, interrogatives, and neutral
+ * conversational nouns. Deliberately excludes third-person pronouns,
+ * clinical nouns/verbs, past-tense reporting verbs, and descriptive
+ * content words, so any substantive clause fails the tail check and the
+ * message is routed to the Judge. Unknown words fail closed (Judge).
+ */
+const TRIVIAL_FILLER_WORDS: ReadonlySet<string> = new Set([
+  'a',
+  'able',
+  'about',
+  'afternoon',
+  'again',
+  'all',
+  'also',
+  'always',
+  'am',
+  'an',
+  'and',
+  'another',
+  'any',
+  'anyone',
+  'anything',
+  'are',
+  'as',
+  'ask',
+  'asking',
+  'asks',
+  'assist',
+  'assistance',
+  'assists',
+  'at',
+  'back',
+  'be',
+  'best',
+  'better',
+  'but',
+  'can',
+  'clarification',
+  'could',
+  'day',
+  'days',
+  'dear',
+  'delay',
+  'details',
+  'did',
+  'do',
+  'does',
+  'doing',
+  'done',
+  'else',
+  'everybody',
+  'everyone',
+  'evening',
+  'everything',
+  'feel',
+  'feeling',
+  'feedback',
+  'folks',
+  'for',
+  'free',
+  'friend',
+  'friends',
+  'from',
+  'glad',
+  'good',
+  'great',
+  'greetings',
+  'guys',
+  'had',
+  'happy',
+  'has',
+  'have',
+  'having',
+  'hear',
+  'hello',
+  'help',
+  'helpful',
+  'helping',
+  'helps',
+  'here',
+  'hey',
+  'hi',
+  'hope',
+  'hoping',
+  'how',
+  'i',
+  'if',
+  'in',
+  'information',
+  'input',
+  'into',
+  'is',
+  'it',
+  'just',
+  'know',
+  'like',
+  'look',
+  'looking',
+  'lot',
+  'may',
+  'me',
+  'meet',
+  'message',
+  'might',
+  'mind',
+  'more',
+  'morning',
+  'much',
+  'my',
+  'need',
+  'needs',
+  'nice',
+  'no',
+  'not',
+  'note',
+  'nothing',
+  'now',
+  'of',
+  'ok',
+  'okay',
+  'on',
+  'one',
+  'or',
+  'other',
+  'our',
+  'out',
+  'patience',
+  'please',
+  'provide',
+  'provided',
+  'question',
+  'questions',
+  'reach',
+  'reached',
+  'reaching',
+  'ready',
+  'reply',
+  'response',
+  'see',
+  'session',
+  'sessions',
+  'shall',
+  'share',
+  'sharing',
+  'should',
+  'so',
+  'some',
+  'something',
+  'soon',
+  'sorry',
+  'still',
+  'talk',
+  'talking',
+  'team',
+  'thank',
+  'thanks',
+  'that',
+  'the',
+  'there',
+  'these',
+  'this',
+  'those',
+  'time',
+  'to',
+  'today',
+  'transcript',
+  'transcripts',
+  'understanding',
+  'us',
+  'useful',
+  'very',
+  'wait',
+  'waiting',
+  'want',
+  'wants',
+  'way',
+  'ways',
+  'we',
+  'welcome',
+  'well',
+  'what',
+  'when',
+  'where',
+  'which',
+  'why',
+  'will',
+  'wish',
+  'wishing',
+  'with',
+  'would',
+  'you',
+  'your',
+]);
+
+/** Lowercase letter words only; punctuation/digits become separators. */
+function normalizeTrivialClause(clause: string): string {
+  return clause
+    .toLowerCase()
+    .replace(/[^a-z]+/g, ' ')
+    .trim();
+}
+
+/**
+ * A clause is trivial only when, after stripping conversational openers,
+ * it starts with a recognized nonfactual lead and every remaining word is
+ * filler. Anything else (factual subjects, clinical verbs, content words,
+ * unknown words) fails closed so the message goes to the Judge.
+ */
+function isTrivialClause(clause: string): boolean {
+  let rest = normalizeTrivialClause(clause);
+  if (!rest) return false;
+  let opener: RegExpMatchArray | null;
+  while ((opener = rest.match(TRIVIAL_OPENER_RE))) {
+    rest = rest.slice(opener[0].length).trimStart();
+    if (!rest) return false;
+  }
+  const lead = rest.match(TRIVIAL_LEAD_RE);
+  if (!lead) return false;
+  const tail = rest.slice(lead[0].length).trimStart();
+  if (!tail) return true;
+  return tail.split(' ').every((word) => TRIVIAL_FILLER_WORDS.has(word));
+}
 
 const TRIVIAL_QUOTE_CHARS = new Set(['"', "'", '“', '”', '‘', '’']);
 
@@ -1066,9 +1294,11 @@ const THINK_BLOCK_RE = /<think>[\s\S]*?(?:<\/think>|$)/gi;
  *
  * A message is trivial when, after stripping `<think>` blocks, it is short
  * (`<= 120` chars and `<= 20` words), contains no digits, no quote
- * characters, no bullet points / Markdown lists, and matches a common
- * greeting/prompt pattern. Anything factual (numbers, quotes, lists, or
- * simply no greeting pattern) still goes to the Judge.
+ * characters, no bullet points / Markdown lists, and EVERY clause is a
+ * complete, explicitly recognized nonfactual utterance: a known greeting /
+ * offer lead followed only by filler words. Any additional substantive
+ * clause (e.g. "Hello! The patient reported ...") fails the per-clause
+ * check and the message goes to the Judge.
  *
  * Pure function: no I/O. Exported for unit testing.
  */
@@ -1083,7 +1313,12 @@ export function isTrivialConversationalMessage(text: string): boolean {
   }
   if (TRIVIAL_LIST_ITEM_RE.test(stripped)) return false;
   if (TRIVIAL_MARKDOWN_RE.test(stripped)) return false;
-  return TRIVIAL_GREETING_PATTERNS.some((re) => re.test(stripped));
+  const clauses = stripped
+    .split(TRIVIAL_CLAUSE_SPLIT_RE)
+    .map((clause) => clause.trim())
+    .filter((clause) => normalizeTrivialClause(clause) !== '');
+  if (clauses.length === 0) return false;
+  return clauses.every(isTrivialClause);
 }
 
 /** Worker-side remote-token gate (mirrors analysisProcessor's private helper). */

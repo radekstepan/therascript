@@ -631,6 +631,77 @@ describe('isTrivialConversationalMessage', () => {
     ).toBe(false);
     expect(isTrivialConversationalMessage('   ')).toBe(false);
   });
+
+  it('rejects greetings followed by factual claims', () => {
+    expect(
+      isTrivialConversationalMessage(
+        'Hello! The patient reported suicidal thoughts.'
+      )
+    ).toBe(false);
+    expect(
+      isTrivialConversationalMessage('Hi! The client takes Sertraline daily.')
+    ).toBe(false);
+    expect(
+      isTrivialConversationalMessage(
+        'Good morning! The patient described panic attacks.'
+      )
+    ).toBe(false);
+    // Spelled-out numbers carry no digits but are still substantive.
+    expect(
+      isTrivialConversationalMessage('Hi! The client had three panic attacks.')
+    ).toBe(false);
+  });
+
+  it('rejects factual answers ending with a conversational prompt', () => {
+    expect(
+      isTrivialConversationalMessage(
+        'The patient takes Sertraline. Let me know if you need anything else.'
+      )
+    ).toBe(false);
+    expect(
+      isTrivialConversationalMessage(
+        'The client reported insomnia. Please let me know if you have questions!'
+      )
+    ).toBe(false);
+    expect(
+      isTrivialConversationalMessage('Let me know. The patient is stable.')
+    ).toBe(false);
+  });
+
+  it('rejects single-clause blends of greeting and factual content', () => {
+    expect(
+      isTrivialConversationalMessage('Hello, the patient is stable.')
+    ).toBe(false);
+    expect(
+      isTrivialConversationalMessage(
+        'Happy to help explain that the client takes Sertraline.'
+      )
+    ).toBe(false);
+    expect(
+      isTrivialConversationalMessage(
+        'How can I help you understand the patient diagnosis?'
+      )
+    ).toBe(false);
+  });
+
+  it('still matches pure multi-clause conversational greetings', () => {
+    expect(isTrivialConversationalMessage('Hello!')).toBe(true);
+    expect(isTrivialConversationalMessage('Hello, how are you?')).toBe(true);
+    expect(isTrivialConversationalMessage('Hello! How are you today?')).toBe(
+      true
+    );
+    expect(
+      isTrivialConversationalMessage('Hi, how can I help you today?')
+    ).toBe(true);
+    expect(
+      isTrivialConversationalMessage(
+        'Good morning, happy to help with your questions.'
+      )
+    ).toBe(true);
+    expect(
+      isTrivialConversationalMessage('Please let me know if you need anything!')
+    ).toBe(true);
+  });
 });
 
 describe('processVerificationJob — judge hardening', () => {
@@ -862,6 +933,88 @@ describe('processVerificationJob — judge hardening', () => {
       accuracyScore: 1,
       promptTokens: 90,
       completionTokens: 40,
+    });
+  });
+
+  it('sends greeting-prefixed factual answers to the Judge and records negative verdicts', async () => {
+    findCandidatesMock.mockReturnValue([
+      candidateFor('Hello! The patient reported suicidal thoughts.'),
+    ]);
+    streamLlmMock.mockImplementationOnce(() =>
+      fakeStream([{ content: '{"summary_assessment": "flagged"}' }], {
+        promptTokens: 90,
+        completionTokens: 40,
+      })
+    );
+    parseJsonMock.mockReturnValueOnce({
+      summary_assessment: 'Contradicted by the transcript.',
+      claims: [
+        {
+          exact_quote: 'The patient reported suicidal thoughts.',
+          normalized_claim: 'Patient reported suicidal thoughts.',
+          verdict: 'contradicted',
+          severity: 'high',
+          confidence: 0.9,
+          reasoning: 'No such statement in the transcript.',
+          evidence: [],
+        },
+      ],
+      omissions: [],
+    });
+
+    await runJob();
+
+    expect(streamLlmMock).toHaveBeenCalledTimes(1);
+    expect(saveResultMock).toHaveBeenCalledTimes(1);
+    expect(saveResultMock.mock.calls[0][0]).toMatchObject({
+      messageId: 11,
+      accuracyScore: 0,
+    });
+    expect(saveResultMock.mock.calls[0][0].statements).toHaveLength(1);
+    expect(saveResultMock.mock.calls[0][0].statements[0]).toMatchObject({
+      verdict: 'contradicted',
+    });
+  });
+
+  it('sends factual answers ending with a prompt to the Judge and records negative verdicts', async () => {
+    findCandidatesMock.mockReturnValue([
+      candidateFor(
+        'The client takes Sertraline daily. Let me know if you need anything else!'
+      ),
+    ]);
+    streamLlmMock.mockImplementationOnce(() =>
+      fakeStream([{ content: '{"summary_assessment": "flagged"}' }], {
+        promptTokens: 90,
+        completionTokens: 40,
+      })
+    );
+    parseJsonMock.mockReturnValueOnce({
+      summary_assessment: 'Fabricated medication claim.',
+      claims: [
+        {
+          exact_quote: 'The client takes Sertraline daily.',
+          normalized_claim: 'Client takes Sertraline daily.',
+          verdict: 'fabricated',
+          severity: 'high',
+          confidence: 0.95,
+          reasoning: 'No medication mention in the transcript.',
+          evidence: [],
+        },
+      ],
+      omissions: [],
+    });
+
+    await runJob();
+
+    expect(streamLlmMock).toHaveBeenCalledTimes(1);
+    expect(saveResultMock).toHaveBeenCalledTimes(1);
+    expect(saveResultMock.mock.calls[0][0]).toMatchObject({
+      messageId: 11,
+      accuracyScore: 0,
+    });
+    expect(saveResultMock.mock.calls[0][0].statements).toHaveLength(1);
+    expect(saveResultMock.mock.calls[0][0].statements[0]).toMatchObject({
+      verdict: 'fabricated',
     });
   });
 });
