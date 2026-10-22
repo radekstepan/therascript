@@ -535,3 +535,154 @@ describe('importDataService message model round-trip (Task 10)', () => {
     expect(inserts[1].args.slice(4, 6)).toEqual([3, 4]);
   });
 });
+
+describe('importDataService interrupted verification jobs (Task 11)', () => {
+  // A backup taken while audits were running contains pending/processing
+  // rows, but the restore target has an empty queue with no worker
+  // processing them. Restoring those statuses verbatim would leave
+  // permanently active rows that hasActiveVerificationJobs() blocks new
+  // audits and verification resets on. The import must reconcile them
+  // into a terminal, recoverable state instead.
+  const baseEntries = (): Record<string, unknown> => ({
+    'sessions.json': [
+      {
+        id: 1,
+        fileName: 'session.mp3',
+        clientName: 'Jane Doe',
+        sessionName: 'Intake',
+        date: '2026-01-01',
+        sessionType: 'Intake',
+        therapy: 'CBT',
+        audioPath: null,
+        status: 'completed',
+        whisperJobId: null,
+        transcriptTokenCount: 10,
+      },
+    ],
+    'chats.json': [
+      { id: 7, sessionId: 1, timestamp: 100, name: null, tags: null },
+    ],
+    'messages.json': [],
+    'templates.json': [],
+    'transcript_paragraphs.json': [],
+    'analysis_jobs.json': [],
+    'analysis_job_sessions.json': [],
+    'intermediate_summaries.json': [],
+    'message_verifications.json': [],
+    'verified_statements.json': [],
+  });
+
+  const buildBackupFile = async (
+    entries: Record<string, unknown>
+  ): Promise<File> => {
+    const pack = tar.pack();
+    for (const [name, value] of Object.entries(entries)) {
+      pack.entry({ name }, JSON.stringify(value));
+    }
+    pack.finalize();
+    const chunks: Buffer[] = [];
+    for await (const chunk of pack) {
+      chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+    }
+    return new File(chunks, 'backup.tar');
+  };
+
+  const seedReindexRepos = () => {
+    mockSessionRepo.findAll.mockReturnValue([]);
+    mockChatRepo.findChatsBySessionId.mockReturnValue([]);
+    mockChatRepo.findStandaloneChats.mockReturnValue([]);
+    mockMessageRepo.findMessagesByChatId.mockReturnValue([]);
+    mockTranscriptRepo.findParagraphsBySessionId.mockReturnValue([]);
+  };
+
+  const verificationJobInserts = () =>
+    mockPrepareCalls.filter(({ sql }) =>
+      sql.startsWith('INSERT INTO verification_jobs (')
+    );
+
+  const makeJob = (id: number, status: string) => ({
+    id,
+    status,
+    scope: 'all_unverified',
+    session_ids_json: '[1]',
+    chat_id: null,
+    skip_verified: true,
+    total_messages: 2,
+    processed_messages: 1,
+    total_statements: 0,
+    flagged_statements: 0,
+    omissions_count: 0,
+    created_at: 200,
+    completed_at: null,
+    error_message: null,
+    model_name: 'judge-v1',
+    context_size: 8192,
+    thinking_budget: 512,
+    temperature: 0.3,
+    top_p: 0.9,
+    repeat_penalty: 1.1,
+    num_gpu_layers: 20,
+    llm_base_url: 'http://localhost:1234',
+  });
+
+  it('restores pending and processing jobs as failed with a restoration explanation', async () => {
+    seedReindexRepos();
+    const file = await buildBackupFile({
+      ...baseEntries(),
+      'verification_jobs.json': [
+        makeJob(1, 'pending'),
+        makeJob(2, 'processing'),
+      ],
+    });
+
+    const result = await importDataService(file);
+    expect(result.message).toMatch(/Import successful/);
+
+    const inserts = verificationJobInserts();
+    expect(inserts).toHaveLength(2);
+    // INSERT column order: status is args[0], completed_at args[11],
+    // error_message args[12].
+    for (const { args } of inserts) {
+      expect(args[0]).toBe('failed');
+      expect(args[11]).toEqual(expect.any(Number));
+      expect(args[12]).toMatch(/interrupted by backup restore/i);
+    }
+    // No restored row may remain active: the hasActiveVerificationJobs()
+    // guard (pending/processing/canceling) must not block new audits.
+    for (const { args } of inserts) {
+      expect(['pending', 'processing', 'canceling']).not.toContain(args[0]);
+    }
+  });
+
+  it('restores terminal jobs verbatim', async () => {
+    seedReindexRepos();
+    const file = await buildBackupFile({
+      ...baseEntries(),
+      'verification_jobs.json': [
+        { ...makeJob(3, 'completed'), completed_at: 300 },
+        {
+          ...makeJob(4, 'failed'),
+          completed_at: 301,
+          error_message: 'Judge model timed out',
+        },
+        { ...makeJob(5, 'canceled'), completed_at: 302 },
+      ],
+    });
+
+    const result = await importDataService(file);
+    expect(result.message).toMatch(/Import successful/);
+
+    const inserts = verificationJobInserts();
+    expect(inserts).toHaveLength(3);
+    expect(inserts.map(({ args }) => args[0])).toEqual([
+      'completed',
+      'failed',
+      'canceled',
+    ]);
+    // Untouched rows keep their original completion metadata.
+    expect(inserts[0].args[11]).toBe(300);
+    expect(inserts[0].args[12]).toBeNull();
+    expect(inserts[1].args[12]).toBe('Judge model timed out');
+    expect(inserts[2].args[11]).toBe(302);
+  });
+});

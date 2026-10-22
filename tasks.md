@@ -140,6 +140,8 @@ This branch records `messages.model` for author-model attribution, but the impor
 
 ## 11. P2 — Restored active verification jobs have no corresponding queue work
 
+- [x] Task 11
+
 **Location:** `packages/api/src/api/adminHandler.ts:579–613`.
 
 Verification backups include pending/processing jobs and restore their status verbatim. The import path does not enqueue or reconcile them. Restoring such a backup into a fresh installation leaves permanently active rows, and `hasActiveVerificationJobs()` blocks starting another audit or resetting verifications.

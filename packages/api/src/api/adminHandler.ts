@@ -362,6 +362,19 @@ const IntermediateSummarySchema = z.object({
 // Remaps the old session ids stored in a verification job's
 // `session_ids_json` array through the import's old-to-new id map.
 // Unparseable or non-array payloads pass through untouched.
+// Verification job statuses that the hasActiveVerificationJobs() guard
+// treats as running. A backup taken mid-audit contains such rows, but
+// the restore target has an empty queue with no worker processing
+// them, so they must be reconciled into a terminal state on import.
+const INTERRUPTED_VERIFICATION_JOB_STATUSES = new Set([
+  'pending',
+  'processing',
+  'canceling',
+]);
+
+const INTERRUPTED_RESTORE_ERROR_MESSAGE =
+  'Job interrupted by backup restore: it was still active when the backup was taken, and the restored queue has no worker running it. Start a new audit to retry.';
+
 const remapSessionIdsJson = (
   value: string | null,
   oldToNewSessionIdMap: Record<number, number>
@@ -586,12 +599,19 @@ export const importDataService = async (
           rest.chat_id != null
             ? (oldToNewChatIdMap[rest.chat_id] ?? null)
             : null;
+        // Active rows have no corresponding queue work after a restore,
+        // so reconciling them to failed keeps hasActiveVerificationJobs()
+        // from blocking new audits forever. Terminal rows keep their
+        // original status and completion metadata verbatim.
+        const wasInterrupted = INTERRUPTED_VERIFICATION_JOB_STATUSES.has(
+          rest.status
+        );
         const res = db
           .prepare(
             'INSERT INTO verification_jobs (status, scope, session_ids_json, chat_id, skip_verified, total_messages, processed_messages, total_statements, flagged_statements, omissions_count, created_at, completed_at, error_message, model_name, context_size, thinking_budget, temperature, top_p, repeat_penalty, num_gpu_layers, llm_base_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
           )
           .run(
-            rest.status,
+            wasInterrupted ? 'failed' : rest.status,
             rest.scope,
             remapSessionIdsJson(rest.session_ids_json, oldToNewSessionIdMap),
             newChatId,
@@ -602,8 +622,12 @@ export const importDataService = async (
             rest.flagged_statements,
             rest.omissions_count,
             rest.created_at,
-            rest.completed_at,
-            rest.error_message,
+            wasInterrupted
+              ? (rest.completed_at ?? Date.now())
+              : rest.completed_at,
+            wasInterrupted
+              ? INTERRUPTED_RESTORE_ERROR_MESSAGE
+              : rest.error_message,
             rest.model_name,
             rest.context_size,
             rest.thinking_budget,
