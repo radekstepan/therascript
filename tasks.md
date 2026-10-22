@@ -66,12 +66,14 @@ For background on the Verification Agent and LLM lifecycle, see `AGENTS.md` (§1
 
 ## Task 5: Judge `malformed_json` failure exhausts retries (Audit #5, message 1819)
 
-- [ ] Done
+- [x] Done
 
 > On Fact Check Audit #5 most of the prompts worked, but this one didn't:
 > Completed with errors: 18 of 19 checked, 1 failed (job 5, judge "qwen3.8-27b"). First failure [malformed_json]: [malformed_json] Judge returned invalid JSON for message 1819 (job 5, judge "qwen3.8-27b", retrying, attempt 2 of 2, 570.0s, 42747+57605 tokens): Judge LLM did not return valid JSON (unparseable output). Retries exhausted (1 retry).
 
-**Verification:** TBD
+**Verification:** `yarn vitest run packages/worker/src/jobs/verificationProcessor.test.ts` (126/126, incl. 6 new tests); `yarn vitest run packages/domain packages/data/src/repositories/verificationRepository.test.ts packages/ui/src/api/verification.test.ts` (117/117); `yarn turbo run build --filter=@therascript/domain --filter=@therascript/data --filter=@therascript/worker --force` clean (tsc).
+
+**Writeup:** 57k completion tokens over 570s means the Judge rambled to its (full-remaining-window) completion cap and truncated mid-JSON; the retry then repeated the identical giant call and failed the same way. `packages/worker/src/jobs/verificationProcessor.ts` now detects runaways from server-reported usage (`detectJudgeRunaway`: filled the cap, or ≥16k unparseable tokens under a larger cap) and retries with a compact-verdict reminder (`JUDGE_RETRY_COMPACT_REMINDER`) under a fail-fast cap (`resolveJudgeRetryCompletionBudget` = min(original, 8k)) — a concise valid verdict fits, a second ramble fails in ~1–2 min instead of ~10. First attempts keep the full window with unchanged thinking/temperature, so previously-successful audits are unaffected; small-context judges keep their already-small retry cap. Cap-truncated failures persist as a new `truncated_output` code with cap numbers in the detail (instead of cryptic `malformed_json`), rippling through the `VerificationFailureCode` union (`packages/domain/src/index.ts`), zod enum (`packages/domain/src/schemas/db/verification.ts`), worker label/reader, data repository input type, and UI label (`Judge output truncated`); the `error_code` TEXT column needs no migration. Deliberately no partial-claim salvage: accepting a truncated prefix as complete would inflate accuracy, so the message still fails loudly and can be re-run. Changeset: `.changeset/judge-runaway-compact-retry.md`.
 
 ---
 

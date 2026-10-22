@@ -230,6 +230,8 @@ export function verificationFailureCodeLabel(
       return 'Empty Judge output';
     case 'malformed_json':
       return 'Invalid Judge JSON';
+    case 'truncated_output':
+      return 'Judge output truncated';
     case 'invalid_structure':
       return 'Invalid Judge response structure';
     case 'provider_error':

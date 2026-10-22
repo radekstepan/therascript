@@ -27,6 +27,7 @@ export const verificationPhaseSchema = z.enum([
 export const verificationFailureCodeSchema = z.enum([
   'empty_output',
   'malformed_json',
+  'truncated_output',
   'invalid_structure',
   'provider_error',
   'context_budget',

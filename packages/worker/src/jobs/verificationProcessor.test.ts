@@ -91,6 +91,11 @@ const {
   resolveJudgeThinkingBudget,
   JUDGE_RETRY_REMINDER,
   JUDGE_RETRY_SCHEMA_REMINDER,
+  JUDGE_RETRY_COMPACT_REMINDER,
+  JUDGE_RUNAWAY_COMPLETION_TOKENS,
+  JUDGE_RUNAWAY_RETRY_MAX_COMPLETION_TOKENS,
+  detectJudgeRunaway,
+  resolveJudgeRetryCompletionBudget,
   allocateJudgeContextBudget,
   resolveJudgeCompletionBudget,
   estimateTokens,
@@ -1175,6 +1180,62 @@ describe('processVerificationJob — judge hardening', () => {
     );
   });
 
+  it('retries a runaway first attempt with a compact reminder and persists truncated_output when the retry also fails', async () => {
+    findCandidatesMock.mockReturnValue([
+      candidateFor('The client takes Sertraline every morning.'),
+    ]);
+    // Both attempts ramble past the completion cap with no valid JSON
+    // (parse mocked to null, as in the Audit #5 qwen runaway).
+    streamLlmMock
+      .mockImplementationOnce(() =>
+        fakeStream([{ content: '{"claims": [{"garbage": ' }], {
+          promptTokens: 100,
+          completionTokens: 20000,
+        })
+      )
+      .mockImplementationOnce(() =>
+        fakeStream([{ content: '{"claims": [{"garbage": ' }], {
+          promptTokens: 120,
+          completionTokens: 20000,
+        })
+      );
+    parseJsonMock.mockReturnValue(null);
+
+    await runJob();
+
+    expect(streamLlmMock).toHaveBeenCalledTimes(2);
+    // The retry demands a compact verdict instead of repeating the
+    // identical giant call (standard reminder must NOT be used).
+    const retryMessages = streamLlmMock.mock.calls[1][0];
+    expect(retryMessages[1].text).toContain('compact valid JSON');
+    expect(retryMessages[1].text).toContain('far too long');
+    expect(retryMessages[1].text).not.toContain('was not valid JSON');
+    // Fail-fast budget: min(original cap, 8k). The fixture's 8k-context
+    // cap is already below 8k, so the retry keeps it unchanged.
+    const firstCap = streamLlmMock.mock.calls[0][1].maxCompletionTokens;
+    expect(streamLlmMock.mock.calls[1][1].maxCompletionTokens).toBe(
+      resolveJudgeRetryCompletionBudget(firstCap)
+    );
+    expect(streamLlmMock.mock.calls[1][1]).toMatchObject({
+      thinkingBudget: -1,
+      temperature: 0.1,
+    });
+    // Both attempts exhausted: the message fails loudly as truncated
+    // (with cap numbers), never as a silent partial audit.
+    expect(saveResultMock).toHaveBeenCalledTimes(1);
+    expect(saveResultMock.mock.calls[0][0].status).toBe('failed');
+    expect(saveResultMock.mock.calls[0][0].errorCode).toBe('truncated_output');
+    expect(saveResultMock.mock.calls[0][0].errorMessage).toContain(
+      '[truncated_output]'
+    );
+    expect(saveResultMock.mock.calls[0][0].errorMessage).toContain(
+      'completion cap'
+    );
+    expect(saveResultMock.mock.calls[0][0].errorMessage).toContain(
+      'Retries exhausted'
+    );
+  });
+
   it('places the transcript in the system message and keeps the user turn focused', async () => {
     findCandidatesMock.mockReturnValue([
       candidateFor('The client takes Sertraline every morning.'),
@@ -2042,11 +2103,12 @@ describe('resolveJudgeCompletionBudget', () => {
   });
 });
 
-describe('JUDGE_RETRY_REMINDER / JUDGE_RETRY_SCHEMA_REMINDER', () => {
-  it('both reminders demand strict JSON plus brief thinking', () => {
+describe('JUDGE_RETRY_REMINDER / JUDGE_RETRY_SCHEMA_REMINDER / JUDGE_RETRY_COMPACT_REMINDER', () => {
+  it('all reminders demand strict JSON plus brief thinking', () => {
     for (const reminder of [
       JUDGE_RETRY_REMINDER,
       JUDGE_RETRY_SCHEMA_REMINDER,
+      JUDGE_RETRY_COMPACT_REMINDER,
     ]) {
       expect(reminder).toContain('ONLY');
       expect(reminder).toContain(
@@ -2055,6 +2117,62 @@ describe('JUDGE_RETRY_REMINDER / JUDGE_RETRY_SCHEMA_REMINDER', () => {
     }
     expect(JUDGE_RETRY_REMINDER).toContain('not valid JSON');
     expect(JUDGE_RETRY_SCHEMA_REMINDER).toContain('did not match');
+    expect(JUDGE_RETRY_COMPACT_REMINDER).toContain('far too long');
+    expect(JUDGE_RETRY_COMPACT_REMINDER).toContain('compact valid JSON');
+  });
+});
+
+describe('detectJudgeRunaway / resolveJudgeRetryCompletionBudget', () => {
+  it('flags attempts that filled the completion cap', () => {
+    expect(detectJudgeRunaway(7650, 7650)).toEqual({
+      runaway: true,
+      hitCap: true,
+    });
+    expect(detectJudgeRunaway(7651, 7650)).toEqual({
+      runaway: true,
+      hitCap: true,
+    });
+  });
+
+  it('flags huge unparseable output even under a giant cap', () => {
+    expect(
+      detectJudgeRunaway(
+        JUDGE_RUNAWAY_COMPLETION_TOKENS,
+        JUDGE_RUNAWAY_COMPLETION_TOKENS * 4
+      )
+    ).toEqual({ runaway: true, hitCap: false });
+  });
+
+  it('passes ordinary attempts and missing usage', () => {
+    expect(detectJudgeRunaway(7000, 7650)).toEqual({
+      runaway: false,
+      hitCap: false,
+    });
+    expect(detectJudgeRunaway(0, 7650)).toEqual({
+      runaway: false,
+      hitCap: false,
+    });
+    expect(detectJudgeRunaway(null, 7650)).toEqual({
+      runaway: false,
+      hitCap: false,
+    });
+    expect(detectJudgeRunaway(undefined, 7650)).toEqual({
+      runaway: false,
+      hitCap: false,
+    });
+    // Degenerate cap: never report a cap-hit without a positive budget.
+    expect(detectJudgeRunaway(100, 0)).toEqual({
+      runaway: false,
+      hitCap: false,
+    });
+  });
+
+  it('fail-fast caps the runaway retry, keeps small caps untouched', () => {
+    expect(resolveJudgeRetryCompletionBudget(60000)).toBe(
+      JUDGE_RUNAWAY_RETRY_MAX_COMPLETION_TOKENS
+    );
+    expect(resolveJudgeRetryCompletionBudget(8192)).toBe(8192);
+    expect(resolveJudgeRetryCompletionBudget(512)).toBe(512);
   });
 });
 
@@ -2462,6 +2580,9 @@ describe('verification failure diagnostics (pure builders)', () => {
     );
     expect(verificationFailureLabel('malformed_json')).toBe(
       'Judge returned invalid JSON'
+    );
+    expect(verificationFailureLabel('truncated_output')).toBe(
+      'Judge output hit the completion cap'
     );
     expect(verificationFailureLabel('invalid_structure')).toBe(
       'Judge JSON failed schema validation'

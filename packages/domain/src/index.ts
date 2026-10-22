@@ -320,6 +320,7 @@ export type VerificationPhase =
 export type VerificationFailureCode =
   | 'empty_output'
   | 'malformed_json'
+  | 'truncated_output'
   | 'invalid_structure'
   | 'provider_error'
   | 'context_budget'

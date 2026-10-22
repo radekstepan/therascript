@@ -953,6 +953,84 @@ export const JUDGE_RETRY_SCHEMA_REMINDER =
   'Keep any <think> reasoning brief and emit the final JSON object immediately.';
 
 /**
+ * Reminder appended to the Judge user message when the first attempt
+ * produced runaway output (filled the completion cap or emitted a huge
+ * volume of unparseable tokens): the retry demands a compact verdict
+ * instead of repeating the identical giant call.
+ */
+export const JUDGE_RETRY_COMPACT_REMINDER =
+  '\n\nIMPORTANT REMINDER: Your previous response was far too long and did not contain valid JSON. ' +
+  'Respond with ONLY a compact valid JSON object matching the required schema, with no preamble or commentary. ' +
+  'Keep every reasoning field to one sentence. ' +
+  'Keep any <think> reasoning brief and emit the final JSON object immediately.';
+
+/**
+ * Unparseable output at or above this completion volume counts as a Judge
+ * runaway even when the completion cap is larger: legitimate single-message
+ * verdicts are single-digit kilobytes, so 16k tokens of invalid JSON means
+ * the model rambled (repetition loop, endless thinking) instead of emitting
+ * verdicts.
+ */
+export const JUDGE_RUNAWAY_COMPLETION_TOKENS = 16384;
+
+/**
+ * Fail-fast completion cap for the retry after a runaway first attempt
+ * (`min(original cap, this)`). A concise valid verdict fits comfortably;
+ * a second ramble fails in a minute or two instead of burning another
+ * ~10 minutes filling a giant window.
+ */
+export const JUDGE_RUNAWAY_RETRY_MAX_COMPLETION_TOKENS = 8192;
+
+/** Runaway verdict for one Judge attempt, from server-reported usage. */
+export interface JudgeRunawayDetection {
+  /**
+   * True when the attempt filled the completion cap or emitted a huge
+   * volume of output — the retry should demand a compact verdict under a
+   * fail-fast cap instead of repeating the identical call.
+   */
+  runaway: boolean;
+  /** True when generation demonstrably stopped at the completion cap. */
+  hitCap: boolean;
+}
+
+/**
+ * Detect runaway Judge output from server-reported completion tokens.
+ * Missing usage (`null`/`undefined`) is never a runaway: without
+ * evidence the standard retry path applies.
+ *
+ * Pure function: no I/O. Exported for unit testing.
+ */
+export function detectJudgeRunaway(
+  completionTokens: number | null | undefined,
+  maxCompletionTokens: number
+): JudgeRunawayDetection {
+  if (completionTokens == null) {
+    return { runaway: false, hitCap: false };
+  }
+  const hitCap =
+    maxCompletionTokens > 0 && completionTokens >= maxCompletionTokens;
+  const runaway = hitCap || completionTokens >= JUDGE_RUNAWAY_COMPLETION_TOKENS;
+  return { runaway, hitCap };
+}
+
+/**
+ * Fail-fast completion cap for the retry after a runaway first attempt.
+ * Small-context judges keep their (already small) cap; giant windows
+ * shrink to `JUDGE_RUNAWAY_RETRY_MAX_COMPLETION_TOKENS` so a second
+ * ramble fails in a minute or two instead of ~10.
+ *
+ * Pure function: no I/O. Exported for unit testing.
+ */
+export function resolveJudgeRetryCompletionBudget(
+  maxCompletionTokens: number
+): number {
+  return Math.min(
+    maxCompletionTokens,
+    JUDGE_RUNAWAY_RETRY_MAX_COMPLETION_TOKENS
+  );
+}
+
+/**
  * Resolve the effective Judge thinking budget: a straight passthrough of the
  * job's configured budget, matching Session Chat (`sessionChatHandler.ts`
  * passes `getConfiguredThinkingBudget()` to the LLM client untouched).
@@ -1894,6 +1972,8 @@ export function verificationFailureLabel(
       return 'Judge returned no output';
     case 'malformed_json':
       return 'Judge returned invalid JSON';
+    case 'truncated_output':
+      return 'Judge output hit the completion cap';
     case 'invalid_structure':
       return 'Judge JSON failed schema validation';
     case 'provider_error':
@@ -1933,6 +2013,7 @@ export function readVerificationFailureCode(
     if (
       code === 'empty_output' ||
       code === 'malformed_json' ||
+      code === 'truncated_output' ||
       code === 'invalid_structure' ||
       code === 'provider_error' ||
       code === 'context_budget' ||
@@ -2900,17 +2981,36 @@ export async function processVerificationJob(
         let structure = validateJudgeOutputStructure(parsed);
         let usedRetry = false;
         let lastRawOutput = firstAttempt.rawOutput;
+        // Completion accounting for runaway detection: a first attempt that
+        // filled the completion cap (or emitted a huge volume of unparseable
+        // output) gets a compact retry under a fail-fast cap instead of the
+        // identical giant call. Parsed-but-invalid output is complete JSON,
+        // so the schema reminder path below never counts as a runaway.
+        const firstCompletionTokens =
+          firstAttempt.streamResult.completionTokens ?? null;
+        const firstRunaway = !parsed
+          ? detectJudgeRunaway(firstCompletionTokens, maxCompletionTokens)
+          : { runaway: false, hitCap: false };
+        let lastCompletionTokens: number | null = firstCompletionTokens;
+        let lastMaxCompletionTokens = maxCompletionTokens;
         if ((!parsed || !structure.valid) && !isCanceled()) {
           // One repair retry with low-variance sampling and a brief-thinking
           // reminder. Thinking stays at the job's configured budget:
           // disabling it breaks reasoning models that must think before
           // emitting JSON. Parsed-but-invalid output gets a schema-shaped
-          // reminder instead.
+          // reminder instead; runaway output gets a compact-verdict reminder
+          // under a fail-fast completion cap.
+          const compactRetry = !parsed && firstRunaway.runaway;
+          const retryMaxCompletionTokens = compactRetry
+            ? resolveJudgeRetryCompletionBudget(maxCompletionTokens)
+            : maxCompletionTokens;
           console.warn(
             `[Verification Worker ${jobId}] Judge output for message ${messageId} ` +
               (parsed
                 ? `failed structural validation (${structure.reason}); retrying once.`
-                : `failed JSON parsing; retrying once.`)
+                : compactRetry
+                  ? `ran away (${firstCompletionTokens ?? 0} completion tokens); retrying once with a compact-verdict reminder.`
+                  : `failed JSON parsing; retrying once.`)
           );
           publishPhase('retrying', {
             processed,
@@ -2925,7 +3025,13 @@ export async function processVerificationJob(
             judgeMessages[0],
             {
               ...judgeMessages[1],
-              text: `${judgeMessages[1].text}${parsed ? JUDGE_RETRY_SCHEMA_REMINDER : JUDGE_RETRY_REMINDER}`,
+              text: `${judgeMessages[1].text}${
+                parsed
+                  ? JUDGE_RETRY_SCHEMA_REMINDER
+                  : compactRetry
+                    ? JUDGE_RETRY_COMPACT_REMINDER
+                    : JUDGE_RETRY_REMINDER
+              }`,
             },
           ]);
           const retryAttempt = await runJudgeStreamAttempt({
@@ -2939,7 +3045,7 @@ export async function processVerificationJob(
             repeatPenalty: jobRecord?.repeat_penalty,
             numGpuLayers: jobRecord?.num_gpu_layers,
             thinkingBudget: effectiveThinkingBudget,
-            maxCompletionTokens,
+            maxCompletionTokens: retryMaxCompletionTokens,
             isCanceled,
             streamTelemetry: {
               phase: 'retrying',
@@ -2966,19 +3072,33 @@ export async function processVerificationJob(
           }
           usedRetry = true;
           lastRawOutput = retryAttempt.rawOutput;
+          lastCompletionTokens =
+            retryAttempt.streamResult.completionTokens ?? null;
+          lastMaxCompletionTokens = retryMaxCompletionTokens;
           parsed = parseJudgeJson<RawJudgeOutput>(retryAttempt.rawOutput);
           structure = validateJudgeOutputStructure(parsed);
         }
         if (!parsed) {
-          // Empty visible output (thinking-only / blank) vs. malformed JSON
-          // are distinct debuggable failures; both exhausted the retries.
+          // Empty visible output (thinking-only / blank), cap truncation,
+          // and malformed JSON are distinct debuggable failures; all
+          // exhausted the retries.
           const visibleContent = extractVisibleAnswer(lastRawOutput).trim();
+          const lastHitCap = detectJudgeRunaway(
+            lastCompletionTokens,
+            lastMaxCompletionTokens
+          ).hitCap;
           const code: VerificationFailureCode =
-            visibleContent.length === 0 ? 'empty_output' : 'malformed_json';
+            visibleContent.length === 0
+              ? 'empty_output'
+              : lastHitCap
+                ? 'truncated_output'
+                : 'malformed_json';
           const detail =
             code === 'empty_output'
               ? 'Judge LLM returned no visible output (empty or thinking-only response).'
-              : 'Judge LLM did not return valid JSON (unparseable output).';
+              : code === 'truncated_output'
+                ? `Judge LLM output hit the completion cap (${lastCompletionTokens ?? 0} of ${lastMaxCompletionTokens} max tokens) and truncated mid-JSON; the verdict was cut off.`
+                : 'Judge LLM did not return valid JSON (unparseable output).';
           throw new CodedVerificationError(
             code,
             buildMessageFailureMessage({
