@@ -1641,6 +1641,23 @@ export async function processVerificationJob(
           `[Verification Worker ${jobId}] Failed to load model:`,
           loadError
         );
+        const freshAfterLoadFailure =
+          verificationRepository.findVerificationJobById(jobId);
+        if (
+          freshAfterLoadFailure &&
+          freshAfterLoadFailure.status === 'canceled'
+        ) {
+          // The user canceled while the model was loading: preserve the
+          // cancellation instead of overwriting it with `failed`.
+          verificationRepository.updateJobStatus(jobId, 'canceled');
+          await job.updateProgress(100);
+          publishVerificationEvent(jobId, {
+            type: 'status',
+            status: 'canceled',
+            message: 'Job canceled by user.',
+          });
+          return;
+        }
         verificationRepository.updateJobStatus(jobId, 'failed', {
           errorMessage: `Failed to load model: ${loadError.message}`,
         });
@@ -1651,6 +1668,20 @@ export async function processVerificationJob(
         });
         throw loadError;
       }
+    }
+
+    // The user may have canceled while the model was loading: re-read the
+    // row so the `processing` transition below cannot overwrite `canceled`.
+    jobRecord = verificationRepository.findVerificationJobById(jobId);
+    if (!jobRecord || jobRecord.status === 'canceled') {
+      await job.updateProgress(100);
+      verificationRepository.updateJobStatus(jobId, 'canceled');
+      publishVerificationEvent(jobId, {
+        type: 'status',
+        status: 'canceled',
+        message: 'Job canceled by user.',
+      });
+      return;
     }
 
     // --- CANDIDATES (newest-first, from the repository query) ---
@@ -1678,9 +1709,31 @@ export async function processVerificationJob(
         skipVerified: jobRecord.skip_verified,
       });
 
-    verificationRepository.updateJobStatus(jobId, 'processing', {
-      totalMessages: candidates.length,
-    });
+    const transitioned = verificationRepository.transitionJobToProcessing(
+      jobId,
+      {
+        totalMessages: candidates.length,
+      }
+    );
+    if (!transitioned) {
+      // Lost a race with a terminal transition (e.g. the user canceled
+      // after the post-load re-read): never revive the terminal row.
+      const fresh = verificationRepository.findVerificationJobById(jobId);
+      await job.updateProgress(100);
+      if (!fresh || fresh.status === 'canceled') {
+        verificationRepository.updateJobStatus(jobId, 'canceled');
+        publishVerificationEvent(jobId, {
+          type: 'status',
+          status: 'canceled',
+          message: 'Job canceled by user.',
+        });
+      } else {
+        console.warn(
+          `[Verification Worker ${jobId}] Job became ${fresh.status} before processing started; leaving terminal state untouched.`
+        );
+      }
+      return;
+    }
     await job.updateProgress(2);
     publishVerificationEvent(jobId, {
       type: 'status',

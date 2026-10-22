@@ -17,6 +17,7 @@ vi.mock('@therascript/data', () => ({
     findVerificationJobById: vi.fn(),
     findCandidateMessagesForVerification: vi.fn(),
     updateJobStatus: vi.fn(),
+    transitionJobToProcessing: vi.fn(),
     saveMessageVerificationResult: vi.fn(),
   },
   transcriptRepository: {
@@ -89,6 +90,8 @@ const findCandidatesMock = data.verificationRepository
   .findCandidateMessagesForVerification as unknown as Mock;
 const updateJobStatusMock = data.verificationRepository
   .updateJobStatus as unknown as Mock;
+const transitionToProcessingMock = data.verificationRepository
+  .transitionJobToProcessing as unknown as Mock;
 const saveResultMock = data.verificationRepository
   .saveMessageVerificationResult as unknown as Mock;
 const findParagraphsMock = data.transcriptRepository
@@ -98,6 +101,9 @@ const findTemplateMock = data.templateRepository.findByTitle as unknown as Mock;
 const findSessionMock = data.sessionRepository.findById as unknown as Mock;
 const resolveBudgetStub =
   analysisStub.resolveEffectiveThinkingBudget as unknown as Mock;
+const loadModelMock = analysisStub.loadLlmModelForWorker as unknown as Mock;
+const publisher = await import('../services/streamPublisher.js');
+const publishEventMock = publisher.publishVerificationEvent as unknown as Mock;
 
 describe('cleanExactQuote', () => {
   it('strips matching outer double quotes', () => {
@@ -910,6 +916,7 @@ describe('processVerificationJob — judge hardening', () => {
     findTemplateMock.mockReturnValue(null);
     findSessionMock.mockReturnValue({ showSpeakers: 1 });
     updateJobStatusMock.mockReturnValue(true);
+    transitionToProcessingMock.mockReturnValue(true);
     saveResultMock.mockReturnValue({});
     // Transparent streamWithRetry: run the factory once, no retries.
     streamWithRetryMock.mockImplementation(async function* (factory: any) {
@@ -1303,4 +1310,201 @@ describe('processVerificationJob — judge hardening', () => {
       /structurally invalid/
     );
   });
+});
+
+describe('processVerificationJob — cancellation during model loading', () => {
+  const jobRecord = {
+    id: 1,
+    status: 'pending',
+    scope: 'all_unverified',
+    session_ids_json: null,
+    chat_id: null,
+    skip_verified: true,
+    total_messages: 0,
+    processed_messages: 0,
+    total_statements: 0,
+    flagged_statements: 0,
+    omissions_count: 0,
+    created_at: Date.now(),
+    completed_at: null,
+    error_message: null,
+    model_name: 'judge-model',
+    context_size: 8192,
+    thinking_budget: -1,
+    temperature: 0.3,
+    top_p: null,
+    repeat_penalty: null,
+    num_gpu_layers: null,
+    llm_base_url: null,
+  };
+
+  // Stateful stand-in for the SQLite row: status writes are visible to later
+  // reads, so an unconditional `processing` write genuinely overwrites a
+  // `canceled` row exactly as in production.
+  let rowStatus: string;
+
+  async function* fakeStream(
+    chunks: Array<{ content?: string; thinking?: string }>,
+    result: { promptTokens?: number; completionTokens?: number }
+  ): AsyncGenerator<{ content?: string; thinking?: string }, unknown> {
+    for (const chunk of chunks) yield chunk;
+    return result;
+  }
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    rowStatus = 'pending';
+    // Conditional `pending -> processing` transition with production
+    // semantics: terminal rows are never revived.
+    const terminal = ['completed', 'failed', 'canceled'];
+    transitionToProcessingMock.mockImplementation(() => {
+      if (terminal.includes(rowStatus)) return false;
+      rowStatus = 'processing';
+      return true;
+    });
+    findJobMock.mockImplementation(() => ({ ...jobRecord, status: rowStatus }));
+    updateJobStatusMock.mockImplementation((_jobId: number, status: string) => {
+      rowStatus = status;
+      return true;
+    });
+    extractVisibleAnswerMock.mockImplementation((text: string) => text);
+    calculateTokenCountMock.mockReturnValue(10);
+    resolveBudgetStub.mockReturnValue(1638);
+    findParagraphsMock.mockReturnValue([
+      {
+        id: 0,
+        timestamp: 866,
+        text: 'I take Sertraline every morning and I feel better.',
+        speaker: 'SPEAKER_00',
+      },
+    ]);
+    findSessionMock.mockReturnValue({ showSpeakers: 1 });
+    saveResultMock.mockReturnValue({});
+    streamWithRetryMock.mockImplementation(async function* (factory: any) {
+      return yield* factory();
+    });
+    streamLlmMock.mockImplementation(() =>
+      fakeStream([{ content: '{"summary_assessment": "ok"}' }], {
+        promptTokens: 90,
+        completionTokens: 40,
+      })
+    );
+    parseJsonMock.mockReturnValue({
+      summary_assessment: 'All supported.',
+      claims: [],
+      omissions: [],
+    });
+    findTemplateMock.mockReturnValue(null);
+    findCandidatesMock.mockReturnValue([
+      {
+        id: 11,
+        chatId: 5,
+        sessionId: 2,
+        sender: 'ai',
+        text: 'The client takes Sertraline every morning.',
+        timestamp: Date.now(),
+        model: 'author-model',
+        userQuestion: 'What did the client say?',
+      },
+    ]);
+  });
+
+  const runJob = () =>
+    processVerificationJob({
+      data: { jobId: 1 },
+      updateProgress: vi.fn(),
+    } as any);
+
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 10));
+
+  const processingWrites = () =>
+    updateJobStatusMock.mock.calls.filter((call) => call[1] === 'processing');
+
+  it('preserves cancellation when the job is canceled while model loading resolves', async () => {
+    let resolveLoad!: () => void;
+    loadModelMock.mockImplementationOnce(
+      () => new Promise<void>((resolve) => void (resolveLoad = resolve))
+    );
+
+    const pending = runJob();
+    await tick();
+    // API cancels the row while the worker is still awaiting the load.
+    rowStatus = 'canceled';
+    resolveLoad();
+    await pending;
+
+    expect(processingWrites()).toHaveLength(0);
+    expect(streamLlmMock).not.toHaveBeenCalled();
+    expect(saveResultMock).not.toHaveBeenCalled();
+    expect(rowStatus).toBe('canceled');
+    expect(publishEventMock).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ status: 'canceled' })
+    );
+  });
+
+  it('preserves cancellation when the job is canceled while model loading rejects', async () => {
+    let rejectLoad!: (err: Error) => void;
+    loadModelMock.mockImplementationOnce(
+      () => new Promise<void>((_resolve, reject) => void (rejectLoad = reject))
+    );
+
+    const pending = runJob();
+    await tick();
+    // API cancels the row while the worker is still awaiting the load.
+    rowStatus = 'canceled';
+    rejectLoad(new Error('model endpoint unavailable'));
+    await pending;
+
+    expect(processingWrites()).toHaveLength(0);
+    expect(
+      updateJobStatusMock.mock.calls.filter((call) => call[1] === 'failed')
+    ).toHaveLength(0);
+    expect(streamLlmMock).not.toHaveBeenCalled();
+    expect(saveResultMock).not.toHaveBeenCalled();
+    expect(rowStatus).toBe('canceled');
+    expect(publishEventMock).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ status: 'canceled' })
+    );
+  });
+
+  it('refuses to move a terminal job back to processing via the conditional transition', async () => {
+    // Simulates the lost-race window: the row becomes terminal after the
+    // worker's post-load re-read but before the `processing` write.
+    transitionJobToProcessingFallbackCheck();
+    let resolveLoad!: () => void;
+    loadModelMock.mockImplementationOnce(
+      () => new Promise<void>((resolve) => void (resolveLoad = resolve))
+    );
+
+    const pending = runJob();
+    await tick();
+    resolveLoad();
+    // Cancel lands after the post-load re-read: flip the row exactly when
+    // the candidates query runs (the last read before the `processing` write).
+    await pending;
+
+    expect(processingWrites()).toHaveLength(0);
+    expect(streamLlmMock).not.toHaveBeenCalled();
+    expect(rowStatus).toBe('canceled');
+  });
+
+  function transitionJobToProcessingFallbackCheck() {
+    findCandidatesMock.mockImplementationOnce(() => {
+      rowStatus = 'canceled';
+      return [
+        {
+          id: 11,
+          chatId: 5,
+          sessionId: 2,
+          sender: 'ai',
+          text: 'The client takes Sertraline every morning.',
+          timestamp: Date.now(),
+          model: 'author-model',
+          userQuestion: 'What did the client say?',
+        },
+      ];
+    });
+  }
 });

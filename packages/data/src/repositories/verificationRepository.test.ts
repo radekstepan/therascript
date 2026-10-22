@@ -201,6 +201,45 @@ describe('verificationRepository job lifecycle', () => {
   });
 });
 
+describe('transitionJobToProcessing', () => {
+  it('transitions pending jobs but never revives terminal jobs', () => {
+    const pending = verificationRepository.createVerificationJob({
+      scope: 'all_unverified',
+    });
+    expect(
+      verificationRepository.transitionJobToProcessing(pending.id, {
+        totalMessages: 3,
+      })
+    ).toBe(true);
+    const processing = verificationRepository.findVerificationJobById(
+      pending.id
+    );
+    expect(processing?.status).toBe('processing');
+    expect(processing?.total_messages).toBe(3);
+
+    for (const terminal of ['completed', 'failed', 'canceled'] as const) {
+      const job = verificationRepository.createVerificationJob({
+        scope: 'all_unverified',
+      });
+      expect(verificationRepository.updateJobStatus(job.id, terminal)).toBe(
+        true
+      );
+      expect(
+        verificationRepository.transitionJobToProcessing(job.id, {
+          totalMessages: 7,
+        })
+      ).toBe(false);
+      const row = verificationRepository.findVerificationJobById(job.id);
+      expect(row?.status).toBe(terminal);
+      expect(row?.total_messages).toBe(0);
+    }
+
+    expect(verificationRepository.transitionJobToProcessing(999999)).toBe(
+      false
+    );
+  });
+});
+
 describe('findCandidateMessagesForVerification', () => {
   const seedScenario = () => {
     const sessionId = insertSession('Main');

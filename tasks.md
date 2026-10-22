@@ -56,6 +56,8 @@ When the judge supplies an existing `paragraphIndex`, hydration immediately acce
 
 ## 4. P1 — Cancellation during model loading is overwritten
 
+- [x] Task 4
+
 **Location:** `packages/worker/src/jobs/verificationProcessor.ts:1244–1328`.
 
 The worker checks cancellation before awaiting model loading. If the user cancels during that await, the API sets the database row to `canceled`, but the worker subsequently writes `processing` unconditionally. The next cancellation check reads this overwritten state, so the canceled audit continues. The API can also accept another audit after cancellation, leaving the original unexpectedly active again.

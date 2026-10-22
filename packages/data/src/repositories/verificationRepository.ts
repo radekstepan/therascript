@@ -412,6 +412,38 @@ export const verificationRepository = {
     }
   },
 
+  /**
+   * Conditional `pending -> processing` transition. The `WHERE` clause
+   * refuses to revive terminal rows (`completed`/`failed`/`canceled`), so a
+   * cancellation that lands between the worker's last status re-read and this
+   * write cannot be overwritten. Returns `true` when the row transitioned.
+   */
+  transitionJobToProcessing: (
+    jobId: number,
+    fields: Pick<UpdateVerificationJobFields, 'totalMessages'> = {}
+  ): boolean => {
+    try {
+      const sets: string[] = ['status = ?', 'completed_at = ?'];
+      const params: unknown[] = ['processing', null];
+      if (fields.totalMessages !== undefined) {
+        sets.push('total_messages = ?');
+        params.push(fields.totalMessages);
+      }
+      params.push(jobId);
+      const info = run(
+        `UPDATE verification_jobs SET ${sets.join(', ')} WHERE id = ? AND status NOT IN ('completed', 'failed', 'canceled')`,
+        ...params
+      );
+      return info.changes > 0;
+    } catch (error) {
+      console.error(
+        `[VerificationRepo] Error transitioning verification job ${jobId} to processing:`,
+        error
+      );
+      throw new Error('Database error updating verification job status.');
+    }
+  },
+
   incrementJobCounters: (
     jobId: number,
     deltas: VerificationJobCounterDeltas
