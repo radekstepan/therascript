@@ -19,6 +19,7 @@ import {
   Checkbox,
   Tooltip,
 } from '@radix-ui/themes';
+import { ShieldCheck } from 'lucide-react';
 import { TableVirtuoso } from 'react-virtuoso';
 import type { Session } from '../../types';
 import type { SessionSortCriteria, SortDirection } from '../../store';
@@ -84,6 +85,11 @@ const SessionRowCells = React.memo(function SessionRowCells({
 }: SessionRowCellsProps) {
   const chatCount = session.chatCount ?? session.chats?.length ?? 0;
   const hasChats = chatCount > 0;
+  const factCheckedChatCount = session.factCheckedChatCount ?? 0;
+  const isFactChecked = hasChats && factCheckedChatCount > 0;
+  const chatLabel = `${chatCount} chat${chatCount === 1 ? '' : 's'}${
+    isFactChecked ? `, ${factCheckedChatCount} fact-checked` : ''
+  }`;
   const sessionIcon = (
     <div
       className={cn(
@@ -95,11 +101,13 @@ const SessionRowCells = React.memo(function SessionRowCells({
       {...(hasChats
         ? {
             role: 'img',
-            'aria-label': `${chatCount} chat${chatCount === 1 ? '' : 's'}`,
+            'aria-label': chatLabel,
           }
         : {})}
     >
-      {hasChats ? (
+      {isFactChecked ? (
+        <ShieldCheck size={16} />
+      ) : hasChats ? (
         <ChatBubbleIcon width={16} height={16} />
       ) : (
         <FileTextIcon width={16} height={16} />
@@ -126,9 +134,7 @@ const SessionRowCells = React.memo(function SessionRowCells({
       >
         <Flex align="center" gap="3" style={{ minWidth: 0 }}>
           {hasChats ? (
-            <Tooltip content={`${chatCount} chat${chatCount === 1 ? '' : 's'}`}>
-              {sessionIcon}
-            </Tooltip>
+            <Tooltip content={chatLabel}>{sessionIcon}</Tooltip>
           ) : (
             sessionIcon
           )}

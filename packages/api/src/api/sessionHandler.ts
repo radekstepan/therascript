@@ -94,6 +94,7 @@ export const listSessions = ({ set }: SessionHandlerContextNoSessionData) => {
       errorMessage: s.errorMessage,
       showSpeakers: s.showSpeakers,
       chatCount: s.chatCount,
+      factCheckedChatCount: s.factCheckedChatCount,
     }));
     set.status = 200;
     return sessionDTOs;

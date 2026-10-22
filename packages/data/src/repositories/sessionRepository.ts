@@ -30,8 +30,10 @@ const selectAllSessionsWithChatCountsStmt = (): DbStatement => {
   if (!_selectAllSessionsWithChatCountsStmt) {
     // Only count chats with actual back-and-forth: at least one user message.
     // Auto-created chats (single AI welcome message) and empty chats are excluded.
+    // factCheckedChatCount counts chats with at least one completed
+    // message verification (drives the fact-checked icon in the list).
     _selectAllSessionsWithChatCountsStmt = db.prepare(
-      "SELECT s.id, s.fileName, s.clientName, s.sessionName, s.date, s.sessionType, s.therapy, s.audioPath, s.status, s.whisperJobId, s.transcriptTokenCount, s.duration, s.errorMessage, s.showSpeakers, COUNT(c.id) AS chatCount FROM sessions s LEFT JOIN chats c ON c.sessionId = s.id AND EXISTS (SELECT 1 FROM messages m WHERE m.chatId = c.id AND m.sender = 'user') GROUP BY s.id ORDER BY s.date DESC, s.id DESC"
+      "SELECT s.id, s.fileName, s.clientName, s.sessionName, s.date, s.sessionType, s.therapy, s.audioPath, s.status, s.whisperJobId, s.transcriptTokenCount, s.duration, s.errorMessage, s.showSpeakers, COUNT(c.id) AS chatCount, (SELECT COUNT(DISTINCT mv.chat_id) FROM message_verifications mv INNER JOIN chats c2 ON c2.id = mv.chat_id WHERE c2.sessionId = s.id AND mv.status = 'completed') AS factCheckedChatCount FROM sessions s LEFT JOIN chats c ON c.sessionId = s.id AND EXISTS (SELECT 1 FROM messages m WHERE m.chatId = c.id AND m.sender = 'user') GROUP BY s.id ORDER BY s.date DESC, s.id DESC"
     );
   }
   return _selectAllSessionsWithChatCountsStmt;
@@ -155,10 +157,14 @@ export const sessionRepository = {
     }
   },
 
-  findAllWithChatCounts: (): (BackendSession & { chatCount: number })[] => {
+  findAllWithChatCounts: (): (BackendSession & {
+    chatCount: number;
+    factCheckedChatCount: number;
+  })[] => {
     try {
       return selectAllSessionsWithChatCountsStmt().all() as (BackendSession & {
         chatCount: number;
+        factCheckedChatCount: number;
       })[];
     } catch (error) {
       throw new Error(`DB error fetching sessions with chat counts: ${error}`);

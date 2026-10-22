@@ -109,6 +109,7 @@ const SessionMetadataResponseSchema = t.Object({
 const SessionListResponseItemSchema = t.Object({
   ...SessionMetadataResponseSchema.properties,
   chatCount: t.Optional(t.Number()),
+  factCheckedChatCount: t.Optional(t.Number()),
 });
 const SessionChatMetadataSchema = t.Omit(
   t.Object({

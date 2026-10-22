@@ -146,6 +146,8 @@ export interface Session extends SessionMetadata {
   chats: Pick<ChatSession, 'id' | 'sessionId' | 'timestamp' | 'name'>[];
   /** Number of chats with actual back-and-forth (at least one user message; populated by the list endpoint). */
   chatCount?: number | null;
+  /** Chats with at least one completed fact-check verification (populated by the list endpoint). */
+  factCheckedChatCount?: number | null;
 }
 
 export interface BackendChatSession {

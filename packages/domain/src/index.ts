@@ -122,6 +122,8 @@ export interface BackendSession {
   chats?: (Omit<ChatMetadata, 'tags'> & { sessionId: number })[];
   /** Number of chats linked to the session. Populated by list endpoints only, not a DB column. */
   chatCount?: number;
+  /** Chats with at least one completed fact-check verification. Populated by list endpoints only, not a DB column. */
+  factCheckedChatCount?: number;
 }
 
 export type BackendSessionMetadata = Omit<
@@ -130,6 +132,7 @@ export type BackendSessionMetadata = Omit<
   | 'transcriptTokenCount'
   | 'chats'
   | 'chatCount'
+  | 'factCheckedChatCount'
   | 'fileName'
   | 'status'
   | 'whisperJobId'
