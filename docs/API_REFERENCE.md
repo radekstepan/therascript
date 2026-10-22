@@ -113,7 +113,7 @@ LLM Fact-Verification & Hallucination Audit ("LLM Judge") job management, analyt
 - `succeeded_messages` / `failed_messages` / `skipped_messages` — Finished-attempt outcome split. `processed_messages` counts finished attempts only (successes + failures).
 - `current_phase` (`waiting_for_lock` | `loading_judge` | `checking_message` | `generating` | `retrying` | `finishing`), `current_message_id`, `current_attempt`, `phase_updated_at` — Live phase snapshot for active jobs; cleared on terminal transitions. Reconnects and reloads read these from the SSE snapshot / `GET` endpoints.
 - A run where every attempted assessment fails lands on `failed`; a mixed run stays `completed` with an `error_message` starting "Completed with errors: …" and `failed_messages > 0` (clients must render the mixed label, never unqualified success).
-- Failed `message_verifications` rows carry a bounded `error_message` plus a machine-readable `error_code` (`empty_output` | `malformed_json` | `invalid_structure` | `provider_error` | `context_budget` | `missing_transcript`).
+- Failed `message_verifications` rows carry a bounded `error_message` plus a machine-readable `error_code` (`empty_output` | `malformed_json` | `truncated_output` | `invalid_structure` | `provider_error` | `context_budget` | `missing_transcript`). `truncated_output` means the Judge demonstrably stopped at its completion cap (cap numbers in the detail); `malformed_json` is unparseable output under the cap.
 
 ---
 
