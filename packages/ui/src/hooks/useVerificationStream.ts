@@ -237,11 +237,12 @@ export function useVerificationStream(
           return next;
         });
 
-        if (
-          data.type === 'message_verified' ||
-          data.type === 'progress' ||
-          data.type === 'phase'
-        ) {
+        // Only a verified message persists new data. Progress counters
+        // and phase ticks (token-speed telemetry fires ~3/sec during
+        // generation) merge into local banner state above — refetching
+        // the dashboard queries on them caused a refetch storm that made
+        // the Issues Feed "refreshing…" indicator strobe constantly.
+        if (data.type === 'message_verified') {
           invalidateDashboard();
         }
 

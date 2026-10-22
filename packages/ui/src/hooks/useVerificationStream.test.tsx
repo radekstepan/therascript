@@ -13,6 +13,9 @@
 //     (not a Judge `streamError`) and invalidates the dashboard queries
 //     so the existing polling/refetch path reconciles the outcome.
 //   - Terminal events clear the phase and fire `onTerminal` once.
+//   - Dashboard queries invalidate only on `message_verified` (new
+//     persisted data) — never on high-frequency `progress`/`phase`
+//     telemetry ticks.
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
@@ -354,6 +357,59 @@ describe('useVerificationStream token speed', () => {
       phase: 'generating',
       tokensPerSecond: null,
       generatedTokens: null,
+    });
+  });
+});
+
+describe('useVerificationStream dashboard invalidation', () => {
+  it('invalidates only when a message verifies — not on progress/phase ticks', () => {
+    const { invalidateSpy } = renderStream(7);
+    act(() => {
+      lastInstance().emit({ type: 'snapshot', job: ACTIVE_JOB });
+    });
+    invalidateSpy.mockClear();
+
+    // Token-speed telemetry ticks (~3/sec during generation) and
+    // progress counters merge into local banner state; they persist
+    // nothing, so they must not refetch the dashboard queries (that
+    // storm made the Issues Feed "refreshing…" indicator strobe).
+    act(() => {
+      lastInstance().emit({
+        jobId: 7,
+        timestamp: Date.now(),
+        type: 'phase',
+        phase: 'generating',
+        message: 'Generating assessment (attempt 1)…',
+        messageId: 1914,
+        messageIndex: 1,
+        attempt: 1,
+        tokensPerSecond: 38.2,
+        generatedTokens: 60,
+      });
+    });
+    act(() => {
+      lastInstance().emit({
+        jobId: 7,
+        timestamp: Date.now(),
+        type: 'progress',
+        totalMessages: 1,
+        processedMessages: 0,
+      });
+    });
+    expect(invalidateSpy).not.toHaveBeenCalled();
+
+    // A verified message persists new statements: now refetch.
+    act(() => {
+      lastInstance().emit({
+        jobId: 7,
+        timestamp: Date.now(),
+        type: 'message_verified',
+        messageId: 1914,
+      });
+    });
+    expect(invalidateSpy).toHaveBeenCalledTimes(4);
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['verificationStatements'],
     });
   });
 });

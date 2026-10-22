@@ -306,7 +306,15 @@ export function IssuesFeedTab({
           <Text size="1" color="gray">
             Showing {query.data.items.length} of{' '}
             {query.data.total.toLocaleString()} issues
-            {query.isFetching && ' · refreshing…'}
+            {/* Always mounted, opacity-toggled: mounting/unmounting this
+                suffix on isFetching shifted the line and strobed during
+                audit refetch storms. */}
+            <span
+              aria-hidden={!query.isFetching}
+              style={{ opacity: query.isFetching ? 1 : 0 }}
+            >
+              {' · refreshing…'}
+            </span>
           </Text>
           <Flex direction="column" gap="2">
             {query.data.items.map((item) => (

@@ -42,11 +42,13 @@ For background on the Verification Agent and LLM lifecycle, see `AGENTS.md` (§1
 
 ## Task 3: Issues Feed "refreshing..." flickers while Fact Check runs
 
-- [ ] Done
+- [x] Done
 
 > In the Issues Feed while Fact Check is running I see "refreshing..." flickering constantly
 
-**Verification:** TBD
+**Verification:** `yarn vitest run packages/ui/src/hooks/useVerificationStream.test.tsx packages/ui/src/components/Verification/IssuesFeedTab.test.tsx` (17/17 pass, incl. 2 new tests, both observed failing pre-fix); `npx tsc --noEmit -p packages/ui/tsconfig.json` passes.
+
+**Writeup:** Two-part root-cause fix. (1) `packages/ui/src/hooks/useVerificationStream.ts` invalidated all four dashboard queries on every `progress`/`phase` SSE event, and the worker emits token-speed `phase` ticks ~3/sec during generation — a refetch storm that toggled `isFetching` constantly (new test proved 8 invalidation calls from 2 ticks pre-fix). It now invalidates only on `message_verified`, the sole event that persists new data; banner/phase stay live via local merged state and the existing jobs/stats polls backstop missed events. This also stops the strobe on the Updating spinner, pagination disabled states, and chat verification refetches. (2) `packages/ui/src/components/Verification/IssuesFeedTab.tsx` keeps the `· refreshing…` suffix always mounted and opacity-toggles it (aria-hidden while idle) instead of conditionally rendering, so even legitimate refetches cause zero layout shift. Tests: stream test asserts phase/progress ticks never invalidate while `message_verified` invalidates all four keys; feed test drives a deferred background refetch and asserts the same node fades 0→1→0. Changeset: `.changeset/issues-feed-refreshing-strobe.md`.
 
 ---
 

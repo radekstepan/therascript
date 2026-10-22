@@ -7,12 +7,21 @@
 // navigate-to-chat handler.
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  act,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { Theme } from '@radix-ui/themes';
-import type { FlaggedStatementItem } from '../../api/verification';
+import type {
+  FlaggedStatementItem,
+  FlaggedStatementsResult,
+} from '../../api/verification';
 import { fetchFlaggedStatements } from '../../api/verification';
 import { IssuesFeedTab } from './IssuesFeedTab';
 
@@ -71,15 +80,18 @@ function renderTab(clients: string[] = ['Jane Doe']) {
       queries: { retry: false, gcTime: 0 },
     },
   });
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={['/verification']}>
-        <Theme>
-          <IssuesFeedTab models={['llama']} clients={clients} />
-        </Theme>
-      </MemoryRouter>
-    </QueryClientProvider>
-  );
+  return {
+    ...render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/verification']}>
+          <Theme>
+            <IssuesFeedTab models={['llama']} clients={clients} />
+          </Theme>
+        </MemoryRouter>
+      </QueryClientProvider>
+    ),
+    queryClient,
+  };
 }
 
 describe('IssuesFeedTab session link', () => {
@@ -141,6 +153,41 @@ describe('IssuesFeedTab client filter', () => {
       expect(vi.mocked(fetchFlaggedStatements)).toHaveBeenCalledWith(
         expect.objectContaining({ clientName: 'John Smith' })
       );
+    });
+  });
+});
+
+describe('IssuesFeedTab refreshing indicator', () => {
+  it('keeps the indicator mounted and toggles opacity (no layout shift)', async () => {
+    const { queryClient } = renderTab();
+    await screen.findByText('The patient takes aspirin daily.');
+
+    // Idle: the indicator stays in the layout, transparent.
+    const indicator = screen.getByText(/refreshing/);
+    expect(indicator.style.opacity).toBe('0');
+
+    // A background refetch fades the SAME node in (no remount flicker).
+    let resolveRefetch!: (value: FlaggedStatementsResult) => void;
+    vi.mocked(fetchFlaggedStatements).mockImplementationOnce(
+      () =>
+        new Promise<FlaggedStatementsResult>((resolve) => {
+          resolveRefetch = resolve;
+        })
+    );
+    // Fire-and-forget: awaiting would deadlock on the deferred fetch below.
+    act(() => {
+      void queryClient.invalidateQueries({
+        queryKey: ['verificationStatements'],
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/refreshing/).style.opacity).toBe('1');
+    });
+    expect(screen.getByText(/refreshing/)).toBe(indicator);
+
+    resolveRefetch({ items: [ITEM], total: 1, limit: 25, offset: 0 });
+    await waitFor(() => {
+      expect(screen.getByText(/refreshing/).style.opacity).toBe('0');
     });
   });
 });
