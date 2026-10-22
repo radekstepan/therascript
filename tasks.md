@@ -13,4 +13,16 @@ For background on the Verification Agent and LLM lifecycle, see `AGENTS.md` (§1
 
 ---
 
-...
+"yarn build" taking a really long time, what's up?
+ Tasks:    14 successful, 14 total
+Cached:    12 cached, 14 total
+  Time:    1m20.008s 
+
+In Accuracy and Hallucinations over time the tooltips don't show where the bar/data point is
+
+In the Issues Feed while Fact Check is running I see "refreshing..." flickering constantly
+
+Fact Check - Claim mix little bar is not vertically aligned in the table row
+
+On FAct Check Audit #5 most of the prompts worked, but this one didn't:
+Completed with errors: 18 of 19 checked, 1 failed (job 5, judge "qwen3.8-27b"). First failure [malformed_json]: [malformed_json] Judge returned invalid JSON for message 1819 (job 5, judge "qwen3.8-27b", retrying, attempt 2 of 2, 570.0s, 42747+57605 tokens): Judge LLM did not return valid JSON (unparseable output). Retries exhausted (1 retry).
