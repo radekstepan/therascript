@@ -249,6 +249,7 @@ export function ChatMessageBubble({
         <mark
           key={idx}
           className={VERIFIED_MARK_CLASS}
+          data-verdict={segment.verdict}
           style={getVerdictMarkStyle(segment.verdict)}
           role="button"
           tabIndex={0}

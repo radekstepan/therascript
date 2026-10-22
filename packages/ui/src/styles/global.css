@@ -531,18 +531,24 @@ button[class*='rt-IconButton']:not(:disabled):hover {
 }
 
 /* --- Verified statement highlights (LLM Judge) --- */
-/* Inline <mark> overlays in session chat notes. Base colors are set inline
-   per verdict; hover/focus elevation lives here. */
+/* Inline <mark> overlays in session chat notes. Resting fills are set
+   inline per verdict (one alpha step down); hover switches ONLY the
+   fill back to full via --verified-mark-bg — underlines/borders stay
+   exactly as the verdict style defines them. */
 .verified-statement-mark {
-  transition:
-    background-color 120ms ease,
-    box-shadow 120ms ease;
+  transition: background-color 120ms ease;
 }
 
-.verified-statement-mark:hover {
-  filter: brightness(0.96);
-  box-shadow: 0 1px 0 var(--gray-a6);
+.verified-statement-mark[data-verdict='fabricated']:hover,
+.verified-statement-mark[data-verdict='contradicted']:hover {
+  --verified-mark-bg: var(--red-a3);
 }
+
+.verified-statement-mark[data-verdict='partially_supported']:hover,
+.verified-statement-mark[data-verdict='omission']:hover {
+  --verified-mark-bg: var(--amber-a3);
+}
+/* Supported marks have no fill: transparent at rest and on hover. */
 
 .verified-statement-mark:focus-visible {
   outline: 2px solid var(--accent-8);

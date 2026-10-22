@@ -771,8 +771,14 @@ export function rehypeHighlightStatements(
 
 // --- verdict styling ---------------------------------------------------------
 
+// Resting fills sit one alpha step below the full verdict color (a2):
+// readable at a glance without shouting. Hover switches ONLY the fill
+// back to full (a3) via --verified-mark-bg (see the :hover rules in
+// global.css) — underlines/borders are never touched. The indirection
+// through a CSS variable is structural: resting fills are inline, and a
+// plain stylesheet hover rule cannot override an inline background.
 const RED_MARK_STYLE: CSSProperties = {
-  background: 'var(--red-a3)',
+  background: 'var(--verified-mark-bg, var(--red-a2))',
   borderBottom: '2px solid var(--red-8)',
   borderRadius: 3,
   padding: '0 2px',
@@ -780,7 +786,7 @@ const RED_MARK_STYLE: CSSProperties = {
 };
 
 const AMBER_MARK_STYLE: CSSProperties = {
-  background: 'var(--amber-a3)',
+  background: 'var(--verified-mark-bg, var(--amber-a2))',
   borderBottom: '1.5px dashed var(--amber-8)',
   borderRadius: 3,
   padding: '0 2px',

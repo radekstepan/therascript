@@ -143,6 +143,15 @@ describe('ChatMessageBubble verification entry points', () => {
   });
 });
 
+describe('ChatMessageBubble mark verdict attributes', () => {
+  it('tags plain-text marks with data-verdict for hover styling', () => {
+    const { container } = renderBubble();
+
+    const mark = container.querySelector('mark');
+    expect(mark?.getAttribute('data-verdict')).toBe('fabricated');
+  });
+});
+
 describe('ChatMessageBubble verified toggle', () => {
   const SUPPORTED_QUOTE = 'The client takes sertraline daily.';
   const FABRICATED_QUOTE = 'The client owns three cats.';

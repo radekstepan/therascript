@@ -91,11 +91,13 @@ For background on the Verification Agent and LLM lifecycle, see `AGENTS.md` (§1
 
 ## Task 7: Fact-check highlight colors more transparent, full color only on hover
 
-- [ ] Done
+- [x] Done
 
 > The colors of fact checks on a session note should be a bit more transparent and only the transparency should switch to the current color/transparency on hover. Do not modify underline, border or anything like that.
 
-**Verification:** TBD
+**Verification:** `yarn vitest run packages/ui/src/utils/highlightVerifiedStatements.test.ts packages/ui/src/components/SessionView/Chat/ChatMessageBubble.test.tsx` (51/51, incl. 3 new); `npx tsc --noEmit -p packages/ui/tsconfig.json` passes. Hover rendering itself needs a browser; resting values, untouched borders, and the verdict hook are pinned by tests.
+
+**Writeup:** Resting fills in `getVerdictMarkStyle` (`packages/ui/src/utils/highlightVerifiedStatements.ts`) drop one Radix alpha step (`red/amber a3` → `a2`); `packages/ui/src/styles/global.css` hover rules switch only the fill back to `a3` per `data-verdict`, replacing the old brightness-filter + gray box-shadow hover. Underlines/borders/radius/padding are byte-identical (pinned by test); supported marks stay fill-less. Because resting fills are inline (a stylesheet rule cannot override them), the handoff uses a `--verified-mark-bg` variable with the `a2` value as fallback; plain-text marks in `ChatMessageBubble` gained the `data-verdict` attribute the markdown path already emitted. Changeset: `.changeset/fact-check-highlight-transparency.md`.
 
 ---
 

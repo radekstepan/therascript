@@ -7,6 +7,7 @@ import {
   rehypeHighlightStatements,
   parseStatementEvidence,
   formatEvidenceTimestamp,
+  getVerdictMarkStyle,
   type HighlightableStatement,
 } from './highlightVerifiedStatements';
 
@@ -582,5 +583,36 @@ describe('rehypeHighlightStatements cross-node matching', () => {
       tree
     );
     expect(collectMarks(tree)).toHaveLength(0);
+  });
+});
+
+describe('getVerdictMarkStyle', () => {
+  it('rests one alpha step below full so fills stay subtle', () => {
+    expect(getVerdictMarkStyle('fabricated').background).toBe(
+      'var(--verified-mark-bg, var(--red-a2))'
+    );
+    expect(getVerdictMarkStyle('contradicted').background).toBe(
+      'var(--verified-mark-bg, var(--red-a2))'
+    );
+    expect(getVerdictMarkStyle('partially_supported').background).toBe(
+      'var(--verified-mark-bg, var(--amber-a2))'
+    );
+    expect(getVerdictMarkStyle('omission').background).toBe(
+      'var(--verified-mark-bg, var(--amber-a2))'
+    );
+    // Supported marks carry no fill at all.
+    expect(getVerdictMarkStyle('supported').background).toBe('transparent');
+  });
+
+  it('leaves underlines, borders, and radius untouched', () => {
+    expect(getVerdictMarkStyle('fabricated').borderBottom).toBe(
+      '2px solid var(--red-8)'
+    );
+    expect(getVerdictMarkStyle('partially_supported').borderBottom).toBe(
+      '1.5px dashed var(--amber-8)'
+    );
+    expect(getVerdictMarkStyle('supported').borderBottom).toBe(
+      '1px dotted var(--green-7)'
+    );
   });
 });
