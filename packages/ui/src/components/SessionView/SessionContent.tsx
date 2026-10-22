@@ -1,11 +1,23 @@
 // Path: packages/ui/src/components/SessionView/SessionContent.tsx
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Box, Flex, Text, Tabs, ScrollArea } from '@radix-ui/themes';
 import type { Session, StructuredTranscript, LlmStatus } from '../../types'; // Add LlmStatus
 import { Transcription } from './Transcription/Transcription';
 import { ChatInterface } from './Chat/ChatInterface';
 import { StartChatPrompt } from './Chat/StartChatPrompt';
 import { SessionSidebar } from './Sidebar/SessionSidebar';
+
+/**
+ * True for transcript paragraph deep-links (`#paragraph-<id>`) emitted by
+ * Fact Check evidence. On small screens the session view is tabbed, so a
+ * paragraph hash must flip to the Transcript tab for the scroll to land.
+ */
+export function shouldActivateTranscriptTab(
+  hash: string | null | undefined
+): boolean {
+  return !!hash && hash.startsWith('#paragraph-');
+}
 
 interface SessionContentProps {
   session: Session;
@@ -53,6 +65,16 @@ export function SessionContent({
     }
     activeChatIdRef.current = activeChatId;
   }, [activeChatId]);
+
+  // Paragraph deep-links (#paragraph-<id>) from Fact Check evidence flip
+  // small screens to the Transcript tab so the scroll lands; the
+  // side-by-side desktop layout has no tabs and ignores this.
+  const location = useLocation();
+  useEffect(() => {
+    if (shouldActivateTranscriptTab(location.hash)) {
+      setActiveTab('transcription');
+    }
+  }, [location.hash]);
 
   return (
     <Flex direction="column" style={{ height: '100%', minHeight: 0 }}>
@@ -119,6 +141,9 @@ export function SessionContent({
             transcriptContent={transcriptContent}
             isLoadingTranscript={isLoadingTranscript}
             transcriptError={transcriptError}
+            // The side-by-side panel is always visible: without this the
+            // #paragraph-<id> scroll effect treats it as inactive.
+            isTabActive
           />
         </Flex>
       </Flex>

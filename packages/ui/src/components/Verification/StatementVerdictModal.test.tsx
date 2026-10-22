@@ -8,6 +8,7 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
 import { Theme } from '@radix-ui/themes';
 import { StatementVerdictModal } from './StatementVerdictModal';
 import type { VerifiedStatement } from '../../api/verification';
@@ -31,7 +32,8 @@ beforeEach(() => {
 });
 
 // The modal clears verifications through react-query, so every render
-// needs a client (fresh per test to avoid cache leakage).
+// needs a client (fresh per test to avoid cache leakage). The router
+// wrapper serves the evidence paragraph jump links.
 function renderWithClient(ui: React.ReactElement) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -40,7 +42,9 @@ function renderWithClient(ui: React.ReactElement) {
     },
   });
   return render(
-    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
+    <MemoryRouter>
+      <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
+    </MemoryRouter>
   );
 }
 
@@ -238,6 +242,72 @@ describe('StatementVerdictModal UNKNOWN speaker', () => {
     );
 
     expect(await screen.findByText('Client')).toBeTruthy();
+  });
+});
+
+describe('StatementVerdictModal paragraph jump link', () => {
+  const WITH_PARAGRAPH: VerifiedStatement = {
+    ...STATEMENT,
+    id: 15,
+    verdict: 'supported',
+    severity: 'none',
+    reasoning: 'Confirmed by the session transcript.',
+    transcript_evidence_json: null,
+    evidence: [
+      {
+        paragraphIndex: 14,
+        timestampMs: 125_000,
+        speaker: 'Client',
+        quote: 'The client takes sertraline daily.',
+      },
+    ],
+  };
+
+  function renderStatement(statement: VerifiedStatement) {
+    return renderWithClient(
+      <Theme>
+        <StatementVerdictModal
+          open
+          onOpenChange={() => {}}
+          statements={[statement]}
+          initialStatementId={statement.id}
+          authoredModel="author-model"
+          judgeModel="judge-model"
+          verifiedAt={Date.now()}
+        />
+      </Theme>
+    );
+  }
+
+  it('links the ¶ evidence reference to that transcript paragraph', async () => {
+    renderStatement(WITH_PARAGRAPH);
+    const link = await screen.findByRole('link', {
+      name: 'Jump to transcript paragraph 14',
+    });
+    expect(link.textContent).toBe('¶14');
+    expect(link.getAttribute('href')).toContain('#paragraph-14');
+    expect(link.getAttribute('title')).toContain(
+      'Jump to this paragraph in the session transcript'
+    );
+  });
+
+  it('renders no jump link when the evidence has no paragraph index', async () => {
+    renderStatement({
+      ...WITH_PARAGRAPH,
+      evidence: [
+        {
+          paragraphIndex: null,
+          timestampMs: 125_000,
+          speaker: 'Client',
+          quote: 'The client takes sertraline daily.',
+        },
+      ],
+    });
+    // The evidence card rendered (timestamp), but offers no jump link.
+    expect(await screen.findByText('2:05')).toBeTruthy();
+    expect(
+      screen.queryByRole('link', { name: /Jump to transcript paragraph/ })
+    ).toBeNull();
   });
 });
 

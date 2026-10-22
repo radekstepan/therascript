@@ -79,11 +79,13 @@ For background on the Verification Agent and LLM lifecycle, see `AGENTS.md` (§1
 
 ## Task 6: Jump from a transcript chat reference to that part of the transcript
 
-- [ ] Done
+- [x] Done
 
 > When looking at transcript chat with a transcript reference, make it easy to jump to that part of the transcript to check yourself.
 
-**Verification:** TBD
+**Verification:** `yarn vitest run packages/ui/src/components/Verification/StatementVerdictModal.test.tsx packages/ui/src/components/SessionView/SessionContent.test.tsx` (12/12, incl. 4 new); neighboring `ChatMessages`/`ChatMessageBubble`/`Transcription` suites (30/30); `npx tsc --noEmit -p packages/ui/tsconfig.json` passes. Scroll landing itself needs a browser (jsdom cannot scroll); href/tab wiring is pinned by tests.
+
+**Writeup:** The `¶N` reference on each Fact Check evidence card (`packages/ui/src/components/Verification/StatementVerdictModal.tsx`) was plain text; it is now a same-page `#paragraph-N` link (accent + hover underline, matching the session-link pattern) reusing the transcript's existing hash-scroll + 2s highlight. Same-page (not `/sessions/:id`) deliberately: the desktop transcript panel sits side-by-side with chat, so leaving the route would discard chat context. Two supporting fixes: the desktop `Transcription` panel never received `isTabActive`, which silently disabled the hash-scroll effect on desktop — `packages/ui/src/components/SessionView/SessionContent.tsx` now passes it — and paragraph hashes auto-switch small (tabbed) screens to the Transcript tab via the tested `shouldActivateTranscriptTab` helper. Evidence `paragraphIndex` is the DB paragraph id (worker hydrates it from `paragraphsById`), matching the `paragraph-<id>` DOM anchors. Tests: modal link href/label + no-link-without-index cases (render helper gained a `MemoryRouter`), helper unit tests. Changeset: `.changeset/evidence-paragraph-jump-link.md`.
 
 ---
 

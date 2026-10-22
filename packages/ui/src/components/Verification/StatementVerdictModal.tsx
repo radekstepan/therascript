@@ -29,6 +29,7 @@ import {
   TrashIcon,
 } from '@radix-ui/react-icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import type {
   StatementSeverity,
   VerifiedStatement,
@@ -392,8 +393,16 @@ export function StatementVerdictModal({
                           {formatEvidenceTimestamp(item.timestampMs)}
                         </Badge>
                         {item.paragraphIndex != null && (
-                          <Text size="1" color="gray">
-                            ¶{item.paragraphIndex}
+                          <Text size="1" as="span">
+                            <Link
+                              to={`#paragraph-${item.paragraphIndex}`}
+                              title="Jump to this paragraph in the session transcript"
+                              aria-label={`Jump to transcript paragraph ${item.paragraphIndex}`}
+                              className="hover:underline"
+                              style={{ color: 'var(--accent-11)' }}
+                            >
+                              ¶{item.paragraphIndex}
+                            </Link>
                           </Text>
                         )}
                       </Flex>
