@@ -277,7 +277,7 @@ The `currentProcess !== devProcess` guard in the concurrently event handlers is 
 
 1.  **Job Creation (UI -> API)**
 
-    - User launches an audit from `StartVerificationModal.tsx` (scope picker + Judge LLM settings) or clicks "Fact Check Chat" in `ChatPanelHeader.tsx` for the active chat.
+    - User launches an audit from `StartVerificationModal.tsx` (scope picker + Judge LLM settings). The session chat header shows only a passive all-verified status icon (`ChatVerifiedStatusIcon.tsx`); it never starts verification.
     - `POST /api/verification/jobs` (or `POST /api/sessions/:id/chats/:chatId/verify`) creates a `verification_jobs` row (`verification_jobs` table).
     - **Single-job guard:** `createVerificationJobRecord` refuses with `409 Conflict` when `verificationRepository.hasActiveVerificationJobs()` is true (a job is `pending`/`processing`/`canceling`).
     - **LLM Param Snapshot:** like analysis jobs, the API snapshots the Judge config (`model_name`, `context_size`, `thinking_budget`, `temperature` defaulting to `0.3`, `top_p`, `repeat_penalty`, `num_gpu_layers`, `llm_base_url`) into the job row. Job creation never mutates the user's global chat model — the worker loads/unloads the Judge model itself.

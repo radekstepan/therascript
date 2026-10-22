@@ -1,5 +1,6 @@
 // packages/ui/src/components/SessionView/Chat/index.ts
 export * from './ChatPanelHeader';
+export * from './ChatVerifiedStatusIcon';
 export * from './ChatInput';
 export * from './ChatMessages';
 export * from './ChatInterface';

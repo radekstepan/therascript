@@ -1,5 +1,6 @@
 /* packages/ui/src/api/verification.ts */
 import axios from 'axios';
+import type { ChatMessage } from '../types';
 
 // UI-local mirrors of the backend verification DTOs (see
 // BackendMessageVerification / BackendVerifiedStatement in
@@ -407,3 +408,147 @@ export const resetVerifications = async (): Promise<{
   const response = await axios.delete('/api/verification/reset');
   return response.data;
 };
+
+// ---------------------------------------------------------------------------
+// Chat-scoped verification coverage (session chat header status icon).
+// ---------------------------------------------------------------------------
+
+/**
+ * Mirrors the backend `WELCOME_MESSAGE_LIKE_PATTERN`
+ * (`Session "%" has been transcribed and is ready for analysis.` in
+ * `verificationRepository.ts`): the automatic message inserted by the
+ * transcription pipeline. Such messages (with `completionTokens` NULL)
+ * are never audited.
+ */
+const WELCOME_MESSAGE_RE =
+  /^Session "[\s\S]*" has been transcribed and is ready for analysis\.$/;
+
+/**
+ * True when `message` is an AI note the backend would consider for
+ * verification. Mirrors `VERIFIABLE_AI_MESSAGE_FILTER`:
+ * sender is `ai`, text is non-empty, not the automatic welcome message,
+ * and answering a preceding user message in the same chat.
+ *
+ * Two client-side allowances keep the header status truthful:
+ * - Optimistic (negative-id) AI messages count even while their text is
+ *   still empty, so the all-verified icon hides the moment a note is
+ *   added instead of lingering through the thinking phase.
+ * - The preceding-user check uses array order (identical to `u.id < m.id`
+ *   for persisted rows, whose ids grow chronologically) so optimistic
+ *   temp ids order correctly.
+ *
+ * Trivial conversational greetings are NOT excluded: the worker audits
+ * them via its zero-token fast path and stores a `completed` row, so
+ * they are eligible and count as checked once that row exists.
+ */
+export function isVerifiableChatAiMessage(
+  message: ChatMessage,
+  messages: ChatMessage[]
+): boolean {
+  if (message.sender !== 'ai') return false;
+  if (
+    message.completionTokens == null &&
+    WELCOME_MESSAGE_RE.test(message.text)
+  ) {
+    return false;
+  }
+  if (message.text.trim() === '' && !(message.id < 0)) return false;
+  const index = messages.indexOf(message);
+  if (index >= 0) {
+    return messages.slice(0, index).some((m) => m.sender === 'user');
+  }
+  return messages.some((m) => m.sender === 'user' && m.id < message.id);
+}
+
+export interface ChatVerificationSummary {
+  eligibleMessageIds: number[];
+  checkedMessageIds: number[];
+  failedMessageIds: number[];
+  /** Eligible but without a terminal record: absent or `skipped`. */
+  uncheckedMessageIds: number[];
+  supportedClaims: number;
+  partialClaims: number;
+  contradictedClaims: number;
+  fabricatedClaims: number;
+  totalClaims: number;
+  omissionsCount: number;
+  /**
+   * Pooled accuracy percent across completed verifications
+   * (`(supported + 0.5 * partial) / (totalClaims + omissions) * 100`,
+   * mirroring the worker's `computeVerificationAccuracy` weighting).
+   * Null when nothing with claims was assessed — callers must label
+   * this as unknown, never render it as 0%.
+   */
+  accuracyPercent: number | null;
+  /**
+   * True only when at least one note is eligible and every eligible
+   * note has a `completed` verification. A completed assessment with
+   * flagged claims still counts; `failed`, `skipped`, or absent does not.
+   */
+  allVerified: boolean;
+}
+
+/**
+ * Roll up per-chat verification coverage from the chat's messages and
+ * its `chatVerifications` records. Only `completed` verifications
+ * contribute claim/omission/accuracy totals.
+ */
+export function summarizeChatVerifications(
+  messages: ChatMessage[],
+  verifications: MessageVerification[]
+): ChatVerificationSummary {
+  const byMessageId = new Map<number, MessageVerification>();
+  for (const v of verifications) {
+    byMessageId.set(v.message_id, v);
+  }
+  const eligibleMessageIds: number[] = [];
+  const checkedMessageIds: number[] = [];
+  const failedMessageIds: number[] = [];
+  const uncheckedMessageIds: number[] = [];
+  let supportedClaims = 0;
+  let partialClaims = 0;
+  let contradictedClaims = 0;
+  let fabricatedClaims = 0;
+  let totalClaims = 0;
+  let omissionsCount = 0;
+  for (const message of messages) {
+    if (!isVerifiableChatAiMessage(message, messages)) continue;
+    eligibleMessageIds.push(message.id);
+    const verification = byMessageId.get(message.id);
+    if (verification?.status === 'completed') {
+      checkedMessageIds.push(message.id);
+      supportedClaims += verification.supported_claims;
+      partialClaims += verification.partial_claims;
+      contradictedClaims += verification.contradicted_claims;
+      fabricatedClaims += verification.fabricated_claims;
+      totalClaims += verification.total_claims;
+      omissionsCount += verification.omissions_count;
+    } else if (verification?.status === 'failed') {
+      failedMessageIds.push(message.id);
+    } else {
+      uncheckedMessageIds.push(message.id);
+    }
+  }
+  const denominator = totalClaims + omissionsCount;
+  const accuracyPercent =
+    denominator > 0
+      ? ((supportedClaims + 0.5 * partialClaims) / denominator) * 100
+      : null;
+  return {
+    eligibleMessageIds,
+    checkedMessageIds,
+    failedMessageIds,
+    uncheckedMessageIds,
+    supportedClaims,
+    partialClaims,
+    contradictedClaims,
+    fabricatedClaims,
+    totalClaims,
+    omissionsCount,
+    accuracyPercent,
+    allVerified:
+      eligibleMessageIds.length > 0 &&
+      failedMessageIds.length === 0 &&
+      uncheckedMessageIds.length === 0,
+  };
+}

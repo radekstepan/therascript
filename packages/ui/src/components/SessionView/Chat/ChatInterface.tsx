@@ -18,8 +18,6 @@ import {
   addStandaloneChatMessageStream,
   unloadLlmModel,
 } from '../../../api/api';
-import { triggerSingleChatVerification } from '../../../api/verification';
-import { useVerificationStream } from '../../../hooks/useVerificationStream';
 import { debounce } from '../../../helpers';
 import type {
   ChatSession,
@@ -179,55 +177,6 @@ export function ChatInterface({
   const latestPromptTokens = lastAiMessageWithTokens?.promptTokens ?? null;
   const latestCompletionTokens =
     lastAiMessageWithTokens?.completionTokens ?? null;
-
-  // --- Single-chat fact check (session chats on completed transcripts) -------
-  // Follows the dashboard pattern: trigger the job, then follow its SSE
-  // stream (which invalidates chatVerifications/verificationStats as each
-  // message completes) until it reaches a terminal status.
-  const canFactCheckChat =
-    !isStandalone && session?.status === 'completed' && activeChatId !== null;
-  const [chatVerifyJobId, setChatVerifyJobId] = useState<number | null>(null);
-
-  const factCheckChatMutation = useMutation({
-    mutationFn: () => {
-      if (activeSessionId === null || activeChatId === null) {
-        throw new Error('Session or chat missing for fact check.');
-      }
-      // skipVerified: already-checked messages keep their verdicts while
-      // failed and unchecked ones are (re-)audited.
-      return triggerSingleChatVerification(activeSessionId, activeChatId, {
-        skipVerified: true,
-      });
-    },
-    onSuccess: (data) => {
-      setChatVerifyJobId(data.jobId);
-      setToastMessage('Fact-checking this chat — auditing newest first.');
-    },
-    onError: (error: Error) => {
-      setToastMessage(`Failed to start fact check: ${error.message}`);
-    },
-  });
-
-  const { job: chatVerifyJob } = useVerificationStream(chatVerifyJobId, {
-    enabled: chatVerifyJobId !== null,
-    onTerminal: (status) => {
-      setChatVerifyJobId(null);
-      if (activeSessionId !== null && activeChatId !== null) {
-        queryClient.invalidateQueries({
-          queryKey: ['chatVerifications', activeSessionId, activeChatId],
-        });
-      }
-      queryClient.invalidateQueries({ queryKey: ['verificationStats'] });
-      setToastMessage(
-        status === 'completed'
-          ? 'Chat fact check complete.'
-          : `Chat fact check ${status}.`
-      );
-    },
-  });
-
-  const isFactCheckingChat =
-    factCheckChatMutation.isPending || chatVerifyJobId !== null;
 
   const processStream = async (
     stream: ReadableStream<Uint8Array>,
@@ -794,16 +743,7 @@ export function ChatInterface({
           onOpenLlmModal={onOpenLlmModal}
           transcriptTokenCount={transcriptTokenCount} // <-- PASS PROP
           activeModelDefaultContextSize={activeModelDefaultContextSize} // <-- PASS PROP
-          factCheck={
-            canFactCheckChat
-              ? {
-                  onFactCheck: () => factCheckChatMutation.mutate(),
-                  isChecking: isFactCheckingChat,
-                  processedMessages: chatVerifyJob?.processed_messages ?? null,
-                  totalMessages: chatVerifyJob?.total_messages ?? null,
-                }
-              : null
-          }
+          messages={chatMessages}
         />
       )}
 

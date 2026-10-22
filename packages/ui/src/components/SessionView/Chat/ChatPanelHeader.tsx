@@ -22,21 +22,15 @@ import type {
   Session,
   LlmStatus,
   UIContextUsageResponse,
+  ChatMessage,
 } from '../../../types';
 import { AppTooltip } from '../../Shared/AppTooltip';
+import { ChatVerifiedStatusIcon } from './ChatVerifiedStatusIcon';
 import { cn } from '../../../utils';
 import prettyBytes from 'pretty-bytes';
-import { ShieldCheck } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchSessionContextUsage } from '../../../api/chat';
 import { useLlmModelState } from '../../../hooks/useLlmModelState';
-
-export interface ChatFactCheckState {
-  onFactCheck: () => void;
-  isChecking: boolean;
-  processedMessages: number | null;
-  totalMessages: number | null;
-}
 
 interface ChatPanelHeaderProps {
   session: Session | null;
@@ -49,10 +43,11 @@ interface ChatPanelHeaderProps {
   transcriptTokenCount?: number | null;
   activeModelDefaultContextSize?: number | null;
   /**
-   * Single-chat fact check controls. Null when unavailable (standalone
-   * chats, incomplete transcripts, or no active chat).
+   * Messages of the selected chat. Feeds the passive all-verified
+   * status icon (hidden for standalone chats, which don't render this
+   * header, or when coverage is incomplete).
    */
-  factCheck?: ChatFactCheckState | null;
+  messages: ChatMessage[];
 }
 
 export function ChatPanelHeader({
@@ -65,7 +60,7 @@ export function ChatPanelHeader({
   latestCompletionTokens,
   transcriptTokenCount,
   activeModelDefaultContextSize,
-  factCheck,
+  messages,
 }: ChatPanelHeaderProps) {
   const modelName = llmStatus?.activeModel ?? 'No Model Selected';
   const isLoaded = llmStatus?.loaded ?? false;
@@ -331,35 +326,13 @@ export function ChatPanelHeader({
           )}
         </Flex>
 
-        {/* Right Side: Fact Check + Model Name + Configure Button */}
+        {/* Right Side: Verified Status + Model Name + Configure Button */}
         <Flex align="center" gap="2">
-          {factCheck && (
-            <AppTooltip
-              content={
-                factCheck.isChecking &&
-                factCheck.processedMessages !== null &&
-                factCheck.totalMessages !== null
-                  ? `Fact-checking this chat: ${factCheck.processedMessages} / ${factCheck.totalMessages} messages`
-                  : factCheck.isChecking
-                    ? 'Fact-checking this chat…'
-                    : 'Fact-check every AI response in this chat against the transcript'
-              }
-            >
-              <Button
-                variant="soft"
-                size="1"
-                onClick={factCheck.onFactCheck}
-                disabled={factCheck.isChecking}
-                aria-label="Fact Check Chat"
-              >
-                {factCheck.isChecking ? (
-                  <Spinner size="1" />
-                ) : (
-                  <ShieldCheck size={13} />
-                )}
-              </Button>
-            </AppTooltip>
-          )}
+          <ChatVerifiedStatusIcon
+            messages={messages}
+            sessionId={session?.id ?? null}
+            chatId={activeChatId}
+          />
           {llmStatus?.activeModel &&
             llmStatus.activeModel !== 'default' &&
             (loadFailed ? (

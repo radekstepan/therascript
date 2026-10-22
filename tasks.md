@@ -55,7 +55,7 @@ For each task, run `yarn test` and the builds listed under **Verification** with
 
 **Verification:** `yarn test`; `yarn build:ui`; inspect the sidebar and splash-screen logos plus the browser favicon in light/dark appearance and several contrasting accents.
 
-### - [ ] Task 3: Replace the session chat Fact Check button with a verified-status icon
+### - [x] Task 3: Replace the session chat Fact Check button with a verified-status icon
 
 **Target Files:**
 - `packages/ui/src/components/SessionView/Chat/ChatPanelHeader.tsx`, `ChatInterface.tsx`, and `ChatMessages.tsx`
