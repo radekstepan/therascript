@@ -32,11 +32,14 @@ const {
   mockGetConfiguredContextSize,
   mockSetActiveModelAndContextAndParams,
   mockUnloadModelAtUrl,
+  mockSubscribeToVerificationStream,
+  mockStreamUnsubscribe,
 } = vi.hoisted(() => ({
   mockVerificationRepo: {
     hasActiveVerificationJobs: vi.fn(),
     createVerificationJob: vi.fn(),
     findAllVerificationJobs: vi.fn(),
+    findVerificationJobById: vi.fn(),
     resetAllVerifications: vi.fn(),
   },
   mockSessionRepo: { findById: vi.fn() },
@@ -53,6 +56,8 @@ const {
   mockGetConfiguredContextSize: vi.fn(),
   mockSetActiveModelAndContextAndParams: vi.fn(),
   mockUnloadModelAtUrl: vi.fn(),
+  mockSubscribeToVerificationStream: vi.fn(),
+  mockStreamUnsubscribe: vi.fn(),
 }));
 
 vi.mock('@therascript/data', () => ({
@@ -69,7 +74,8 @@ vi.mock('../services/jobQueueService.js', () => ({
 }));
 
 vi.mock('../services/streamSubscriber.js', () => ({
-  subscribeToVerificationStream: vi.fn(),
+  subscribeToVerificationStream: (...args: unknown[]) =>
+    mockSubscribeToVerificationStream(...args),
 }));
 
 vi.mock('../services/activeModelService.js', () => ({
@@ -96,6 +102,7 @@ const {
   createVerificationJobHandler,
   createVerificationJobRecord,
   resetVerificationsHandler,
+  streamVerificationJobHandler,
 } = await import('./verificationHandler.js');
 
 beforeEach(() => {
@@ -222,5 +229,196 @@ describe('resetVerificationsHandler active-job guard', () => {
       message: 'All verifications cleared (3 message(s)).',
       deletedVerifications: 3,
     });
+  });
+});
+
+describe('streamVerificationJobHandler terminal-event delivery', () => {
+  type StreamCallback = (event: Record<string, unknown>) => void;
+
+  const RUNNING_JOB = { id: 7, status: 'processing' };
+
+  /** Read every SSE `data:` frame from a single response through EOF. */
+  const readSseEvents = async (
+    res: Response
+  ): Promise<Record<string, unknown>[]> => {
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    const events: Record<string, unknown>[] = [];
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let boundary: number;
+      while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+        const frame = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        for (const line of frame.split('\n')) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('data:')) {
+            events.push(JSON.parse(trimmed.slice('data:'.length).trim()));
+          }
+        }
+      }
+    }
+    return events;
+  };
+
+  /** Subscribe to a running job and return the captured Redis callback. */
+  const subscribeToRunningJob = (): {
+    res: Response;
+    emit: StreamCallback;
+  } => {
+    mockVerificationRepo.findVerificationJobById.mockReturnValue(RUNNING_JOB);
+    mockSubscribeToVerificationStream.mockReturnValue(mockStreamUnsubscribe);
+    const res = streamVerificationJobHandler({
+      params: { jobId: 7 },
+      set: {},
+    });
+    expect(res.status).toBe(200);
+    const emit = mockSubscribeToVerificationStream.mock.calls[0][1];
+    return { res, emit };
+  };
+
+  beforeEach(() => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  it.each([
+    {
+      name: 'completed',
+      terminal: {
+        jobId: 7,
+        timestamp: 1,
+        type: 'complete',
+        status: 'completed',
+      },
+    },
+    {
+      name: 'failed',
+      terminal: {
+        jobId: 7,
+        timestamp: 2,
+        type: 'error',
+        status: 'failed',
+        message: 'judge exploded',
+      },
+    },
+    {
+      name: 'canceled',
+      terminal: {
+        jobId: 7,
+        timestamp: 3,
+        type: 'status',
+        status: 'canceled',
+        message: 'canceled by user',
+      },
+    },
+  ])(
+    'delivers the $name terminal event exactly once with queued progress retained',
+    async ({ terminal }) => {
+      const { res, emit } = subscribeToRunningJob();
+      const progress1 = {
+        jobId: 7,
+        timestamp: 10,
+        type: 'progress',
+        processedMessages: 1,
+        totalMessages: 3,
+      };
+      const progress2 = {
+        jobId: 7,
+        timestamp: 11,
+        type: 'message_verified',
+        messageId: 42,
+      };
+
+      // Queue progress and then the terminal event back-to-back on the
+      // same tick, as a burst of Redis messages would arrive.
+      emit(progress1);
+      emit(progress2);
+      emit(terminal);
+
+      // A single stream read through EOF must observe everything —
+      // no reconnect for a terminal snapshot.
+      const events = await readSseEvents(res);
+
+      expect(events).toEqual([
+        { type: 'snapshot', job: RUNNING_JOB },
+        progress1,
+        progress2,
+        terminal,
+      ]);
+      expect(events.filter((e) => e.type === terminal.type)).toHaveLength(1);
+      expect(mockStreamUnsubscribe).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it('closes idempotently when terminal events repeat', async () => {
+    const { res, emit } = subscribeToRunningJob();
+    const terminal = {
+      jobId: 7,
+      timestamp: 1,
+      type: 'complete',
+      status: 'completed',
+    };
+
+    emit(terminal);
+    // A duplicate terminal delivery (or a status echo after complete)
+    // must not throw, re-enqueue, or re-unsubscribe.
+    emit({ ...terminal, timestamp: 2 });
+    emit({ jobId: 7, timestamp: 3, type: 'status', status: 'completed' });
+
+    const events = await readSseEvents(res);
+
+    expect(events).toEqual([{ type: 'snapshot', job: RUNNING_JOB }, terminal]);
+    expect(mockStreamUnsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the stream open for non-terminal events and unsubscribes on disconnect', async () => {
+    const { res, emit } = subscribeToRunningJob();
+    const progress = {
+      jobId: 7,
+      timestamp: 10,
+      type: 'progress',
+      processedMessages: 1,
+      totalMessages: 3,
+    };
+    emit(progress);
+
+    // Give deferred enqueues a chance to run: the stream must still
+    // be open (no close, no unsubscribe) for non-terminal events.
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(mockStreamUnsubscribe).not.toHaveBeenCalled();
+
+    // Client disconnect cancels the stream and releases the subscription.
+    await res.body!.cancel();
+    expect(mockStreamUnsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends the snapshot and closes for an already-terminal job', async () => {
+    const job = { id: 9, status: 'completed' };
+    mockVerificationRepo.findVerificationJobById.mockReturnValue(job);
+
+    const res = streamVerificationJobHandler({
+      params: { jobId: 9 },
+      set: {},
+    });
+
+    expect(await readSseEvents(res)).toEqual([{ type: 'snapshot', job }]);
+    expect(mockSubscribeToVerificationStream).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 without subscribing when the job does not exist', () => {
+    mockVerificationRepo.findVerificationJobById.mockReturnValue(null);
+    const set: { status?: number | string } = {};
+
+    const res = streamVerificationJobHandler({
+      params: { jobId: 123 },
+      set,
+    });
+
+    expect(res.status).toBe(404);
+    expect(set.status).toBe(404);
+    expect(mockSubscribeToVerificationStream).not.toHaveBeenCalled();
   });
 });

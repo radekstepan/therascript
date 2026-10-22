@@ -362,36 +362,78 @@ export const streamVerificationJobHandler = ({
 
   let unsubscribe: (() => void) | null = null;
   let streamClosed = false;
+  // Set once a terminal close is scheduled: refuses sends queued after the
+  // terminal event while the already-queued payloads still flush.
+  let closing = false;
+  // Serializes deferred enqueues with stream closure so the terminal
+  // payload (and any progress queued before it) is always flushed before
+  // the controller closes. Links never reject.
+  let enqueueChain: Promise<void> = Promise.resolve();
+
+  // Idempotent: safe to call from the terminal path, cancel(), and
+  // enqueue-error handling without double-unsubscribing.
+  const doUnsubscribe = (): void => {
+    const fn = unsubscribe;
+    unsubscribe = null;
+    if (fn) {
+      try {
+        fn();
+      } catch {
+        // Best-effort teardown; subscriber cleanup must not break the stream.
+      }
+    }
+  };
 
   const stream = new ReadableStream({
     start(controller) {
       const encoder = new TextEncoder();
 
       const send = (data: object) => {
-        if (streamClosed) return;
-        setImmediate(() => {
-          if (streamClosed) return;
-          try {
-            controller.enqueue(
-              encoder.encode(`data: ${JSON.stringify(data)}\n\n`)
-            );
-          } catch (e: any) {
-            if (e?.code === 'ERR_INVALID_STATE') {
-              streamClosed = true;
-              return;
-            }
-            throw e;
-          }
-        });
+        if (streamClosed || closing) return;
+        enqueueChain = enqueueChain.then(
+          () =>
+            new Promise<void>((resolve) => {
+              // Yield to the event loop so each per-event write actually hits
+              // the wire on its own (see streamSubscriber): without this, a
+              // burst of Redis messages arriving in the same tick would be
+              // coalesced into a single kernel send buffer flush on remote
+              // (non-loopback) sockets, making streaming appear to stall.
+              setImmediate(() => {
+                if (!streamClosed) {
+                  try {
+                    controller.enqueue(
+                      encoder.encode(`data: ${JSON.stringify(data)}\n\n`)
+                    );
+                  } catch (e: any) {
+                    // The stream is dead (client gone or controller closed):
+                    // drop the rest of the queue rather than throwing out of
+                    // the timer (which would escape as an uncaughtException)
+                    // or stalling the serialized close below.
+                    streamClosed = true;
+                    doUnsubscribe();
+                    if (e?.code !== 'ERR_INVALID_STATE') {
+                      console.error(
+                        `[Stream API] Unexpected enqueue error for verification job ${jobId}:`,
+                        e
+                      );
+                    }
+                  }
+                }
+                resolve();
+              });
+            })
+        );
       };
 
-      // 1. Send initial snapshot
-      send({ type: 'snapshot', job });
-
-      // 2. If the job is already terminal, close immediately after the
-      // snapshot so clients don't hang on a finished job.
-      if (TERMINAL_JOB_STATUSES.has(job.status)) {
-        setImmediate(() => {
+      // Serialized close: appended to the enqueue chain so it runs after
+      // every payload scheduled before it. Idempotent via closing/closed.
+      const closeStream = () => {
+        if (closing || streamClosed) return;
+        closing = true;
+        // Stop the Redis flow now; payloads already chained still flush.
+        doUnsubscribe();
+        enqueueChain = enqueueChain.then(() => {
+          if (streamClosed) return;
           streamClosed = true;
           try {
             controller.close();
@@ -399,6 +441,15 @@ export const streamVerificationJobHandler = ({
             // Already closed — nothing to do.
           }
         });
+      };
+
+      // 1. Send initial snapshot
+      send({ type: 'snapshot', job });
+
+      // 2. If the job is already terminal, close once the snapshot flushes
+      // so clients don't hang on a finished job.
+      if (TERMINAL_JOB_STATUSES.has(job.status)) {
+        closeStream();
         return;
       }
 
@@ -416,9 +467,7 @@ export const streamVerificationJobHandler = ({
           console.log(
             `[Stream API] Verification job ${jobId} finished. Closing stream.`
           );
-          streamClosed = true;
-          controller.close();
-          unsubscribe?.();
+          closeStream();
         }
       });
     },
@@ -427,7 +476,7 @@ export const streamVerificationJobHandler = ({
         `[Stream API] Client disconnected from verification job ${jobId} stream.`
       );
       streamClosed = true;
-      unsubscribe?.();
+      doUnsubscribe();
     },
   });
 

@@ -80,6 +80,8 @@ The early return for a canceled job still executes `finally`. At that point `jud
 
 ## 6. P2 — Terminal SSE events are dropped before delivery
 
+- [x] Task 6
+
 **Location:** `packages/api/src/api/verificationHandler.ts:367–421`.
 
 `send(event)` schedules enqueueing with `setImmediate`. For terminal Redis events, the subscriber immediately sets `streamClosed = true` and closes the controller. The scheduled enqueue sees the flag and returns, so completion/failure/cancellation is never sent. Previously scheduled progress events can be discarded too. The browser must reconnect and obtain a terminal snapshot to discover completion, delaying callbacks and losing the original terminal error event.
