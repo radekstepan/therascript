@@ -22,7 +22,7 @@ This document is structured as a sequential execution plan for an LLM orchestrat
 - [x] Task 2: I don't understand why say session "foo" has accuracy of 0.8%. Statements???
 - [x] Task 3: Show accuracy by llm and the chart over time above rather than next to each other. The chart should go first.
 - [x] Task 4: When I navigate from issue feed to that chat, it opens the Fact Check modal on the page 2x
-- [ ] Task 5: Highlight the name of the session in the issues feed like a link just like we do elsewhere
+- [x] Task 5: Highlight the name of the session in the issues feed like a link just like we do elsewhere
 - [ ] Task 6: Be able to filter the issues list by client
 - [ ] Task 7: Don't like the purple judge label when job is running, put the name of the judge in the "audit in progress" line instead
 - [ ] Task 8: Currently we change the icon of the session in the list when it has a chat (speech bubble icon). If it is also fact checked, use that icon instead (the one you use in the header of the chat panel on the session page in the Fact Check Chat)

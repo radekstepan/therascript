@@ -4,7 +4,7 @@
 // partial support, omissions) with deep links into the session chat.
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   Box,
   Flex,
@@ -331,7 +331,26 @@ export function IssuesFeedTab({ models }: { models: string[] }) {
                 </Text>
                 <Flex gap="2" wrap="wrap" align="center">
                   <Text size="1" color="gray">
-                    {item.sessionName} · {item.clientName}
+                    <Link
+                      to={`/sessions/${item.session_id}`}
+                      title="Open session transcript"
+                      aria-label={`Open transcript for ${item.sessionName}`}
+                      className="hover:underline"
+                      style={{ color: 'var(--accent-11)' }}
+                      onClick={(event) => {
+                        // The card itself navigates to the chat; keep the
+                        // session link on the transcript route instead.
+                        event.stopPropagation();
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.stopPropagation();
+                        }
+                      }}
+                    >
+                      {item.sessionName}
+                    </Link>{' '}
+                    · {item.clientName}
                   </Text>
                   <Text size="1" color="gray">
                     ·
