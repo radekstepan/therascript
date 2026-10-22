@@ -259,6 +259,26 @@ describe('VerificationAuditPage live phase display', () => {
     expect(screen.getByText('1 failed')).not.toBeNull();
   });
 
+  it('renders a single spinner in the live banner while the phase is displayed', async () => {
+    hookState.phase = {
+      phase: 'generating',
+      message: 'Generating assessment for message 1914 (attempt 1)…',
+      messageId: 1914,
+      chatId: 5,
+      sessionId: 2,
+      messageIndex: 1,
+      attempt: 1,
+      elapsedMs: 4200,
+      updatedAt: Date.now(),
+    };
+    const { container } = renderPage();
+
+    await screen.findByRole('heading', { name: /Audit #7 in progress/ });
+    expect(screen.getByTestId('audit-live-phase')).not.toBeNull();
+    // Header spinner kept; the duplicate phase-row spinner was removed.
+    expect(container.querySelectorAll('.rt-Spinner')).toHaveLength(1);
+  });
+
   it('distinguishes connection trouble from a Judge failure', async () => {
     hookState.connectionLost = true;
     renderPage();

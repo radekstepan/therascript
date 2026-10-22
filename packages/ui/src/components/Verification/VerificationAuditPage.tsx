@@ -137,7 +137,6 @@ function LiveJobBanner({ job }: { job: VerificationJob }) {
         </Box>
 
         <Flex align="center" gap="2">
-          <Spinner size="1" aria-hidden="true" />
           <Text size="2" data-testid="audit-live-phase">
             {phaseText}
           </Text>

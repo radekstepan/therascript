@@ -32,7 +32,7 @@ For background on the Verification Agent and LLM lifecycle, see `AGENTS.md` (§1
 
 ---
 
-### - [ ] Task 2: Remove duplicate loading spinner from the live audit progress banner
+### - [x] Task 2: Remove duplicate loading spinner from the live audit progress banner
 
 - **Problem & Investigation Context:**
   When a fact-check audit is running on `/verification`, `LiveJobBanner` in `packages/ui/src/components/Verification/VerificationAuditPage.tsx` (lines 80–200) renders **two** `<Spinner>` components simultaneously:
