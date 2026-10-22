@@ -500,7 +500,7 @@ export function PersistentSidebar() {
                 <Flex align="center" justify="between" width="100%">
                   <span className="text-[var(--gray-12)]">Active Jobs</span>
                   {totalActiveJobs > 0 && (
-                    <Badge color="blue" variant="solid" radius="full" size="1">
+                    <Badge color="blue" variant="solid" size="1">
                       {totalActiveJobs}
                     </Badge>
                   )}

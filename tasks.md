@@ -15,4 +15,7 @@ For background on the Verification Agent and LLM lifecycle, see `AGENTS.md` (§1
 
 When there are active jobs we show this "oval" with a number. Use the subtly rounded borders on a square/rectangle instead (like elsewhere in the app).
 
+**Task 1 writeup — what/why:** The sidebar "Active Jobs" count badge in `packages/ui/src/components/Layout/PersistentSidebar.tsx` was the only count badge passing `radius="full"` to Radix `Badge`, rendering it as an oval/pill. Removed the prop so it inherits the theme default (`radius="medium"` in `App.tsx`), matching the subtly-rounded rectangle badges used everywhere else (Fact Check `CoverageTab`/`JobHistoryTab`, Analysis jobs). Added `PersistentSidebar.test.tsx` asserting the badge never renders `data-radius="full"`. Changeset: `.changeset/active-jobs-badge-radius.md` (patch on `@therascript/ui`).
+
 When we done with a Fact Check, make sure we still keep the selected model loaded with its context so if we go to a chat or run a different Fact Check, we have settings preset. We can of course unload the model too while starting a Fact Check (just like we woulf from a dsession chat)
+
