@@ -189,6 +189,15 @@ export const LlmEndpointModelPicker: React.FC<LlmEndpointModelPickerProps> = ({
     staleTime: 0,
     gcTime: 0,
     refetchOnMount: 'always',
+    // Model discovery runs only on dialog mount, on endpoint/URL change
+    // (via the queryKey above), and on explicit error-Retry. Window
+    // focus — like audit polling, SSE updates, and tab switches — must
+    // never start discovery from hidden (or backgrounded) controls, so
+    // this is pinned off explicitly rather than inherited from the
+    // client's global default. The queryFn's last-known-good
+    // persistence therefore only ever runs for intentional, enabled
+    // discovery.
+    refetchOnWindowFocus: false,
   });
 
   // A malformed payload (e.g. a non-array `models` field) renders as an

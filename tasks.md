@@ -109,7 +109,7 @@ For each task, run `yarn test` and the builds listed under **Verification** with
 
 **Verification:** `yarn test`; `yarn build:ui`; inspect desktop and narrow viewport layouts.
 
-### - [ ] Task 6: Stop fetching model lists while only viewing/running an audit
+### - [x] Task 6: Stop fetching model lists while only viewing/running an audit
 
 **Target Files:**
 - `packages/ui/src/components/Verification/VerificationAuditPage.tsx`, `StartVerificationModal.tsx`

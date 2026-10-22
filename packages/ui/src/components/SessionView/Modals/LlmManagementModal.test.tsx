@@ -2,13 +2,14 @@
 // packages/ui/src/components/SessionView/Modals/LlmManagementModal.test.tsx
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Provider as JotaiProvider } from 'jotai';
 import { Theme } from '@radix-ui/themes';
 
 import { LlmManagementModal } from './LlmManagementModal';
+import { fetchAvailableModels } from '../../../api/api';
 import type { LlmModelInfo, LlmStatus } from '../../../types';
 
 const VERY_LONG_MODEL_NAME =
@@ -166,5 +167,56 @@ describe('LlmManagementModal', () => {
     expect(
       screen.getByText(/Are you sure you want to delete the model/i)
     ).toBeTruthy();
+  });
+});
+
+describe('LlmManagementModal model discovery (Task 6)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const sleep = (ms: number) =>
+    new Promise((resolve) => setTimeout(resolve, ms));
+
+  // NOTE: renderModal's QueryClient leaves `refetchOnWindowFocus` at
+  // TanStack's default (`true`), so the focus steps below genuinely
+  // exercise the focus-refetch path. TanStack v5 refetches on
+  // `visibilitychange`, not on `focus`.
+  function fireWindowRefocus() {
+    act(() => {
+      window.dispatchEvent(new Event('visibilitychange'));
+    });
+  }
+
+  it('does not fetch model lists while closed, even across window focus', async () => {
+    renderModal({ isOpen: false, onOpenChange: vi.fn() });
+
+    await act(async () => {
+      await sleep(300);
+    });
+    fireWindowRefocus();
+    await act(async () => {
+      await sleep(300);
+    });
+
+    expect(vi.mocked(fetchAvailableModels)).not.toHaveBeenCalled();
+  });
+
+  it('fetches on open but not on window focus', async () => {
+    renderModal({ isOpen: true, onOpenChange: vi.fn() });
+
+    // Opening the dialog fetches the catalog as expected.
+    await screen.findByText(VERY_LONG_MODEL_NAME);
+    expect(vi.mocked(fetchAvailableModels)).toHaveBeenCalled();
+    const callsAfterOpen = vi.mocked(fetchAvailableModels).mock.calls.length;
+
+    // Refocusing the window must not start discovery.
+    fireWindowRefocus();
+    await act(async () => {
+      await sleep(300);
+    });
+    expect(vi.mocked(fetchAvailableModels).mock.calls.length).toBe(
+      callsAfterOpen
+    );
   });
 });

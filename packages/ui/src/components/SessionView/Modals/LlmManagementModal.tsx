@@ -126,6 +126,11 @@ export function LlmManagementModal({
     queryFn: () => fetchAvailableModels(llmStatus?.defaultBaseUrl ?? null),
     enabled: isOpen && !!llmStatus?.defaultBaseUrl,
     gcTime: 1 * 60 * 1000,
+    // Discovery runs only while this dialog is open (mount + explicit
+    // Retry). Window focus must never start it — pinned off explicitly
+    // rather than inherited from the client's global default, mirroring
+    // the shared picker's audit-page guarantee.
+    refetchOnWindowFocus: false,
   });
 
   const startPullMutation = useMutation({

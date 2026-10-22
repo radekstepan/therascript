@@ -21,7 +21,7 @@
 // covered by SelectActiveModelModal.test.tsx.
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Provider as JotaiProvider, useAtomValue } from 'jotai';
@@ -561,5 +561,111 @@ describe('LlmEndpointModelPicker — remote URL pre-fill', () => {
     expect(screen.getByTestId('atom-value').textContent).toBe(
       '"http://saved-host:1234"'
     );
+  });
+});
+
+describe('LlmEndpointModelPicker — dialog-visibility gating (Task 6)', () => {
+  beforeEach(() => {
+    localStorage.removeItem(STORAGE_KEY);
+    vi.clearAllMocks();
+    fetchModelsMock.mockResolvedValue({ models: [] });
+  });
+
+  const sleep = (ms: number) =>
+    new Promise((resolve) => setTimeout(resolve, ms));
+
+  function renderHarness(ui: React.ReactElement) {
+    // NOTE: no `refetchOnWindowFocus` override — TanStack's default
+    // (`true`) applies, so the focus steps below genuinely exercise
+    // the focus-refetch path (the app's global default is `false`,
+    // but discovery must stay silent regardless of the default).
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false, gcTime: 0, staleTime: 0 },
+      },
+    });
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <JotaiProvider>
+          <Theme>{ui}</Theme>
+        </JotaiProvider>
+      </QueryClientProvider>
+    );
+  }
+
+  /** TanStack v5 refetches on `visibilitychange`, not on `focus`. */
+  function fireWindowRefocus() {
+    act(() => {
+      window.dispatchEvent(new Event('visibilitychange'));
+    });
+  }
+
+  it('does not fetch while disabled, and starts discovery when enabled', async () => {
+    // Remote mode with a valid URL: the picker WOULD fetch immediately
+    // if it were enabled, so sustained silence proves the gate.
+    const VisibilityHarness: React.FC = () => {
+      const [enabled, setEnabled] = React.useState(false);
+      const [remoteUrl, setRemoteUrl] = React.useState('http://remote:1234');
+      return (
+        <>
+          <LlmEndpointModelPicker
+            selectedModel=""
+            onSelectedModelChange={() => {}}
+            isRemote
+            setIsRemote={() => {}}
+            remoteUrl={remoteUrl}
+            setRemoteUrl={setRemoteUrl}
+            apiToken=""
+            setApiToken={() => {}}
+            localBaseUrl={LOCAL_BASE_URL}
+            enabled={enabled}
+          />
+          <button onClick={() => setEnabled(true)}>Enable discovery</button>
+        </>
+      );
+    };
+    renderHarness(<VisibilityHarness />);
+
+    // Past the 500ms debounce and across a window refocus: zero
+    // model-list requests from the hidden control.
+    await act(async () => {
+      await sleep(800);
+    });
+    fireWindowRefocus();
+    await act(async () => {
+      await sleep(300);
+    });
+    expect(fetchModelsMock).not.toHaveBeenCalled();
+
+    // Enabling (dialog opened) starts discovery for the current URL.
+    await userEvent
+      .setup()
+      .click(screen.getByRole('button', { name: 'Enable discovery' }));
+    await waitFor(
+      () => {
+        expect(fetchModelsMock).toHaveBeenCalledWith('http://remote:1234');
+      },
+      { timeout: FETCH_TIMEOUT }
+    );
+  });
+
+  it('does not refetch on window focus while enabled', async () => {
+    renderPicker();
+    await waitFor(
+      () => {
+        expect(fetchModelsMock).toHaveBeenCalledWith(LOCAL_BASE_URL);
+      },
+      { timeout: FETCH_TIMEOUT }
+    );
+    const callsAfterMount = fetchModelsMock.mock.calls.length;
+
+    // Refocusing the window must not start discovery: the only fetch
+    // triggers are mount (dialog open), endpoint/URL change, and the
+    // explicit error-Retry.
+    fireWindowRefocus();
+    await act(async () => {
+      await sleep(300);
+    });
+    expect(fetchModelsMock.mock.calls.length).toBe(callsAfterMount);
   });
 });
