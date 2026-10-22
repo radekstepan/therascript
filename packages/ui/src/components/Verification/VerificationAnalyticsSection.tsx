@@ -113,13 +113,18 @@ export function VerificationAnalyticsSection({
         />
       </Grid>
 
-      <Grid columns={{ initial: '1', xl: '2' }} gap="4" width="100%">
-        <ModelAccuracyCard stats={byModel} />
+      <Flex
+        direction="column"
+        gap="4"
+        width="100%"
+        data-testid="accuracy-stack"
+      >
         <AccuracyTimelineCard
           defaultPoints={overTime}
           models={byModel.map((m) => m.model)}
         />
-      </Grid>
+        <ModelAccuracyCard stats={byModel} />
+      </Flex>
     </Flex>
   );
 }
