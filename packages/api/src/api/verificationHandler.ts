@@ -179,8 +179,9 @@ const reconcileRejectedVerificationSubmission = async (
  * the single-chat "verify" action: validates scope filters, refuses to start
  * a second job while one is active, snapshots the Judge LLM config into the
  * job row (without touching the user's global chat model), persists the job
- * row, and enqueues the BullMQ job. The worker loads/unloads the Judge model
- * itself when it picks the job up. If queue submission rejects, the row is
+ * row, and enqueues the BullMQ job. The worker loads the Judge model itself
+ * when it picks the job up and keeps it loaded afterwards. If queue
+ * submission rejects, the row is
  * reconciled (ambiguous successes stay pending; anything else lands terminal
  * `failed` with the queue error) instead of orphaning a pending job.
  */
@@ -276,10 +277,11 @@ export const createVerificationJobRecord = async (
 
   // NOTE: creating a background job must NOT mutate the user's global
   // chat model (no unloadModelAtUrl / setActiveModelAndContextAndParams
-  // here): doing so would overwrite Session/Standalone chat settings with
-  // the Judge's parameters and could unload a model mid-stream. The Judge
-  // config is snapshotted into the job row below, and the worker loads and
-  // unloads that model around the job itself.
+  // here): doing so would overwrite Session/Standalone chat settings before
+  // the Judge model is actually loaded and could unload a model mid-stream.
+  // The Judge config is snapshotted into the job row below; the worker loads
+  // that model when it picks the job up, adopts it as the active settings,
+  // and keeps it loaded after the job finishes.
   const judgeModelName = modelName || getActiveModel();
 
   // Scope owns skip semantics for the global audits: all_force always

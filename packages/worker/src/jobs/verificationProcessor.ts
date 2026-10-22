@@ -7,11 +7,13 @@ import {
   usageRepository,
   templateRepository,
   sessionRepository,
+  appSettingsRepository,
   type VerificationCandidateMessage,
   type VerificationStatementInput,
 } from '@therascript/data';
 import { formatMessagePreview } from '@therascript/domain';
 import type {
+  AppSettingsRow,
   BackendChatMessage,
   BackendVerificationJob,
   StatementSeverity,
@@ -39,7 +41,6 @@ import { runWithLlmWorkerLock } from '../llmWorkerMutex.js';
 import {
   loadLlmModelForWorker,
   loadLlmApiTokenForWorker,
-  unloadModelAtUrlForWorker,
 } from './analysisProcessor.js';
 
 export const VERIFICATION_JUDGE_TEMPLATE_TITLE = 'system_verification_judge';
@@ -1547,6 +1548,93 @@ function resolveJudgeApiToken(url: string | undefined): string | null {
 }
 
 /**
+ * Snapshotted Judge LLM config needed to adopt a finished Fact Check's model
+ * as the global active settings (a subset of `BackendVerificationJob`).
+ */
+export interface JudgeActiveSettingsSource {
+  model_name: string | null;
+  context_size: number | null;
+  thinking_budget: number | null;
+  temperature: number | null;
+  top_p: number | null;
+  repeat_penalty: number | null;
+  num_gpu_layers: number | null;
+  llm_base_url: string | null;
+}
+
+/**
+ * Build the global `app_settings` update that adopts a Fact Check's Judge LLM
+ * config as the active model settings, so Session/Standalone chat and the
+ * next Fact Check start with the Judge model (and its context/params) preset
+ * — and chat's `ensureModelLoaded` reuses the still-loaded model instead of
+ * evicting it.
+ *
+ * Range guards mirror `setActiveModelAndContextAndParams` in the API's
+ * `activeModelService` (the job row carries no range validation, so a
+ * malformed row must never corrupt the global settings): out-of-range
+ * sampling values are skipped, i.e. the current global value is kept.
+ * `temperature`/`top_p`/`repeat_penalty` are `NOT NULL` in `app_settings`,
+ * so null snapshots are skipped as well. The `llm_base_url` override is
+ * `null` when the job ran on the local default (trailing-slash-insensitive
+ * comparison), otherwise the job's concrete URL.
+ *
+ * Pure function: no I/O. Exported for unit testing. The caller persists the
+ * result via `appSettingsRepository.updateSettings` (best-effort).
+ */
+export function buildJudgeActiveSettingsUpdate(
+  job: JudgeActiveSettingsSource,
+  localBaseUrl: string
+): Partial<AppSettingsRow> {
+  const stripTrailingSlashes = (value: string): string =>
+    value.replace(/\/+$/, '');
+  const update: Partial<AppSettingsRow> = {};
+
+  if (job.model_name) {
+    update.llm_model_name = job.model_name;
+  }
+  if (
+    job.context_size === null ||
+    (Number.isInteger(job.context_size) && job.context_size > 0)
+  ) {
+    update.llm_context_size = job.context_size;
+  }
+  if (
+    typeof job.temperature === 'number' &&
+    job.temperature >= 0 &&
+    job.temperature <= 2
+  ) {
+    update.llm_temperature = job.temperature;
+  }
+  if (typeof job.top_p === 'number' && job.top_p >= 0 && job.top_p <= 1) {
+    update.llm_top_p = job.top_p;
+  }
+  if (
+    typeof job.repeat_penalty === 'number' &&
+    job.repeat_penalty >= 0 &&
+    job.repeat_penalty <= 2
+  ) {
+    update.llm_repeat_penalty = job.repeat_penalty;
+  }
+  if (
+    job.num_gpu_layers === null ||
+    (Number.isInteger(job.num_gpu_layers) && job.num_gpu_layers >= 0)
+  ) {
+    update.llm_num_gpu_layers = job.num_gpu_layers;
+  }
+  if (job.thinking_budget === null || Number.isInteger(job.thinking_budget)) {
+    update.llm_thinking_budget = job.thinking_budget;
+  }
+
+  const jobUrl = job.llm_base_url?.trim();
+  update.llm_base_url =
+    jobUrl &&
+    stripTrailingSlashes(jobUrl) !== stripTrailingSlashes(localBaseUrl)
+      ? jobUrl
+      : null;
+  return update;
+}
+
+/**
  * Judge system prompt with the ground-truth transcript appended, mirroring
  * Session Chat (`sessionChatHandler.ts` injects the transcript into the
  * system prefix so the static prefix stays KV-cache-friendly across calls).
@@ -2009,13 +2097,11 @@ export async function processVerificationJob(
   }
   console.log(`[Verification Worker] Starting processing for job ID: ${jobId}`);
 
-  // Resolved inside try; kept in outer scope so `finally` can unload it.
-  // `judgeModelAcquired` is set only after `loadLlmModelForWorker` resolves,
-  // so early-cancel / missing-job / default-model exits (which acquire
-  // nothing) never unload an endpoint they do not own.
+  // Resolved inside try; kept in outer scope so the stream attempts and the
+  // persisted rows use the job's endpoint/model even after `jobRecord` is
+  // re-read for cancellation checks.
   let judgeBaseUrl: string = config.llm.baseURL;
   let judgeModel = 'default';
-  let judgeModelAcquired = false;
 
   // Finished-attempt outcome split. `processed` stays the count of finished
   // attempts (successes + failures); these counters break it down so failed
@@ -2233,6 +2319,11 @@ export async function processVerificationJob(
     }
 
     // --- LOAD MODEL ---
+    // Evicting a previous model here to load the Judge is expected
+    // (`loadLlmModelForWorker` unloads stale instances, like Session Chat's
+    // load path). The Judge model itself is intentionally kept loaded when
+    // the job finishes — there is no `finally` unload — so chat and the
+    // next Fact Check reuse it via the adopted active settings below.
     if (jobRecord.model_name && jobRecord.model_name !== 'default') {
       publishPhase('loading_judge', { processed: 0 });
       try {
@@ -2245,8 +2336,26 @@ export async function processVerificationJob(
           judgeBaseUrl,
           jobRecord.num_gpu_layers
         );
-        judgeModelAcquired = true;
         console.log(`[Verification Worker ${jobId}] Model ready.`);
+        // Adopt the Judge config as the global active settings while the
+        // model is confirmed loaded: Session/Standalone chat and the next
+        // Fact Check then start with these settings preset, and chat's
+        // `ensureModelLoaded` reuses the warm model instead of evicting it
+        // (including mid-audit). Best-effort: a settings write failure must
+        // never fail the audit itself.
+        try {
+          appSettingsRepository.updateSettings(
+            buildJudgeActiveSettingsUpdate(jobRecord, config.llm.baseURL)
+          );
+          console.log(
+            `[Verification Worker ${jobId}] Adopted Judge model '${judgeModel}' as the active model settings.`
+          );
+        } catch (settingsError) {
+          console.warn(
+            `[Verification Worker ${jobId}] Failed to adopt Judge model as active settings (non-fatal):`,
+            settingsError
+          );
+        }
       } catch (loadError: any) {
         console.error(
           `[Verification Worker ${jobId}] Failed to load model:`,
@@ -3228,25 +3337,13 @@ export async function processVerificationJob(
       );
     }
     throw error;
-  } finally {
-    // Best-effort: never let an unload failure mask the job outcome.
-    // Only release the endpoint when this job actually acquired a model on
-    // it: early-cancel / missing-job / failed-load / default-model exits own
-    // nothing, and unloading would evict an unrelated chat model.
-    if (judgeModelAcquired) {
-      try {
-        const unloaded = await unloadModelAtUrlForWorker(judgeBaseUrl);
-        console.log(
-          `[Verification Worker ${jobId}] Unloaded ${unloaded} model instance(s) from ${judgeBaseUrl}`
-        );
-      } catch (unloadError: any) {
-        console.warn(
-          `[Verification Worker ${jobId}] Failed to unload model from ${judgeBaseUrl}:`,
-          unloadError?.message ?? unloadError
-        );
-      }
-    }
   }
+  // NOTE: no `finally` unload — the Judge model intentionally stays loaded
+  // with its context when the job finishes (completed, failed, or canceled),
+  // and the global active settings adopted above keep pointing at it, so
+  // chat and the next Fact Check reuse the warm model with settings preset.
+  // Only worker shutdown (loadedModelsTracker) or an explicit unload evicts
+  // it; starting another job with a different model evicts it at load time.
 }
 
 /**

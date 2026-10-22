@@ -43,6 +43,9 @@ vi.mock('@therascript/data', () => ({
   sessionRepository: {
     findById: vi.fn(),
   },
+  appSettingsRepository: {
+    updateSettings: vi.fn(),
+  },
 }));
 
 vi.mock('@therascript/services', () => ({
@@ -102,6 +105,7 @@ const {
   verificationFailureLabel,
   CodedVerificationError,
   readVerificationFailureCode,
+  buildJudgeActiveSettingsUpdate,
   processVerificationJob,
 } = await import('./verificationProcessor.js');
 
@@ -142,6 +146,8 @@ const resolveBudgetStub =
 const loadModelMock = analysisStub.loadLlmModelForWorker as unknown as Mock;
 const unloadModelMock =
   analysisStub.unloadModelAtUrlForWorker as unknown as Mock;
+const updateSettingsMock = data.appSettingsRepository
+  .updateSettings as unknown as Mock;
 const publisher = await import('../services/streamPublisher.js');
 const publishEventMock = publisher.publishVerificationEvent as unknown as Mock;
 
@@ -640,6 +646,97 @@ describe('resolveJudgeThinkingBudget', () => {
 
   it('honors an explicit 0 (user-disabled thinking)', () => {
     expect(resolveJudgeThinkingBudget(0)).toBe(0);
+  });
+});
+
+describe('buildJudgeActiveSettingsUpdate', () => {
+  const LOCAL_URL = 'http://localhost:1234';
+
+  const fullJob = {
+    model_name: 'judge-model',
+    context_size: 32768,
+    thinking_budget: -1,
+    temperature: 0.3,
+    top_p: 0.9,
+    repeat_penalty: 1.1,
+    num_gpu_layers: 99,
+    llm_base_url: 'http://remote-judge:1234',
+  };
+
+  it('adopts every snapshotted Judge field, keeping a remote base URL override', () => {
+    expect(buildJudgeActiveSettingsUpdate(fullJob, LOCAL_URL)).toEqual({
+      llm_model_name: 'judge-model',
+      llm_context_size: 32768,
+      llm_temperature: 0.3,
+      llm_top_p: 0.9,
+      llm_repeat_penalty: 1.1,
+      llm_num_gpu_layers: 99,
+      llm_thinking_budget: -1,
+      llm_base_url: 'http://remote-judge:1234',
+    });
+  });
+
+  it('clears the base URL override when the job ran on the local default', () => {
+    for (const local of [LOCAL_URL, `${LOCAL_URL}/`, null]) {
+      expect(
+        buildJudgeActiveSettingsUpdate(
+          { ...fullJob, llm_base_url: local },
+          LOCAL_URL
+        ).llm_base_url
+      ).toBeNull();
+    }
+  });
+
+  it('skips null sampling values so NOT NULL global columns keep their values', () => {
+    const update = buildJudgeActiveSettingsUpdate(
+      { ...fullJob, temperature: null, top_p: null, repeat_penalty: null },
+      LOCAL_URL
+    );
+    expect(update).not.toHaveProperty('llm_temperature');
+    expect(update).not.toHaveProperty('llm_top_p');
+    expect(update).not.toHaveProperty('llm_repeat_penalty');
+    // Nullable columns still pass nulls through (explicit "use the default").
+    expect(
+      buildJudgeActiveSettingsUpdate(
+        {
+          ...fullJob,
+          context_size: null,
+          num_gpu_layers: null,
+          thinking_budget: null,
+        },
+        LOCAL_URL
+      )
+    ).toMatchObject({
+      llm_context_size: null,
+      llm_num_gpu_layers: null,
+      llm_thinking_budget: null,
+    });
+  });
+
+  it('skips out-of-range values instead of corrupting the global settings', () => {
+    const update = buildJudgeActiveSettingsUpdate(
+      {
+        ...fullJob,
+        context_size: -5,
+        temperature: 9.9,
+        top_p: 1.5,
+        repeat_penalty: -1,
+        num_gpu_layers: -2,
+        thinking_budget: 1.5,
+      },
+      LOCAL_URL
+    );
+    expect(update).not.toHaveProperty('llm_context_size');
+    expect(update).not.toHaveProperty('llm_temperature');
+    expect(update).not.toHaveProperty('llm_top_p');
+    expect(update).not.toHaveProperty('llm_repeat_penalty');
+    expect(update).not.toHaveProperty('llm_num_gpu_layers');
+    expect(update).not.toHaveProperty('llm_thinking_budget');
+    // The valid fields are still adopted.
+    expect(update).toMatchObject({
+      llm_model_name: 'judge-model',
+      llm_base_url: 'http://remote-judge:1234',
+    });
   });
 });
 
@@ -1637,7 +1734,6 @@ describe('processVerificationJob — cancellation during model loading', () => {
 
 describe('processVerificationJob — early-cancel resource ownership', () => {
   const REMOTE_JUDGE_URL = 'http://remote-judge:1234';
-  const LOCAL_DEFAULT_URL = 'http://localhost:1234';
 
   const baseRecord = {
     id: 1,
@@ -1753,6 +1849,7 @@ describe('processVerificationJob — early-cancel resource ownership', () => {
 
     expect(loadModelMock).not.toHaveBeenCalled();
     expect(unloadModelMock).not.toHaveBeenCalled();
+    expect(updateSettingsMock).not.toHaveBeenCalled();
     expect(streamLlmMock).not.toHaveBeenCalled();
     expect(rowStatus).toBe('canceled');
     expect(publishEventMock).toHaveBeenCalledWith(
@@ -1768,9 +1865,10 @@ describe('processVerificationJob — early-cancel resource ownership', () => {
 
     expect(loadModelMock).not.toHaveBeenCalled();
     expect(unloadModelMock).not.toHaveBeenCalled();
+    expect(updateSettingsMock).not.toHaveBeenCalled();
   });
 
-  it('still unloads the resolved remote endpoint after a normal acquired-model run', async () => {
+  it('keeps the Judge model loaded and adopts it as the active settings after a normal acquired-model run', async () => {
     await runJob();
 
     expect(loadModelMock).toHaveBeenCalledWith(
@@ -1779,15 +1877,25 @@ describe('processVerificationJob — early-cancel resource ownership', () => {
       REMOTE_JUDGE_URL,
       null
     );
-    expect(unloadModelMock).toHaveBeenCalledTimes(1);
-    expect(unloadModelMock).toHaveBeenCalledWith(REMOTE_JUDGE_URL);
-    expect(unloadModelMock).not.toHaveBeenCalledWith(LOCAL_DEFAULT_URL);
+    // Retention contract: no unload on any endpoint after the job finishes,
+    // so chat and the next Fact Check reuse the warm model.
+    expect(unloadModelMock).not.toHaveBeenCalled();
+    expect(updateSettingsMock).toHaveBeenCalledTimes(1);
+    expect(updateSettingsMock).toHaveBeenCalledWith({
+      llm_model_name: 'judge-model',
+      llm_context_size: 8192,
+      llm_temperature: 0.3,
+      llm_num_gpu_layers: null,
+      llm_thinking_budget: -1,
+      llm_base_url: REMOTE_JUDGE_URL,
+    });
     expect(rowStatus).toBe('completed');
   });
 
-  it('still cleans up the acquired model when canceled during loading', async () => {
-    // Task 4 interaction: the load genuinely succeeded, so the acquired
-    // remote model must still be released even though the job is canceled.
+  it('keeps the acquired model loaded when canceled during loading', async () => {
+    // The load genuinely succeeded, so the acquired remote model stays
+    // loaded (and adopted as the active settings) even though the job is
+    // canceled — retention applies to every terminal path, not just success.
     let resolveLoad!: () => void;
     loadModelMock.mockImplementationOnce(
       () => new Promise<void>((resolve) => void (resolveLoad = resolve))
@@ -1802,15 +1910,21 @@ describe('processVerificationJob — early-cancel resource ownership', () => {
 
     expect(streamLlmMock).not.toHaveBeenCalled();
     expect(rowStatus).toBe('canceled');
-    expect(unloadModelMock).toHaveBeenCalledTimes(1);
-    expect(unloadModelMock).toHaveBeenCalledWith(REMOTE_JUDGE_URL);
-    expect(unloadModelMock).not.toHaveBeenCalledWith(LOCAL_DEFAULT_URL);
+    expect(unloadModelMock).not.toHaveBeenCalled();
+    expect(updateSettingsMock).toHaveBeenCalledTimes(1);
+    expect(updateSettingsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        llm_model_name: 'judge-model',
+        llm_base_url: REMOTE_JUDGE_URL,
+      })
+    );
   });
 
   it('makes no unload calls for default-model jobs that acquire nothing', async () => {
     // A `default` judge reuses whatever is already loaded; the job acquires
     // no model resources of its own, so cleanup must leave the endpoint
-    // (and any unrelated chat model on it) untouched.
+    // (and any unrelated chat model on it) untouched — and the global
+    // settings keep pointing at whatever the user had configured.
     findJobMock.mockImplementation(() => ({
       ...baseRecord,
       model_name: 'default',
@@ -1822,6 +1936,7 @@ describe('processVerificationJob — early-cancel resource ownership', () => {
 
     expect(loadModelMock).not.toHaveBeenCalled();
     expect(unloadModelMock).not.toHaveBeenCalled();
+    expect(updateSettingsMock).not.toHaveBeenCalled();
     expect(rowStatus).toBe('completed');
   });
 });
@@ -3121,7 +3236,7 @@ describe('processVerificationJob — progress phases and outcome semantics', () 
     );
   });
 
-  it('unloads the Judge model on all-failed, mixed, and canceled terminal paths', async () => {
+  it('keeps the Judge model loaded and adopted on all-failed and mixed terminal paths', async () => {
     findJobMock.mockReturnValue({ ...baseRecord, model_name: 'judge-model' });
     loadModelMock.mockResolvedValue(undefined);
     unloadModelMock.mockResolvedValue(1);
@@ -3139,7 +3254,17 @@ describe('processVerificationJob — progress phases and outcome semantics', () 
     parseJsonMock.mockReturnValue(null);
     await runJob();
     expect(terminalStatusCall()?.[1]).toBe('failed');
-    expect(unloadModelMock).toHaveBeenCalledTimes(1);
+    expect(unloadModelMock).not.toHaveBeenCalled();
+    expect(updateSettingsMock).toHaveBeenCalledTimes(1);
+    expect(updateSettingsMock).toHaveBeenCalledWith({
+      llm_model_name: 'judge-model',
+      llm_context_size: 32768,
+      llm_temperature: 0.3,
+      llm_num_gpu_layers: null,
+      llm_thinking_budget: -1,
+      // Local-default job URL → the override is cleared, not stored.
+      llm_base_url: null,
+    });
 
     // Mixed run.
     vi.resetAllMocks();
@@ -3171,7 +3296,8 @@ describe('processVerificationJob — progress phases and outcome semantics', () 
     parseJsonMock.mockReturnValue(null);
     await runJob();
     expect(terminalStatusCall()?.[1]).toBe('completed');
-    expect(unloadModelMock).toHaveBeenCalledTimes(1);
+    expect(unloadModelMock).not.toHaveBeenCalled();
+    expect(updateSettingsMock).toHaveBeenCalledTimes(1);
   });
 });
 
