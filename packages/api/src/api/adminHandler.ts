@@ -307,6 +307,9 @@ const MessageSchema = z.object({
   timestamp: z.number(),
   promptTokens: z.number().nullable().optional(),
   completionTokens: z.number().nullable().optional(),
+  // Author-model attribution (messages.model). Optional so backups taken
+  // before the field existed still import cleanly.
+  model: z.string().nullable().optional(),
 });
 const TemplateSchema = z.object({
   id: z.number(),
@@ -542,15 +545,16 @@ export const importDataService = async (
         if (newCid) {
           const res = db
             .prepare(
-              'INSERT INTO messages (chatId, sender, text, timestamp, promptTokens, completionTokens) VALUES (?, ?, ?, ?, ?, ?)'
+              'INSERT INTO messages (chatId, sender, text, timestamp, promptTokens, completionTokens, model) VALUES (?, ?, ?, ?, ?, ?, ?)'
             )
             .run(
               newCid,
               m.sender,
               m.text,
               m.timestamp,
-              m.promptTokens,
-              m.completionTokens
+              m.promptTokens ?? null,
+              m.completionTokens ?? null,
+              m.model ?? null
             );
           oldToNewMessageIdMap[m.id] = res.lastInsertRowid as number;
         }

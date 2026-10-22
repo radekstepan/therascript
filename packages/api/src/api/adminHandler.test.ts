@@ -13,6 +13,7 @@
 //
 // Reference: packages/api/src/api/adminHandler.ts
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import tar from 'tar-stream';
 
 const {
   mockDeleteIndex,
@@ -100,9 +101,8 @@ vi.mock('@therascript/services', () => ({
   getUploadsDir: vi.fn(() => '/tmp/uploads'),
 }));
 
-const { reindexElasticsearchService, resetAllDataService } = await import(
-  './adminHandler.js'
-);
+const { reindexElasticsearchService, resetAllDataService, importDataService } =
+  await import('./adminHandler.js');
 
 const completedSession = {
   id: 1,
@@ -322,5 +322,216 @@ describe('resetAllDataService', () => {
     expect(result.errors.join('\n')).toMatch(/disk failure/);
     // Every stage was still attempted.
     expect(mockDeleteAllUploads).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('importDataService message model round-trip (Task 10)', () => {
+  // Backup payloads every import test needs; messages and verification
+  // files are supplied per test.
+  const baseEntries = (): Record<string, unknown> => ({
+    'sessions.json': [
+      {
+        id: 1,
+        fileName: 'session.mp3',
+        clientName: 'Jane Doe',
+        sessionName: 'Intake',
+        date: '2026-01-01',
+        sessionType: 'Intake',
+        therapy: 'CBT',
+        audioPath: null,
+        status: 'completed',
+        whisperJobId: null,
+        transcriptTokenCount: 10,
+      },
+    ],
+    'chats.json': [
+      { id: 7, sessionId: 1, timestamp: 100, name: null, tags: null },
+    ],
+    'templates.json': [],
+    'transcript_paragraphs.json': [],
+    'analysis_jobs.json': [],
+    'analysis_job_sessions.json': [],
+    'intermediate_summaries.json': [],
+  });
+
+  const buildBackupFile = async (
+    entries: Record<string, unknown>
+  ): Promise<File> => {
+    const pack = tar.pack();
+    for (const [name, value] of Object.entries(entries)) {
+      pack.entry({ name }, JSON.stringify(value));
+    }
+    pack.finalize();
+    const chunks: Buffer[] = [];
+    for await (const chunk of pack) {
+      chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+    }
+    return new File(chunks, 'backup.tar');
+  };
+
+  // The import path ends with a re-index; keep it empty.
+  const seedReindexRepos = () => {
+    mockSessionRepo.findAll.mockReturnValue([]);
+    mockChatRepo.findChatsBySessionId.mockReturnValue([]);
+    mockChatRepo.findStandaloneChats.mockReturnValue([]);
+    mockMessageRepo.findMessagesByChatId.mockReturnValue([]);
+    mockTranscriptRepo.findParagraphsBySessionId.mockReturnValue([]);
+  };
+
+  const messageInserts = () =>
+    mockPrepareCalls.filter(({ sql }) =>
+      sql.startsWith('INSERT INTO messages (')
+    );
+
+  it('round-trips author-model metadata for checked and unchecked messages', async () => {
+    seedReindexRepos();
+    const file = await buildBackupFile({
+      ...baseEntries(),
+      'messages.json': [
+        {
+          id: 11,
+          chatId: 7,
+          sender: 'user',
+          text: 'Hi',
+          timestamp: 101,
+          promptTokens: null,
+          completionTokens: null,
+          model: null,
+        },
+        {
+          id: 12,
+          chatId: 7,
+          sender: 'ai',
+          text: 'Hello',
+          timestamp: 102,
+          promptTokens: 5,
+          completionTokens: 6,
+          model: 'llama-3.1-8b',
+        },
+        {
+          id: 13,
+          chatId: 7,
+          sender: 'ai',
+          text: 'Follow-up',
+          timestamp: 103,
+          promptTokens: 7,
+          completionTokens: 8,
+          model: 'mistral-7b-instruct',
+        },
+      ],
+      'verification_jobs.json': [
+        {
+          id: 3,
+          status: 'completed',
+          scope: 'single_chat',
+          session_ids_json: '[1]',
+          chat_id: 7,
+          skip_verified: true,
+          total_messages: 1,
+          processed_messages: 1,
+          total_statements: 1,
+          flagged_statements: 0,
+          omissions_count: 0,
+          created_at: 200,
+          completed_at: 201,
+          error_message: null,
+          model_name: 'judge-v1',
+          context_size: 8192,
+          thinking_budget: 512,
+          temperature: 0.3,
+          top_p: 0.9,
+          repeat_penalty: 1.1,
+          num_gpu_layers: 20,
+          llm_base_url: 'http://localhost:1234',
+        },
+      ],
+      // Message 12 is checked; message 13 is unchecked.
+      'message_verifications.json': [
+        {
+          id: 4,
+          message_id: 12,
+          chat_id: 7,
+          session_id: 1,
+          verification_job_id: 3,
+          authored_model: 'llama-3.1-8b',
+          judge_model: 'judge-v1',
+          status: 'completed',
+          total_claims: 1,
+          supported_claims: 1,
+          partial_claims: 0,
+          contradicted_claims: 0,
+          fabricated_claims: 0,
+          omissions_count: 0,
+          accuracy_score: 1,
+          summary_assessment: 'All supported',
+          prompt_tokens: 10,
+          completion_tokens: 20,
+          duration_ms: 100,
+          verified_at: 202,
+          error_message: null,
+        },
+      ],
+      'verified_statements.json': [],
+    });
+
+    const result = await importDataService(file);
+    expect(result.message).toMatch(/Import successful/);
+
+    const inserts = messageInserts();
+    expect(inserts).toHaveLength(3);
+    for (const { sql } of inserts) {
+      expect(sql).toContain('model');
+    }
+    // Model attribution survives the restore for both the checked and
+    // the unchecked message, so a forced re-audit reports the real
+    // author instead of Unknown Model.
+    expect(inserts.map(({ args }) => args[6])).toEqual([
+      null,
+      'llama-3.1-8b',
+      'mistral-7b-instruct',
+    ]);
+    // Token counts are preserved alongside the model.
+    expect(inserts[1].args.slice(4, 6)).toEqual([5, 6]);
+
+    // The checked message's audit snapshot survives alongside it.
+    const mvInsert = mockPrepareCalls.find(({ sql }) =>
+      sql.startsWith('INSERT INTO message_verifications (')
+    );
+    expect(mvInsert?.args[4]).toBe('llama-3.1-8b');
+  });
+
+  it('imports pre-feature backups that omit the model field', async () => {
+    seedReindexRepos();
+    const file = await buildBackupFile({
+      ...baseEntries(),
+      'messages.json': [
+        {
+          id: 21,
+          chatId: 7,
+          sender: 'user',
+          text: 'Hi',
+          timestamp: 101,
+          promptTokens: null,
+          completionTokens: null,
+        },
+        {
+          id: 22,
+          chatId: 7,
+          sender: 'ai',
+          text: 'Old answer',
+          timestamp: 102,
+          promptTokens: 3,
+          completionTokens: 4,
+        },
+      ],
+    });
+
+    const result = await importDataService(file);
+    expect(result.message).toMatch(/Import successful/);
+
+    const inserts = messageInserts();
+    expect(inserts).toHaveLength(2);
+    expect(inserts.map(({ args }) => args[6])).toEqual([null, null]);
+    expect(inserts[1].args.slice(4, 6)).toEqual([3, 4]);
   });
 });

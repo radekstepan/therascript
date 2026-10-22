@@ -128,6 +128,8 @@ A candidate from a completed session with no transcript paragraphs is saved as c
 
 ## 10. P2 — Backup restore drops the new message author-model metadata
 
+- [x] Task 10
+
 **Location:** `packages/api/src/api/adminHandler.ts:302–311` and `540–556`; new field written by `packages/data/src/repositories/messageRepository.ts:5`.
 
 This branch records `messages.model` for author-model attribution, but the import validator does not accept/preserve it and the insert does not write it. Restoring a backup loses model attribution for all messages. Existing verification rows retain their separate authored-model snapshot, but auditing previously unchecked messages or re-auditing restored messages uses null and reports Unknown Model instead.
