@@ -357,14 +357,6 @@ export function ChatPanelHeader({
                 ) : (
                   <ShieldCheck size={13} />
                 )}
-                {factCheck.isChecking &&
-                factCheck.processedMessages !== null &&
-                factCheck.totalMessages !== null &&
-                factCheck.totalMessages > 0
-                  ? `${factCheck.processedMessages}/${factCheck.totalMessages}`
-                  : factCheck.isChecking
-                    ? 'Checking…'
-                    : 'Fact Check Chat'}
               </Button>
             </AppTooltip>
           )}
