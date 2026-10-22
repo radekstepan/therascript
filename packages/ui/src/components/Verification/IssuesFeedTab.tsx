@@ -2,7 +2,7 @@
 //
 // Filterable feed of flagged statements (fabrications, contradictions,
 // partial support, omissions) with deep links into the session chat.
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import {
@@ -140,6 +140,19 @@ export function IssuesFeedTab({
       }),
     staleTime: 15000,
   });
+
+  // When the last issue on a page is dismissed elsewhere (or a refetch
+  // shrinks the feed), clamp back to the last non-empty page instead of
+  // stranding the user on an empty one.
+  const lastPage = Math.max(
+    0,
+    Math.ceil((query.data?.total ?? 0) / PAGE_SIZE) - 1
+  );
+  useEffect(() => {
+    if (query.data && page > lastPage) {
+      setPage(lastPage);
+    }
+  }, [query.data, page, lastPage]);
 
   const resetPage = () => setPage(0);
 

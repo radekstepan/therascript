@@ -1,3 +1,5 @@
+import type { StatementReviewStatus } from './verificationReview.js';
+
 export interface VramEstimate {
   /** Total estimated VRAM required (weights on GPU + KV cache + CUDA overhead) */
   vram_bytes: number;
@@ -401,6 +403,22 @@ export interface BackendVerifiedStatement {
   /** Parsed transcript_evidence_json. Populated by repository/API layers, not a DB column. */
   evidence?: TranscriptEvidenceItem[];
   created_at: number;
+  /**
+   * Human-review state for this finding. `'confirmed'` means the user
+   * dismissed it as not-an-issue; the Judge verdict above is always
+   * preserved. Populated by repository readers (joined from
+   * `verification_statement_reviews`), never a `verified_statements` column.
+   */
+  review_status: StatementReviewStatus;
+  /** Milliseconds timestamp of the human confirmation, if any. */
+  confirmed_at: number | null;
+  /** Owning `verification_statement_reviews` row id, if any. */
+  review_id: number | null;
+  /**
+   * Opaque token over the immutable statement snapshot + material revision.
+   * Required (as `expectedReviewToken`) to dismiss this statement.
+   */
+  review_token: string | null;
 }
 
 export interface BackendMessageVerification {
@@ -426,8 +444,39 @@ export interface BackendMessageVerification {
   verified_at: number;
   error_message: string | null;
   error_code: VerificationFailureCode | null;
+  /**
+   * Fingerprint of the material actually evaluated (visible answer +
+   * therapist question + full transcript content). Null for legacy rows
+   * audited before revisions existed; established lazily on next audit or
+   * first dismissal. Counts/scores on this row are review-aware effective
+   * aggregates; raw Judge verdicts live on the nested statements.
+   */
+  material_revision?: string | null;
   /** Nested statements. Populated by repository/API layers, not a DB column. */
   statements?: BackendVerifiedStatement[];
+}
+
+/** Durable human confirmation of one finding (independent of statement rows). */
+export interface BackendStatementReview {
+  id: number;
+  message_id: number;
+  session_id: number;
+  identity_version: number;
+  context_revision: string;
+  finding_key: string;
+  reusable: boolean;
+  confirmed_statement_id: number | null;
+  confirmed_at: number;
+  kind: StatementKind;
+  exact_quote: string;
+  normalized_claim: string;
+  start_char: number | null;
+  end_char: number | null;
+  verdict: StatementVerdict;
+  severity: StatementSeverity;
+  confidence: number;
+  reasoning: string;
+  transcript_evidence_json: string | null;
 }
 
 export interface ModelAccuracyStat {
@@ -492,6 +541,7 @@ export interface VerificationGlobalStats {
 
 export * from './validators.js';
 export * from './messagePreview.js';
+export * from './verificationReview.js';
 export * from './schemas/api/index.js';
 export * from './schemas/jobs/index.js';
 export * from './schemas/db/index.js';

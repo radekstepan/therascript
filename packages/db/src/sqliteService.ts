@@ -95,7 +95,7 @@ export const schema = `
 `;
 
 // --- NEW MIGRATION LOGIC ---
-export const LATEST_SCHEMA_VERSION = 21;
+export const LATEST_SCHEMA_VERSION = 22;
 
 // --- NEW SYSTEM PROMPTS ---
 export const SYSTEM_PROMPT_TEMPLATES = {
@@ -1050,6 +1050,111 @@ function runMigrations(dbInstance: DB) {
         dbInstance.pragma(`user_version = 21`);
         currentVersion = 21;
         console.log('[db Migrator] Version 21 applied.');
+      }
+
+      // NEW MIGRATION: Version 22 for durable human review of individual
+      // fact-check findings ("Dismiss Statement (Confirmed)").
+      // - `verification_statement_reviews`: independent per-finding
+      //   confirmations owned by the MESSAGE (FK/cascade on message
+      //   deletion). Deliberately NOT dependent on the disposable
+      //   statement/assessment rows: reviews survive `deleteMessageVerification`
+      //   and the worker's delete/reinsert cycle, and are matched back to
+      //   current rows by (message_id, context_revision, finding_key).
+      // - `message_verifications.material_revision`: fingerprint of the
+      //   material actually evaluated (visible answer + therapist question +
+      //   full transcript content). NULL for legacy rows; established lazily
+      //   on next audit or first dismissal.
+      // - `verified_statements.finding_key` / `.context_revision`: stored
+      //   finding identity so the Active Issues feed can exclude confirmed
+      //   findings in SQL (correct COUNT/pagination). NULL for legacy rows.
+      if (currentVersion < 22) {
+        console.log('[db Migrator] Applying version 22...');
+        const v22Tables = (
+          dbInstance
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+            .all() as { name: string }[]
+        ).map((row) => row.name);
+
+        dbInstance.exec(`
+          CREATE TABLE IF NOT EXISTS verification_statement_reviews (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              message_id INTEGER NOT NULL,
+              session_id INTEGER NOT NULL,
+              identity_version INTEGER NOT NULL DEFAULT 1,
+              context_revision TEXT NOT NULL,
+              finding_key TEXT NOT NULL,
+              reusable INTEGER NOT NULL DEFAULT 1,
+              confirmed_statement_id INTEGER NULL,
+              confirmed_at INTEGER NOT NULL,
+              kind TEXT NOT NULL DEFAULT 'claim'
+                CHECK(kind IN ('claim', 'omission')),
+              exact_quote TEXT NOT NULL,
+              normalized_claim TEXT NOT NULL,
+              start_char INTEGER NULL,
+              end_char INTEGER NULL,
+              verdict TEXT NOT NULL
+                CHECK(verdict IN ('supported', 'partially_supported', 'contradicted', 'fabricated', 'omission')),
+              severity TEXT NOT NULL DEFAULT 'none'
+                CHECK(severity IN ('none', 'low', 'medium', 'high', 'critical')),
+              confidence REAL NOT NULL DEFAULT 1.0,
+              reasoning TEXT NOT NULL,
+              transcript_evidence_json TEXT NULL,
+              UNIQUE (message_id, context_revision, finding_key),
+              FOREIGN KEY (message_id) REFERENCES messages (id) ON DELETE CASCADE,
+              FOREIGN KEY (session_id) REFERENCES sessions (id) ON DELETE CASCADE
+          );
+          CREATE INDEX IF NOT EXISTS idx_statement_reviews_message ON verification_statement_reviews (message_id);
+          CREATE INDEX IF NOT EXISTS idx_statement_reviews_message_revision ON verification_statement_reviews (message_id, context_revision);
+          CREATE INDEX IF NOT EXISTS idx_statement_reviews_session ON verification_statement_reviews (session_id);
+        `);
+
+        if (v22Tables.includes('message_verifications')) {
+          const mvColumns = dbInstance.pragma(
+            'table_info(message_verifications)'
+          ) as { name: string }[];
+          if (!mvColumns.some((col) => col.name === 'material_revision')) {
+            console.log(
+              '[db Migrator V22] Adding "material_revision" to message_verifications...'
+            );
+            dbInstance.exec(
+              'ALTER TABLE message_verifications ADD COLUMN material_revision TEXT NULL'
+            );
+          }
+        } else {
+          console.log(
+            '[db Migrator V22] Skipping message_verifications ALTER (no such table).'
+          );
+        }
+
+        if (v22Tables.includes('verified_statements')) {
+          const vsColumns = dbInstance.pragma(
+            'table_info(verified_statements)'
+          ) as { name: string }[];
+          if (!vsColumns.some((col) => col.name === 'finding_key')) {
+            console.log(
+              '[db Migrator V22] Adding "finding_key" to verified_statements...'
+            );
+            dbInstance.exec(
+              'ALTER TABLE verified_statements ADD COLUMN finding_key TEXT NULL'
+            );
+          }
+          if (!vsColumns.some((col) => col.name === 'context_revision')) {
+            console.log(
+              '[db Migrator V22] Adding "context_revision" to verified_statements...'
+            );
+            dbInstance.exec(
+              'ALTER TABLE verified_statements ADD COLUMN context_revision TEXT NULL'
+            );
+          }
+        } else {
+          console.log(
+            '[db Migrator V22] Skipping verified_statements ALTERs (no such table).'
+          );
+        }
+
+        dbInstance.pragma(`user_version = 22`);
+        currentVersion = 22;
+        console.log('[db Migrator] Version 22 applied.');
       }
     })();
     console.log(

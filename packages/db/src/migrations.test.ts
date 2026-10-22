@@ -227,9 +227,9 @@ describe('initializeDatabase — v21 verification diagnostics columns', () => {
       }>
     ).map((c) => c.name);
 
-  it('ends at schema version 21', () => {
-    expect(userVersion(db)).toBe(21);
-    expect(LATEST_SCHEMA_VERSION).toBe(21);
+  it('ends at latest schema version', () => {
+    expect(userVersion(db)).toBe(LATEST_SCHEMA_VERSION);
+    expect(LATEST_SCHEMA_VERSION).toBe(22);
   });
 
   it('creates verification_jobs with outcome counters and phase snapshot columns', () => {
@@ -267,5 +267,92 @@ describe('initializeDatabase — v21 verification diagnostics columns', () => {
 
   it('creates message_verifications with a nullable error_code column', () => {
     expect(columnNames('message_verifications')).toContain('error_code');
+  });
+});
+
+describe('initializeDatabase — v22 statement reviews', () => {
+  let db: DB;
+
+  beforeEach(() => {
+    db = new Database(':memory:');
+    initializeDatabase(db);
+  });
+
+  const columnNames = (table: string): string[] =>
+    (
+      db.pragma(`table_info(${table})`, { simple: false }) as Array<{
+        name: string;
+      }>
+    ).map((c) => c.name);
+
+  it('ends at schema version 22', () => {
+    expect(userVersion(db)).toBe(22);
+    expect(LATEST_SCHEMA_VERSION).toBe(22);
+  });
+
+  it('creates verification_statement_reviews owned by the message', () => {
+    const cols = columnNames('verification_statement_reviews');
+    for (const name of [
+      'message_id',
+      'session_id',
+      'identity_version',
+      'context_revision',
+      'finding_key',
+      'reusable',
+      'confirmed_statement_id',
+      'confirmed_at',
+      'kind',
+      'exact_quote',
+      'normalized_claim',
+      'start_char',
+      'end_char',
+      'verdict',
+      'severity',
+      'confidence',
+      'reasoning',
+      'transcript_evidence_json',
+    ]) {
+      expect(cols).toContain(name);
+    }
+    // Uniqueness on (message_id, context_revision, finding_key).
+    const indexes = db
+      .prepare(`PRAGMA index_list('verification_statement_reviews')`)
+      .all() as Array<{ name: string; unique: number; origin: string }>;
+    expect(indexes.some((i) => i.unique === 1 && i.origin === 'u')).toBe(true);
+    // FK/cascade on message deletion (reviews are message-owned).
+    const fks = db
+      .prepare(`PRAGMA foreign_key_list('verification_statement_reviews')`)
+      .all() as Array<{ table: string; on_delete: string }>;
+    expect(
+      fks.some((fk) => fk.table === 'messages' && fk.on_delete === 'CASCADE')
+    ).toBe(true);
+  });
+
+  it('adds material_revision and finding identity columns as nullable', () => {
+    expect(columnNames('message_verifications')).toContain('material_revision');
+    expect(columnNames('verified_statements')).toContain('finding_key');
+    expect(columnNames('verified_statements')).toContain('context_revision');
+    // Existing results start unreviewed: legacy-shaped rows carry NULLs.
+    db.prepare(
+      `INSERT INTO sessions (fileName, clientName, sessionName, date, sessionType, therapy) VALUES ('a.mp3', 'c', 's', '2024-01-01', 'intake', 'cbt')`
+    ).run();
+    db.prepare(`INSERT INTO chats (sessionId, timestamp) VALUES (1, 1)`).run();
+    db.prepare(
+      `INSERT INTO messages (chatId, sender, text, timestamp) VALUES (1, 'ai', 'hi', 1)`
+    ).run();
+    db.prepare(
+      `INSERT INTO message_verifications (message_id, chat_id, session_id, judge_model, verified_at) VALUES (1, 1, 1, 'judge', ?)`
+    ).run(Date.now());
+    const row = db
+      .prepare(
+        `SELECT material_revision FROM message_verifications WHERE message_id = 1`
+      )
+      .get() as { material_revision: string | null };
+    expect(row.material_revision).toBeNull();
+  });
+
+  it('is idempotent — re-running migrations keeps version 22', () => {
+    expect(() => initializeDatabase(db)).not.toThrow();
+    expect(userVersion(db)).toBe(22);
   });
 });

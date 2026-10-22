@@ -43,6 +43,10 @@ const { ITEM } = vi.hoisted(() => {
     reasoning: 'No such medication in the transcript.',
     transcript_evidence_json: null,
     created_at: 3000,
+    review_status: 'unreviewed',
+    confirmed_at: null,
+    review_id: null,
+    review_token: 'v1.feed-token',
     sessionName: 'Intake Session',
     clientName: 'Jane Doe',
     chatId: 5,
@@ -189,5 +193,50 @@ describe('IssuesFeedTab refreshing indicator', () => {
     await waitFor(() => {
       expect(screen.getByText(/refreshing/).style.opacity).toBe('0');
     });
+  });
+});
+
+describe('IssuesFeedTab pagination clamp', () => {
+  beforeEach(() => {
+    vi.mocked(fetchFlaggedStatements).mockReset();
+  });
+
+  it('returns to the last non-empty page when dismissals shrink the feed', async () => {
+    const fetchMock = vi.mocked(fetchFlaggedStatements);
+    fetchMock.mockImplementation(async (params) => ({
+      items: [ITEM],
+      total: 26,
+      limit: 25,
+      offset: params.offset ?? 0,
+    }));
+    const { queryClient } = renderTab();
+    expect(await screen.findByText('Page 1 of 2')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByText('Page 2 of 2')).toBeTruthy();
+
+    // Dismissing the last issue on page 2 elsewhere shrinks the feed.
+    fetchMock.mockImplementation(async (params) => ({
+      items: [ITEM],
+      total: 1,
+      limit: 25,
+      offset: params.offset ?? 0,
+    }));
+    await act(async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ['verificationStatements'],
+      });
+    });
+
+    // Clamped back to page 1 (single-page feed hides pagination)
+    // instead of stranding the user on an empty page 2.
+    await waitFor(() => {
+      expect(screen.queryByText('Page 2 of 2')).toBeNull();
+    });
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ offset: 0 })
+    );
+    expect(
+      await screen.findByRole('link', { name: /View Fabricated issue in chat/ })
+    ).toBeTruthy();
   });
 });

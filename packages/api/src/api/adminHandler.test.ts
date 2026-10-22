@@ -14,6 +14,9 @@
 // Reference: packages/api/src/api/adminHandler.ts
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import tar from 'tar-stream';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 const {
   mockDeleteIndex,
@@ -23,10 +26,13 @@ const {
   mockTranscriptRepo,
   mockChatRepo,
   mockMessageRepo,
+  mockTemplateRepo,
+  mockAnalysisRepo,
   mockVerificationRepo,
   mockDb,
   mockPrepareCalls,
   mockDeleteAllUploads,
+  mockGetUploadsDir,
 } = vi.hoisted(() => {
   const mockPrepareCalls: Array<{ sql: string; args: unknown[] }> = [];
   return {
@@ -34,16 +40,27 @@ const {
     mockInitializeIndices: vi.fn(),
     mockBulkIndex: vi.fn(),
     mockSessionRepo: { findAll: vi.fn() },
-    mockTranscriptRepo: { findParagraphsBySessionId: vi.fn() },
+    mockTranscriptRepo: {
+      findParagraphsBySessionId: vi.fn(),
+      findAll: vi.fn(),
+    },
     mockChatRepo: {
       findChatsBySessionId: vi.fn(),
       findStandaloneChats: vi.fn(),
     },
-    mockMessageRepo: { findMessagesByChatId: vi.fn() },
+    mockMessageRepo: { findMessagesByChatId: vi.fn(), findAll: vi.fn() },
+    mockTemplateRepo: { findAll: vi.fn() },
+    mockAnalysisRepo: {
+      listJobs: vi.fn(),
+      findAllJobSessions: vi.fn(),
+      findAllIntermediateSummaries: vi.fn(),
+    },
     mockVerificationRepo: {
       findAllJobsForBackup: vi.fn(),
       findAllMessageVerificationsForBackup: vi.fn(),
       findAllVerifiedStatementsForBackup: vi.fn(),
+      findAllStatementReviewsForBackup: vi.fn(),
+      recomputeEffectiveVerificationForMessage: vi.fn(),
     },
     mockDb: {
       transaction: vi.fn((fn: () => void) => fn),
@@ -58,6 +75,7 @@ const {
     },
     mockPrepareCalls,
     mockDeleteAllUploads: vi.fn(),
+    mockGetUploadsDir: vi.fn(() => '/tmp/uploads'),
   };
 });
 
@@ -91,18 +109,22 @@ vi.mock('@therascript/data', () => ({
   transcriptRepository: mockTranscriptRepo,
   chatRepository: mockChatRepo,
   messageRepository: mockMessageRepo,
-  templateRepository: {},
-  analysisRepository: {},
+  templateRepository: mockTemplateRepo,
+  analysisRepository: mockAnalysisRepo,
   verificationRepository: mockVerificationRepo,
 }));
 
 vi.mock('@therascript/services', () => ({
   deleteAllUploads: (...args: unknown[]) => mockDeleteAllUploads(...args),
-  getUploadsDir: vi.fn(() => '/tmp/uploads'),
+  getUploadsDir: () => mockGetUploadsDir(),
 }));
 
-const { reindexElasticsearchService, resetAllDataService, importDataService } =
-  await import('./adminHandler.js');
+const {
+  reindexElasticsearchService,
+  resetAllDataService,
+  importDataService,
+  exportDataService,
+} = await import('./adminHandler.js');
 
 const completedSession = {
   id: 1,
@@ -250,6 +272,9 @@ describe('resetAllDataService', () => {
       (call: unknown[]) => call[0] as string
     );
     // Verification tables are wiped along with all other user data.
+    const reviewsIdx = execSql.findIndex((sql: string) =>
+      sql.includes('DELETE FROM verification_statement_reviews')
+    );
     const statementsIdx = execSql.findIndex((sql: string) =>
       sql.includes('DELETE FROM verified_statements')
     );
@@ -265,10 +290,13 @@ describe('resetAllDataService', () => {
     const sessionsIdx = execSql.findIndex((sql: string) =>
       sql.includes('DELETE FROM sessions')
     );
+    expect(reviewsIdx).toBeGreaterThanOrEqual(0);
     expect(statementsIdx).toBeGreaterThanOrEqual(0);
     expect(verificationsIdx).toBeGreaterThanOrEqual(0);
     expect(jobsIdx).toBeGreaterThanOrEqual(0);
     // Children are deleted before their parents (foreign keys are ON).
+    // Human confirmations are message-owned, wiped with the other children.
+    expect(reviewsIdx).toBeLessThan(messagesIdx);
     expect(statementsIdx).toBeLessThan(verificationsIdx);
     expect(verificationsIdx).toBeLessThan(jobsIdx);
     expect(verificationsIdx).toBeLessThan(messagesIdx);
@@ -690,5 +718,280 @@ describe('importDataService interrupted verification jobs (Task 11)', () => {
       expect(args[8]).toBe(0);
       expect(args[9]).toBe(0);
     }
+  });
+});
+
+describe('importDataService statement-review round-trip', () => {
+  const baseEntries = (): Record<string, unknown> => ({
+    'sessions.json': [
+      {
+        id: 1,
+        fileName: 'session.mp3',
+        clientName: 'Jane Doe',
+        sessionName: 'Intake',
+        date: '2026-01-01',
+        sessionType: 'Intake',
+        therapy: 'CBT',
+        audioPath: null,
+        status: 'completed',
+        whisperJobId: null,
+        transcriptTokenCount: 10,
+      },
+    ],
+    'chats.json': [
+      { id: 7, sessionId: 1, timestamp: 100, name: null, tags: null },
+    ],
+    'messages.json': [
+      {
+        id: 12,
+        chatId: 7,
+        sender: 'ai',
+        text: 'The client flies to Mars.',
+        timestamp: 102,
+        promptTokens: 5,
+        completionTokens: 6,
+        model: 'llama-3.1-8b',
+      },
+    ],
+    'templates.json': [],
+    'transcript_paragraphs.json': [],
+    'analysis_jobs.json': [],
+    'analysis_job_sessions.json': [],
+    'intermediate_summaries.json': [],
+    'verification_jobs.json': [],
+    'message_verifications.json': [
+      {
+        id: 4,
+        message_id: 12,
+        chat_id: 7,
+        session_id: 1,
+        verification_job_id: null,
+        authored_model: 'llama-3.1-8b',
+        judge_model: 'judge-v1',
+        status: 'completed',
+        total_claims: 1,
+        supported_claims: 1,
+        partial_claims: 0,
+        contradicted_claims: 0,
+        fabricated_claims: 0,
+        omissions_count: 0,
+        accuracy_score: 1,
+        summary_assessment: 'Confirmed by human.',
+        prompt_tokens: 10,
+        completion_tokens: 20,
+        duration_ms: 100,
+        verified_at: 202,
+        error_message: null,
+        material_revision: 'v1.abc',
+      },
+    ],
+    'verified_statements.json': [
+      {
+        id: 9,
+        message_verification_id: 4,
+        message_id: 12,
+        session_id: 1,
+        statement_index: 0,
+        kind: 'claim',
+        exact_quote: 'The client flies to Mars.',
+        normalized_claim: 'The client flies to Mars.',
+        start_char: 0,
+        end_char: 25,
+        verdict: 'fabricated',
+        severity: 'high',
+        confidence: 0.9,
+        reasoning: 'Not in transcript.',
+        transcript_evidence_json: null,
+        created_at: 203,
+        finding_key: 'v1/claim/s0-e25/deadbeef',
+        context_revision: 'v1.abc',
+      },
+    ],
+  });
+
+  const buildBackupFile = async (
+    entries: Record<string, unknown>
+  ): Promise<File> => {
+    const pack = tar.pack();
+    for (const [name, value] of Object.entries(entries)) {
+      pack.entry({ name }, JSON.stringify(value));
+    }
+    pack.finalize();
+    const chunks: Buffer[] = [];
+    for await (const chunk of pack) {
+      chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+    }
+    return new File(chunks, 'backup.tar');
+  };
+
+  const seedReindexRepos = () => {
+    mockSessionRepo.findAll.mockReturnValue([]);
+    mockChatRepo.findChatsBySessionId.mockReturnValue([]);
+    mockChatRepo.findStandaloneChats.mockReturnValue([]);
+    mockMessageRepo.findMessagesByChatId.mockReturnValue([]);
+    mockTranscriptRepo.findParagraphsBySessionId.mockReturnValue([]);
+  };
+
+  const reviewInserts = () =>
+    mockPrepareCalls.filter(({ sql }) =>
+      sql.startsWith('INSERT INTO verification_statement_reviews (')
+    );
+
+  it('remaps review associations, preserves fingerprints, and recomputes aggregates', async () => {
+    seedReindexRepos();
+    const file = await buildBackupFile({
+      ...baseEntries(),
+      'verification_statement_reviews.json': [
+        {
+          id: 2,
+          message_id: 12,
+          session_id: 1,
+          identity_version: 1,
+          context_revision: 'v1.abc',
+          finding_key: 'v1/claim/s0-e25/deadbeef',
+          reusable: true,
+          confirmed_statement_id: null,
+          confirmed_at: 300,
+          kind: 'claim',
+          exact_quote: 'The client flies to Mars.',
+          normalized_claim: 'The client flies to Mars.',
+          start_char: 0,
+          end_char: 25,
+          verdict: 'fabricated',
+          severity: 'high',
+          confidence: 0.9,
+          reasoning: 'Not in transcript.',
+          transcript_evidence_json: null,
+        },
+        {
+          id: 3,
+          message_id: 999,
+          session_id: 1,
+          identity_version: 1,
+          context_revision: 'v1.abc',
+          finding_key: 'v1/claim/s0-e1/orphan',
+          reusable: true,
+          confirmed_statement_id: null,
+          confirmed_at: 301,
+          kind: 'claim',
+          exact_quote: 'orphan',
+          normalized_claim: 'orphan',
+          start_char: null,
+          end_char: null,
+          verdict: 'fabricated',
+          severity: 'low',
+          confidence: 0.5,
+          reasoning: 'orphan review',
+          transcript_evidence_json: null,
+        },
+      ],
+    });
+
+    const result = await importDataService(file);
+    expect(result.message).toMatch(/Import successful/);
+
+    // The mapped review imports with remapped message/session (mock assigns
+    // new id 1 to every insert) and verbatim fingerprints/snapshot; the
+    // orphan (unknown message) is skipped.
+    const inserts = reviewInserts();
+    expect(inserts).toHaveLength(1);
+    // INSERT column order: message_id args[0], session_id args[1],
+    // identity_version args[2], context_revision args[3], finding_key args[4].
+    expect(inserts[0].args[0]).toBe(1);
+    expect(inserts[0].args[1]).toBe(1);
+    expect(inserts[0].args[3]).toBe('v1.abc');
+    expect(inserts[0].args[4]).toBe('v1/claim/s0-e25/deadbeef');
+    expect(inserts[0].args[7]).toBe(300);
+    expect(inserts[0].args[13]).toBe('fabricated');
+
+    // Aggregates are recomputed per restored message (not trusted blindly).
+    expect(
+      mockVerificationRepo.recomputeEffectiveVerificationForMessage
+    ).toHaveBeenCalledWith(1);
+  });
+
+  it('imports legacy backups without review data as an empty set', async () => {
+    seedReindexRepos();
+    const file = await buildBackupFile(baseEntries());
+
+    const result = await importDataService(file);
+    expect(result.message).toMatch(/Import successful/);
+    expect(reviewInserts()).toHaveLength(0);
+    expect(
+      mockVerificationRepo.recomputeEffectiveVerificationForMessage
+    ).toHaveBeenCalledWith(1);
+  });
+});
+
+describe('exportDataService statement reviews', () => {
+  it('includes the review rows as verification_statement_reviews.json', async () => {
+    const review = {
+      id: 2,
+      message_id: 12,
+      session_id: 1,
+      identity_version: 1,
+      context_revision: 'v1.abc',
+      finding_key: 'v1/claim/s0-e25/deadbeef',
+      reusable: true,
+      confirmed_statement_id: null,
+      confirmed_at: 300,
+      kind: 'claim',
+      exact_quote: 'The client flies to Mars.',
+      normalized_claim: 'The client flies to Mars.',
+      start_char: 0,
+      end_char: 25,
+      verdict: 'fabricated',
+      severity: 'high',
+      confidence: 0.9,
+      reasoning: 'Not in transcript.',
+      transcript_evidence_json: null,
+    };
+    mockSessionRepo.findAll.mockReturnValue([]);
+    mockChatRepo.findStandaloneChats.mockReturnValue([]);
+    mockMessageRepo.findAll.mockReturnValue([]);
+    mockTemplateRepo.findAll.mockReturnValue([]);
+    mockTranscriptRepo.findAll.mockReturnValue([]);
+    mockAnalysisRepo.listJobs.mockReturnValue([]);
+    mockAnalysisRepo.findAllJobSessions.mockReturnValue([]);
+    mockAnalysisRepo.findAllIntermediateSummaries.mockReturnValue([]);
+    mockVerificationRepo.findAllJobsForBackup.mockReturnValue([]);
+    mockVerificationRepo.findAllMessageVerificationsForBackup.mockReturnValue(
+      []
+    );
+    mockVerificationRepo.findAllVerifiedStatementsForBackup.mockReturnValue([]);
+    mockVerificationRepo.findAllStatementReviewsForBackup.mockReturnValue([
+      review,
+    ]);
+    // Empty real uploads dir (export streams every file it finds).
+    const uploadsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'uploads-'));
+    mockGetUploadsDir.mockReturnValue(uploadsDir);
+
+    const readable = await exportDataService();
+    const extract = tar.extract();
+    const entries: Record<string, string> = {};
+    const done = new Promise<void>((resolve, reject) => {
+      extract.on('entry', (header, stream, next) => {
+        const chunks: Buffer[] = [];
+        stream.on('data', (c: Buffer) => chunks.push(c));
+        stream.on('end', () => {
+          entries[header.name] = Buffer.concat(chunks).toString('utf8');
+          next();
+        });
+        stream.resume();
+      });
+      extract.on('finish', () => resolve());
+      extract.on('error', reject);
+    });
+    readable.pipe(extract);
+    await done;
+
+    expect(
+      mockVerificationRepo.findAllStatementReviewsForBackup
+    ).toHaveBeenCalled();
+    expect(entries['verification_statement_reviews.json']).toBeDefined();
+    expect(JSON.parse(entries['verification_statement_reviews.json']!)).toEqual(
+      [review]
+    );
+    fs.rmSync(uploadsDir, { recursive: true, force: true });
   });
 });

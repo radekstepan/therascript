@@ -23,6 +23,7 @@ import {
   verificationJobSchema,
   messageVerificationSchema,
   verifiedStatementSchema,
+  statementReviewSchema,
 } from '@therascript/domain';
 import { InternalServerError } from '../errors.js';
 import type {
@@ -187,6 +188,7 @@ export async function resetAllDataService(): Promise<ResetResult> {
       // never dropped, so the full migration-built schema — including the
       // verification tables, app_settings, and system templates — stays
       // intact and queryable after a reset, and user_version is untouched.
+      db.exec('DELETE FROM verification_statement_reviews');
       db.exec('DELETE FROM verified_statements');
       db.exec('DELETE FROM message_verifications');
       db.exec('DELETE FROM verification_jobs');
@@ -254,6 +256,8 @@ export const exportDataService = async (): Promise<Readable> => {
           verificationRepository.findAllMessageVerificationsForBackup(),
         verified_statements:
           verificationRepository.findAllVerifiedStatementsForBackup(),
+        verification_statement_reviews:
+          verificationRepository.findAllStatementReviewsForBackup(),
       };
       for (const [key, value] of Object.entries(dbData)) {
         pack.entry({ name: `${key}.json` }, JSON.stringify(value, null, 2));
@@ -466,6 +470,13 @@ export const importDataService = async (
       .optional()
       .default([])
       .parse(dataFiles['verified_statements.json']);
+    // Human confirmations are optional: legacy backups predate reviews and
+    // import as an empty set.
+    const verification_statement_reviews = z
+      .array(statementReviewSchema)
+      .optional()
+      .default([])
+      .parse(dataFiles['verification_statement_reviews.json']);
 
     await resetAllDataService();
 
@@ -475,6 +486,7 @@ export const importDataService = async (
     const oldToNewAnalysisJobIdMap: Record<number, number> = {};
     const oldToNewVerificationJobIdMap: Record<number, number> = {};
     const oldToNewMessageVerificationIdMap: Record<number, number> = {};
+    const oldToNewStatementIdMap: Record<number, number> = {};
     db.transaction(() => {
       sessions.forEach((s) => {
         const { id, ...rest } = s;
@@ -656,7 +668,7 @@ export const importDataService = async (
             : null;
         const res = db
           .prepare(
-            'INSERT INTO message_verifications (message_id, chat_id, session_id, verification_job_id, authored_model, judge_model, status, total_claims, supported_claims, partial_claims, contradicted_claims, fabricated_claims, omissions_count, accuracy_score, summary_assessment, prompt_tokens, completion_tokens, duration_ms, verified_at, error_message, error_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            'INSERT INTO message_verifications (message_id, chat_id, session_id, verification_job_id, authored_model, judge_model, status, total_claims, supported_claims, partial_claims, contradicted_claims, fabricated_claims, omissions_count, accuracy_score, summary_assessment, prompt_tokens, completion_tokens, duration_ms, verified_at, error_message, error_code, material_revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
           )
           .run(
             newMessageId,
@@ -680,7 +692,10 @@ export const importDataService = async (
             mv.verified_at,
             mv.error_message,
             // Pre-V21 backups lack failure codes.
-            (mv as { error_code?: string | null }).error_code ?? null
+            (mv as { error_code?: string | null }).error_code ?? null,
+            // Pre-V22 backups lack material revisions; recompute backfills.
+            (mv as { material_revision?: string | null }).material_revision ??
+              null
           );
         oldToNewMessageVerificationIdMap[mv.id] = res.lastInsertRowid as number;
       });
@@ -690,27 +705,83 @@ export const importDataService = async (
         const newMessageId = oldToNewMessageIdMap[st.message_id];
         const newSessionId = oldToNewSessionIdMap[st.session_id];
         if (!newVerificationId || !newMessageId || !newSessionId) return;
+        const res = db
+          .prepare(
+            'INSERT INTO verified_statements (message_verification_id, message_id, session_id, statement_index, kind, exact_quote, normalized_claim, start_char, end_char, verdict, severity, confidence, reasoning, transcript_evidence_json, created_at, finding_key, context_revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+          )
+          .run(
+            newVerificationId,
+            newMessageId,
+            newSessionId,
+            st.statement_index,
+            st.kind,
+            st.exact_quote,
+            st.normalized_claim,
+            st.start_char,
+            st.end_char,
+            st.verdict,
+            st.severity,
+            st.confidence,
+            st.reasoning,
+            st.transcript_evidence_json,
+            st.created_at,
+            // Pre-V22 backups lack finding identity; recompute below
+            // backfills from content.
+            (st as { finding_key?: string | null }).finding_key ?? null,
+            (st as { context_revision?: string | null }).context_revision ??
+              null
+          );
+        oldToNewStatementIdMap[st.id] = res.lastInsertRowid as number;
+      });
+      verification_statement_reviews.forEach((review) => {
+        const newMessageId = oldToNewMessageIdMap[review.message_id];
+        const newSessionId = oldToNewSessionIdMap[review.session_id];
+        if (!newMessageId || !newSessionId) return;
+        // Content fingerprints (context_revision/finding_key) survive
+        // remapping verbatim; only message/session/statement associations
+        // are remapped. Snapshots import without requiring an extant old
+        // statement row; ambiguous row associations that cannot be remapped
+        // become inert history (NULL) rather than pointing at a wrong row.
+        const newStatementId =
+          review.confirmed_statement_id != null
+            ? (oldToNewStatementIdMap[review.confirmed_statement_id] ?? null)
+            : null;
         db.prepare(
-          'INSERT INTO verified_statements (message_verification_id, message_id, session_id, statement_index, kind, exact_quote, normalized_claim, start_char, end_char, verdict, severity, confidence, reasoning, transcript_evidence_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+          'INSERT INTO verification_statement_reviews (message_id, session_id, identity_version, context_revision, finding_key, reusable, confirmed_statement_id, confirmed_at, kind, exact_quote, normalized_claim, start_char, end_char, verdict, severity, confidence, reasoning, transcript_evidence_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         ).run(
-          newVerificationId,
           newMessageId,
           newSessionId,
-          st.statement_index,
-          st.kind,
-          st.exact_quote,
-          st.normalized_claim,
-          st.start_char,
-          st.end_char,
-          st.verdict,
-          st.severity,
-          st.confidence,
-          st.reasoning,
-          st.transcript_evidence_json,
-          st.created_at
+          review.identity_version,
+          review.context_revision,
+          review.finding_key,
+          review.reusable ? 1 : 0,
+          newStatementId,
+          review.confirmed_at,
+          review.kind,
+          review.exact_quote,
+          review.normalized_claim,
+          review.start_char,
+          review.end_char,
+          review.verdict,
+          review.severity,
+          review.confidence,
+          review.reasoning,
+          review.transcript_evidence_json
         );
       });
     })();
+
+    // Restored effective aggregates are recomputed (not trusted blindly):
+    // matching reviews re-apply through content fingerprints, so confirmed
+    // findings stay confirmed with correct counts after remapping.
+    for (const mv of message_verifications) {
+      const newMessageId = oldToNewMessageIdMap[mv.message_id];
+      if (newMessageId) {
+        verificationRepository.recomputeEffectiveVerificationForMessage(
+          newMessageId
+        );
+      }
+    }
 
     const uploadsSrcDir = path.join(tempDir, 'uploads');
     const uploadsDestDir = getUploadsDir();

@@ -4,7 +4,7 @@
 // Covers the chat-scoped coverage helpers behind the session chat
 // header's passive verified-status icon: backend eligibility mirroring
 // (`VERIFIABLE_AI_MESSAGE_FILTER`) and per-chat rollups.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   isVerifiableChatAiMessage,
   summarizeChatVerifications,
@@ -227,5 +227,27 @@ describe('summarizeChatVerifications', () => {
     ]);
     expect(summary.allVerified).toBe(true);
     expect(summary.failedMessageIds).toEqual([]);
+  });
+});
+
+describe('dismissStatementVerification', () => {
+  it('posts only the statement id + token and returns statement + verification', async () => {
+    const axios = (await import('axios')).default;
+    const post = vi.fn().mockResolvedValue({
+      data: {
+        statement: { id: 9, review_status: 'confirmed' },
+        verification: { id: 4, message_id: 12 },
+      },
+    });
+    vi.spyOn(axios, 'post').mockImplementation(post);
+    const { dismissStatementVerification } = await import('./verification');
+    const result = await dismissStatementVerification(9, 'v1.token');
+    expect(post).toHaveBeenCalledWith(
+      '/api/verification/statements/9/dismiss',
+      { expectedReviewToken: 'v1.token' }
+    );
+    expect(result.statement.review_status).toBe('confirmed');
+    expect(result.verification.message_id).toBe(12);
+    vi.restoreAllMocks();
   });
 });

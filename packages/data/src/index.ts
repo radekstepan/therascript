@@ -8,6 +8,11 @@ export { templateRepository } from './repositories/templateRepository.js';
 export { appSettingsRepository } from './repositories/appSettingsRepository.js';
 export { verificationRepository } from './repositories/verificationRepository.js';
 export { resolveVerificationSkipVerified } from './repositories/verificationRepository.js';
+export {
+  StatementReviewNotFoundError,
+  StatementReviewConflictError,
+  StaleVerificationMaterialError,
+} from './repositories/verificationRepository.js';
 
 export type {
   UsageLog,
@@ -35,4 +40,6 @@ export type {
   FlaggedStatementsQuery,
   FlaggedStatementItem,
   FlaggedStatementsResult,
+  DismissStatementResult,
+  StatementReviewConflictReason,
 } from './repositories/verificationRepository.js';

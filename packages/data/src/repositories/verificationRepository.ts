@@ -1,14 +1,30 @@
 import { db, run, all, get } from '@therascript/db';
-import { formatMessagePreview } from '@therascript/domain';
+import {
+  formatMessagePreview,
+  applyConfirmedReviewsToCounts,
+  computeFindingKey,
+  computeAmbiguousReviewKey,
+  computeMaterialRevision,
+  computeReviewToken,
+  computeVerificationAccuracyScore,
+  deriveRawVerificationCounts,
+  isReviewEligibleFinding,
+  isUnresolvedClaimAmbiguous,
+  reduceEffectiveVerificationCounts,
+  VERIFICATION_REVIEW_IDENTITY_VERSION,
+} from '@therascript/domain';
+import { extractVisibleAnswer } from '@therascript/services';
 import type {
   BackendChatMessage,
   BackendMessageVerification,
+  BackendStatementReview,
   BackendVerificationJob,
   BackendVerifiedStatement,
   ModelAccuracyStat,
   MessageVerificationRow,
   SessionVerificationSummary,
   StatementKind,
+  StatementReviewStatus,
   StatementSeverity,
   StatementVerdict,
   TranscriptEvidenceItem,
@@ -18,6 +34,74 @@ import type {
   VerificationJobStatus,
   VerificationTimepointStat,
 } from '@therascript/domain';
+
+/**
+ * Thrown by `dismissStatementAsConfirmed` when the statement or its parent
+ * assessment no longer exists (including old ids replaced by a rerun/clear).
+ * Maps to HTTP 404. Never silently applies to a replacement row.
+ * Carries the current authoritative assessment when one is resolvable
+ * (null when the owning message itself is gone) so the client can refresh
+ * instead of applying the dismissal to a replacement row.
+ */
+export class StatementReviewNotFoundError extends Error {
+  readonly code = 'review_not_found' as const;
+  readonly verification: BackendMessageVerification | null;
+  constructor(
+    message: string,
+    verification: BackendMessageVerification | null = null
+  ) {
+    super(message);
+    this.name = 'StatementReviewNotFoundError';
+    this.verification = verification;
+  }
+}
+
+export type StatementReviewConflictReason =
+  | 'stale_token'
+  | 'material_changed'
+  | 'not_completed'
+  | 'not_eligible';
+
+/**
+ * Thrown by `dismissStatementAsConfirmed` for stale tokens/material,
+ * non-completed parents, or supported statements. Maps to HTTP 409 with an
+ * explanation + refresh of the current assessment.
+ */
+export class StatementReviewConflictError extends Error {
+  readonly code = 'review_conflict' as const;
+  readonly reason: StatementReviewConflictReason;
+  readonly verification: BackendMessageVerification | null;
+  constructor(
+    reason: StatementReviewConflictReason,
+    message: string,
+    verification: BackendMessageVerification | null = null
+  ) {
+    super(message);
+    this.name = 'StatementReviewConflictError';
+    this.reason = reason;
+    this.verification = verification;
+  }
+}
+
+/**
+ * Thrown by `saveMessageVerificationResult` when the live message/transcript
+ * material changed between Judge evaluation and commit. The worker must
+ * discard the stale result (never attribute it to changed content) and leave
+ * any prior assessment and all durable reviews untouched.
+ */
+export class StaleVerificationMaterialError extends Error {
+  readonly code = 'stale_material' as const;
+  constructor(message: string) {
+    super(message);
+    this.name = 'StaleVerificationMaterialError';
+  }
+}
+
+/** True when `error` is a SQLite UNIQUE-constraint violation (dismiss race). */
+const isUniqueConstraintError = (error: unknown): boolean =>
+  typeof error === 'object' &&
+  error !== null &&
+  (error as { code?: unknown }).code === 'SQLITE_CONSTRAINT_UNIQUE';
 
 export interface CreateVerificationJobOptions {
   scope: VerificationJobScope;
@@ -128,6 +212,19 @@ export interface SaveMessageVerificationInput {
     | 'missing_transcript'
     | null;
   statements?: VerificationStatementInput[];
+  /**
+   * Fingerprint of the material the Judge evaluated, computed by the worker
+   * before the LLM call. The save transaction recomputes the live revision
+   * and rejects the save (`StaleVerificationMaterialError`) on mismatch.
+   * Omit only for callers that did not evaluate material (tests/backfill):
+   * the live revision is then adopted without a staleness check.
+   */
+  materialRevision?: string | null;
+}
+
+export interface DismissStatementResult {
+  statement: BackendVerifiedStatement;
+  verification: BackendMessageVerification;
 }
 
 export interface FailedVerificationItem {
@@ -242,8 +339,8 @@ const currentMessageTextSubquery =
 const selectJobByIdSql = `SELECT verification_jobs.*, ${currentMessageTextSubquery} FROM verification_jobs WHERE id = ?`;
 
 const upsertMessageVerificationSql = `
-    INSERT INTO message_verifications (message_id, chat_id, session_id, verification_job_id, authored_model, judge_model, status, total_claims, supported_claims, partial_claims, contradicted_claims, fabricated_claims, omissions_count, accuracy_score, summary_assessment, prompt_tokens, completion_tokens, duration_ms, verified_at, error_message, error_code)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO message_verifications (message_id, chat_id, session_id, verification_job_id, authored_model, judge_model, status, total_claims, supported_claims, partial_claims, contradicted_claims, fabricated_claims, omissions_count, accuracy_score, summary_assessment, prompt_tokens, completion_tokens, duration_ms, verified_at, error_message, error_code, material_revision)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(message_id) DO UPDATE SET
       chat_id = excluded.chat_id,
       session_id = excluded.session_id,
@@ -264,15 +361,39 @@ const upsertMessageVerificationSql = `
       duration_ms = excluded.duration_ms,
       verified_at = excluded.verified_at,
       error_message = excluded.error_message,
-      error_code = excluded.error_code
+      error_code = excluded.error_code,
+      material_revision = excluded.material_revision
 `;
 const selectVerificationIdByMessageIdSql =
   'SELECT id FROM message_verifications WHERE message_id = ?';
 const deleteStatementsByMessageIdSql =
   'DELETE FROM verified_statements WHERE message_id = ?';
 const insertStatementSql = `
-    INSERT INTO verified_statements (message_verification_id, message_id, session_id, statement_index, kind, exact_quote, normalized_claim, start_char, end_char, verdict, severity, confidence, reasoning, transcript_evidence_json, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO verified_statements (message_verification_id, message_id, session_id, statement_index, kind, exact_quote, normalized_claim, start_char, end_char, verdict, severity, confidence, reasoning, transcript_evidence_json, created_at, finding_key, context_revision)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`;
+const insertStatementReviewSql = `
+    INSERT INTO verification_statement_reviews (message_id, session_id, identity_version, context_revision, finding_key, reusable, confirmed_statement_id, confirmed_at, kind, exact_quote, normalized_claim, start_char, end_char, verdict, severity, confidence, reasoning, transcript_evidence_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`;
+
+/**
+ * SQL predicate (aliased on `vs`) excluding human-confirmed findings.
+ * A statement is resolved when a reusable review matches its stored
+ * (revision, finding key), or when an ambiguous (non-reusable) review names
+ * its exact row id. Legacy rows with NULL identity columns never match the
+ * reusable branch, so existing results start unreviewed.
+ */
+const UNRESOLVED_STATEMENT_PREDICATE = `
+  NOT EXISTS (
+    SELECT 1 FROM verification_statement_reviews r
+    WHERE r.message_id = vs.message_id
+      AND (
+        (r.reusable = 1 AND vs.finding_key IS NOT NULL AND vs.context_revision IS NOT NULL
+         AND r.context_revision = vs.context_revision AND r.finding_key = vs.finding_key)
+        OR (r.reusable = 0 AND r.confirmed_statement_id = vs.id)
+      )
+  )
 `;
 
 const mapJobRow = (row: any): BackendVerificationJob => {
@@ -322,10 +443,290 @@ const parseEvidenceJson = (value: string | null): TranscriptEvidenceItem[] => {
   }
 };
 
-const mapStatementRow = (row: any): BackendVerifiedStatement => ({
-  ...(row as Omit<BackendVerifiedStatement, 'evidence'>),
-  evidence: parseEvidenceJson(row.transcript_evidence_json ?? null),
+const UNREVIEWED_METADATA: {
+  review_status: StatementReviewStatus;
+  confirmed_at: null;
+  review_id: null;
+  review_token: null;
+} = {
+  review_status: 'unreviewed',
+  confirmed_at: null,
+  review_id: null,
+  review_token: null,
+};
+
+/**
+ * Raw row mapping. Review metadata defaults to unreviewed; readers that
+ * serve statements must call `attachReviewMetadata` so every read carries
+ * authoritative `review_status`/`confirmed_at`/`review_id`/`review_token`.
+ */
+const mapStatementRow = (row: any): BackendVerifiedStatement => {
+  const {
+    finding_key: _findingKey,
+    context_revision: _contextRevision,
+    ...rest
+  } = row as Record<string, unknown>;
+  return {
+    ...(rest as unknown as Omit<
+      BackendVerifiedStatement,
+      | 'evidence'
+      | 'review_status'
+      | 'confirmed_at'
+      | 'review_id'
+      | 'review_token'
+    >),
+    evidence: parseEvidenceJson(
+      (row.transcript_evidence_json as string | null) ?? null
+    ),
+    ...UNREVIEWED_METADATA,
+  };
+};
+
+const mapReviewRow = (row: any): BackendStatementReview => ({
+  ...(row as Omit<BackendStatementReview, 'reusable'>),
+  reusable: row.reusable === 1,
 });
+
+/** Live material behind one audited message, for revision fingerprinting. */
+interface LiveVerificationMaterial {
+  revision: string;
+  visibleAnswer: string;
+  userQuestion: string | null;
+}
+
+/**
+ * Recompute the material revision from live message + transcript rows.
+ * Must run INSIDE the caller's write transaction so the revision, the
+ * review match, and the aggregate update commit atomically.
+ */
+const computeLiveMaterialRevision = (
+  messageId: number,
+  chatId: number,
+  sessionId: number
+): LiveVerificationMaterial => {
+  const messageRow = get<{ text: string }>(
+    'SELECT text FROM messages WHERE id = ?',
+    messageId
+  );
+  const visibleAnswer = extractVisibleAnswer(messageRow?.text ?? '').trim();
+  const questionRow = get<{ text: string }>(
+    `SELECT text FROM messages
+     WHERE chatId = ? AND sender = 'user' AND id < ?
+     ORDER BY id DESC LIMIT 1`,
+    chatId,
+    messageId
+  );
+  const userQuestion = questionRow?.text ?? null;
+  const paragraphs = all<{
+    paragraphIndex: number;
+    timestampMs: number;
+    speaker: string | null;
+    text: string;
+  }>(
+    `SELECT paragraphIndex, timestampMs, speaker, text
+     FROM transcript_paragraphs WHERE sessionId = ? ORDER BY paragraphIndex ASC`,
+    sessionId
+  );
+  return {
+    revision: computeMaterialRevision({
+      visibleAnswer,
+      userQuestion,
+      transcript: paragraphs,
+    }),
+    visibleAnswer,
+    userQuestion,
+  };
+};
+
+/** Finding key for a worker-supplied statement input. */
+const findingKeyForInput = (s: VerificationStatementInput): string => {
+  if (s.kind === 'omission') {
+    return computeFindingKey({
+      kind: 'omission',
+      normalizedClaim: s.normalizedClaim,
+      evidence: (s.evidence ?? []).map((e) => ({
+        timestampMs: e.timestampMs ?? null,
+        speaker: e.speaker ?? null,
+        quote: e.quote,
+      })),
+    });
+  }
+  return computeFindingKey({
+    kind: 'claim',
+    exactQuote: s.exactQuote,
+    normalizedClaim: s.normalizedClaim,
+    startChar: s.startChar ?? null,
+    endChar: s.endChar ?? null,
+  });
+};
+
+/** Finding key for a persisted statement row (evidence parsed from JSON). */
+const findingKeyForRow = (row: {
+  kind: StatementKind;
+  exact_quote: string;
+  normalized_claim: string;
+  start_char: number | null;
+  end_char: number | null;
+  transcript_evidence_json: string | null;
+}): string => {
+  if (row.kind === 'omission') {
+    return computeFindingKey({
+      kind: 'omission',
+      normalizedClaim: row.normalized_claim,
+      evidence: parseEvidenceJson(row.transcript_evidence_json).map((e) => ({
+        timestampMs: e.timestampMs ?? null,
+        speaker: e.speaker ?? null,
+        quote: e.quote,
+      })),
+    });
+  }
+  return computeFindingKey({
+    kind: 'claim',
+    exactQuote: row.exact_quote,
+    normalizedClaim: row.normalized_claim,
+    startChar: row.start_char,
+    endChar: row.end_char,
+  });
+};
+
+const reviewTokenForRow = (
+  row: {
+    id: number;
+    message_id: number;
+    kind: StatementKind;
+    exact_quote: string;
+    normalized_claim: string;
+    start_char: number | null;
+    end_char: number | null;
+    verdict: StatementVerdict;
+    severity: StatementSeverity;
+    confidence: number;
+    reasoning: string;
+    transcript_evidence_json: string | null;
+  },
+  materialRevision: string | null
+): string =>
+  computeReviewToken({
+    statementId: row.id,
+    messageId: row.message_id,
+    kind: row.kind,
+    materialRevision: materialRevision ?? '',
+    exactQuote: row.exact_quote,
+    normalizedClaim: row.normalized_claim,
+    startChar: row.start_char,
+    endChar: row.end_char,
+    verdict: row.verdict,
+    severity: row.severity,
+    confidence: row.confidence,
+    reasoning: row.reasoning,
+    evidenceJson: row.transcript_evidence_json,
+  });
+
+interface MatchableStatement {
+  id: number;
+  findingKey: string | null;
+  contextRevision: string | null;
+}
+
+/**
+ * Match durable reviews to current statements. Precedence:
+ *  1. An ambiguous (non-reusable) review matches only its exact
+ *     `confirmed_statement_id` — never a rerun's replacement rows.
+ *  2. A reusable review matches a statement's stored (revision, key) only
+ *     when exactly one current statement carries that pair; duplicate
+ *     groups stay unreviewed ("prefer a newly expressed finding requiring
+ *     review to suppressing a distinct problem").
+ */
+const matchReviewsToStatements = (
+  statements: MatchableStatement[],
+  reviews: BackendStatementReview[]
+): Map<number, BackendStatementReview> => {
+  const matched = new Map<number, BackendStatementReview>();
+  const ambiguousByStatementId = new Map<number, BackendStatementReview>();
+  const reusableByKey = new Map<string, BackendStatementReview>();
+  for (const review of reviews) {
+    if (!review.reusable && review.confirmed_statement_id != null) {
+      ambiguousByStatementId.set(review.confirmed_statement_id, review);
+    } else if (review.reusable) {
+      reusableByKey.set(
+        `${review.context_revision}\n${review.finding_key}`,
+        review
+      );
+    }
+  }
+  const groupSizes = new Map<string, number>();
+  for (const s of statements) {
+    if (s.findingKey == null || s.contextRevision == null) continue;
+    const group = `${s.contextRevision}\n${s.findingKey}`;
+    groupSizes.set(group, (groupSizes.get(group) ?? 0) + 1);
+  }
+  for (const s of statements) {
+    const ambiguous = ambiguousByStatementId.get(s.id);
+    if (ambiguous) {
+      matched.set(s.id, ambiguous);
+      continue;
+    }
+    if (s.findingKey == null || s.contextRevision == null) continue;
+    const group = `${s.contextRevision}\n${s.findingKey}`;
+    if (groupSizes.get(group) !== 1) continue;
+    const reusable = reusableByKey.get(group);
+    if (reusable) matched.set(s.id, reusable);
+  }
+  return matched;
+};
+
+/**
+ * Attach authoritative review metadata + tokens to mapped statements.
+ * `rowsById` carries the stored identity columns (stripped from the mapped
+ * shape); `materialRevision` is the parent assessment's revision ('' for
+ * legacy rows). Every statement read path must use this so metadata can
+ * never be silently dropped.
+ */
+const attachReviewMetadata = (
+  statements: BackendVerifiedStatement[],
+  rowsById: Map<
+    number,
+    {
+      finding_key: string | null;
+      context_revision: string | null;
+    }
+  >,
+  reviews: BackendStatementReview[],
+  materialRevision: string | null
+): BackendVerifiedStatement[] => {
+  const matchable: MatchableStatement[] = statements.map((s) => ({
+    id: s.id,
+    findingKey: rowsById.get(s.id)?.finding_key ?? null,
+    contextRevision: rowsById.get(s.id)?.context_revision ?? null,
+  }));
+  const matched = matchReviewsToStatements(matchable, reviews);
+  return statements.map((s) => {
+    const review = matched.get(s.id);
+    return {
+      ...s,
+      review_status: review ? 'confirmed' : 'unreviewed',
+      confirmed_at: review ? review.confirmed_at : null,
+      review_id: review ? review.id : null,
+      review_token: reviewTokenForRow(
+        {
+          id: s.id,
+          message_id: s.message_id,
+          kind: s.kind,
+          exact_quote: s.exact_quote,
+          normalized_claim: s.normalized_claim,
+          start_char: s.start_char,
+          end_char: s.end_char,
+          verdict: s.verdict,
+          severity: s.severity,
+          confidence: s.confidence,
+          reasoning: s.reasoning,
+          transcript_evidence_json: s.transcript_evidence_json,
+        },
+        materialRevision
+      ),
+    };
+  });
+};
 
 const escapeLikePattern = (value: string): string =>
   value.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
@@ -337,6 +738,67 @@ const buildInClause = (
   const placeholders = values.map(() => '?').join(', ');
   params.push(...values);
   return `(${placeholders})`;
+};
+
+/**
+ * Current authoritative parent + review-attached statements for one
+ * assessment row. Used by the dismiss success path and carried on 409
+ * errors so the client refreshes to current data (with fresh tokens)
+ * instead of retrying a stale submission.
+ */
+const loadAuthoritativeVerification = (
+  parentRow: any
+): BackendMessageVerification => {
+  const rows = all<any>(
+    'SELECT * FROM verified_statements WHERE message_verification_id = ? ORDER BY statement_index ASC, id ASC',
+    parentRow.id
+  );
+  const reviews =
+    rows.length === 0
+      ? []
+      : all<any>(
+          'SELECT * FROM verification_statement_reviews WHERE message_id = ?',
+          parentRow.message_id
+        ).map(mapReviewRow);
+  const rowsById = new Map(
+    rows.map((r) => [
+      r.id,
+      {
+        finding_key: r.finding_key ?? null,
+        context_revision: r.context_revision ?? null,
+      },
+    ])
+  );
+  return {
+    ...(parentRow as Omit<BackendMessageVerification, 'statements'>),
+    statements: attachReviewMetadata(
+      rows.map(mapStatementRow),
+      rowsById,
+      reviews,
+      parentRow.material_revision ?? null
+    ),
+  };
+};
+
+/** Durable reviews grouped by owning message id (history included). */
+const findReviewsByMessageIds = (
+  messageIds: number[]
+): Map<number, BackendStatementReview[]> => {
+  const grouped = new Map<number, BackendStatementReview[]>();
+  if (messageIds.length === 0) return grouped;
+  const params: unknown[] = [];
+  const rows = all<any>(
+    `SELECT * FROM verification_statement_reviews
+     WHERE message_id IN ${buildInClause(messageIds, params)}
+     ORDER BY message_id ASC, id ASC`,
+    ...params
+  );
+  for (const row of rows) {
+    const list = grouped.get(row.message_id) ?? [];
+    list.push(mapReviewRow(row));
+    grouped.set(row.message_id, list);
+  }
+  return grouped;
 };
 
 const safePercent = (numerator: number, denominator: number): number =>
@@ -711,16 +1173,93 @@ export const verificationRepository = {
   ): BackendMessageVerification => {
     try {
       const status = payload.status ?? 'completed';
-      const totalClaims = payload.totalClaims ?? 0;
-      const supportedClaims = payload.supportedClaims ?? 0;
-      const partialClaims = payload.partialClaims ?? 0;
-      const contradictedClaims = payload.contradictedClaims ?? 0;
-      const fabricatedClaims = payload.fabricatedClaims ?? 0;
-      const omissionsCount = payload.omissionsCount ?? 0;
       const statements = payload.statements ?? [];
       const verificationJobId = payload.verificationJobId ?? null;
 
       const verificationId = db.transaction(() => {
+        // Revalidate the evaluated material against live rows INSIDE the
+        // transaction: a transcript edit landing between the Judge call and
+        // this commit must discard the stale result, never attribute it to
+        // changed content. Callers without evaluated material (tests,
+        // backfill) adopt the live revision unchecked.
+        const live = computeLiveMaterialRevision(
+          payload.messageId,
+          payload.chatId,
+          payload.sessionId
+        );
+        if (
+          payload.materialRevision != null &&
+          live.revision !== payload.materialRevision
+        ) {
+          throw new StaleVerificationMaterialError(
+            `Verification result for message ${payload.messageId} was evaluated against changed material; discarding instead of attributing it to new content.`
+          );
+        }
+        const materialRevision = live.revision;
+
+        // Reconcile durable human confirmations BEFORE calculating
+        // aggregates: read the latest reviews inside this transaction (a
+        // dismissal may have landed after the Judge call) and reduce to
+        // effective counts. Failed/skipped/empty saves store no statements
+        // but still persist the revision; independent review rows are never
+        // touched here, so they always survive.
+        const keys = statements.map(findingKeyForInput);
+        const durableReviews =
+          status === 'completed' && statements.length > 0
+            ? all<any>(
+                `SELECT * FROM verification_statement_reviews
+                 WHERE message_id = ? AND context_revision = ? AND reusable = 1`,
+                payload.messageId,
+                materialRevision
+              ).map(mapReviewRow)
+            : [];
+        const matchable: MatchableStatement[] = statements.map((s, i) => ({
+          // Pre-insert ids are unknown; use negative indexes so ambiguous
+          // id-matches (positive row ids) can never fire here.
+          id: -(i + 1),
+          findingKey: keys[i]!,
+          contextRevision: materialRevision,
+        }));
+        const matched = matchReviewsToStatements(matchable, durableReviews);
+        const matchedInputs = statements.filter((_, i) =>
+          matched.has(-(i + 1))
+        );
+        // Caller-supplied raw counts stay authoritative (the worker computes
+        // them from the same Judge output); per-field fallback derives from
+        // the statements when the caller omitted counts. With no matching
+        // reviews the stored row is byte-identical to the pre-review
+        // behavior; with matches the shared adjustment core reconciles.
+        const derived = deriveRawVerificationCounts(statements);
+        const rawCounts = {
+          totalClaims: payload.totalClaims ?? derived.totalClaims,
+          supportedClaims: payload.supportedClaims ?? derived.supportedClaims,
+          partialClaims: payload.partialClaims ?? derived.partialClaims,
+          contradictedClaims:
+            payload.contradictedClaims ?? derived.contradictedClaims,
+          fabricatedClaims:
+            payload.fabricatedClaims ?? derived.fabricatedClaims,
+          omissionsCount: payload.omissionsCount ?? derived.omissionsCount,
+        };
+        const effective =
+          matchedInputs.length === 0
+            ? {
+                ...rawCounts,
+                accuracyScore:
+                  payload.accuracyScore ??
+                  (statements.length === 0
+                    ? 1.0
+                    : computeVerificationAccuracyScore(
+                        rawCounts.supportedClaims,
+                        rawCounts.partialClaims,
+                        rawCounts.totalClaims,
+                        rawCounts.omissionsCount
+                      )),
+              }
+            : applyConfirmedReviewsToCounts(
+                rawCounts,
+                matchedInputs.map((s) => ({ kind: s.kind, verdict: s.verdict }))
+              );
+
         run(
           upsertMessageVerificationSql,
           payload.messageId,
@@ -730,20 +1269,21 @@ export const verificationRepository = {
           payload.authoredModel ?? null,
           payload.judgeModel,
           status,
-          totalClaims,
-          supportedClaims,
-          partialClaims,
-          contradictedClaims,
-          fabricatedClaims,
-          omissionsCount,
-          payload.accuracyScore ?? 1.0,
+          effective.totalClaims,
+          effective.supportedClaims,
+          effective.partialClaims,
+          effective.contradictedClaims,
+          effective.fabricatedClaims,
+          effective.omissionsCount,
+          effective.accuracyScore,
           payload.summaryAssessment ?? null,
           payload.promptTokens ?? null,
           payload.completionTokens ?? null,
           payload.durationMs ?? null,
           Date.now(),
           payload.errorMessage ?? null,
-          payload.errorCode ?? null
+          payload.errorCode ?? null,
+          materialRevision
         );
         const idRow = get<{ id: number }>(
           selectVerificationIdByMessageIdSql,
@@ -758,7 +1298,8 @@ export const verificationRepository = {
         if (statements.length > 0) {
           const createdAt = Date.now();
           const stmt = db.prepare(insertStatementSql);
-          for (const s of statements) {
+          for (let i = 0; i < statements.length; i++) {
+            const s = statements[i]!;
             stmt.run(
               idRow.id,
               payload.messageId,
@@ -776,13 +1317,19 @@ export const verificationRepository = {
               s.evidence && s.evidence.length > 0
                 ? JSON.stringify(s.evidence)
                 : null,
-              createdAt
+              createdAt,
+              keys[i]!,
+              materialRevision
             );
           }
         }
         if (verificationJobId != null) {
+          // New audit counters describe effective results at save time
+          // (human-confirmed findings already reconciled above).
           const flaggedDelta =
-            contradictedClaims + fabricatedClaims + partialClaims;
+            effective.contradictedClaims +
+            effective.fabricatedClaims +
+            effective.partialClaims;
           run(
             `UPDATE verification_jobs
              SET processed_messages = processed_messages + 1,
@@ -790,9 +1337,9 @@ export const verificationRepository = {
                  flagged_statements = flagged_statements + ?,
                  omissions_count = omissions_count + ?
              WHERE id = ?`,
-            totalClaims + omissionsCount,
+            effective.totalClaims + effective.omissionsCount,
             flaggedDelta,
-            omissionsCount,
+            effective.omissionsCount,
             verificationJobId
           );
         }
@@ -810,11 +1357,33 @@ export const verificationRepository = {
         'SELECT * FROM verified_statements WHERE message_verification_id = ? ORDER BY statement_index ASC, id ASC',
         verificationId
       );
+      const reviewsForMessage =
+        statementRows.length === 0
+          ? []
+          : all<any>(
+              'SELECT * FROM verification_statement_reviews WHERE message_id = ?',
+              payload.messageId
+            ).map(mapReviewRow);
+      const rowsById = new Map(
+        statementRows.map((r) => [
+          r.id,
+          {
+            finding_key: r.finding_key ?? null,
+            context_revision: r.context_revision ?? null,
+          },
+        ])
+      );
       return {
         ...(saved as Omit<BackendMessageVerification, 'statements'>),
-        statements: statementRows.map(mapStatementRow),
+        statements: attachReviewMetadata(
+          statementRows.map(mapStatementRow),
+          rowsById,
+          reviewsForMessage,
+          saved.material_revision ?? null
+        ),
       };
     } catch (error) {
+      if (error instanceof StaleVerificationMaterialError) throw error;
       console.error(
         `[VerificationRepo] Error saving verification for message ${payload.messageId}:`,
         error
@@ -837,18 +1406,36 @@ export const verificationRepository = {
          ORDER BY vs.message_id ASC, vs.statement_index ASC, vs.id ASC`,
         chatId
       );
-      const byVerificationId = new Map<number, BackendVerifiedStatement[]>();
+      const messageIds = [...new Set(verifications.map((v) => v.message_id))];
+      const reviewsByMessage = findReviewsByMessageIds(messageIds);
+      const rowsByVerificationId = new Map<number, any[]>();
       for (const row of statementRows) {
-        const list = byVerificationId.get(row.message_verification_id) ?? [];
-        list.push(mapStatementRow(row));
-        byVerificationId.set(row.message_verification_id, list);
+        const list =
+          rowsByVerificationId.get(row.message_verification_id) ?? [];
+        list.push(row);
+        rowsByVerificationId.set(row.message_verification_id, list);
       }
-      return verifications.map(
-        (v): BackendMessageVerification => ({
+      return verifications.map((v): BackendMessageVerification => {
+        const rows = rowsByVerificationId.get(v.id) ?? [];
+        const rowsById = new Map(
+          rows.map((r) => [
+            r.id,
+            {
+              finding_key: r.finding_key ?? null,
+              context_revision: r.context_revision ?? null,
+            },
+          ])
+        );
+        return {
           ...(v as Omit<BackendMessageVerification, 'statements'>),
-          statements: byVerificationId.get(v.id) ?? [],
-        })
-      );
+          statements: attachReviewMetadata(
+            rows.map(mapStatementRow),
+            rowsById,
+            reviewsByMessage.get(v.message_id) ?? [],
+            v.material_revision ?? null
+          ),
+        };
+      });
     } catch (error) {
       console.error(
         `[VerificationRepo] Error finding verifications for chat ${chatId}:`,
@@ -928,11 +1515,40 @@ export const verificationRepository = {
               'SELECT * FROM verified_statements WHERE session_id = ? ORDER BY message_id ASC, statement_index ASC, id ASC',
               sessionId
             );
-      const byVerificationId = new Map<number, BackendVerifiedStatement[]>();
+      const reviewsByMessage = findReviewsByMessageIds(
+        verifications.map((v) => v.message_id)
+      );
+      const rowsByVerificationId = new Map<number, any[]>();
       for (const row of statementRows) {
-        const list = byVerificationId.get(row.message_verification_id) ?? [];
-        list.push(mapStatementRow(row));
-        byVerificationId.set(row.message_verification_id, list);
+        const list =
+          rowsByVerificationId.get(row.message_verification_id) ?? [];
+        list.push(row);
+        rowsByVerificationId.set(row.message_verification_id, list);
+      }
+      const statementsByVerificationId = new Map<
+        number,
+        BackendVerifiedStatement[]
+      >();
+      for (const v of verifications) {
+        const rows = rowsByVerificationId.get(v.id) ?? [];
+        const rowsById = new Map(
+          rows.map((r) => [
+            r.id,
+            {
+              finding_key: r.finding_key ?? null,
+              context_revision: r.context_revision ?? null,
+            },
+          ])
+        );
+        statementsByVerificationId.set(
+          v.id,
+          attachReviewMetadata(
+            rows.map(mapStatementRow),
+            rowsById,
+            reviewsByMessage.get(v.message_id) ?? [],
+            v.material_revision ?? null
+          )
+        );
       }
       const totalRow = get<{ count: number }>(
         `SELECT COUNT(*) AS count FROM messages m
@@ -954,8 +1570,9 @@ export const verificationRepository = {
         sessionId
       );
       const flaggedRow = get<{ count: number }>(
-        `SELECT COUNT(*) AS count FROM verified_statements
-         WHERE session_id = ? AND verdict IN ('fabricated', 'contradicted', 'partially_supported', 'omission')`,
+        `SELECT COUNT(*) AS count FROM verified_statements vs
+         WHERE vs.session_id = ? AND vs.verdict IN ('fabricated', 'contradicted', 'partially_supported', 'omission')
+           AND ${UNRESOLVED_STATEMENT_PREDICATE}`,
         sessionId
       );
       return {
@@ -969,7 +1586,7 @@ export const verificationRepository = {
         verifications: verifications.map(
           (v): BackendMessageVerification => ({
             ...(v as Omit<BackendMessageVerification, 'statements'>),
-            statements: byVerificationId.get(v.id) ?? [],
+            statements: statementsByVerificationId.get(v.id) ?? [],
           })
         ),
       };
@@ -1143,7 +1760,8 @@ export const verificationRepository = {
                  WHERE mv.session_id = s.id AND mv.status = 'failed') AS failedAiMessages,
                 (SELECT COUNT(*) FROM verified_statements vs
                  WHERE vs.session_id = s.id
-                   AND vs.verdict IN ('fabricated', 'contradicted', 'partially_supported', 'omission')) AS flaggedIssues,
+                   AND vs.verdict IN ('fabricated', 'contradicted', 'partially_supported', 'omission')
+                   AND ${UNRESOLVED_STATEMENT_PREDICATE}) AS flaggedIssues,
                 (SELECT AVG(mv2.accuracy_score) * 100.0 FROM message_verifications mv2
                  WHERE mv2.session_id = s.id AND mv2.status = 'completed') AS averageAccuracy
          FROM sessions s
@@ -1265,6 +1883,10 @@ export const verificationRepository = {
       const params: unknown[] = [];
       const conditions: string[] = [
         `vs.verdict IN ${buildInClause(verdicts, params)}`,
+        // Human-confirmed findings leave the active feed (rows AND the
+        // COUNT/pagination query share this predicate — never hide rows
+        // only after fetching a page).
+        UNRESOLVED_STATEMENT_PREDICATE,
       ];
       if (query.severities && query.severities.length > 0) {
         conditions.push(
@@ -1302,7 +1924,8 @@ export const verificationRepository = {
       const rows = all<any>(
         `SELECT vs.*, s.sessionName, s.clientName, mv.chat_id AS chatId,
                 COALESCE(mv.authored_model, m.model) AS authoredModel,
-                mv.judge_model AS judgeModel, mv.verified_at AS verifiedAt
+                mv.judge_model AS judgeModel, mv.verified_at AS verifiedAt,
+                mv.material_revision AS parent_revision
          FROM ${from}
          WHERE ${where}
          ORDER BY vs.created_at DESC, vs.id DESC
@@ -1311,18 +1934,39 @@ export const verificationRepository = {
         limit,
         offset
       );
+      const reviewsByMessage = findReviewsByMessageIds(
+        rows.map((r) => r.message_id)
+      );
       return {
-        items: rows.map(
-          (row): FlaggedStatementItem => ({
-            ...mapStatementRow(row),
+        items: rows.map((row): FlaggedStatementItem => {
+          // `parent_revision` is join-only input for token minting: strip
+          // it before mapping so strict route response validation never
+          // sees an undeclared field.
+          const { parent_revision: _parentRevision, ...mappable } = row;
+          const [withMetadata] = attachReviewMetadata(
+            [mapStatementRow(mappable)],
+            new Map([
+              [
+                row.id,
+                {
+                  finding_key: row.finding_key ?? null,
+                  context_revision: row.context_revision ?? null,
+                },
+              ],
+            ]),
+            reviewsByMessage.get(row.message_id) ?? [],
+            row.parent_revision ?? null
+          );
+          return {
+            ...(withMetadata as BackendVerifiedStatement),
             sessionName: row.sessionName as string,
             clientName: row.clientName as string,
             chatId: row.chatId as number,
             authoredModel: (row.authoredModel as string | null) ?? null,
             judgeModel: row.judgeModel as string,
             verifiedAt: row.verifiedAt as number,
-          })
-        ),
+          };
+        }),
         total: totalRow?.count ?? 0,
         limit,
         offset,
@@ -1340,6 +1984,9 @@ export const verificationRepository = {
    * Clears the verification (and all its statements) for a single message.
    * Statements are deleted explicitly so the row counts stay correct even
    * when foreign-key cascades are disabled.
+   * Human confirmations (`verification_statement_reviews`) are message-owned
+   * and deliberately PRESERVED: a cleared response returns to the unverified
+   * pool, and matching findings stay confirmed when it is re-audited.
    * @returns true when a verification row existed and was deleted.
    */
   deleteMessageVerification: (messageId: number): boolean => {
@@ -1363,17 +2010,21 @@ export const verificationRepository = {
   },
 
   /**
-   * Clears ALL verification data — statements, message verifications, and
-   * job history rows — so the user can re-audit from scratch.
+   * Clears ALL verification data — statements, message verifications, job
+   * history rows, AND human confirmations — so the user can re-audit from
+   * scratch. This is the explicit clean-slate operation (unlike per-response
+   * clear, which preserves confirmations).
    * @returns The number of rows deleted from each verification table.
    */
   resetAllVerifications: (): {
     deletedVerifications: number;
     deletedStatements: number;
     deletedJobs: number;
+    deletedReviews: number;
   } => {
     try {
       const result = db.transaction(() => {
+        const reviewsInfo = run('DELETE FROM verification_statement_reviews');
         const statementsInfo = run('DELETE FROM verified_statements');
         const verificationsInfo = run('DELETE FROM message_verifications');
         const jobsInfo = run('DELETE FROM verification_jobs');
@@ -1381,6 +2032,7 @@ export const verificationRepository = {
           deletedVerifications: Number(verificationsInfo.changes ?? 0),
           deletedStatements: Number(statementsInfo.changes ?? 0),
           deletedJobs: Number(jobsInfo.changes ?? 0),
+          deletedReviews: Number(reviewsInfo.changes ?? 0),
         };
       })();
       return result;
@@ -1435,6 +2087,369 @@ export const verificationRepository = {
         error
       );
       throw new Error('Database error reading verified statements for backup.');
+    }
+  },
+
+  /**
+   * Bulk review reader for admin backup export. Reviews are exported even
+   * when their assessment was cleared (message-owned, assessment-independent).
+   * `reusable` maps INTEGER -> boolean so rows validate on import.
+   */
+  findAllStatementReviewsForBackup: (): BackendStatementReview[] => {
+    try {
+      const rows = all<any>(
+        'SELECT * FROM verification_statement_reviews ORDER BY id ASC'
+      );
+      return rows.map(mapReviewRow);
+    } catch (error) {
+      console.error(
+        '[VerificationRepo] Error reading statement reviews for backup:',
+        error
+      );
+      throw new Error('Database error reading statement reviews for backup.');
+    }
+  },
+
+  /**
+   * Recompute one message's effective counts from its current statements +
+   * durable reviews. Used by backup import to validate/restore aggregates
+   * after id remapping (content fingerprints survive remapping, so matching
+   * findings re-apply). No-op for missing/non-completed parents.
+   */
+  recomputeEffectiveVerificationForMessage: (messageId: number): void => {
+    try {
+      db.transaction(() => {
+        const parent = get<any>(
+          'SELECT * FROM message_verifications WHERE message_id = ?',
+          messageId
+        );
+        if (!parent || parent.status !== 'completed') return;
+        let revision = parent.material_revision as string | null;
+        if (revision == null) {
+          const live = computeLiveMaterialRevision(
+            messageId,
+            parent.chat_id,
+            parent.session_id
+          );
+          revision = live.revision;
+          run(
+            'UPDATE message_verifications SET material_revision = ? WHERE id = ?',
+            revision,
+            parent.id
+          );
+        }
+        const rows = all<any>(
+          'SELECT * FROM verified_statements WHERE message_verification_id = ? ORDER BY statement_index ASC, id ASC',
+          parent.id
+        );
+        // Backfill identity columns when missing (legacy rows), so the
+        // feed join and future reruns match restored reviews.
+        for (const row of rows) {
+          if (row.finding_key == null || row.context_revision == null) {
+            run(
+              'UPDATE verified_statements SET finding_key = ?, context_revision = ? WHERE id = ?',
+              findingKeyForRow(row),
+              revision,
+              row.id
+            );
+            row.finding_key = findingKeyForRow(row);
+            row.context_revision = revision;
+          }
+        }
+        const reviews = all<any>(
+          'SELECT * FROM verification_statement_reviews WHERE message_id = ?',
+          messageId
+        ).map(mapReviewRow);
+        const matched = matchReviewsToStatements(
+          rows.map((r) => ({
+            id: r.id,
+            findingKey: r.finding_key,
+            contextRevision: r.context_revision,
+          })),
+          reviews
+        );
+        const effective = reduceEffectiveVerificationCounts(
+          rows.map((r) => ({
+            kind: r.kind as StatementKind,
+            verdict: r.verdict as StatementVerdict,
+            reviewStatus: matched.has(r.id) ? 'confirmed' : 'unreviewed',
+          }))
+        );
+        run(
+          `UPDATE message_verifications
+           SET total_claims = ?, supported_claims = ?, partial_claims = ?,
+               contradicted_claims = ?, fabricated_claims = ?, omissions_count = ?,
+               accuracy_score = ?
+           WHERE id = ?`,
+          effective.totalClaims,
+          effective.supportedClaims,
+          effective.partialClaims,
+          effective.contradictedClaims,
+          effective.fabricatedClaims,
+          effective.omissionsCount,
+          effective.accuracyScore,
+          parent.id
+        );
+      })();
+    } catch (error) {
+      console.error(
+        `[VerificationRepo] Error recomputing verification for message ${messageId}:`,
+        error
+      );
+      throw new Error('Database error recomputing message verification.');
+    }
+  },
+
+  /**
+   * Dismiss one finding as human-confirmed ("not an issue").
+   *
+   * Within one short SQLite write transaction: validate the live
+   * finding/parent/revision → insert/reuse the review snapshot → reduce all
+   * current statements → update parent effective counts/score → return
+   * authoritative data. The parent stays `completed` with its original Judge
+   * verdicts intact; only effective aggregates change. Job counters,
+   * coverage, attribution, usage, and `verified_at` are untouched.
+   *
+   * @throws StatementReviewNotFoundError when the statement/parent is gone
+   *   (including ids replaced by a rerun/clear) — never applies to a
+   *   replacement row.
+   * @throws StatementReviewConflictError on stale token/material revision,
+   *   non-completed parents, or supported statements.
+   */
+  dismissStatementAsConfirmed: (
+    statementId: number,
+    expectedReviewToken: string
+  ): DismissStatementResult => {
+    try {
+      return db.transaction(() => {
+        const row = get<any>(
+          'SELECT * FROM verified_statements WHERE id = ?',
+          statementId
+        );
+        if (!row) {
+          throw new StatementReviewNotFoundError(
+            `Statement with ID ${statementId} no longer exists (it may have been replaced by a re-audit or cleared). Refresh the current assessment.`
+          );
+        }
+        const parent = get<any>(
+          'SELECT * FROM message_verifications WHERE id = ?',
+          row.message_verification_id
+        );
+        if (!parent) {
+          throw new StatementReviewNotFoundError(
+            `Assessment for statement ${statementId} no longer exists. Refresh the current assessment.`
+          );
+        }
+        if (parent.status !== 'completed') {
+          throw new StatementReviewConflictError(
+            'not_completed',
+            'Only findings from a completed assessment can be confirmed. Refresh the current assessment.',
+            loadAuthoritativeVerification(parent)
+          );
+        }
+        if (!isReviewEligibleFinding(row.kind, row.verdict)) {
+          throw new StatementReviewConflictError(
+            'not_eligible',
+            'Supported claims need no confirmation — only partially supported, contradicted, fabricated, or omission findings can be dismissed.',
+            loadAuthoritativeVerification(parent)
+          );
+        }
+        const expected = reviewTokenForRow(
+          row,
+          parent.material_revision ?? null
+        );
+        if (expected !== expectedReviewToken) {
+          throw new StatementReviewConflictError(
+            'stale_token',
+            'This finding changed since you opened it (stale confirmation token). Refresh the current assessment and try again.',
+            loadAuthoritativeVerification(parent)
+          );
+        }
+        const live = computeLiveMaterialRevision(
+          row.message_id,
+          parent.chat_id,
+          parent.session_id
+        );
+        let revision = parent.material_revision as string | null;
+        if (revision != null && revision !== live.revision) {
+          throw new StatementReviewConflictError(
+            'material_changed',
+            'The response or transcript changed since this audit; the confirmation no longer applies to current content. Re-audit, then confirm the new finding if appropriate.',
+            loadAuthoritativeVerification(parent)
+          );
+        }
+        if (revision == null) {
+          // Legacy baseline: rows audited before revisions existed carry no
+          // provenance, so hashing today's content cannot prove what they
+          // evaluated. The user's confirmation applies to the CURRENT
+          // displayed finding, so adopt live material as the baseline going
+          // forward (documented; never presented as historical provenance).
+          run(
+            'UPDATE message_verifications SET material_revision = ? WHERE id = ?',
+            live.revision,
+            parent.id
+          );
+          revision = live.revision;
+        }
+
+        const currentRows = all<any>(
+          'SELECT * FROM verified_statements WHERE message_verification_id = ? ORDER BY statement_index ASC, id ASC',
+          parent.id
+        );
+        const baseKey = findingKeyForRow(row);
+        let storageKey = baseKey;
+        let reusable = 1;
+        let confirmedStatementId: number | null = null;
+        const unresolvedSpan =
+          row.kind === 'claim' &&
+          (row.start_char == null || row.end_char == null);
+        if (unresolvedSpan) {
+          const siblings = currentRows
+            .filter((r) => r.id !== row.id)
+            .map((r) => ({
+              exactQuote: r.exact_quote as string,
+              normalizedClaim: r.normalized_claim as string,
+            }));
+          if (
+            isUnresolvedClaimAmbiguous(
+              live.visibleAnswer,
+              row.exact_quote,
+              row.normalized_claim,
+              siblings
+            )
+          ) {
+            // Ambiguous: confirm only this row, never auto-reuse across runs.
+            reusable = 0;
+            confirmedStatementId = row.id;
+            storageKey = computeAmbiguousReviewKey(baseKey, row.id);
+          }
+        }
+
+        // Idempotent repeat: same live statement/token returns the existing
+        // review with its original confirmed_at (no count changes).
+        const existing = get<any>(
+          `SELECT * FROM verification_statement_reviews
+           WHERE message_id = ? AND context_revision = ? AND finding_key = ?`,
+          row.message_id,
+          revision,
+          storageKey
+        );
+        if (!existing) {
+          try {
+            run(
+              insertStatementReviewSql,
+              row.message_id,
+              parent.session_id,
+              VERIFICATION_REVIEW_IDENTITY_VERSION,
+              revision,
+              storageKey,
+              reusable,
+              confirmedStatementId,
+              Date.now(),
+              row.kind,
+              row.exact_quote,
+              row.normalized_claim,
+              row.start_char ?? null,
+              row.end_char ?? null,
+              row.verdict,
+              row.severity,
+              row.confidence,
+              row.reasoning,
+              row.transcript_evidence_json ?? null
+            );
+          } catch (insertError) {
+            // Duplicate-dismiss race: a concurrent transaction committed the
+            // same review first. Re-read inside this transaction; a genuine
+            // bug (still missing) rethrows.
+            if (!isUniqueConstraintError(insertError)) throw insertError;
+            const raced = get<any>(
+              `SELECT * FROM verification_statement_reviews
+               WHERE message_id = ? AND context_revision = ? AND finding_key = ?`,
+              row.message_id,
+              revision,
+              storageKey
+            );
+            if (!raced) throw insertError;
+          }
+        }
+
+        // Backfill stored identity on the selected row (legacy rows start
+        // NULL) so feed/SQL matching and token stability hold.
+        run(
+          'UPDATE verified_statements SET finding_key = ?, context_revision = ? WHERE id = ?',
+          baseKey,
+          revision,
+          row.id
+        );
+
+        // Reduce ALL current statements with the full durable review set and
+        // persist effective aggregates (counts/score only).
+        const freshRows = all<any>(
+          'SELECT * FROM verified_statements WHERE message_verification_id = ? ORDER BY statement_index ASC, id ASC',
+          parent.id
+        );
+        const reviews = all<any>(
+          'SELECT * FROM verification_statement_reviews WHERE message_id = ?',
+          row.message_id
+        ).map(mapReviewRow);
+        const matched = matchReviewsToStatements(
+          freshRows.map((r) => ({
+            id: r.id,
+            findingKey: r.finding_key,
+            contextRevision: r.context_revision,
+          })),
+          reviews
+        );
+        const effective = reduceEffectiveVerificationCounts(
+          freshRows.map((r) => ({
+            kind: r.kind as StatementKind,
+            verdict: r.verdict as StatementVerdict,
+            reviewStatus: matched.has(r.id) ? 'confirmed' : 'unreviewed',
+          }))
+        );
+        run(
+          `UPDATE message_verifications
+           SET total_claims = ?, supported_claims = ?, partial_claims = ?,
+               contradicted_claims = ?, fabricated_claims = ?, omissions_count = ?,
+               accuracy_score = ?
+           WHERE id = ?`,
+          effective.totalClaims,
+          effective.supportedClaims,
+          effective.partialClaims,
+          effective.contradictedClaims,
+          effective.fabricatedClaims,
+          effective.omissionsCount,
+          effective.accuracyScore,
+          parent.id
+        );
+
+        const freshParent = get<any>(
+          'SELECT * FROM message_verifications WHERE id = ?',
+          parent.id
+        );
+        const verification = loadAuthoritativeVerification(freshParent);
+        const target = (verification.statements ?? []).find(
+          (s) => s.id === statementId
+        );
+        if (!target) {
+          throw new StatementReviewNotFoundError(
+            `Statement with ID ${statementId} no longer exists. Refresh the current assessment.`
+          );
+        }
+        return { statement: target, verification };
+      })();
+    } catch (error) {
+      if (
+        error instanceof StatementReviewNotFoundError ||
+        error instanceof StatementReviewConflictError
+      ) {
+        throw error;
+      }
+      console.error(
+        `[VerificationRepo] Error dismissing statement ${statementId}:`,
+        error
+      );
+      throw new Error('Database error dismissing verified statement.');
     }
   },
 };

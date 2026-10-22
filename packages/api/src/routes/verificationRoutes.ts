@@ -9,6 +9,7 @@ import {
   streamVerificationJobHandler,
   getVerificationStatsHandler,
   listVerificationStatementsHandler,
+  dismissStatementHandler,
   deleteMessageVerificationHandler,
   resetVerificationsHandler,
 } from '../api/verificationHandler.js';
@@ -97,6 +98,18 @@ const MessageIdParamSchema = t.Object({
   }),
 });
 
+// Intentionally permissive: Elysia surfaces schema rejections as its
+// native 422 (bypassing the app's error mapping), while the handler's
+// BadRequestError maps to the normal 400. All id/token validation lives in
+// `dismissStatementHandler` so every malformed dismiss is a uniform 400.
+const StatementIdParamSchema = t.Object({
+  statementId: t.String(),
+});
+
+const DismissStatementBodySchema = t.Object({
+  expectedReviewToken: t.Optional(t.Unknown()),
+});
+
 const TranscriptEvidenceItemSchema = t.Object({
   paragraphIndex: t.Union([t.Number(), t.Null()]),
   timestampMs: t.Union([t.Number(), t.Null()]),
@@ -134,6 +147,46 @@ const VerifiedStatementSchema = t.Object({
   transcript_evidence_json: t.Union([t.String(), t.Null()]),
   evidence: t.Optional(t.Array(TranscriptEvidenceItemSchema)),
   created_at: t.Number(),
+  review_status: t.Union([t.Literal('unreviewed'), t.Literal('confirmed')]),
+  confirmed_at: t.Union([t.Number(), t.Null()]),
+  review_id: t.Union([t.Number(), t.Null()]),
+  review_token: t.Union([t.String(), t.Null()]),
+});
+
+const MessageVerificationSchema = t.Object({
+  id: t.Number(),
+  message_id: t.Number(),
+  chat_id: t.Number(),
+  session_id: t.Number(),
+  verification_job_id: t.Union([t.Number(), t.Null()]),
+  authored_model: t.Union([t.String(), t.Null()]),
+  judge_model: t.String(),
+  status: t.Union([
+    t.Literal('completed'),
+    t.Literal('failed'),
+    t.Literal('skipped'),
+  ]),
+  total_claims: t.Number(),
+  supported_claims: t.Number(),
+  partial_claims: t.Number(),
+  contradicted_claims: t.Number(),
+  fabricated_claims: t.Number(),
+  omissions_count: t.Number(),
+  accuracy_score: t.Number(),
+  summary_assessment: t.Union([t.String(), t.Null()]),
+  prompt_tokens: t.Union([t.Number(), t.Null()]),
+  completion_tokens: t.Union([t.Number(), t.Null()]),
+  duration_ms: t.Union([t.Number(), t.Null()]),
+  verified_at: t.Number(),
+  error_message: t.Union([t.String(), t.Null()]),
+  error_code: t.Optional(t.Union([t.String(), t.Null()])),
+  material_revision: t.Optional(t.Union([t.String(), t.Null()])),
+  statements: t.Optional(t.Array(VerifiedStatementSchema)),
+});
+
+const DismissStatementResponseSchema = t.Object({
+  statement: VerifiedStatementSchema,
+  verification: MessageVerificationSchema,
 });
 
 const FlaggedStatementItemSchema = t.Intersect([
@@ -256,6 +309,9 @@ export const verificationRoutes = new Elysia({ prefix: '/api/verification' })
     createVerificationJobBody: CreateVerificationJobBodySchema,
     jobIdParam: JobIdParamSchema,
     messageIdParam: MessageIdParamSchema,
+    statementIdParam: StatementIdParamSchema,
+    dismissStatementBody: DismissStatementBodySchema,
+    dismissStatementResponse: DismissStatementResponseSchema,
     flaggedStatementsResponse: FlaggedStatementsResponseSchema,
     verificationGlobalStats: VerificationGlobalStatsSchema,
     verificationStatsQuery: VerificationStatsQuerySchema,
@@ -312,6 +368,15 @@ export const verificationRoutes = new Elysia({ prefix: '/api/verification' })
         detail: {
           summary:
             'List paginated/filterable flagged statements (verdict, severity, model, session, client, search)',
+        },
+      })
+      .post('/statements/:statementId/dismiss', dismissStatementHandler, {
+        params: 'statementIdParam',
+        body: 'dismissStatementBody',
+        response: { 200: 'dismissStatementResponse' },
+        detail: {
+          summary:
+            'Confirm one finding as not-an-issue (dismiss statement, keep confirmation for future audits)',
         },
       })
       .delete('/messages/:messageId', deleteMessageVerificationHandler, {

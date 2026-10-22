@@ -91,9 +91,10 @@ LLM Fact-Verification & Hallucination Audit ("LLM Judge") job management, analyt
 | `GET` | `/api/verification/jobs/:jobId/failures` | List failed message assessments attributable to one job run (`{ jobId, failures[] }`, `404` if the job does not exist) |
 | `POST` | `/api/verification/jobs/:jobId/cancel` | Request cancellation of a pending/processing job (`202`; `409` if already terminal) |
 | `GET` | `/api/verification/stats` | Global verification analytics (KPIs, per-model accuracy, trends, session coverage) |
-| `GET` | `/api/verification/statements` | List paginated/filterable flagged statements |
-| `DELETE` | `/api/verification/messages/:messageId` | Clear the verification (and its statements) for a specific chat message |
-| `DELETE` | `/api/verification/reset` | Clear all verifications, statements, and jobs (`409` while a job is active) |
+| `GET` | `/api/verification/statements` | List paginated/filterable flagged statements (human-confirmed findings excluded) |
+| `POST` | `/api/verification/statements/:statementId/dismiss` | Confirm one finding as not-an-issue; returns the finding plus authoritative parent (`200`; `400` / `404` / `409`, see below) |
+| `DELETE` | `/api/verification/messages/:messageId` | Clear the verification (and its statements) for a specific chat message (human confirmations preserved for re-audit) |
+| `DELETE` | `/api/verification/reset` | Clear all verifications, statements, jobs, and human confirmations (`409` while a job is active) |
 
 **Create Job Body (`POST /api/verification/jobs`):**
 - `scope` (required) — `all_unverified` | `all_force` | `selected_sessions` | `single_chat`.
@@ -108,6 +109,13 @@ LLM Fact-Verification & Hallucination Audit ("LLM Judge") job management, analyt
 
 **Statements Query Parameters (`GET /api/verification/statements`):**
 - `verdict`, `severity`, `authoredModel`, `sessionId`, `search`, `limit`, `offset` — Optional filters (`verdict`/`severity` accept comma-separated lists).
+
+**Dismiss Body (`POST /api/verification/statements/:statementId/dismiss`):**
+
+- Body: `{ expectedReviewToken }` — the opaque token from the statement read. Only the statement id + token are client-supplied; verdicts, scores, and parent ids never are.
+- Returns `{ statement, verification }`: the original Judge finding plus `review_status: 'confirmed'` / `confirmed_at` / `review_id`, and the full authoritative parent assessment with review-aware effective counts.
+- Statuses: `200` (repeats idempotent — same review, original `confirmed_at`); `400` for malformed ids/tokens (fractional/zero/negative/`12abc`, missing/blank token); `404` when the statement id is gone (replaced by a rerun/clear — never applies to a replacement row); `409` for stale tokens, changed answer/question/transcript, non-completed parents, or `supported` statements. `404`/`409` carry an explanation and the client refreshes to the current assessment.
+- Every statement read carries `review_status` / `confirmed_at` / `review_id` / `review_token`. Confirmed partial/contradicted/fabricated claims count as supported (claim total unchanged); confirmed omissions leave the active omission count. Raw Judge verdicts are always preserved on the rows.
 
 **Job Outcome Fields (`verification_jobs` rows):**
 - `succeeded_messages` / `failed_messages` / `skipped_messages` — Finished-attempt outcome split. `processed_messages` counts finished attempts only (successes + failures).

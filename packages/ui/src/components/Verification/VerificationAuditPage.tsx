@@ -393,7 +393,8 @@ export function VerificationAuditPage() {
                 <AlertDialog.Title>Clear all verifications?</AlertDialog.Title>
                 <AlertDialog.Description size="2">
                   This permanently deletes every audit verdict and flagged
-                  statement. Chats can be re-audited afterwards from scratch.
+                  statement — including your per-finding confirmations. Chats
+                  can be re-audited afterwards from scratch.
                 </AlertDialog.Description>
                 <Flex gap="3" mt="4" justify="end">
                   <AlertDialog.Cancel>

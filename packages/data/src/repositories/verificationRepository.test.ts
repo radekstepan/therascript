@@ -1215,6 +1215,7 @@ describe('resetAllVerifications', () => {
       deletedVerifications: 1,
       deletedStatements: 1,
       deletedJobs: 2,
+      deletedReviews: 0,
     });
     expect(verificationRepository.findAllVerificationJobs()).toHaveLength(0);
     expect(

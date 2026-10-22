@@ -32,10 +32,14 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { AppTooltip } from '../Shared/AppTooltip';
 import type {
+  MessageVerification,
   StatementSeverity,
   VerifiedStatement,
 } from '../../api/verification';
-import { deleteMessageVerification } from '../../api/verification';
+import {
+  deleteMessageVerification,
+  dismissStatementVerification,
+} from '../../api/verification';
 import {
   formatEvidenceTimestamp,
   getVerdictBadgeColor,
@@ -85,6 +89,47 @@ function capitalize(value: string): string {
   return value.length === 0 ? value : value[0]!.toUpperCase() + value.slice(1);
 }
 
+/** Findings the user may confirm as not-an-issue (supported needs no action). */
+function isDismissible(statement: VerifiedStatement): boolean {
+  if (statement.review_status === 'confirmed') return false;
+  if (statement.kind === 'omission') return true;
+  return (
+    statement.verdict === 'partially_supported' ||
+    statement.verdict === 'contradicted' ||
+    statement.verdict === 'fabricated'
+  );
+}
+
+function mutationErrorMessage(error: unknown): string {
+  // Thrown ApiErrors surface as a plain-text body (Elysia native mapping);
+  // accept an enveloped { message } shape too when one is ever returned.
+  const data = (error as { response?: { data?: unknown } })?.response?.data;
+  if (typeof data === 'string' && data.trim() !== '') {
+    return data;
+  }
+  const axiosMessage = (data as { message?: unknown } | null)?.message;
+  if (typeof axiosMessage === 'string' && axiosMessage.trim() !== '') {
+    return axiosMessage;
+  }
+  return error instanceof Error && error.message
+    ? error.message
+    : 'Something went wrong — try again.';
+}
+
+/** 404/409 dismiss responses carry the current assessment for refresh. */
+function errorRefreshVerification(error: unknown): MessageVerification | null {
+  const verification = (
+    error as {
+      response?: { data?: { details?: { verification?: unknown } } };
+    }
+  )?.response?.data?.details?.verification;
+  return verification != null &&
+    typeof verification === 'object' &&
+    typeof (verification as MessageVerification).message_id === 'number'
+    ? (verification as MessageVerification)
+    : null;
+}
+
 export function StatementVerdictModal({
   open,
   onOpenChange,
@@ -118,6 +163,66 @@ export function StatementVerdictModal({
       );
     },
   });
+
+  // Immediate cache update from an authoritative assessment (success
+  // payload or 404/409 refresh), then refetch every dependent prefix.
+  const applyVerificationRefresh = useCallback(
+    (verification: MessageVerification) => {
+      queryClient.setQueriesData<MessageVerification[] | undefined>(
+        { queryKey: ['chatVerifications'] },
+        (old) => {
+          if (!Array.isArray(old)) return old;
+          return old.map((v) =>
+            v.message_id === verification.message_id ? verification : v
+          );
+        }
+      );
+      queryClient.invalidateQueries({ queryKey: ['chatVerifications'] });
+      queryClient.invalidateQueries({ queryKey: ['verificationStats'] });
+      queryClient.invalidateQueries({ queryKey: ['verificationStatements'] });
+    },
+    [queryClient]
+  );
+
+  const dismissMutation = useMutation({
+    mutationFn: ({
+      statementId,
+      token,
+    }: {
+      statementId: number;
+      token: string;
+    }) => dismissStatementVerification(statementId, token),
+    onMutate: async () => {
+      // Dismissal needs no active job/SSE: cancel in-flight reads so a
+      // stale response cannot restore highlights after the update lands.
+      await queryClient.cancelQueries({ queryKey: ['chatVerifications'] });
+      await queryClient.cancelQueries({ queryKey: ['verificationStats'] });
+      await queryClient.cancelQueries({
+        queryKey: ['verificationStatements'],
+      });
+    },
+    onSuccess: (data) => {
+      applyVerificationRefresh(data.verification);
+    },
+    onError: (error: Error) => {
+      console.error(
+        `[StatementVerdictModal] Failed to dismiss statement:`,
+        error
+      );
+      // Stale/failed dismissals refresh to the current assessment carried
+      // on the error (or a plain refetch when nothing is resolvable) so
+      // the modal never shows a finding that no longer exists.
+      const refresh = errorRefreshVerification(error);
+      if (refresh) {
+        applyVerificationRefresh(refresh);
+      } else {
+        queryClient.invalidateQueries({ queryKey: ['chatVerifications'] });
+        queryClient.invalidateQueries({ queryKey: ['verificationStats'] });
+        queryClient.invalidateQueries({ queryKey: ['verificationStatements'] });
+      }
+    },
+  });
+
   const sorted = useMemo(
     () =>
       [...statements].sort((a, b) => {
@@ -129,32 +234,38 @@ export function StatementVerdictModal({
     [statements]
   );
 
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  // Selection tracks the statement ID (not the index) so refetches that
+  // reorder rows can never retarget another finding. Explicit targeting
+  // syncs on open/initial change only — never on bare refetches.
+  const [selectedId, setSelectedId] = useState<number | null>(null);
 
-  // Sync selection whenever the modal opens or a new statement is targeted.
   useEffect(() => {
     if (!open) return;
-    const idx =
-      initialStatementId == null
-        ? 0
-        : sorted.findIndex((s) => s.id === initialStatementId);
-    setSelectedIndex(idx >= 0 ? idx : 0);
-  }, [open, initialStatementId, sorted]);
+    setSelectedId(initialStatementId ?? null);
+  }, [open, initialStatementId]);
+
+  const selectedIndex = useMemo(() => {
+    if (sorted.length === 0) return 0;
+    if (selectedId == null) return 0;
+    const idx = sorted.findIndex((s) => s.id === selectedId);
+    return idx >= 0 ? idx : 0;
+  }, [sorted, selectedId]);
 
   const goPrev = useCallback(() => {
-    setSelectedIndex((prev) =>
-      sorted.length === 0 ? 0 : (prev - 1 + sorted.length) % sorted.length
-    );
-  }, [sorted.length]);
+    if (sorted.length === 0) return;
+    const idx = (selectedIndex - 1 + sorted.length) % sorted.length;
+    setSelectedId(sorted[idx]!.id);
+  }, [sorted, selectedIndex]);
 
   const goNext = useCallback(() => {
-    setSelectedIndex((prev) =>
-      sorted.length === 0 ? 0 : (prev + 1) % sorted.length
-    );
-  }, [sorted.length]);
+    if (sorted.length === 0) return;
+    const idx = (selectedIndex + 1) % sorted.length;
+    setSelectedId(sorted[idx]!.id);
+  }, [sorted, selectedIndex]);
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
+      if (dismissMutation.isPending) return;
       if (event.key === 'ArrowLeft') {
         event.preventDefault();
         goPrev();
@@ -163,7 +274,7 @@ export function StatementVerdictModal({
         goNext();
       }
     },
-    [goPrev, goNext]
+    [goPrev, goNext, dismissMutation.isPending]
   );
 
   const current =
@@ -261,6 +372,17 @@ export function StatementVerdictModal({
                 {current.kind === 'omission' && (
                   <Badge color="amber" variant="outline" size="1">
                     Omitted from response
+                  </Badge>
+                )}
+                {current.review_status === 'confirmed' && (
+                  <Badge color="green" variant="solid" size="1">
+                    Confirmed by you
+                    {current.confirmed_at != null
+                      ? ` · ${new Date(current.confirmed_at).toLocaleString(
+                          undefined,
+                          { dateStyle: 'medium', timeStyle: 'short' }
+                        )}`
+                      : ''}
                   </Badge>
                 )}
               </Flex>
@@ -464,8 +586,8 @@ export function StatementVerdictModal({
                 <AppTooltip
                   content={
                     sorted.length > 1
-                      ? `Deletes all ${sorted.length} fact-check statements for this response — not just the one shown above. The response returns to the unverified pool and will be re-checked on the next audit.`
-                      : `Deletes this response's fact-check statement. The response returns to the unverified pool and will be re-checked on the next audit.`
+                      ? `Deletes all ${sorted.length} fact-check statements for this response — not just the one shown above. The response returns to the unverified pool and will be re-checked on the next audit. Your per-finding confirmations are kept and will re-apply to matching findings.`
+                      : `Deletes this response's fact-check statement. The response returns to the unverified pool and will be re-checked on the next audit. Your per-finding confirmations are kept and will re-apply to matching findings.`
                   }
                 >
                   <span style={{ display: 'inline-block' }}>
@@ -473,7 +595,9 @@ export function StatementVerdictModal({
                       size="2"
                       variant="soft"
                       color="red"
-                      disabled={clearMutation.isPending}
+                      disabled={
+                        clearMutation.isPending || dismissMutation.isPending
+                      }
                       onClick={() => clearMutation.mutate()}
                     >
                       <TrashIcon />{' '}
@@ -492,18 +616,65 @@ export function StatementVerdictModal({
             ) : (
               <Box />
             )}
-            {sorted.length > 1 ? (
-              <Flex gap="2">
-                <Button size="2" variant="soft" color="gray" onClick={goPrev}>
-                  <ChevronLeftIcon /> Prev
-                </Button>
-                <Button size="2" variant="soft" color="gray" onClick={goNext}>
-                  Next <ChevronRightIcon />
-                </Button>
+            <Flex direction="column" gap="1" align="end">
+              <Flex gap="2" wrap="wrap" justify="end">
+                {/* Per-statement action, separate from the response-scoped
+                    Clear above. Hidden for supported/confirmed findings. */}
+                {current !== null &&
+                  isDismissible(current) &&
+                  current.review_token != null && (
+                    <AppTooltip content="Confirm that this finding is not an issue. Removes its highlight, updates accuracy and issue counts, and keeps this confirmation for future Fact Checks of unchanged content. Other statements are unchanged.">
+                      <span style={{ display: 'inline-block' }}>
+                        <Button
+                          size="2"
+                          variant="solid"
+                          color="green"
+                          disabled={
+                            dismissMutation.isPending || clearMutation.isPending
+                          }
+                          onClick={() =>
+                            dismissMutation.mutate({
+                              statementId: current.id,
+                              token: current.review_token as string,
+                            })
+                          }
+                        >
+                          {dismissMutation.isPending
+                            ? 'Dismissing…'
+                            : 'Dismiss Statement (Confirmed)'}
+                        </Button>
+                      </span>
+                    </AppTooltip>
+                  )}
+                {sorted.length > 1 && (
+                  <>
+                    <Button
+                      size="2"
+                      variant="soft"
+                      color="gray"
+                      onClick={goPrev}
+                      disabled={dismissMutation.isPending}
+                    >
+                      <ChevronLeftIcon /> Prev
+                    </Button>
+                    <Button
+                      size="2"
+                      variant="soft"
+                      color="gray"
+                      onClick={goNext}
+                      disabled={dismissMutation.isPending}
+                    >
+                      Next <ChevronRightIcon />
+                    </Button>
+                  </>
+                )}
               </Flex>
-            ) : (
-              <Box />
-            )}
+              {dismissMutation.isError && (
+                <Text size="1" color="red" role="alert">
+                  {mutationErrorMessage(dismissMutation.error)}
+                </Text>
+              )}
+            </Flex>
           </Flex>
         )}
       </Dialog.Content>

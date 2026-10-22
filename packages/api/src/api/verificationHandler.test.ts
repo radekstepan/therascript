@@ -14,10 +14,17 @@
 //
 // Reference: packages/api/src/api/verificationHandler.ts
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ConflictError, InternalServerError } from '../errors.js';
+import {
+  ApiError,
+  BadRequestError,
+  ConflictError,
+  InternalServerError,
+} from '../errors.js';
 
 const {
   mockVerificationRepo,
+  mockReviewNotFoundError,
+  mockReviewConflictError,
   mockSessionRepo,
   mockChatRepo,
   mockMessageRepo,
@@ -45,7 +52,10 @@ const {
     findFailedVerificationsByJobId: vi.fn(),
     resetAllVerifications: vi.fn(),
     updateJobStatus: vi.fn(),
+    dismissStatementAsConfirmed: vi.fn(),
   },
+  mockReviewNotFoundError: class MockReviewNotFoundError extends Error {},
+  mockReviewConflictError: class MockReviewConflictError extends Error {},
   // Mirrors the real resolveVerificationSkipVerified truth table (pinned
   // by the data-package candidate-selection tests); the wiring under test
   // here is that the handler delegates to the shared resolver and
@@ -78,6 +88,8 @@ const {
 
 vi.mock('@therascript/data', () => ({
   verificationRepository: mockVerificationRepo,
+  StatementReviewNotFoundError: mockReviewNotFoundError,
+  StatementReviewConflictError: mockReviewConflictError,
   resolveVerificationSkipVerified: (...args: unknown[]) =>
     (mockResolveVerificationSkipVerified as (...a: unknown[]) => unknown)(
       ...args
@@ -126,6 +138,7 @@ const {
   getVerificationJobFailuresHandler,
   resetVerificationsHandler,
   streamVerificationJobHandler,
+  dismissStatementHandler,
 } = await import('./verificationHandler.js');
 
 beforeEach(() => {
@@ -759,5 +772,183 @@ describe('getVerificationJobFailuresHandler', () => {
 
     expect(set.status).toBe(200);
     expect(result).toEqual({ jobId: 2, failures: [] });
+  });
+});
+
+describe('dismissStatementHandler', () => {
+  const confirmedStatement = {
+    id: 9,
+    message_verification_id: 4,
+    message_id: 12,
+    session_id: 1,
+    statement_index: 2,
+    kind: 'claim',
+    exact_quote: 'The client flies to Mars.',
+    normalized_claim: 'The client flies to Mars.',
+    start_char: 58,
+    end_char: 85,
+    verdict: 'fabricated',
+    severity: 'high',
+    confidence: 0.9,
+    reasoning: 'Not in transcript.',
+    transcript_evidence_json: null,
+    evidence: [],
+    created_at: 203,
+    review_status: 'confirmed',
+    confirmed_at: 300,
+    review_id: 2,
+    review_token: 'v1.token',
+  };
+  const parentVerification = {
+    id: 4,
+    message_id: 12,
+    chat_id: 7,
+    session_id: 1,
+    verification_job_id: null,
+    authored_model: 'llama-3.1-8b',
+    judge_model: 'judge-v1',
+    status: 'completed',
+    total_claims: 3,
+    supported_claims: 2,
+    partial_claims: 1,
+    contradicted_claims: 0,
+    fabricated_claims: 0,
+    omissions_count: 1,
+    accuracy_score: 0.625,
+    summary_assessment: null,
+    prompt_tokens: null,
+    completion_tokens: null,
+    duration_ms: null,
+    verified_at: 202,
+    error_message: null,
+    material_revision: 'v1.abc',
+    statements: [confirmedStatement],
+  };
+
+  const ctx = (statementId: unknown, body: unknown) => ({
+    params: { statementId: statementId as string | number },
+    body,
+    set: {} as { status?: number | string },
+  });
+
+  it('returns the confirmed statement plus authoritative parent on success', () => {
+    mockVerificationRepo.dismissStatementAsConfirmed.mockReturnValue({
+      statement: confirmedStatement,
+      verification: parentVerification,
+    });
+    const context = ctx(9, { expectedReviewToken: 'v1.token' });
+    const result = dismissStatementHandler(context as never);
+    expect(context.set.status).toBe(200);
+    expect(
+      mockVerificationRepo.dismissStatementAsConfirmed
+    ).toHaveBeenCalledWith(9, 'v1.token');
+    expect(result.statement.review_status).toBe('confirmed');
+    // Original Judge verdict preserved alongside the confirmation.
+    expect(result.statement.verdict).toBe('fabricated');
+    expect(result.verification.statements).toHaveLength(1);
+    expect(result.verification.accuracy_score).toBe(0.625);
+  });
+
+  it.each([[0], [-3], [2.5], ['12abc'], [''], ['  '], [NaN]])(
+    'rejects invalid statement id %p with 400',
+    (statementId) => {
+      const context = ctx(statementId, { expectedReviewToken: 'v1.token' });
+      expect(() => dismissStatementHandler(context as never)).toThrow(
+        BadRequestError
+      );
+      expect(
+        mockVerificationRepo.dismissStatementAsConfirmed
+      ).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    [undefined],
+    [null],
+    [{}],
+    [{ expectedReviewToken: '' }],
+    [{ expectedReviewToken: '   ' }],
+    [{ expectedReviewToken: 42 }],
+  ])('rejects missing/blank/non-string tokens with 400: %p', (body) => {
+    const context = ctx(9, body);
+    expect(() => dismissStatementHandler(context as never)).toThrow(
+      BadRequestError
+    );
+    expect(
+      mockVerificationRepo.dismissStatementAsConfirmed
+    ).not.toHaveBeenCalled();
+  });
+
+  it('maps missing statements to 404 with the repository message', () => {
+    mockVerificationRepo.dismissStatementAsConfirmed.mockImplementation(() => {
+      throw new mockReviewNotFoundError(
+        'Statement with ID 9 no longer exists.'
+      );
+    });
+    const context = ctx(9, { expectedReviewToken: 'v1.token' });
+    try {
+      dismissStatementHandler(context as never);
+      expect.unreachable('expected a 404 ApiError');
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiError);
+      expect((error as ApiError).status).toBe(404);
+      expect((error as Error).message).toMatch(/no longer exists/);
+    }
+  });
+
+  it('maps stale/conflict dismissals to 409 with the repository message', () => {
+    mockVerificationRepo.dismissStatementAsConfirmed.mockImplementation(() => {
+      throw new mockReviewConflictError('stale confirmation token');
+    });
+    const context = ctx(9, { expectedReviewToken: 'v1.token' });
+    try {
+      dismissStatementHandler(context as never);
+      expect.unreachable('expected a 409 ConflictError');
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConflictError);
+      expect((error as ApiError).status).toBe(409);
+      expect((error as Error).message).toMatch(/stale/);
+    }
+  });
+
+  it('forwards the carried current assessment in 404/409 details', () => {
+    mockVerificationRepo.dismissStatementAsConfirmed.mockImplementation(() => {
+      throw Object.assign(
+        new mockReviewConflictError('stale confirmation token'),
+        { verification: parentVerification }
+      );
+    });
+    const conflictCtx = ctx(9, { expectedReviewToken: 'v1.token' });
+    try {
+      dismissStatementHandler(conflictCtx as never);
+      expect.unreachable('expected a 409 ConflictError');
+    } catch (error) {
+      expect((error as ApiError).details).toEqual({
+        verification: parentVerification,
+      });
+    }
+    mockVerificationRepo.dismissStatementAsConfirmed.mockImplementation(() => {
+      throw new mockReviewNotFoundError(
+        'Statement with ID 9 no longer exists.'
+      );
+    });
+    const missingCtx = ctx(9, { expectedReviewToken: 'v1.token' });
+    try {
+      dismissStatementHandler(missingCtx as never);
+      expect.unreachable('expected a 404 ApiError');
+    } catch (error) {
+      expect((error as ApiError).status).toBe(404);
+      expect((error as ApiError).details).toBeUndefined();
+    }
+  });
+
+  it('wraps unexpected repository failures in 500', () => {
+    mockVerificationRepo.dismissStatementAsConfirmed.mockImplementation(() => {
+      throw new Error('disk on fire');
+    });
+    const context = ctx(9, { expectedReviewToken: 'v1.token' });
+    expect(() => dismissStatementHandler(context as never)).toThrow(
+      InternalServerError
+    );
   });
 });

@@ -121,6 +121,10 @@ const ChatVerifiedStatementSchema = t.Object({
   transcript_evidence_json: t.Union([t.String(), t.Null()]),
   evidence: t.Optional(t.Array(ChatTranscriptEvidenceItemSchema)),
   created_at: t.Number(),
+  review_status: t.Union([t.Literal('unreviewed'), t.Literal('confirmed')]),
+  confirmed_at: t.Union([t.Number(), t.Null()]),
+  review_id: t.Union([t.Number(), t.Null()]),
+  review_token: t.Union([t.String(), t.Null()]),
 });
 
 const ChatMessageVerificationSchema = t.Object({
@@ -149,6 +153,8 @@ const ChatMessageVerificationSchema = t.Object({
   duration_ms: t.Union([t.Number(), t.Null()]),
   verified_at: t.Number(),
   error_message: t.Union([t.String(), t.Null()]),
+  error_code: t.Optional(t.Union([t.String(), t.Null()])),
+  material_revision: t.Optional(t.Union([t.String(), t.Null()])),
   statements: t.Optional(t.Array(ChatVerifiedStatementSchema)),
 });
 

@@ -34,7 +34,7 @@
 | `sessionChatHandler.ts` | RAG chat with transcript context |
 | `standaloneChatHandler.ts` | General-purpose chat (no context) |
 | `analysisHandler.ts` | Strategy generation, MapReduce orchestration |
-| `verificationHandler.ts` | Verification job CRUD, single-job guard, stats/statements, SSE stream |
+| `verificationHandler.ts` | Verification job CRUD, single-job guard, stats/statements, per-finding dismiss, SSE stream |
 | `templateHandler.ts` | Template management logic |
 | `jobsHandler.ts` | Job queue operations (active count + queue reset) |
 | `gpuHandler.ts` | GPU availability checks |
@@ -160,7 +160,7 @@
 | `templates.ts` | Templates API |
 | `system.ts` | System prompts API |
 | `jobs.ts` | Jobs API (active count + reset transcription queue) |
-| `verification.ts` | Verification API calls (jobs, stats, statements, per-chat verify, resets) |
+| `verification.ts` | Verification API calls (jobs, stats, statements, per-finding dismiss, per-chat verify, resets) |
 | `docker.ts` | Docker management API |
 | `meta.ts` | Health/readiness API (explicit 200/503 readiness handling) |
 

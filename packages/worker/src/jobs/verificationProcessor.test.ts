@@ -21,6 +21,9 @@ vi.mock('@therascript/config', () => ({
 }));
 
 vi.mock('@therascript/data', () => ({
+  StaleVerificationMaterialError: class StaleVerificationMaterialError extends Error {
+    readonly code = 'stale_material' as const;
+  },
   verificationRepository: {
     findVerificationJobById: vi.fn(),
     findCandidateMessagesForVerification: vi.fn(),
@@ -111,12 +114,16 @@ const {
   CodedVerificationError,
   readVerificationFailureCode,
   buildJudgeActiveSettingsUpdate,
+  computeJudgeMaterialRevision,
   processVerificationJob,
 } = await import('./verificationProcessor.js');
 
 const services = await import('@therascript/services');
 const data = await import('@therascript/data');
 const analysisStub = await import('./analysisProcessor.js');
+const StaleMaterialError = data.StaleVerificationMaterialError as new (
+  message: string
+) => Error;
 
 const streamLlmMock = services.streamLlmChatDetailed as unknown as Mock;
 const calculateTokenCountMock = services.calculateTokenCount as unknown as Mock;
@@ -3647,6 +3654,239 @@ describe('processVerificationJob — live token-speed telemetry', () => {
     expect(terminal).toMatchObject({
       tokensPerSecond: null,
       generatedTokens: null,
+    });
+  });
+});
+
+describe('computeJudgeMaterialRevision', () => {
+  const paragraphs: TranscriptParagraphData[] = [
+    { id: 0, timestamp: 0, text: 'First paragraph.', speaker: 'SPEAKER_00' },
+    {
+      id: 1,
+      timestamp: 5000,
+      text: 'Second paragraph.',
+      speaker: 'SPEAKER_01',
+    },
+  ];
+
+  it('is deterministic and order-independent', () => {
+    const a = computeJudgeMaterialRevision('Answer.', 'Question?', paragraphs);
+    const b = computeJudgeMaterialRevision(
+      'Answer.',
+      'Question?',
+      [...paragraphs].reverse()
+    );
+    expect(a).toBe(b);
+    expect(a.startsWith('v1.')).toBe(true);
+  });
+
+  it('changes when the answer, question, or transcript changes', () => {
+    const base = computeJudgeMaterialRevision(
+      'Answer.',
+      'Question?',
+      paragraphs
+    );
+    expect(
+      computeJudgeMaterialRevision('Other answer.', 'Question?', paragraphs)
+    ).not.toBe(base);
+    expect(
+      computeJudgeMaterialRevision('Answer.', 'Other question?', paragraphs)
+    ).not.toBe(base);
+    expect(
+      computeJudgeMaterialRevision('Answer.', 'Question?', [
+        ...paragraphs.slice(0, 1),
+      ])
+    ).not.toBe(base);
+  });
+});
+
+describe('processVerificationJob — human-review reconciliation', () => {
+  const paragraphs: TranscriptParagraphData[] = [
+    {
+      id: 0,
+      timestamp: 866,
+      text: 'I take Sertraline every morning and I feel better.',
+      speaker: 'SPEAKER_00',
+    },
+  ];
+
+  const jobRecord = {
+    id: 1,
+    status: 'pending',
+    scope: 'all_unverified',
+    session_ids_json: null,
+    chat_id: null,
+    skip_verified: true,
+    total_messages: 0,
+    processed_messages: 0,
+    total_statements: 0,
+    flagged_statements: 0,
+    omissions_count: 0,
+    created_at: Date.now(),
+    completed_at: null,
+    error_message: null,
+    model_name: 'default',
+    context_size: 8192,
+    thinking_budget: -1,
+    temperature: 0.3,
+    top_p: null,
+    repeat_penalty: null,
+    num_gpu_layers: null,
+    llm_base_url: null,
+  };
+
+  const candidate = {
+    id: 11,
+    chatId: 5,
+    sessionId: 2,
+    sender: 'ai',
+    text: 'The client takes Sertraline every morning.',
+    timestamp: Date.now(),
+    model: 'author-model',
+    userQuestion: 'What did the client say?',
+  };
+
+  async function* fakeStream(
+    chunks: Array<{ content?: string; thinking?: string }>,
+    result: { promptTokens?: number; completionTokens?: number }
+  ): AsyncGenerator<{ content?: string; thinking?: string }, unknown> {
+    for (const chunk of chunks) yield chunk;
+    return result;
+  }
+
+  const judgeOutput = {
+    summary_assessment: 'One supported, one fabricated.',
+    claims: [
+      {
+        exact_quote: 'The client takes Sertraline',
+        normalized_claim: 'Client takes Sertraline.',
+        verdict: 'supported',
+        severity: 'none',
+        confidence: 0.95,
+        reasoning: 'Stated verbatim in P#0.',
+        evidence: [],
+      },
+      {
+        exact_quote: 'every morning on Mars',
+        normalized_claim: 'Client takes it on Mars.',
+        verdict: 'fabricated',
+        severity: 'high',
+        confidence: 0.9,
+        reasoning: 'Mars is not in the transcript.',
+        evidence: [],
+      },
+    ],
+    omissions: [],
+  };
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    extractVisibleAnswerMock.mockImplementation((text: string) => text);
+    calculateTokenCountMock.mockReturnValue(10);
+    resolveBudgetStub.mockReturnValue(1638);
+    findJobMock.mockReturnValue({ ...jobRecord });
+    findParagraphsMock.mockReturnValue(paragraphs);
+    findTemplateMock.mockReturnValue(null);
+    findSessionMock.mockReturnValue({ showSpeakers: 1 });
+    updateJobStatusMock.mockReturnValue(true);
+    transitionToProcessingMock.mockReturnValue(true);
+    saveResultMock.mockReturnValue({});
+    streamWithRetryMock.mockImplementation(async function* (factory: any) {
+      return yield* factory();
+    });
+  });
+
+  const runJob = () =>
+    processVerificationJob({
+      data: { jobId: 1 },
+      updateProgress: vi.fn(),
+    } as any);
+
+  it('passes the evaluated material revision to every save', async () => {
+    findCandidatesMock.mockReturnValue([{ ...candidate }]);
+    streamLlmMock.mockImplementationOnce(() =>
+      fakeStream([{ content: '{"ok": true}' }], {
+        promptTokens: 100,
+        completionTokens: 60,
+      })
+    );
+    parseJsonMock.mockReturnValueOnce(judgeOutput);
+
+    await runJob();
+
+    expect(saveResultMock).toHaveBeenCalledTimes(1);
+    const payload = saveResultMock.mock.calls[0][0];
+    expect(typeof payload.materialRevision).toBe('string');
+    expect(payload.materialRevision.startsWith('v1.')).toBe(true);
+  });
+
+  it('publishes persisted effective values from the save result', async () => {
+    findCandidatesMock.mockReturnValue([{ ...candidate }]);
+    streamLlmMock.mockImplementationOnce(() =>
+      fakeStream([{ content: '{"ok": true}' }], {
+        promptTokens: 100,
+        completionTokens: 60,
+      })
+    );
+    parseJsonMock.mockReturnValueOnce(judgeOutput);
+    // The repository reconciled a durable confirmation: 2 supported of 2.
+    saveResultMock.mockReturnValueOnce({
+      accuracy_score: 1.0,
+      total_claims: 2,
+    });
+
+    await runJob();
+
+    const verified = publishEventMock.mock.calls
+      .map((call) => call[1])
+      .find((e) => e?.type === 'message_verified');
+    // Local Judge math would be 0.5 (1 supported of 2); the persisted
+    // effective score (1.0) wins.
+    expect(verified).toMatchObject({
+      messageId: 11,
+      accuracyScore: 1.0,
+      totalClaims: 2,
+    });
+  });
+
+  it('discards stale-material saves as skipped, never as failed', async () => {
+    findCandidatesMock.mockReturnValue([{ ...candidate }]);
+    streamLlmMock.mockImplementationOnce(() =>
+      fakeStream([{ content: '{"ok": true}' }], {
+        promptTokens: 100,
+        completionTokens: 60,
+      })
+    );
+    parseJsonMock.mockReturnValueOnce(judgeOutput);
+    saveResultMock.mockImplementationOnce(() => {
+      throw new StaleMaterialError('evaluated against changed material');
+    });
+
+    await runJob();
+
+    // No failure-row save attempted after the stale rollback.
+    expect(saveResultMock).toHaveBeenCalledTimes(1);
+    // Processed still advances; the failure counters stay at zero.
+    expect(incrementJobCountersMock).toHaveBeenCalledWith(1, {
+      processedMessages: 1,
+    });
+    expect(updateJobStatusMock).toHaveBeenCalledWith(
+      1,
+      'completed',
+      expect.objectContaining({
+        succeededMessages: 0,
+        failedMessages: 0,
+        skippedMessages: 1,
+      })
+    );
+    const terminal = publishEventMock.mock.calls
+      .map((call) => call[1])
+      .find((e) => e?.type === 'complete');
+    expect(terminal).toMatchObject({
+      status: 'completed',
+      succeededMessages: 0,
+      failedMessages: 0,
+      skippedMessages: 1,
     });
   });
 });

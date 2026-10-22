@@ -14,9 +14,12 @@ import { Theme } from '@radix-ui/themes';
 import { StatementVerdictModal } from './StatementVerdictModal';
 import type { VerifiedStatement } from '../../api/verification';
 
-const { mockDeleteMessageVerification } = vi.hoisted(() => ({
-  mockDeleteMessageVerification: vi.fn(),
-}));
+const { mockDeleteMessageVerification, mockDismissStatement } = vi.hoisted(
+  () => ({
+    mockDeleteMessageVerification: vi.fn(),
+    mockDismissStatement: vi.fn(),
+  })
+);
 
 vi.mock('../../api/verification', async (importOriginal) => {
   const original =
@@ -24,12 +27,14 @@ vi.mock('../../api/verification', async (importOriginal) => {
   return {
     ...original,
     deleteMessageVerification: mockDeleteMessageVerification,
+    dismissStatementVerification: mockDismissStatement,
   };
 });
 
 beforeEach(() => {
   mockDeleteMessageVerification.mockReset();
   mockDeleteMessageVerification.mockResolvedValue({ message: 'cleared' });
+  mockDismissStatement.mockReset();
 });
 
 // The modal clears verifications through react-query, so every render
@@ -66,6 +71,10 @@ const STATEMENT: VerifiedStatement = {
   reasoning: 'No mention of sertraline anywhere in the transcript.',
   transcript_evidence_json: null,
   created_at: Date.now(),
+  review_status: 'unreviewed',
+  confirmed_at: null,
+  review_id: null,
+  review_token: 'v1.modal-token',
 };
 
 function renderModal() {
@@ -384,5 +393,391 @@ describe('StatementVerdictModal clear verification', () => {
     expect(tooltip.textContent).toContain('not just the one shown');
     expect(tooltip.textContent).toContain('unverified pool');
     expect(tooltip.textContent).toContain('re-checked on the next audit');
+  });
+});
+
+describe('StatementVerdictModal dismissal', () => {
+  const SUPPORTED: VerifiedStatement = {
+    ...STATEMENT,
+    id: 12,
+    statement_index: 1,
+    exact_quote: 'The client attends weekly sessions.',
+    normalized_claim: 'The client attends weekly sessions.',
+    verdict: 'supported',
+    severity: 'none',
+  };
+  const CONFIRMED: VerifiedStatement = {
+    ...STATEMENT,
+    id: 13,
+    statement_index: 2,
+    review_status: 'confirmed',
+    confirmed_at: 5000,
+    review_id: 3,
+  };
+
+  function renderDismissable(
+    statements: VerifiedStatement[],
+    initialStatementId: number,
+    messageId: number | undefined = 42
+  ) {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        // Keep a normal cache lifetime: dismissal tests seed
+        // chatVerifications entries with no active observer.
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    });
+    const renderResult = render(
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <Theme>
+            <StatementVerdictModal
+              open
+              onOpenChange={() => {}}
+              statements={statements}
+              initialStatementId={initialStatementId}
+              authoredModel="author-model"
+              judgeModel="judge-model"
+              verifiedAt={Date.now()}
+              messageId={messageId}
+            />
+          </Theme>
+        </QueryClientProvider>
+      </MemoryRouter>
+    );
+    return { ...renderResult, queryClient };
+  }
+
+  it('shows Dismiss only for unresolved eligible findings', async () => {
+    const { unmount } = renderDismissable([STATEMENT], STATEMENT.id);
+    expect(
+      await screen.findByRole('button', {
+        name: 'Dismiss Statement (Confirmed)',
+      })
+    ).toBeTruthy();
+    unmount();
+
+    // Supported claims need no action: no Dismiss button.
+    renderDismissable([SUPPORTED], SUPPORTED.id);
+    expect(await screen.findByText('Fact Check')).toBeTruthy();
+    expect(
+      screen.queryByRole('button', { name: 'Dismiss Statement (Confirmed)' })
+    ).toBeNull();
+  });
+
+  it('shows "Confirmed by you" with original Judge details for confirmed rows', async () => {
+    renderDismissable([CONFIRMED], CONFIRMED.id);
+    expect(await screen.findByText(/Confirmed by you/)).toBeTruthy();
+    // Original Judge verdict is preserved, not rewritten.
+    expect(screen.getByText('FABRICATED')).toBeTruthy();
+    expect(
+      screen.queryByRole('button', { name: 'Dismiss Statement (Confirmed)' })
+    ).toBeNull();
+  });
+
+  it('dismisses with id+token, updates cache, and stays on the statement', async () => {
+    const user = userEvent.setup();
+    const confirmedRow: VerifiedStatement = {
+      ...STATEMENT,
+      review_status: 'confirmed',
+      confirmed_at: 6000,
+      review_id: 4,
+    };
+    const returnedVerification = {
+      id: 5,
+      message_id: 42,
+      chat_id: 9,
+      session_id: 7,
+      verification_job_id: 3,
+      authored_model: 'author-model',
+      judge_model: 'judge-model',
+      status: 'completed',
+      total_claims: 1,
+      supported_claims: 1,
+      partial_claims: 0,
+      contradicted_claims: 0,
+      fabricated_claims: 0,
+      omissions_count: 0,
+      accuracy_score: 1,
+      summary_assessment: null,
+      prompt_tokens: null,
+      completion_tokens: null,
+      duration_ms: null,
+      verified_at: Date.now(),
+      error_message: null,
+      statements: [confirmedRow],
+    };
+    // Deferred dismiss so the pending state is observable.
+    let resolveDismiss!: (value: unknown) => void;
+    mockDismissStatement.mockImplementation(
+      () => new Promise((resolve) => (resolveDismiss = resolve))
+    );
+    const { queryClient, rerender } = renderDismissable(
+      [STATEMENT, SUPPORTED],
+      STATEMENT.id
+    );
+    queryClient.setQueryData(
+      ['chatVerifications', 9, 7],
+      [{ ...returnedVerification, statements: [STATEMENT, SUPPORTED] }]
+    );
+
+    const dismissButton = await screen.findByRole('button', {
+      name: 'Dismiss Statement (Confirmed)',
+    });
+    await user.click(dismissButton);
+    expect(mockDismissStatement).toHaveBeenCalledWith(11, 'v1.modal-token');
+
+    // Pending: Dismissing…, clear + navigation disabled, evidence visible.
+    expect(
+      await screen.findByRole('button', { name: 'Dismissing…' })
+    ).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: /Clear Response Fact Check/ })
+    ).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Prev' })).toHaveProperty(
+      'disabled',
+      true
+    );
+    expect(screen.getByRole('button', { name: 'Next' })).toHaveProperty(
+      'disabled',
+      true
+    );
+    expect(
+      screen.getByText('No mention of sertraline anywhere in the transcript.')
+    ).toBeTruthy();
+
+    resolveDismiss({
+      statement: confirmedRow,
+      verification: returnedVerification,
+    });
+    // Cache update lands immediately from the returned assessment.
+    await waitFor(() => {
+      const cached = queryClient.getQueryData([
+        'chatVerifications',
+        9,
+        7,
+      ]) as Array<{ fabricated_claims: number }>;
+      expect(cached[0]!.fabricated_claims).toBe(0);
+    });
+    // Parent rerenders the modal with the fresh statements; the modal stays
+    // on the reviewed statement (ID-tracked) showing the confirmed badge.
+    rerender(
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <Theme>
+            <StatementVerdictModal
+              open
+              onOpenChange={() => {}}
+              statements={[confirmedRow, SUPPORTED]}
+              initialStatementId={STATEMENT.id}
+              authoredModel="author-model"
+              judgeModel="judge-model"
+              verifiedAt={Date.now()}
+              messageId={42}
+            />
+          </Theme>
+        </QueryClientProvider>
+      </MemoryRouter>
+    );
+    expect(await screen.findByText(/Confirmed by you/)).toBeTruthy();
+    expect(screen.getByText('FABRICATED')).toBeTruthy();
+    expect(
+      screen.queryByRole('button', { name: 'Dismiss Statement (Confirmed)' })
+    ).toBeNull();
+    // Navigation through all statements is preserved.
+    expect(screen.getByRole('button', { name: 'Next' })).toBeTruthy();
+  });
+
+  it('restores controls with an inline error when dismissal fails', async () => {
+    const user = userEvent.setup();
+    // Production-faithful: thrown ApiErrors surface as a plain-text body.
+    mockDismissStatement.mockRejectedValue(
+      Object.assign(new Error('Request failed with status code 409'), {
+        response: { data: 'stale confirmation token' },
+      })
+    );
+    renderDismissable([STATEMENT, SUPPORTED], STATEMENT.id);
+    const dismissButton = await screen.findByRole('button', {
+      name: 'Dismiss Statement (Confirmed)',
+    });
+    await user.click(dismissButton);
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toMatch(/stale confirmation token/);
+    // Controls restored, modal still open on the same statement.
+    expect(
+      screen.getByRole('button', { name: 'Dismiss Statement (Confirmed)' })
+    ).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: /Clear Response Fact Check/ })
+    ).toHaveProperty('disabled', false);
+    expect(screen.getByRole('button', { name: 'Next' })).toHaveProperty(
+      'disabled',
+      false
+    );
+    expect(screen.getByText('Fact Check')).toBeTruthy();
+  });
+
+  it('tracks selection by ID when a refetch reorders statements', async () => {
+    const FIRST = { ...STATEMENT, statement_index: 0 };
+    const SECOND = { ...SUPPORTED, statement_index: 1 };
+    const { rerender } = renderDismissable([FIRST, SECOND], FIRST.id);
+    expect(
+      await screen.findByText('The client takes sertraline daily.')
+    ).toBeTruthy();
+
+    // Refetch returns the same rows reordered: selection follows the ID.
+    rerender(
+      <MemoryRouter>
+        <QueryClientProvider
+          client={
+            new QueryClient({
+              defaultOptions: {
+                queries: { retry: false, gcTime: 0 },
+                mutations: { retry: false },
+              },
+            })
+          }
+        >
+          <Theme>
+            <StatementVerdictModal
+              open
+              onOpenChange={() => {}}
+              statements={[SECOND, FIRST]}
+              initialStatementId={FIRST.id}
+              authoredModel="author-model"
+              judgeModel="judge-model"
+              verifiedAt={Date.now()}
+              messageId={42}
+            />
+          </Theme>
+        </QueryClientProvider>
+      </MemoryRouter>
+    );
+    // Still on FIRST (its quote), not retargeted to the new index 0.
+    expect(
+      await screen.findByText('The client takes sertraline daily.')
+    ).toBeTruthy();
+    expect(screen.getByText(/Statement 1 of 2/)).toBeTruthy();
+  });
+});
+
+describe('StatementVerdictModal dismissal refresh', () => {
+  function renderRefreshable() {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    });
+    const renderResult = render(
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <Theme>
+            <StatementVerdictModal
+              open
+              onOpenChange={() => {}}
+              statements={[STATEMENT]}
+              initialStatementId={STATEMENT.id}
+              authoredModel="author-model"
+              judgeModel="judge-model"
+              verifiedAt={Date.now()}
+              messageId={42}
+            />
+          </Theme>
+        </QueryClientProvider>
+      </MemoryRouter>
+    );
+    return { ...renderResult, queryClient };
+  }
+
+  it('applies the assessment carried on a 409 and shows the explanation', async () => {
+    const user = userEvent.setup();
+    const refreshed = {
+      ...STATEMENT,
+      id: 99,
+      review_token: 'v1.fresh-token',
+    };
+    const refreshedVerification = {
+      id: 5,
+      message_id: 42,
+      chat_id: 9,
+      session_id: 7,
+      verification_job_id: 3,
+      authored_model: 'author-model',
+      judge_model: 'judge-model',
+      status: 'completed',
+      total_claims: 1,
+      supported_claims: 0,
+      partial_claims: 0,
+      contradicted_claims: 0,
+      fabricated_claims: 1,
+      omissions_count: 0,
+      accuracy_score: 0,
+      summary_assessment: null,
+      prompt_tokens: null,
+      completion_tokens: null,
+      duration_ms: null,
+      verified_at: Date.now(),
+      error_message: null,
+      statements: [refreshed],
+    };
+    mockDismissStatement.mockRejectedValue(
+      Object.assign(new Error('Request failed with status code 409'), {
+        response: {
+          data: {
+            message: 'stale confirmation token',
+            details: { verification: refreshedVerification },
+          },
+        },
+      })
+    );
+    const { queryClient, rerender } = renderRefreshable();
+    queryClient.setQueryData(
+      ['chatVerifications', 9, 7],
+      [{ ...refreshedVerification, statements: [STATEMENT] }]
+    );
+    const dismissButton = await screen.findByRole('button', {
+      name: 'Dismiss Statement (Confirmed)',
+    });
+    await user.click(dismissButton);
+
+    // Explanation surfaces inline; the carried assessment lands in cache.
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toMatch(/stale confirmation token/);
+    await waitFor(() => {
+      const cached = queryClient.getQueryData([
+        'chatVerifications',
+        9,
+        7,
+      ]) as Array<{ statements: Array<{ id: number }> }>;
+      expect(cached[0]!.statements[0]!.id).toBe(99);
+    });
+
+    // Parent rerenders with refreshed rows: new token, still actionable.
+    rerender(
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <Theme>
+            <StatementVerdictModal
+              open
+              onOpenChange={() => {}}
+              statements={[refreshed]}
+              initialStatementId={STATEMENT.id}
+              authoredModel="author-model"
+              judgeModel="judge-model"
+              verifiedAt={Date.now()}
+              messageId={42}
+            />
+          </Theme>
+        </QueryClientProvider>
+      </MemoryRouter>
+    );
+    expect(
+      await screen.findByRole('button', {
+        name: 'Dismiss Statement (Confirmed)',
+      })
+    ).toBeTruthy();
   });
 });

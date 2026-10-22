@@ -12,6 +12,7 @@ import {
   verificationJobSchema,
   messageVerificationSchema,
   verifiedStatementSchema,
+  statementReviewSchema,
 } from '@therascript/domain';
 
 interface SchemaColumn {
@@ -103,6 +104,7 @@ export const validateDatabaseSchema = (
     { name: 'verification_jobs', schema: verificationJobSchema },
     { name: 'message_verifications', schema: messageVerificationSchema },
     { name: 'verified_statements', schema: verifiedStatementSchema },
+    { name: 'verification_statement_reviews', schema: statementReviewSchema },
   ];
 
   for (const table of tables) {

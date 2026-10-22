@@ -57,6 +57,10 @@ const { VERIFICATION } = vi.hoisted(() => {
     reasoning: 'No such medication in the transcript.',
     transcript_evidence_json: null,
     created_at: 3000,
+    review_status: 'unreviewed',
+    confirmed_at: null,
+    review_id: null,
+    review_token: 'v1.chat-token',
   };
   const verification: MessageVerification = {
     id: 201,

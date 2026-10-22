@@ -25,6 +25,8 @@ export interface TranscriptEvidenceItem {
   quote: string;
 }
 
+export type StatementReviewStatus = 'unreviewed' | 'confirmed';
+
 export interface VerifiedStatement {
   id: number;
   message_verification_id: number;
@@ -44,6 +46,20 @@ export interface VerifiedStatement {
   /** Parsed transcript_evidence_json (populated by the API layer). */
   evidence?: TranscriptEvidenceItem[];
   created_at: number;
+  /**
+   * Human-review state. `'confirmed'` means the user dismissed this finding
+   * as not-an-issue; the Judge `verdict` above is always preserved.
+   */
+  review_status: StatementReviewStatus;
+  /** Milliseconds timestamp of the human confirmation, if any. */
+  confirmed_at: number | null;
+  /** Owning review row id, if any. */
+  review_id: number | null;
+  /**
+   * Opaque token over the immutable statement snapshot + material revision.
+   * Pass as `expectedReviewToken` to dismiss this statement.
+   */
+  review_token: string | null;
 }
 
 export type MessageVerificationStatus = 'completed' | 'failed' | 'skipped';
@@ -72,7 +88,15 @@ export interface MessageVerification {
   error_message: string | null;
   /** Machine-readable failure category (present on `failed` rows). */
   error_code?: string | null;
+  /** Fingerprint of the material actually evaluated (absent on legacy rows). */
+  material_revision?: string | null;
   statements?: VerifiedStatement[];
+}
+
+/** Dismissed finding + full authoritative parent assessment. */
+export interface DismissStatementResponse {
+  statement: VerifiedStatement;
+  verification: MessageVerification;
 }
 
 /** React Query key for per-chat verification verdicts. */
@@ -524,7 +548,25 @@ export const fetchFlaggedStatements = async (
 };
 
 /**
+ * Confirms one finding as not-an-issue. Only the statement id + the opaque
+ * token from the statement read are sent; the server returns the confirmed
+ * finding plus the full authoritative parent assessment.
+ */
+export const dismissStatementVerification = async (
+  statementId: number,
+  expectedReviewToken: string
+): Promise<DismissStatementResponse> => {
+  const response = await axios.post<DismissStatementResponse>(
+    `/api/verification/statements/${statementId}/dismiss`,
+    { expectedReviewToken }
+  );
+  return response.data;
+};
+
+/**
  * Clears the verification for a specific chat message.
+ * Human confirmations for matching findings are preserved and re-apply on
+ * re-audit; use Reset All Verifications for a clean slate.
  */
 export const deleteMessageVerification = async (
   messageId: number

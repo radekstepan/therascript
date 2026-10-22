@@ -8,10 +8,15 @@ import {
   templateRepository,
   sessionRepository,
   appSettingsRepository,
+  StaleVerificationMaterialError,
   type VerificationCandidateMessage,
   type VerificationStatementInput,
 } from '@therascript/data';
-import { formatMessagePreview } from '@therascript/domain';
+import {
+  formatMessagePreview,
+  computeMaterialRevision,
+  computeVerificationAccuracyScore,
+} from '@therascript/domain';
 import type {
   AppSettingsRow,
   BackendChatMessage,
@@ -487,6 +492,9 @@ function longestMatchedClauseSpan(
  * contradicted/fabricated 0, and every omission counts as a missed item in
  * the denominator. Conversational acknowledgements with 0 claims and 0
  * omissions default to 1.0.
+ *
+ * Shared with dismissal/analytics via `@therascript/domain`; this export is
+ * kept so existing worker imports/tests keep working.
  */
 export function computeVerificationAccuracy(
   supportedClaims: number,
@@ -494,9 +502,36 @@ export function computeVerificationAccuracy(
   totalClaims: number,
   omissionsCount: number
 ): number {
-  const denominator = totalClaims + omissionsCount;
-  if (denominator <= 0) return 1.0;
-  return (supportedClaims + 0.5 * partialClaims) / denominator;
+  return computeVerificationAccuracyScore(
+    supportedClaims,
+    partialClaims,
+    totalClaims,
+    omissionsCount
+  );
+}
+
+/**
+ * Material revision for one Judge evaluation: visible answer + therapist
+ * question + full transcript content (see `computeMaterialRevision`). The
+ * save transaction recomputes this from live rows and discards the result
+ * (`StaleVerificationMaterialError`) when they diverge, so a transcript
+ * edit landing mid-audit is never misattributed.
+ */
+export function computeJudgeMaterialRevision(
+  visibleAnswer: string,
+  userQuestion: string | null,
+  paragraphs: StructuredTranscript
+): string {
+  return computeMaterialRevision({
+    visibleAnswer,
+    userQuestion,
+    transcript: paragraphs.map((p) => ({
+      paragraphIndex: p.id,
+      timestampMs: p.timestamp,
+      speaker: p.speaker ?? null,
+      text: p.text,
+    })),
+  });
 }
 
 export function formatTimestampMmSs(timestampMs: number | null): string {
@@ -2664,25 +2699,37 @@ export async function processVerificationJob(
       let accPromptTokens = 0;
       let accCompletionTokens = 0;
       let accDurationMs = 0;
+      // Material evaluated by this attempt (set once the transcript loads).
+      // The failure path reuses it so even failed rows carry the revision;
+      // null when the failure struck before the material was known.
+      let materialRevisionForSave: string | null = null;
 
       try {
         const visibleAnswer = extractVisibleAnswer(candidate.text ?? '').trim();
         const paragraphs = getSessionParagraphs(sessionId);
+        const candidateUserQuestion = candidate.userQuestion ?? null;
+        materialRevisionForSave = computeJudgeMaterialRevision(
+          visibleAnswer,
+          candidateUserQuestion,
+          paragraphs
+        );
 
         // Nothing verifiable (conversational acknowledgement / thinking-only):
         // record a clean completed row without spending a Judge call.
         if (!visibleAnswer) {
-          verificationRepository.saveMessageVerificationResult({
-            messageId,
-            chatId,
-            sessionId,
-            verificationJobId: jobId,
-            authoredModel,
-            judgeModel,
-            accuracyScore: 1.0,
-            summaryAssessment: 'No verifiable content in AI response.',
-            statements: [],
-          });
+          const savedEmpty =
+            verificationRepository.saveMessageVerificationResult({
+              messageId,
+              chatId,
+              sessionId,
+              verificationJobId: jobId,
+              authoredModel,
+              judgeModel,
+              accuracyScore: 1.0,
+              summaryAssessment: 'No verifiable content in AI response.',
+              statements: [],
+              materialRevision: materialRevisionForSave,
+            });
           tallyOutcome('succeeded');
           processed++;
           await job.updateProgress(
@@ -2694,8 +2741,8 @@ export async function processVerificationJob(
             messageId,
             chatId,
             sessionId,
-            accuracyScore: 1.0,
-            totalClaims: 0,
+            accuracyScore: savedEmpty?.accuracy_score ?? 1.0,
+            totalClaims: savedEmpty?.total_claims ?? 0,
             tokensPerSecond: null,
             generatedTokens: null,
           });
@@ -2708,21 +2755,23 @@ export async function processVerificationJob(
         // ground, so they keep this completed fast path even when the
         // session transcript is missing.
         if (isTrivialConversationalMessage(visibleAnswer)) {
-          verificationRepository.saveMessageVerificationResult({
-            messageId,
-            chatId,
-            sessionId,
-            verificationJobId: jobId,
-            authoredModel,
-            judgeModel,
-            accuracyScore: 1.0,
-            summaryAssessment:
-              'Trivial conversational message; no factual claims to verify.',
-            promptTokens: 0,
-            completionTokens: 0,
-            durationMs: 0,
-            statements: [],
-          });
+          const savedTrivial =
+            verificationRepository.saveMessageVerificationResult({
+              messageId,
+              chatId,
+              sessionId,
+              verificationJobId: jobId,
+              authoredModel,
+              judgeModel,
+              accuracyScore: 1.0,
+              summaryAssessment:
+                'Trivial conversational message; no factual claims to verify.',
+              promptTokens: 0,
+              completionTokens: 0,
+              durationMs: 0,
+              statements: [],
+              materialRevision: materialRevisionForSave,
+            });
           tallyOutcome('succeeded');
           processed++;
           await job.updateProgress(
@@ -2734,8 +2783,8 @@ export async function processVerificationJob(
             messageId,
             chatId,
             sessionId,
-            accuracyScore: 1.0,
-            totalClaims: 0,
+            accuracyScore: savedTrivial?.accuracy_score ?? 1.0,
+            totalClaims: savedTrivial?.total_claims ?? 0,
             tokensPerSecond: null,
             generatedTokens: null,
           });
@@ -2779,6 +2828,7 @@ export async function processVerificationJob(
             completionTokens: 0,
             durationMs: 0,
             statements: [],
+            materialRevision: materialRevisionForSave,
           });
           noteFirstFailure('missing_transcript', missingDetail);
           tallyOutcome('failed');
@@ -2834,6 +2884,7 @@ export async function processVerificationJob(
             completionTokens: 0,
             durationMs: 0,
             statements: [],
+            materialRevision: materialRevisionForSave,
           });
           noteFirstFailure('context_budget', allocation.reason);
           tallyOutcome('failed');
@@ -3212,26 +3263,35 @@ export async function processVerificationJob(
           omissionsCount
         );
 
-        verificationRepository.saveMessageVerificationResult({
-          messageId,
-          chatId,
-          sessionId,
-          verificationJobId: jobId,
-          authoredModel,
-          judgeModel,
-          totalClaims,
-          supportedClaims: supported,
-          partialClaims: partial,
-          contradictedClaims: contradicted,
-          fabricatedClaims: fabricated,
-          omissionsCount,
-          accuracyScore,
-          summaryAssessment: normalized.summaryAssessment,
-          promptTokens: accPromptTokens,
-          completionTokens: accCompletionTokens,
-          durationMs: accDurationMs,
-          statements,
-        });
+        // The save reconciles durable human confirmations inside its
+        // transaction: publish the PERSISTED effective values it returns,
+        // never stale local counts computed before applying reviews.
+        const savedVerification =
+          verificationRepository.saveMessageVerificationResult({
+            messageId,
+            chatId,
+            sessionId,
+            verificationJobId: jobId,
+            authoredModel,
+            judgeModel,
+            totalClaims,
+            supportedClaims: supported,
+            partialClaims: partial,
+            contradictedClaims: contradicted,
+            fabricatedClaims: fabricated,
+            omissionsCount,
+            accuracyScore,
+            summaryAssessment: normalized.summaryAssessment,
+            promptTokens: accPromptTokens,
+            completionTokens: accCompletionTokens,
+            durationMs: accDurationMs,
+            statements,
+            materialRevision: materialRevisionForSave,
+          });
+        const effectiveAccuracy =
+          savedVerification?.accuracy_score ?? accuracyScore;
+        const effectiveTotalClaims =
+          savedVerification?.total_claims ?? totalClaims;
 
         tallyOutcome('succeeded');
         processed++;
@@ -3242,107 +3302,135 @@ export async function processVerificationJob(
           messageId,
           chatId,
           sessionId,
-          accuracyScore,
-          totalClaims,
+          accuracyScore: effectiveAccuracy,
+          totalClaims: effectiveTotalClaims,
         });
         publishVerificationEvent(jobId, {
           type: 'message_verified',
           messageId,
           chatId,
           sessionId,
-          accuracyScore,
-          totalClaims,
+          accuracyScore: effectiveAccuracy,
+          totalClaims: effectiveTotalClaims,
           tokensPerSecond: null,
           generatedTokens: null,
         });
 
         console.log(
           `[Verification Worker ${jobId}] Verified message ${messageId} ` +
-            `(${processed}/${candidates.length}, accuracy=${accuracyScore.toFixed(3)}).`
+            `(${processed}/${candidates.length}, accuracy=${effectiveAccuracy.toFixed(3)}).`
         );
       } catch (messageError: any) {
-        console.error(
-          `[Verification Worker ${jobId}] Failed to verify message ${messageId}:`,
-          messageError
-        );
-        // Classified Judge failures throw CodedVerificationError with a
-        // pre-built message; anything else (provider/transport errors from
-        // the stream, unexpected bugs) becomes `provider_error` with the
-        // bounded raw detail. Either way the failed row carries job/message
-        // IDs, the Judge model, attempt, duration, and token usage.
-        const codedMessage =
-          messageError instanceof CodedVerificationError
-            ? messageError.message
-            : null;
-        const code: VerificationFailureCode =
-          readVerificationFailureCode(messageError) ?? 'provider_error';
-        const rawDetail =
-          messageError?.message ?? String(messageError ?? 'unknown error');
-        const failureMessage =
-          codedMessage ??
-          buildMessageFailureMessage({
-            code,
-            jobId,
-            messageId,
-            judgeModel,
-            phase: 'generating',
-            attempt: 1,
-            attemptsTotal: 2,
-            durationMs: accDurationMs,
-            promptTokens: accPromptTokens,
-            completionTokens: accCompletionTokens,
-            detail:
-              code === 'provider_error'
-                ? `Judge provider request failed: ${rawDetail}`
-                : rawDetail,
-          });
-        noteFirstFailure(code, rawDetail);
-        let failurePersisted = false;
-        try {
-          verificationRepository.saveMessageVerificationResult({
-            messageId,
-            chatId,
-            sessionId,
-            verificationJobId: jobId,
-            authoredModel,
-            judgeModel,
-            status: 'failed',
-            errorMessage: failureMessage,
-            errorCode: code,
-            promptTokens: accPromptTokens,
-            completionTokens: accCompletionTokens,
-            durationMs: accDurationMs,
-            statements: [],
-          });
-          failurePersisted = true;
-        } catch (persistError) {
-          console.error(
-            `[Verification Worker ${jobId}] Failed to persist failure for message ${messageId}:`,
-            persistError
-          );
-        }
-        // The failed-row save already bumps `processed_messages`; only when
-        // that save itself threw must the counters be repaired manually.
-        // Either way the failure counts toward `failed`, never `succeeded`.
-        failed++;
-        try {
-          verificationRepository.incrementJobCounters(
-            jobId,
-            failurePersisted
-              ? { failedMessages: 1 }
-              : { processedMessages: 1, failedMessages: 1 }
-          );
-        } catch (counterError) {
+        // Stale material: the transcript/answer changed between the Judge
+        // call and the save commit, so the save rolled itself back. Discard
+        // the result outright — never attribute it to changed content, never
+        // overwrite the prior assessment, never count it as a Judge failure.
+        // The terminal transition reports it as skipped
+        // (total - succeeded - failed).
+        if (messageError instanceof StaleVerificationMaterialError) {
           console.warn(
-            `[Verification Worker ${jobId}] Failed to increment failure counters for message ${messageId}:`,
-            counterError
+            `[Verification Worker ${jobId}] Discarding stale result for message ${messageId}: material changed mid-audit; leaving the prior assessment untouched.`
           );
+          try {
+            verificationRepository.incrementJobCounters(jobId, {
+              processedMessages: 1,
+            });
+          } catch (counterError) {
+            console.warn(
+              `[Verification Worker ${jobId}] Failed to increment stale-discard counter for message ${messageId}:`,
+              counterError
+            );
+          }
+          processed++;
+          await job.updateProgress(
+            Math.round((processed / candidates.length) * 100)
+          );
+          publishProgress();
+        } else {
+          console.error(
+            `[Verification Worker ${jobId}] Failed to verify message ${messageId}:`,
+            messageError
+          );
+          // Classified Judge failures throw CodedVerificationError with a
+          // pre-built message; anything else (provider/transport errors from
+          // the stream, unexpected bugs) becomes `provider_error` with the
+          // bounded raw detail. Either way the failed row carries job/message
+          // IDs, the Judge model, attempt, duration, and token usage.
+          const codedMessage =
+            messageError instanceof CodedVerificationError
+              ? messageError.message
+              : null;
+          const code: VerificationFailureCode =
+            readVerificationFailureCode(messageError) ?? 'provider_error';
+          const rawDetail =
+            messageError?.message ?? String(messageError ?? 'unknown error');
+          const failureMessage =
+            codedMessage ??
+            buildMessageFailureMessage({
+              code,
+              jobId,
+              messageId,
+              judgeModel,
+              phase: 'generating',
+              attempt: 1,
+              attemptsTotal: 2,
+              durationMs: accDurationMs,
+              promptTokens: accPromptTokens,
+              completionTokens: accCompletionTokens,
+              detail:
+                code === 'provider_error'
+                  ? `Judge provider request failed: ${rawDetail}`
+                  : rawDetail,
+            });
+          noteFirstFailure(code, rawDetail);
+          let failurePersisted = false;
+          try {
+            verificationRepository.saveMessageVerificationResult({
+              messageId,
+              chatId,
+              sessionId,
+              verificationJobId: jobId,
+              authoredModel,
+              judgeModel,
+              status: 'failed',
+              errorMessage: failureMessage,
+              errorCode: code,
+              promptTokens: accPromptTokens,
+              completionTokens: accCompletionTokens,
+              durationMs: accDurationMs,
+              statements: [],
+              materialRevision: materialRevisionForSave,
+            });
+            failurePersisted = true;
+          } catch (persistError) {
+            console.error(
+              `[Verification Worker ${jobId}] Failed to persist failure for message ${messageId}:`,
+              persistError
+            );
+          }
+          // The failed-row save already bumps `processed_messages`; only when
+          // that save itself threw must the counters be repaired manually.
+          // Either way the failure counts toward `failed`, never `succeeded`.
+          failed++;
+          try {
+            verificationRepository.incrementJobCounters(
+              jobId,
+              failurePersisted
+                ? { failedMessages: 1 }
+                : { processedMessages: 1, failedMessages: 1 }
+            );
+          } catch (counterError) {
+            console.warn(
+              `[Verification Worker ${jobId}] Failed to increment failure counters for message ${messageId}:`,
+              counterError
+            );
+          }
+          processed++;
+          await job.updateProgress(
+            Math.round((processed / candidates.length) * 100)
+          );
+          publishProgress();
         }
-        processed++;
-        await job.updateProgress(
-          Math.round((processed / candidates.length) * 100)
-        );
-        publishProgress();
       }
     }
 

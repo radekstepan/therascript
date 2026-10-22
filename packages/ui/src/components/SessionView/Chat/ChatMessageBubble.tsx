@@ -150,11 +150,18 @@ export function ChatMessageBubble({
   );
 
   // Inline highlights cover claims only (omissions have no in-text span).
-  // All verified claims stay highlighted, including supported ones.
+  // All verified claims stay highlighted, including supported ones, except
+  // human-confirmed findings: the user judged them not-an-issue, so their
+  // highlights are removed (still viewable via the footer link / modal).
   const highlightable: HighlightableStatement[] = useMemo(
     () =>
       verificationStatements
-        .filter((s) => s.kind === 'claim' && s.exact_quote.trim() !== '')
+        .filter(
+          (s) =>
+            s.kind === 'claim' &&
+            s.exact_quote.trim() !== '' &&
+            s.review_status !== 'confirmed'
+        )
         .map((s) => ({
           id: s.id,
           exact_quote: s.exact_quote,
@@ -341,21 +348,26 @@ export function ChatMessageBubble({
               text: `✓ Verified (${supportedCount}/${totalClaims} claims)`,
             };
 
-  // Modal entry point for the footer link: the most severe statement,
-  // mirroring the ?highlightMsg deep-link priority in ChatMessages.
-  const topIssueStatement = useMemo(
-    () =>
-      verificationStatements.find(
+  // Modal entry point for the footer link: the most severe UNRESOLVED
+  // statement, mirroring the ?highlightMsg deep-link priority in
+  // ChatMessages. Confirmed findings are excluded from the active entry
+  // point but stay navigable once the modal opens (fallback: first row).
+  const topIssueStatement = useMemo(() => {
+    const unresolved = verificationStatements.filter(
+      (s) => s.review_status !== 'confirmed'
+    );
+    return (
+      unresolved.find(
         (s) => s.verdict === 'fabricated' || s.verdict === 'contradicted'
       ) ??
-      verificationStatements.find((s) => s.verdict === 'partially_supported') ??
-      verificationStatements.find(
+      unresolved.find((s) => s.verdict === 'partially_supported') ??
+      unresolved.find(
         (s) => s.kind === 'omission' || s.verdict === 'omission'
       ) ??
       verificationStatements[0] ??
-      null,
-    [verificationStatements]
-  );
+      null
+    );
+  }, [verificationStatements]);
 
   const handleCopy = () => {
     if (message.sender === 'ai' && renderMd && markdownContainerRef.current) {

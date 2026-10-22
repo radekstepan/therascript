@@ -113,6 +113,7 @@ export const messageVerificationSchema = z.object({
   verified_at: z.number().int().nonnegative(),
   error_message: z.string().nullable(),
   error_code: verificationFailureCodeSchema.nullable().optional().default(null),
+  material_revision: z.string().nullable().optional().default(null),
 });
 
 export const statementKindSchema = z.enum(['claim', 'omission']);
@@ -150,6 +151,44 @@ export const verifiedStatementSchema = z.object({
   reasoning: z.string(),
   transcript_evidence_json: z.string().nullable(),
   created_at: z.number().int().nonnegative(),
+  finding_key: z.string().nullable().optional().default(null),
+  context_revision: z.string().nullable().optional().default(null),
+});
+
+export const statementReviewStatusSchema = z.enum(['unreviewed', 'confirmed']);
+
+export const statementReviewSchema = z.object({
+  id: z.number().int().positive(),
+  message_id: z.number().int().positive(),
+  session_id: z.number().int().positive(),
+  identity_version: z.number().int().positive(),
+  context_revision: z.string(),
+  finding_key: z.string(),
+  reusable: z.boolean(),
+  confirmed_statement_id: z.number().int().positive().nullable(),
+  confirmed_at: z.number().int().nonnegative(),
+  kind: statementKindSchema,
+  exact_quote: z.string(),
+  normalized_claim: z.string(),
+  start_char: z.number().int().nonnegative().nullable(),
+  end_char: z.number().int().nonnegative().nullable(),
+  verdict: statementVerdictSchema,
+  severity: statementSeveritySchema,
+  confidence: z.number().nonnegative(),
+  reasoning: z.string(),
+  transcript_evidence_json: z.string().nullable(),
+});
+
+/** Human-review metadata attached to every statement read (API contract). */
+export const statementReviewMetadataSchema = z.object({
+  review_status: statementReviewStatusSchema,
+  confirmed_at: z.number().int().nonnegative().nullable(),
+  review_id: z.number().int().positive().nullable(),
+  review_token: z.string().nullable(),
+});
+
+export const dismissStatementRequestSchema = z.object({
+  expectedReviewToken: z.string().min(1),
 });
 
 export const transcriptEvidenceItemSchema = z.object({
@@ -191,6 +230,13 @@ export type MessageVerificationRow = z.infer<typeof messageVerificationSchema>;
 export type VerifiedStatementRow = z.infer<typeof verifiedStatementSchema>;
 export type TranscriptEvidenceItemRow = z.infer<
   typeof transcriptEvidenceItemSchema
+>;
+export type StatementReviewRow = z.infer<typeof statementReviewSchema>;
+export type StatementReviewStatusRow = z.infer<
+  typeof statementReviewStatusSchema
+>;
+export type DismissStatementRequestRow = z.infer<
+  typeof dismissStatementRequestSchema
 >;
 export type VerificationJobStatusRow = z.infer<
   typeof verificationJobStatusSchema

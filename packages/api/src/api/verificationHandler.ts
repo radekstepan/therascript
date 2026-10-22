@@ -2,6 +2,8 @@
 import {
   verificationRepository,
   resolveVerificationSkipVerified,
+  StatementReviewNotFoundError,
+  StatementReviewConflictError,
   sessionRepository,
   chatRepository,
   messageRepository,
@@ -16,6 +18,7 @@ import {
 import type {
   BackendMessageVerification,
   BackendVerificationJob,
+  BackendVerifiedStatement,
   StatementSeverity,
   StatementVerdict,
   VerificationGlobalStats,
@@ -732,6 +735,81 @@ export const resetVerificationsHandler = ({
     if (error instanceof ApiError) throw error;
     throw new InternalServerError(
       'Failed to reset verifications.',
+      error instanceof Error ? error : undefined
+    );
+  }
+};
+
+export interface DismissStatementBody {
+  expectedReviewToken: string;
+}
+
+export interface DismissStatementResponse {
+  statement: BackendVerifiedStatement;
+  verification: BackendMessageVerification;
+}
+
+/**
+ * Confirm one finding as "not an issue" (dismiss statement).
+ *
+ * The client supplies only the statement id + the opaque `review_token` it
+ * received on the statement read; verdicts, scores, parent ids, and
+ * timestamps are never client-supplied. Success returns the original Judge
+ * finding plus confirmed metadata and the full authoritative parent
+ * assessment. Repeats are idempotent (same review, original `confirmed_at`).
+ */
+export const dismissStatementHandler = ({
+  params,
+  body,
+  set,
+}: {
+  params: { statementId: string | number };
+  body: unknown;
+  set: { status?: number | string };
+}): DismissStatementResponse => {
+  const rawId = params.statementId;
+  const statementId = typeof rawId === 'number' ? rawId : Number(rawId);
+  if (!Number.isInteger(statementId) || statementId <= 0) {
+    throw new BadRequestError('Statement ID must be a positive integer.');
+  }
+  const token = (body as { expectedReviewToken?: unknown } | null | undefined)
+    ?.expectedReviewToken;
+  if (typeof token !== 'string' || token.trim().length === 0) {
+    throw new BadRequestError(
+      'expectedReviewToken is required and must be a non-empty string.'
+    );
+  }
+  try {
+    const result = verificationRepository.dismissStatementAsConfirmed(
+      statementId,
+      token
+    );
+    set.status = 200;
+    return result;
+  } catch (error) {
+    // 404/409 responses carry an explanation + refresh of the current
+    // assessment (when one is resolvable) so the client refreshes to
+    // current data instead of applying the dismissal to a replacement row.
+    if (error instanceof StatementReviewNotFoundError) {
+      throw new ApiError(
+        404,
+        error.message,
+        error.verification ? { verification: error.verification } : undefined
+      );
+    }
+    if (error instanceof StatementReviewConflictError) {
+      throw new ConflictError(
+        error.message,
+        error.verification ? { verification: error.verification } : undefined
+      );
+    }
+    console.error(
+      `[VerificationHandler] Error dismissing statement ${statementId}:`,
+      error
+    );
+    if (error instanceof ApiError) throw error;
+    throw new InternalServerError(
+      'Failed to dismiss verified statement.',
       error instanceof Error ? error : undefined
     );
   }

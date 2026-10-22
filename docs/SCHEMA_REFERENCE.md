@@ -151,9 +151,9 @@ Stores the result of the "Map" phase for each session.
 
 **Indices:** `idx_intermediate_summaries_job_id`
 
-### Verification Tables (Added in V20, Extended in V21)
+### Verification Tables (Added in V20, Extended in V21, Reviews in V22)
 
-Migration V20 adds the LLM Fact-Verification & Hallucination Audit ("LLM Judge") system: audit-run tracking (`verification_jobs`), per-message audit summaries (`message_verifications`), and atomic claim/omission verdicts (`verified_statements`), plus the `messages.model` authoring-model column above. Migration V21 adds the per-outcome counters and live phase snapshot columns to `verification_jobs` (backfilled from each job's message rows) plus the `error_code` failure category on `message_verifications`.
+Migration V20 adds the LLM Fact-Verification & Hallucination Audit ("LLM Judge") system: audit-run tracking (`verification_jobs`), per-message audit summaries (`message_verifications`), and atomic claim/omission verdicts (`verified_statements`), plus the `messages.model` authoring-model column above. Migration V21 adds the per-outcome counters and live phase snapshot columns to `verification_jobs` (backfilled from each job's message rows) plus the `error_code` failure category on `message_verifications`. Migration V22 adds durable human confirmations (`verification_statement_reviews`), the evaluated-material fingerprint on `message_verifications` (`material_revision`), and stored finding identity on `verified_statements` (`finding_key`, `context_revision`). Legacy rows carry NULLs and start unreviewed.
 
 #### `verification_jobs`
 Tracks fact-verification audit runs. The Judge LLM config is snapshotted into the row at creation time so the worker (a separate process) honours the user's Judge settings; once the Judge model is confirmed loaded, the worker adopts that config into the global `app_settings` (see `buildJudgeActiveSettingsUpdate` in `verificationProcessor.ts`) and keeps the model loaded after the job finishes.
@@ -219,8 +219,11 @@ Per-message audit summary: one row per audited AI message (`message_id` is UNIQU
 | `verified_at` | INTEGER | NOT NULL | Verification timestamp |
 | `error_message` | TEXT | NULL | Error details when `status = 'failed'` |
 | `error_code` | TEXT | NULL | Machine-readable failure category when `status = 'failed'` (V21) |
+| `material_revision` | TEXT | NULL | Fingerprint of the evaluated material: visible answer + therapist question + full transcript content (V22; NULL on legacy rows) |
 
 **Indices:** `idx_msg_verifications_session`, `idx_msg_verifications_chat`, `idx_msg_verifications_authored_model`, `idx_msg_verifications_verified_at`
+
+Counts/scores on this row are review-aware effective aggregates: confirmed partial/contradicted/fabricated claims count as supported (claim total unchanged) and confirmed omissions leave the active count. Raw Judge verdicts live on the nested `verified_statements` rows.
 
 #### `verified_statements`
 Atomic claims and omissions extracted from an audited message, each with a verdict, severity, character span (for inline UI highlighting), and transcript evidence.
@@ -243,8 +246,37 @@ Atomic claims and omissions extracted from an audited message, each with a verdi
 | `reasoning` | TEXT | NOT NULL | Judge's justification |
 | `transcript_evidence_json` | TEXT | NULL | JSON array of `{ paragraphIndex, timestampMs, speaker, quote }`, hydrated against ground-truth paragraphs |
 | `created_at` | INTEGER | NOT NULL | Creation timestamp |
+| `finding_key` | TEXT | NULL | Deterministic finding identity within a revision (V22; NULL on legacy rows) |
+| `context_revision` | TEXT | NULL | Material revision this finding was evaluated against (V22; NULL on legacy rows) |
 
 **Indices:** `idx_verified_statements_msg`, `idx_verified_statements_verdict`, `idx_verified_statements_session`
+
+#### `verification_statement_reviews` (V22)
+Durable human confirmations of individual findings ("Dismiss Statement (Confirmed)"). Message-owned (`message_id` FK with cascade) and deliberately independent of the disposable statement/assessment rows: reviews survive per-response clears and the worker's delete/reinsert cycle, and are matched back to current rows by `(message_id, context_revision, finding_key)`. Reset All Verifications and full data resets delete them; message/chat/session deletion cascades.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | INTEGER | PK, AUTOINCREMENT | Unique review identifier |
+| `message_id` | INTEGER | NOT NULL, FK → messages(id) ON DELETE CASCADE | Owning AI message |
+| `session_id` | INTEGER | NOT NULL, FK → sessions(id) ON DELETE CASCADE | Owning session (scope) |
+| `identity_version` | INTEGER | NOT NULL, DEFAULT 1 | Finding-identity format version |
+| `context_revision` | TEXT | NOT NULL | Material revision the confirmation applies to |
+| `finding_key` | TEXT | NOT NULL | Deterministic finding key (UNIQUE with message_id + context_revision) |
+| `reusable` | INTEGER | NOT NULL, DEFAULT 1 | 1 = auto-matches reruns; 0 = ambiguous, bound to `confirmed_statement_id` only |
+| `confirmed_statement_id` | INTEGER | NULL, no FK | Selected row for ambiguous confirmations (NULL otherwise) |
+| `confirmed_at` | INTEGER | NOT NULL | Human confirmation timestamp (ms) |
+| `kind` | TEXT | NOT NULL | Snapshot: 'claim' \| 'omission' |
+| `exact_quote` | TEXT | NOT NULL | Snapshot: reviewed quote |
+| `normalized_claim` | TEXT | NOT NULL | Snapshot: reviewed normalized claim |
+| `start_char` | INTEGER | NULL | Snapshot: resolved span start |
+| `end_char` | INTEGER | NULL | Snapshot: resolved span end |
+| `verdict` | TEXT | NOT NULL | Snapshot: raw Judge verdict (CHECK) |
+| `severity` | TEXT | NOT NULL, DEFAULT 'none' | Snapshot: raw severity (CHECK) |
+| `confidence` | REAL | NOT NULL, DEFAULT 1.0 | Snapshot: Judge confidence 0–1 |
+| `reasoning` | TEXT | NOT NULL | Snapshot: reviewed reasoning |
+| `transcript_evidence_json` | TEXT | NULL | Snapshot: reviewed evidence JSON |
+
+**Indices:** `idx_statement_reviews_message`, `idx_statement_reviews_message_revision`, `idx_statement_reviews_session`
 
 ```
 ┌──────────────────┐     ┌───────────────────┐     ┌──────────────────┐
@@ -258,7 +290,21 @@ Atomic claims and omissions extracted from an audited message, each with a verdi
 │ snapshot         │     │  UNIQUE)          │     │ verdict/severity │
 └──────────────────┘     │ chat_id (FK)      │     │ start/end_char   │
                          │ session_id (FK)   │     │ evidence JSON    │
-                         │ accuracy_score    │     └──────────────────┘
+                         │ accuracy_score    │     │ finding_key (V22)│
+                         └─────────┬─────────┘     └──────────────────┘
+                                   │
+                    message-owned,  │  statement-independent
+                    survives clears │  (matched by revision+key)
+                    and reruns      │
+                         ┌─────────▼─────────┐
+                         │ verification_     │
+                         │ statement_reviews │
+                         │ (V22)             │
+                         ├───────────────────┤
+                         │ message_id (FK)   │
+                         │ context_revision  │
+                         │ finding_key       │
+                         │ snapshot + when   │
                          └───────────────────┘
 ```
 

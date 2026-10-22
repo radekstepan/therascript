@@ -73,6 +73,10 @@ const STATEMENT: VerifiedStatement = {
   reasoning: 'No mention of sertraline anywhere in the transcript.',
   transcript_evidence_json: null,
   created_at: Date.now(),
+  review_status: 'unreviewed',
+  confirmed_at: null,
+  review_id: null,
+  review_token: 'v1.bubble-token',
 };
 
 const VERIFICATION: MessageVerification = {
@@ -619,5 +623,199 @@ describe('ChatMessageBubble failed verification', () => {
     } finally {
       consoleSpy.mockRestore();
     }
+  });
+});
+
+describe('ChatMessageBubble confirmed findings', () => {
+  const S1 = 'The client takes sertraline daily.';
+  const S2 = 'The client owns three cats.';
+  const TEXT = `${S1} ${S2}`;
+
+  const CONFIRMED_FABRICATED: VerifiedStatement = {
+    ...STATEMENT,
+    id: 41,
+    statement_index: 0,
+    exact_quote: S1,
+    normalized_claim: S1,
+    start_char: 0,
+    end_char: S1.length,
+    review_status: 'confirmed',
+    confirmed_at: 5000,
+    review_id: 3,
+  };
+  const OPEN_PARTIAL: VerifiedStatement = {
+    ...STATEMENT,
+    id: 42,
+    statement_index: 1,
+    exact_quote: S2,
+    normalized_claim: S2,
+    start_char: S1.length + 1,
+    end_char: TEXT.length,
+    verdict: 'partially_supported',
+    severity: 'medium',
+  };
+
+  function renderConfirmedBubble(
+    verification: MessageVerification,
+    onStatementClick: (
+      messageId: number,
+      statement: VerifiedStatement
+    ) => void = () => {}
+  ) {
+    return renderWithClient(
+      <Theme>
+        <ChatMessageBubble
+          message={{ ...MESSAGE, text: TEXT }}
+          isCurrentlyStreaming={false}
+          isAiResponding={false}
+          renderMd={false}
+          onStarClick={() => {}}
+          onCopyClick={() => {}}
+          verification={verification}
+          onStatementClick={onStatementClick}
+        />
+      </Theme>
+    );
+  }
+
+  it('removes highlights for confirmed claims while keeping unresolved ones', () => {
+    const { container } = renderConfirmedBubble({
+      ...VERIFICATION,
+      total_claims: 2,
+      supported_claims: 1,
+      partial_claims: 1,
+      fabricated_claims: 0,
+      statements: [CONFIRMED_FABRICATED, OPEN_PARTIAL],
+    });
+    const marks = Array.from(container.querySelectorAll('mark')).map(
+      (mark) => mark.textContent
+    );
+    expect(marks).not.toContain(S1);
+    expect(marks).toContain(S2);
+  });
+
+  it('routes the footer entry point to the top unresolved issue', () => {
+    const onStatementClick = vi.fn();
+    renderConfirmedBubble(
+      {
+        ...VERIFICATION,
+        total_claims: 2,
+        supported_claims: 1,
+        partial_claims: 1,
+        fabricated_claims: 0,
+        statements: [CONFIRMED_FABRICATED, OPEN_PARTIAL],
+      },
+      onStatementClick
+    );
+    // Effective counts (not raw verdicts) drive the footer label.
+    expect(screen.getByText('1 Partially supported')).toBeTruthy();
+    fireEvent.click(screen.getByText('1 Partially supported'));
+    expect(onStatementClick).toHaveBeenCalledTimes(1);
+    expect(onStatementClick).toHaveBeenCalledWith(
+      MESSAGE.id,
+      expect.objectContaining({ id: OPEN_PARTIAL.id })
+    );
+  });
+
+  it('keeps an overlapping unresolved mark when its neighbor is confirmed', () => {
+    const text = 'The client takes sertraline daily now.';
+    const { container } = renderWithClient(
+      <Theme>
+        <ChatMessageBubble
+          message={{ ...MESSAGE, text }}
+          isCurrentlyStreaming={false}
+          isAiResponding={false}
+          renderMd={false}
+          onStarClick={() => {}}
+          onCopyClick={() => {}}
+          verification={{
+            ...VERIFICATION,
+            total_claims: 2,
+            supported_claims: 1,
+            partial_claims: 1,
+            fabricated_claims: 0,
+            statements: [
+              {
+                ...CONFIRMED_FABRICATED,
+                id: 51,
+                exact_quote: 'takes sertraline daily',
+                start_char: 11,
+                end_char: 33,
+              },
+              {
+                ...OPEN_PARTIAL,
+                id: 52,
+                exact_quote: 'sertraline daily now',
+                start_char: 17,
+                end_char: 37,
+              },
+            ],
+          }}
+          onStatementClick={() => {}}
+        />
+      </Theme>
+    );
+    // Filtering happens before span resolution, so the overlapping
+    // unresolved quote still resolves and stays marked.
+    const marks = Array.from(container.querySelectorAll('mark')).map(
+      (mark) => mark.textContent
+    );
+    expect(marks).toEqual(['sertraline daily now']);
+  });
+
+  it('removes confirmed marks in markdown mode too', () => {
+    const md = 'The client takes **sertraline** daily. The client owns cats.';
+    const { container } = renderWithClient(
+      <Theme>
+        <ChatMessageBubble
+          message={{ ...MESSAGE, text: md }}
+          isCurrentlyStreaming={false}
+          isAiResponding={false}
+          renderMd
+          onStarClick={() => {}}
+          onCopyClick={() => {}}
+          verification={{
+            ...VERIFICATION,
+            total_claims: 2,
+            supported_claims: 1,
+            partial_claims: 1,
+            fabricated_claims: 0,
+            statements: [
+              {
+                ...CONFIRMED_FABRICATED,
+                exact_quote: 'takes sertraline daily',
+              },
+              { ...OPEN_PARTIAL, exact_quote: 'owns cats' },
+            ],
+          }}
+          onStatementClick={() => {}}
+        />
+      </Theme>
+    );
+    const marks = Array.from(
+      container.querySelectorAll('mark[data-statement-id]')
+    ).map((mark) => mark.getAttribute('data-statement-id'));
+    expect(marks).not.toContain(String(CONFIRMED_FABRICATED.id));
+    expect(marks).toContain(String(OPEN_PARTIAL.id));
+  });
+
+  it('falls back to the first statement when every finding is confirmed', () => {
+    const onStatementClick = vi.fn();
+    renderConfirmedBubble(
+      {
+        ...VERIFICATION,
+        total_claims: 1,
+        supported_claims: 1,
+        fabricated_claims: 0,
+        statements: [{ ...CONFIRMED_FABRICATED }],
+      },
+      onStatementClick
+    );
+    // Fully confirmed: verified chip still links into the modal.
+    fireEvent.click(screen.getByText('✓ Verified (1/1 claims)'));
+    expect(onStatementClick).toHaveBeenCalledWith(
+      MESSAGE.id,
+      expect.objectContaining({ id: CONFIRMED_FABRICATED.id })
+    );
   });
 });
