@@ -22,7 +22,7 @@ These are implementation instructions for a future execution pass. This editing 
 
 For each task, run `yarn test` and the builds listed under **Verification** with Node `23.10.0`. Add focused regression coverage to existing test suites where possible; create a nearby test file if none exists. Include visual/manual checks for layout and interaction changes. Mark a task complete only after its acceptance checks and verification pass.
 
-### - [ ] Task 1: Order transcripts newest first in Run Verification Audit
+### - [x] Task 1: Order transcripts newest first in Run Verification Audit
 
 **Target Files:**
 - `packages/ui/src/components/Verification/StartVerificationModal.tsx`

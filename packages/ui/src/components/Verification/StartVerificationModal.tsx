@@ -59,6 +59,45 @@ type ModalScope = 'all_unverified' | 'all_force' | 'selected_sessions';
 const JUDGE_DEFAULT_TEMPERATURE = 0.3;
 const JUDGE_DEFAULT_THINKING_BUDGET = 1024;
 
+/**
+ * Parse a session `date` into epoch milliseconds.
+ *
+ * Returns `null` for missing, non-string, or unparseable values so the
+ * comparator can sort those sessions last instead of comparing NaN.
+ */
+function verificationDateMs(date: unknown): number | null {
+  if (typeof date !== 'string' || date.length === 0) return null;
+  const ms = Date.parse(date);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/**
+ * Newest-first ordering for the transcript picker: valid dates descend,
+ * missing/invalid dates sort last, and ties (including equal dates)
+ * break deterministically on descending `sessionId`.
+ */
+export function compareVerificationSessionsNewestFirst(
+  a: SessionVerificationSummary,
+  b: SessionVerificationSummary
+): number {
+  const aMs = verificationDateMs(a.date);
+  const bMs = verificationDateMs(b.date);
+  if (aMs !== null && bMs !== null && aMs !== bMs) return bMs - aMs;
+  if (aMs !== null && bMs === null) return -1;
+  if (aMs === null && bMs !== null) return 1;
+  return b.sessionId - a.sessionId;
+}
+
+/**
+ * Return a new array sorted newest-first. Never mutates the input (the
+ * caller passes the `sessionsSummary` prop straight in).
+ */
+export function sortVerificationSessionsNewestFirst(
+  sessions: SessionVerificationSummary[]
+): SessionVerificationSummary[] {
+  return [...sessions].sort(compareVerificationSessionsNewestFirst);
+}
+
 const SCOPE_OPTIONS: {
   value: ModalScope;
   title: string;
@@ -171,9 +210,10 @@ export function StartVerificationModal({
   }, [isOpen, llmStatus, initialScope, initialSessionIds]);
 
   const visibleSessions = useMemo(() => {
-    const sorted = [...sessionsSummary].sort((a, b) =>
-      a.sessionName.localeCompare(b.sessionName)
-    );
+    // Newest-first in both filter states; the hide-verified toggle only
+    // removes fully-verified rows without reordering the rest. Selection
+    // is tracked separately by session id, so it survives filtering.
+    const sorted = sortVerificationSessionsNewestFirst(sessionsSummary);
     return hideVerified ? sorted.filter((s) => !s.isFullyVerified) : sorted;
   }, [sessionsSummary, hideVerified]);
 
