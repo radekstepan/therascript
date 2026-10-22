@@ -202,6 +202,7 @@ const VerificationStatementsQuerySchema = t.Object({
   severity: t.Optional(t.String()),
   authoredModel: t.Optional(t.String()),
   sessionId: t.Optional(t.String()),
+  clientName: t.Optional(t.String()),
   search: t.Optional(t.String()),
   limit: t.Optional(t.String()),
   offset: t.Optional(t.String()),
@@ -260,7 +261,7 @@ export const verificationRoutes = new Elysia({ prefix: '/api/verification' })
         response: { 200: 'flaggedStatementsResponse' },
         detail: {
           summary:
-            'List paginated/filterable flagged statements (verdict, severity, model, session, search)',
+            'List paginated/filterable flagged statements (verdict, severity, model, session, client, search)',
         },
       })
       .delete('/messages/:messageId', deleteMessageVerificationHandler, {

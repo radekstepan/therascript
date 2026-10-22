@@ -14,11 +14,13 @@ let tmpDir: string;
 const insertSession = (
   name: string,
   status: string = 'completed',
-  date: string = '2024-05-10'
+  date: string = '2024-05-10',
+  clientName: string = 'Client'
 ): number => {
   const info = run(
     `INSERT INTO sessions (fileName, clientName, sessionName, date, sessionType, therapy, status)
-     VALUES ('audio.mp3', 'Client', ?, ?, 'intake', 'cbt', ?)`,
+     VALUES ('audio.mp3', ?, ?, ?, 'intake', 'cbt', ?)`,
+    clientName,
     name,
     date,
     status
@@ -1165,5 +1167,60 @@ describe('findFlaggedStatements', () => {
     });
     expect(paged.total).toBe(1);
     expect(paged.items).toHaveLength(0);
+  });
+
+  it('filters flagged statements by client name', () => {
+    seedFlagged();
+    const otherSession = insertSession(
+      'S2',
+      'completed',
+      '2024-05-11',
+      'Other Client'
+    );
+    const otherChat = insertChat(otherSession);
+    const otherMsg = insertMessage({
+      chatId: otherChat,
+      sender: 'ai',
+      text: 'Insomnia cures anxiety.',
+      timestamp: T0,
+      model: 'llama',
+    });
+    verificationRepository.saveMessageVerificationResult({
+      messageId: otherMsg,
+      chatId: otherChat,
+      sessionId: otherSession,
+      authoredModel: 'llama',
+      judgeModel: 'judge-9',
+      totalClaims: 1,
+      fabricatedClaims: 1,
+      accuracyScore: 0,
+      statements: [
+        {
+          statementIndex: 0,
+          kind: 'claim',
+          exactQuote: 'Insomnia cures anxiety',
+          normalizedClaim: 'Insomnia cures anxiety.',
+          verdict: 'fabricated',
+          severity: 'high',
+          reasoning: 'No transcript support.',
+        },
+      ],
+    });
+
+    expect(verificationRepository.findFlaggedStatements().total).toBe(2);
+    const mine = verificationRepository.findFlaggedStatements({
+      clientName: 'Client',
+    });
+    expect(mine.total).toBe(1);
+    expect(mine.items[0]?.clientName).toBe('Client');
+    const other = verificationRepository.findFlaggedStatements({
+      clientName: 'Other Client',
+    });
+    expect(other.total).toBe(1);
+    expect(other.items[0]?.clientName).toBe('Other Client');
+    expect(
+      verificationRepository.findFlaggedStatements({ clientName: 'Nobody' })
+        .total
+    ).toBe(0);
   });
 });

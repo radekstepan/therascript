@@ -125,6 +125,7 @@ export interface FlaggedStatementsQuery {
   severities?: StatementSeverity[];
   authoredModel?: string | null;
   sessionId?: number | null;
+  clientName?: string | null;
   search?: string | null;
   limit?: number;
   offset?: number;
@@ -1022,6 +1023,10 @@ export const verificationRepository = {
       if (query.sessionId != null) {
         conditions.push('vs.session_id = ?');
         params.push(query.sessionId);
+      }
+      if (query.clientName) {
+        conditions.push('s.clientName = ?');
+        params.push(query.clientName);
       }
       if (query.search && query.search.trim() !== '') {
         const like = `%${escapeLikePattern(query.search.trim())}%`;

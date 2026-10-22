@@ -303,6 +303,7 @@ export interface FlaggedStatementsParams {
   severity?: StatementSeverity[];
   authoredModel?: string;
   sessionId?: number;
+  clientName?: string;
   search?: string;
   limit?: number;
   offset?: number;

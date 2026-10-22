@@ -489,6 +489,7 @@ export const listVerificationStatementsHandler = ({
       severities: severities.length > 0 ? severities : undefined,
       authoredModel: parseOptionalString(query?.authoredModel) ?? null,
       sessionId: parseOptionalNumber(query?.sessionId) ?? null,
+      clientName: parseOptionalString(query?.clientName) ?? null,
       search: parseOptionalString(query?.search) ?? null,
       limit,
       offset,

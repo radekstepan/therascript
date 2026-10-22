@@ -392,6 +392,11 @@ export function VerificationAuditPage() {
             <Tabs.Content value="issues">
               <IssuesFeedTab
                 models={(stats?.byModel ?? []).map((m) => m.model)}
+                clients={Array.from(
+                  new Set(
+                    (stats?.sessionsSummary ?? []).map((s) => s.clientName)
+                  )
+                ).sort((a, b) => a.localeCompare(b))}
               />
             </Tabs.Content>
             <Tabs.Content value="coverage">

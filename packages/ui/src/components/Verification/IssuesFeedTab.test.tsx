@@ -7,11 +7,13 @@
 // navigate-to-chat handler.
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { Theme } from '@radix-ui/themes';
 import type { FlaggedStatementItem } from '../../api/verification';
+import { fetchFlaggedStatements } from '../../api/verification';
 import { IssuesFeedTab } from './IssuesFeedTab';
 
 const { ITEM } = vi.hoisted(() => {
@@ -63,7 +65,7 @@ vi.mock('../../api/verification', async (importOriginal) => {
   };
 });
 
-function renderTab() {
+function renderTab(clients: string[] = ['Jane Doe']) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false, gcTime: 0 },
@@ -73,7 +75,7 @@ function renderTab() {
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={['/verification']}>
         <Theme>
-          <IssuesFeedTab models={['llama']} />
+          <IssuesFeedTab models={['llama']} clients={clients} />
         </Theme>
       </MemoryRouter>
     </QueryClientProvider>
@@ -113,5 +115,32 @@ describe('IssuesFeedTab session link', () => {
     expect(navigateSpy).toHaveBeenCalledWith(
       '/sessions/9/chats/5?highlightMsg=12'
     );
+  });
+});
+
+describe('IssuesFeedTab client filter', () => {
+  beforeEach(() => {
+    vi.mocked(fetchFlaggedStatements).mockClear();
+    // Radix Select reaches for these on open; jsdom lacks them.
+    window.HTMLElement.prototype.scrollIntoView = vi.fn();
+    window.HTMLElement.prototype.hasPointerCapture = vi.fn();
+    window.HTMLElement.prototype.releasePointerCapture = vi.fn();
+  });
+
+  it('refetches with the selected client', async () => {
+    const user = userEvent.setup();
+    renderTab(['Jane Doe', 'John Smith']);
+    await screen.findByText('The patient takes aspirin daily.');
+
+    await user.click(
+      screen.getByRole('combobox', { name: 'Filter by client' })
+    );
+    await user.click(screen.getByRole('option', { name: 'John Smith' }));
+
+    await waitFor(() => {
+      expect(vi.mocked(fetchFlaggedStatements)).toHaveBeenCalledWith(
+        expect.objectContaining({ clientName: 'John Smith' })
+      );
+    });
   });
 });

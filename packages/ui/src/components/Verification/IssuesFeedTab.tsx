@@ -103,11 +103,18 @@ function severityBadgeColor(
   }
 }
 
-export function IssuesFeedTab({ models }: { models: string[] }) {
+export function IssuesFeedTab({
+  models,
+  clients,
+}: {
+  models: string[];
+  clients: string[];
+}) {
   const navigate = useNavigate();
   const [verdicts, setVerdicts] = useState<StatementVerdict[]>([]);
   const [severity, setSeverity] = useState<string>('__all__');
   const [authoredModel, setAuthoredModel] = useState<string>('__all__');
+  const [clientName, setClientName] = useState<string>('__all__');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
   const debouncedSearch = useDebounce(search, 350);
@@ -115,7 +122,7 @@ export function IssuesFeedTab({ models }: { models: string[] }) {
   const query = useQuery({
     queryKey: [
       'verificationStatements',
-      { verdicts, severity, authoredModel, debouncedSearch, page },
+      { verdicts, severity, authoredModel, clientName, debouncedSearch, page },
     ],
     queryFn: () =>
       fetchFlaggedStatements({
@@ -124,6 +131,7 @@ export function IssuesFeedTab({ models }: { models: string[] }) {
           ? { severity: [severity as StatementSeverity] }
           : {}),
         ...(authoredModel !== '__all__' ? { authoredModel } : {}),
+        ...(clientName !== '__all__' ? { clientName } : {}),
         ...(debouncedSearch.trim().length > 0
           ? { search: debouncedSearch.trim() }
           : {}),
@@ -202,6 +210,28 @@ export function IssuesFeedTab({ models }: { models: string[] }) {
               {models.map((model) => (
                 <Select.Item key={model} value={model}>
                   {model}
+                </Select.Item>
+              ))}
+            </Select.Content>
+          </Select.Root>
+        </Box>
+        <Box>
+          <Text as="div" size="1" color="gray" mb="1">
+            Client
+          </Text>
+          <Select.Root
+            value={clientName}
+            onValueChange={(v) => {
+              setClientName(v);
+              resetPage();
+            }}
+          >
+            <Select.Trigger aria-label="Filter by client" />
+            <Select.Content>
+              <Select.Item value="__all__">All clients</Select.Item>
+              {clients.map((client) => (
+                <Select.Item key={client} value={client}>
+                  {client}
                 </Select.Item>
               ))}
             </Select.Content>
