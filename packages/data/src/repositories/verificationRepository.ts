@@ -106,6 +106,7 @@ export interface SessionVerificationDetail {
   totalAiMessages: number;
   verifiedAiMessages: number;
   failedAiMessages: number;
+  /** Mean per-message accuracy on the 0–100 percent scale (null when nothing verified). */
   averageAccuracy: number | null;
   flaggedIssues: number;
   omissions: number;
@@ -691,7 +692,7 @@ export const verificationRepository = {
       }>(
         `SELECT COUNT(CASE WHEN status = 'completed' THEN 1 ELSE NULL END) AS verified,
                 COUNT(CASE WHEN status = 'failed' THEN 1 ELSE NULL END) AS failed,
-                AVG(CASE WHEN status = 'completed' THEN accuracy_score ELSE NULL END) AS averageAccuracy,
+                AVG(CASE WHEN status = 'completed' THEN accuracy_score ELSE NULL END) * 100.0 AS averageAccuracy,
                 COALESCE(SUM(CASE WHEN status = 'completed' THEN omissions_count ELSE 0 END), 0) AS omissions
          FROM message_verifications WHERE session_id = ?`,
         sessionId
@@ -887,7 +888,7 @@ export const verificationRepository = {
                 (SELECT COUNT(*) FROM verified_statements vs
                  WHERE vs.session_id = s.id
                    AND vs.verdict IN ('fabricated', 'contradicted', 'partially_supported', 'omission')) AS flaggedIssues,
-                (SELECT AVG(mv2.accuracy_score) FROM message_verifications mv2
+                (SELECT AVG(mv2.accuracy_score) * 100.0 FROM message_verifications mv2
                  WHERE mv2.session_id = s.id AND mv2.status = 'completed') AS averageAccuracy
          FROM sessions s
          WHERE s.status = 'completed' ${sessionFilter}

@@ -435,6 +435,7 @@ export interface SessionVerificationSummary {
   failedAiMessages: number;
   isFullyVerified: boolean;
   flaggedIssues: number;
+  /** Mean per-message accuracy on the 0–100 percent scale (null when nothing verified). */
   averageAccuracy: number | null;
 }
 

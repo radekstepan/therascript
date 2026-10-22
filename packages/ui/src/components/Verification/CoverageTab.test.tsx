@@ -41,6 +41,17 @@ describe('CoverageTab jump-to-transcript', () => {
   });
 });
 
+describe('CoverageTab accuracy display', () => {
+  it('renders percent-scale accuracy with an explanatory tooltip', () => {
+    renderTab();
+    const badge = screen.getByText('87.5%');
+    expect(badge).toBeTruthy();
+    expect(badge.getAttribute('title')).toMatch(
+      /Mean fact accuracy across 4 verified AI responses/
+    );
+  });
+});
+
 describe('CoverageTab failed verifications', () => {
   const FAILED_SUMMARY: SessionVerificationSummary = {
     ...SUMMARY,

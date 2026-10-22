@@ -607,6 +607,52 @@ describe('findVerificationsBySessionId', () => {
     expect(detail.verifications.map((v) => v.message_id)).toEqual([m1]);
     void m2;
   });
+
+  it('reports averageAccuracy on the 0-100 percent scale', () => {
+    const sessionId = insertSession('Pct');
+    const chatId = insertChat(sessionId);
+    insertMessage({
+      chatId,
+      sender: 'user',
+      text: 'Question?',
+      timestamp: T0 - 1000,
+    });
+    const m1 = insertMessage({
+      chatId,
+      sender: 'ai',
+      text: 'Mostly right.',
+      timestamp: T0,
+    });
+    const m2 = insertMessage({
+      chatId,
+      sender: 'ai',
+      text: 'Half right.',
+      timestamp: T0 + 1000,
+    });
+    verificationRepository.saveMessageVerificationResult({
+      messageId: m1,
+      chatId,
+      sessionId,
+      judgeModel: 'judge-1',
+      totalClaims: 4,
+      supportedClaims: 3,
+      partialClaims: 1,
+      accuracyScore: 0.875,
+    });
+    verificationRepository.saveMessageVerificationResult({
+      messageId: m2,
+      chatId,
+      sessionId,
+      judgeModel: 'judge-1',
+      totalClaims: 2,
+      supportedClaims: 1,
+      accuracyScore: 0.5,
+    });
+    const detail =
+      verificationRepository.findVerificationsBySessionId(sessionId);
+    // Mean of 0.875 and 0.5, percent-scaled: 68.75 (not 0.6875).
+    expect(detail.averageAccuracy).toBeCloseTo(68.75, 10);
+  });
 });
 
 describe('getGlobalVerificationAnalytics', () => {
@@ -710,6 +756,11 @@ describe('getGlobalVerificationAnalytics', () => {
     expect(summaryS1?.totalAiMessages).toBe(2);
     expect(summaryS1?.verifiedAiMessages).toBe(2);
     expect(summaryS1?.isFullyVerified).toBe(true);
+    // Mean of 0.875 and 1/3, percent-scaled (not 0-1).
+    expect(summaryS1?.averageAccuracy).toBeCloseTo(
+      ((0.875 + 1 / 3) / 2) * 100,
+      10
+    );
     expect(summaryS2?.isFullyVerified).toBe(false);
     expect(summaryS2?.averageAccuracy).toBeNull();
   });

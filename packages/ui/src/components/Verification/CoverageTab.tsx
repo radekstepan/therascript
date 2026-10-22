@@ -141,6 +141,7 @@ export function CoverageTab({
                       }
                       variant="soft"
                       size="1"
+                      title={`Mean fact accuracy across ${session.verifiedAiMessages} verified AI response${session.verifiedAiMessages === 1 ? '' : 's'} — per response: supported claims plus half credit for partials, over extracted claims plus omissions`}
                     >
                       {session.averageAccuracy.toFixed(1)}%
                     </Badge>
