@@ -15,10 +15,12 @@ For background on the Verification Agent and LLM lifecycle, see `AGENTS.md` (§1
 
 ## Tasks
 
-Fact Check when I want to highlight a sentence in a note it should not keep flashing. Just a single flash and not border, just background.
+- [x] Fact Check when I want to highlight a sentence in a note it should not keep flashing. Just a single flash and not border, just background.
 
-Accuracy by Authoring LLM - Claim mix little bar chart needs onhover tooltip. Make sure it won't be cutoff by the UI.
+  Writeup: `packages/ui/src/styles/global.css` — `.verified-statement-mark-active` now runs `verified-mark-flash 0.9s ease-out 1` (was `2`) with `box-shadow: none` (was a persistent 2px verdict ring). Keyframes animate `background-color` from the verdict tint (`--verified-flash` red/amber/green `a5`) with only the `0%` frame, so the mark flashes once and settles back into its resting fill. Reason: the repeating ring flash was distracting and the persistent border fought the resting underline styles; a single background pulse orients the reader without lingering chrome.
 
-Fact Check page, Job History Action has "View details" that's cuttoff. Just say "View" so it's a single line.
+- [ ] Accuracy by Authoring LLM - Claim mix little bar chart needs onhover tooltip. Make sure it won't be cutoff by the UI.
 
-Fact Check page, Transcripts coverage, add a column that says what was the (predominant) chat LLM across all chats for that transcript.
+- [ ] Fact Check page, Job History Action has "View details" that's cuttoff. Just say "View" so it's a single line.
+
+- [ ] Fact Check page, Transcripts coverage, add a column that says what was the (predominant) chat LLM across all chats for that transcript.
