@@ -550,7 +550,7 @@ export function StatementVerdictModal({
           (current !== null &&
             isDismissible(current) &&
             current.review_token != null)) && (
-          <Flex justify="between" align="center" mt="4" gap="2" wrap="wrap">
+          <Flex justify="end" align="center" mt="4" gap="2" wrap="wrap">
             <Flex direction="column" gap="1" align="end">
               <Flex gap="2" wrap="wrap" justify="end">
                 {/* Per-statement action. Hidden for supported/confirmed findings. */}

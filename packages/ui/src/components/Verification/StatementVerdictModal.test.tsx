@@ -327,6 +327,44 @@ describe('StatementVerdictModal clear action removed', () => {
   });
 });
 
+describe('StatementVerdictModal footer alignment', () => {
+  const SECOND: VerifiedStatement = {
+    ...STATEMENT,
+    id: 12,
+    statement_index: 1,
+    exact_quote: 'The client attends weekly sessions.',
+    normalized_claim: 'The client attends weekly sessions.',
+    verdict: 'supported',
+    severity: 'none',
+  };
+
+  it('right-aligns the Prev/Next navigation (no left-side actions)', async () => {
+    renderWithClient(
+      <Theme>
+        <StatementVerdictModal
+          open
+          onOpenChange={() => {}}
+          statements={[STATEMENT, SECOND]}
+          initialStatementId={STATEMENT.id}
+          authoredModel="author-model"
+          judgeModel="judge-model"
+          verifiedAt={Date.now()}
+        />
+      </Theme>
+    );
+
+    const next = await screen.findByRole('button', { name: 'Next' });
+    const prev = screen.getByRole('button', { name: 'Prev' });
+    // Both steppers share one row container pinned to the right edge;
+    // the response-scoped Clear action (the old left column) is gone.
+    const row = next.closest('div');
+    expect(row).not.toBeNull();
+    expect(row!.contains(prev)).toBe(true);
+    expect(row!.className).toMatch(/jc-end|justify-end|justify-content/);
+    expect(screen.queryByRole('button', { name: /Clear/ })).toBeNull();
+  });
+});
+
 describe('StatementVerdictModal dismissal', () => {
   const SUPPORTED: VerifiedStatement = {
     ...STATEMENT,

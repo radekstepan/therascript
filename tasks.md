@@ -20,7 +20,10 @@ For background on the Verification Agent and LLM lifecycle, see `AGENTS.md` (§1
   - **Why:** the response-scoped delete did not belong in a per-statement verdict modal (its tooltip had to explain it cleared all N statements, not the one shown); failed-message retry keeps its own inline entry point.
   - **Tests:** `StatementVerdictModal.test.tsx` — removed the clear-action suite, replaced with a "clear action removed" assertion; all 15 modal tests + 39 `SessionView/Chat` tests pass.
 
-- Align Prev and Next buttons in Fact Check to the right
+- [x] Align Prev and Next buttons in Fact Check to the right
+  - **Done:** modal footer switched from `justify="between"` (with an empty left filler left over from the Clear action) to a single right-aligned column in `StatementVerdictModal.tsx`; Prev/Next and Dismiss share one right-pinned row.
+  - **Why:** with no left-side action remaining, `space-between` pushed the steppers unpredictably; right-pinning matches the dialog-close affordance and other modal footers.
+  - **Tests:** new "footer alignment" case in `StatementVerdictModal.test.tsx` asserting Prev/Next share a right-justified row and no Clear button exists; 16/16 modal tests pass.
 
 - Rename "Dismiss Statement (Confirmed)" to "Dismiss" with a trahscan delete icon
 
