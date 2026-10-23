@@ -15,38 +15,4 @@ For background on the Verification Agent and LLM lifecycle, see `AGENTS.md` (§1
 
 ## Tasks
 
-- [x] remove "Cleare Response Fact Check button from Fact Check modal
-  - **Done:** deleted the "Clear Response Fact Check" footer action (plus its `clearMutation` and the now-unused `messageId` modal prop) from `packages/ui/src/components/Verification/StatementVerdictModal.tsx`; `ChatMessages.tsx` no longer passes `messageId`. Per-response clearing stays available for failed verifications via the "Clear" button in `ChatMessageBubble.tsx`, and via Reset All Verifications on the `/verification` hub.
-  - **Why:** the response-scoped delete did not belong in a per-statement verdict modal (its tooltip had to explain it cleared all N statements, not the one shown); failed-message retry keeps its own inline entry point.
-  - **Tests:** `StatementVerdictModal.test.tsx` — removed the clear-action suite, replaced with a "clear action removed" assertion; all 15 modal tests + 39 `SessionView/Chat` tests pass.
-
-- [x] Align Prev and Next buttons in Fact Check to the right
-  - **Done:** modal footer switched from `justify="between"` (with an empty left filler left over from the Clear action) to a single right-aligned column in `StatementVerdictModal.tsx`; Prev/Next and Dismiss share one right-pinned row.
-  - **Why:** with no left-side action remaining, `space-between` pushed the steppers unpredictably; right-pinning matches the dialog-close affordance and other modal footers.
-  - **Tests:** new "footer alignment" case in `StatementVerdictModal.test.tsx` asserting Prev/Next share a right-justified row and no Clear button exists; 16/16 modal tests pass.
-
-- [x] Rename "Dismiss Statement (Confirmed)" to "Dismiss" with a trahscan delete icon
-  - **Done:** Dismiss button in `StatementVerdictModal.tsx` now reads "Dismiss" with a `TrashIcon`; tooltip, pending state, and "Confirmed by you" badge unchanged.
-  - **Why:** the old label restated the stored review status instead of the action; the icon keeps the destructive affordance recognizable at a glance.
-  - **Tests:** updated all `StatementVerdictModal.test.tsx` references; 16/16 pass.
-
-- [x] Make it so that Fact Check modal shows to the left of the Transcript and we can see both modal and the transcript. Make the modal moveable too.
-  - **Done:** `StatementVerdictModal.tsx` is now a modeless left-docked panel (fixed `left: 24px`, vertically centered, 560px max) with no overlay, so the transcript stays visible and interactive beside it; header is a pointer-capture drag handle with viewport clamping (position resets on open). Uses raw `@radix-ui/react-dialog` primitives with `modal={false}` + the same `rt-DialogContent` surface classes, because the Themes `Dialog.Root` hardcodes `modal: true`; Escape-to-close and `role="dialog"` preserved.
-  - **Why:** a centered modal covered the transcript and blocked interacting with it, defeating side-by-side evidence comparison; a docked modeless panel lets the reader cross-check quotes against the transcript.
-  - **Tests:** new "left-dock and drag" cases (dock position, header-drag moves the panel, Close button doesn't start drags); 19/19 pass; `tsc --noEmit` clean. Follow-up fix: the raw portal renders outside the app `<Theme>` subtree, losing all design tokens (transparent background, no padding) — wrapped portal content in `<Theme>` (same as the Themes dialog does internally); verified with a real-browser screenshot.
-
-- [x] Make sure we have e2e coverage around fact checking including the Fact Check page and individual session transcript page
-  - **Done:** new `packages/ui/tests/e2e/fact-check.spec.ts` (2 tests, 4/4 green on repeat) backed by a `POST /api/__e2e/set-fact-check` mock hook (`packages/ui/src/mocks/handlers/e2e.ts`, `verification.ts`, `sessionChats.ts`, `state.ts`) seeding chat messages, chat-scoped verifications, and the flagged feed, plus mock dismiss (409 on stale tokens) and per-message clear handlers. Covers: hub Issues feed → deep-link opens panel at fabricated statement; session page transcript + severity link → docked movable panel (dock position, header drag, Prev/Next, Dismiss → "Confirmed by you").
-  - **Why:** the Fact Check modal/panel previously had unit coverage only; the mocked dashboard returned empty fixtures, so neither surface was exercised end-to-end.
-  - **Tests:** 2 new e2e specs pass (incl. `--repeat-each=2`); neighboring suites green (verification-coverage, chat-navigation, transcript-edit, speaker-rename — 7/7); full ui unit suite 304/304. Fixtures live in `localStorage` because MSW v2 resolves handlers in the page realm and full `page.goto` loads wipe module state — this also explains why the pre-existing seed-then-navigate specs (jobs-queue, live-banner) fail in this environment on the clean tree; left untouched as out of scope.
-  - Follow-ups for a later batch: migrate the older `set-verification-jobs` fixtures to the same `localStorage` pattern; re-check the red seed-based specs.
-
-- [x] Same-hash paragraph links re-highlight
-  - **Done:** `Transcription.tsx` extracts scroll+highlight into a shared `highlightParagraphById` callback (timeout reset, not stacked) used by the `location.hash` effect and a new document-level click listener for `a[href*="#paragraph-"]` (document-level because evidence links portal to `document.body`; containment match because Router renders full hrefs). Re-clicking `#paragraph-282` while on it now scrolls to and re-highlights it.
-  - **Why:** the hash effect only reruns on location change, so same-hash clicks silently did nothing.
-  - **Tests:** new `fact-check.spec.ts` case (highlight → clear → same-hash re-click → highlighted); 6/6 e2e on repeat; 145/145 Verification+SessionView unit tests.
-
-- [x] Dismiss button left, grey, bold
-  - **Done:** `StatementVerdictModal.tsx` footer is now `space-between`: grey solid bold Dismiss pinned left, Prev/Next right (unchanged). Unit test rewritten to assert the left/right split, grey `data-accent-color`, and bold label.
-  - **Why:** Dismiss is the primary per-finding action and reads better as the footer's left anchor; grey de-emphasizes vs. the old green while bold keeps it legible.
-  - **Tests:** rewritten footer-layout cases; 20/20 modal tests pass. (Also fixed the e2e drag test to press at the handle center — the old corner offset landed in theme padding.)
+Fact Check modal - If you click Next or Prev, the statement in the note itself (on the chat thread) should flash/highlight with the appropriaet color (so we know where we at in the note. And also when I open the modal it starts bottom left and then it slides up. Can we "remember" the last position and show the modal there immediately?
