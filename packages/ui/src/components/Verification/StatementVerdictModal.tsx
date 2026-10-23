@@ -22,6 +22,7 @@ import {
   ScrollArea,
   Separator,
   Text,
+  Theme,
 } from '@radix-ui/themes';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import {
@@ -340,385 +341,395 @@ export function StatementVerdictModal({
   // fully visible and interactive beside the docked panel (the Themes
   // Dialog root hardcodes modal, so the raw primitives are used here
   // with the same `rt-DialogContent` surface classes). No overlay is
-  // rendered, so nothing dims the transcript.
+  // rendered, so nothing dims the transcript. The inner `<Theme>`
+  // re-establishes the design-token scope the portal escapes (the app
+  // `<Theme>` does not cover `document.body`): without it the panel
+  // and its controls lose background, padding, and shadows.
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange} modal={false}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Content
-          data-testid="fact-check-modal"
-          className="rt-BaseDialogContent rt-DialogContent rt-r-size-3"
-          style={{
-            maxWidth: 640,
-            width: 'min(560px, calc(100vw - 48px))',
-            position: 'fixed',
-            left: 24,
-            top: '50%',
-            margin: 0,
-            transform: `translateY(-50%) translate(${drag.x}px, ${drag.y}px)`,
-            maxHeight: 'calc(100vh - 48px)',
-            zIndex: 50,
-          }}
-          onKeyDown={handleKeyDown}
-        >
-          <Flex
-            justify="between"
-            align="start"
-            gap="3"
-            data-testid="fact-check-drag-handle"
-            title="Drag to move"
-            onPointerDown={handleDragStart}
-            onPointerMove={handleDragMove}
-            onPointerUp={handleDragEnd}
-            onPointerCancel={handleDragEnd}
+        <Theme>
+          <DialogPrimitive.Content
+            data-testid="fact-check-modal"
+            className="rt-BaseDialogContent rt-DialogContent rt-r-size-3"
             style={{
-              cursor: 'move',
-              touchAction: 'none',
-              userSelect: 'none',
+              maxWidth: 640,
+              width: 'min(560px, calc(100vw - 48px))',
+              position: 'fixed',
+              left: 24,
+              top: '50%',
+              margin: 0,
+              transform: `translateY(-50%) translate(${drag.x}px, ${drag.y}px)`,
+              maxHeight: 'calc(100vh - 48px)',
+              zIndex: 50,
             }}
+            onKeyDown={handleKeyDown}
           >
-            <Box>
-              <DialogPrimitive.Title asChild>
-                <Heading size="4">Fact Check</Heading>
-              </DialogPrimitive.Title>
-              <DialogPrimitive.Description asChild>
-                <Text as="p" size="2" color="gray">
-                  {sorted.length > 1
-                    ? `Statement ${selectedIndex + 1} of ${sorted.length} in this response`
-                    : 'Fact-check verdict for this statement'}
-                </Text>
-              </DialogPrimitive.Description>
-            </Box>
-            <Flex align="center" gap="1" style={{ flexShrink: 0 }}>
-              <DialogPrimitive.Close asChild>
-                <IconButton
-                  size="2"
-                  variant="ghost"
-                  color="gray"
-                  aria-label="Close"
-                >
-                  <Cross2Icon />
-                </IconButton>
-              </DialogPrimitive.Close>
-            </Flex>
-          </Flex>
-
-          {current === null ? (
-            <Box py="5">
-              <Callout.Root color="gray" size="2">
-                <Callout.Icon>
-                  <InfoCircledIcon />
-                </Callout.Icon>
-                <Callout.Text>
-                  No verified statements available for this message yet.
-                </Callout.Text>
-              </Callout.Root>
-            </Box>
-          ) : (
-            <ScrollArea
-              type="auto"
-              scrollbars="vertical"
-              style={{ maxHeight: '62vh', marginTop: 12 }}
+            <Flex
+              justify="between"
+              align="start"
+              gap="3"
+              data-testid="fact-check-drag-handle"
+              title="Drag to move"
+              onPointerDown={handleDragStart}
+              onPointerMove={handleDragMove}
+              onPointerUp={handleDragEnd}
+              onPointerCancel={handleDragEnd}
+              style={{
+                cursor: 'move',
+                touchAction: 'none',
+                userSelect: 'none',
+              }}
             >
-              <Flex direction="column" gap="4" pr="4" pb="2">
-                {/* Header badges */}
-                <Flex align="center" gap="2" wrap="wrap">
-                  <Badge
-                    color={getVerdictBadgeColor(current.verdict)}
-                    variant="solid"
+              <Box>
+                <DialogPrimitive.Title asChild>
+                  <Heading size="4">Fact Check</Heading>
+                </DialogPrimitive.Title>
+                <DialogPrimitive.Description asChild>
+                  <Text as="p" size="2" color="gray">
+                    {sorted.length > 1
+                      ? `Statement ${selectedIndex + 1} of ${sorted.length} in this response`
+                      : 'Fact-check verdict for this statement'}
+                  </Text>
+                </DialogPrimitive.Description>
+              </Box>
+              <Flex align="center" gap="1" style={{ flexShrink: 0 }}>
+                <DialogPrimitive.Close asChild>
+                  <IconButton
                     size="2"
+                    variant="ghost"
+                    color="gray"
+                    aria-label="Close"
                   >
-                    {getVerdictLabel(current.verdict).toUpperCase()}
-                  </Badge>
-                  {current.severity !== 'none' && (
-                    <Badge
-                      color={getSeverityBadgeColor(current.severity)}
-                      variant="soft"
-                      size="1"
-                    >
-                      {capitalize(current.severity)} severity
-                    </Badge>
-                  )}
-                  <Badge color="gray" variant="soft" size="1">
-                    {Math.round(current.confidence * 100)}% confidence
-                  </Badge>
-                  {current.kind === 'omission' && (
-                    <Badge color="amber" variant="outline" size="1">
-                      Omitted from response
-                    </Badge>
-                  )}
-                  {current.review_status === 'confirmed' && (
-                    <Badge color="green" variant="solid" size="1">
-                      Confirmed by you
-                      {current.confirmed_at != null
-                        ? ` · ${new Date(current.confirmed_at).toLocaleString(
-                            undefined,
-                            { dateStyle: 'medium', timeStyle: 'short' }
-                          )}`
-                        : ''}
-                    </Badge>
-                  )}
-                </Flex>
+                    <Cross2Icon />
+                  </IconButton>
+                </DialogPrimitive.Close>
+              </Flex>
+            </Flex>
 
-                {/* Section 1 — extracted statement */}
-                <Box>
-                  <Text as="div" size="2" weight="medium" mb="2">
-                    {current.kind === 'omission'
-                      ? 'What the response missed'
-                      : 'Extracted statement'}
-                  </Text>
-                  {current.kind === 'claim' &&
-                    current.exact_quote.trim() !== '' && (
-                      <Box
-                        p="3"
-                        mb="2"
-                        style={{
-                          background: 'var(--gray-a2)',
-                          border: '1px solid var(--gray-a5)',
-                          borderLeft: '3px solid var(--gray-8)',
-                          borderRadius: 'var(--radius-3)',
-                        }}
-                      >
-                        <Flex gap="2" align="start">
-                          <Box pt="1" style={{ color: 'var(--gray-9)' }}>
-                            <QuoteIcon />
-                          </Box>
-                          <Text size="2" style={{ fontStyle: 'italic' }}>
-                            &ldquo;{current.exact_quote}&rdquo;
-                          </Text>
-                        </Flex>
-                      </Box>
-                    )}
-                  {current.kind === 'omission' &&
-                    userQuestion != null &&
-                    userQuestion.trim() !== '' && (
-                      <Box
-                        p="3"
-                        mb="2"
-                        style={{
-                          background: 'var(--accent-a2)',
-                          border: '1px solid var(--accent-a5)',
-                          borderRadius: 'var(--radius-3)',
-                        }}
-                      >
-                        <Text as="div" size="1" color="gray" mb="1">
-                          Therapist asked
-                        </Text>
-                        <Text size="2">{userQuestion}</Text>
-                      </Box>
-                    )}
-                  <Flex gap="2" align="start">
-                    <Text size="2" color="gray" style={{ flexShrink: 0 }}>
-                      Claim:
-                    </Text>
-                    <Text size="2">{current.normalized_claim}</Text>
-                  </Flex>
-                </Box>
-
-                <Separator size="4" />
-
-                {/* Section 2 — judge reasoning */}
-                <Box>
-                  <Text as="div" size="2" weight="medium" mb="2">
-                    Judge&rsquo;s reasoning
-                  </Text>
-                  <Text size="2" color="gray" style={{ lineHeight: 1.6 }}>
-                    {current.reasoning}
-                  </Text>
-                </Box>
-
-                <Separator size="4" />
-
-                {/* Section 3 — transcript evidence */}
-                <Box>
-                  <Text as="div" size="2" weight="medium" mb="2">
-                    Transcript evidence
-                  </Text>
-                  {showNoEvidenceCallout && (
-                    <Callout.Root color="red" size="2">
-                      <Callout.Icon>
-                        <ExclamationTriangleIcon />
-                      </Callout.Icon>
-                      <Callout.Text>
-                        No matching evidence found anywhere in the session
-                        transcript — this statement appears to be fabricated.
-                      </Callout.Text>
-                    </Callout.Root>
-                  )}
-                  {showEmptyEvidenceNote && (
-                    <Callout.Root color="gray" size="1">
-                      <Callout.Icon>
-                        <InfoCircledIcon />
-                      </Callout.Icon>
-                      <Callout.Text>
-                        The Fact Check did not attach transcript quotes for this
-                        statement.
-                      </Callout.Text>
-                    </Callout.Root>
-                  )}
-                  <Flex direction="column" gap="2">
-                    {evidence.map((item, idx) => (
-                      <Box
-                        key={`${item.paragraphIndex ?? 'na'}-${idx}`}
-                        p="3"
-                        style={{
-                          background: 'var(--gray-a2)',
-                          border: '1px solid var(--gray-a5)',
-                          borderRadius: 'var(--radius-3)',
-                        }}
-                      >
-                        <Flex align="center" gap="2" wrap="wrap" mb="2">
-                          {item.speaker != null &&
-                            item.speaker.trim() !== '' &&
-                            item.speaker.trim().toUpperCase() !== 'UNKNOWN' && (
-                              <Badge color="blue" variant="soft" size="1">
-                                <PersonIcon />
-                                {item.speaker}
-                              </Badge>
-                            )}
-                          <Badge
-                            color="gray"
-                            variant="soft"
-                            size="1"
-                            title={
-                              item.timestampMs != null
-                                ? `Transcript position ${formatEvidenceTimestamp(item.timestampMs)}`
-                                : 'Unknown transcript position'
-                            }
-                          >
-                            <ClockIcon />
-                            {formatEvidenceTimestamp(item.timestampMs)}
-                          </Badge>
-                          {item.paragraphIndex != null && (
-                            <Text size="1" as="span">
-                              <Link
-                                to={`#paragraph-${item.paragraphIndex}`}
-                                title="Jump to this paragraph in the session transcript"
-                                aria-label={`Jump to transcript paragraph ${item.paragraphIndex}`}
-                                className="hover:underline"
-                                style={{ color: 'var(--accent-11)' }}
-                              >
-                                ¶{item.paragraphIndex}
-                              </Link>
-                            </Text>
-                          )}
-                        </Flex>
-                        <Text size="2" style={{ lineHeight: 1.6 }}>
-                          &ldquo;{item.quote}&rdquo;
-                        </Text>
-                      </Box>
-                    ))}
-                  </Flex>
-                </Box>
-
-                <Separator size="4" />
-
-                {/* Footer metadata */}
-                <Flex direction="column" gap="1">
-                  {summaryAssessment != null && summaryAssessment !== '' && (
-                    <Text size="1" color="gray" style={{ fontStyle: 'italic' }}>
-                      {summaryAssessment}
-                    </Text>
-                  )}
+            {current === null ? (
+              <Box py="5">
+                <Callout.Root color="gray" size="2">
+                  <Callout.Icon>
+                    <InfoCircledIcon />
+                  </Callout.Icon>
+                  <Callout.Text>
+                    No verified statements available for this message yet.
+                  </Callout.Text>
+                </Callout.Root>
+              </Box>
+            ) : (
+              <ScrollArea
+                type="auto"
+                scrollbars="vertical"
+                style={{ maxHeight: '62vh', marginTop: 12 }}
+              >
+                <Flex direction="column" gap="4" pr="4" pb="2">
+                  {/* Header badges */}
                   <Flex align="center" gap="2" wrap="wrap">
-                    <Text size="1" color="gray">
-                      Authored by:{' '}
-                      <Text weight="medium">
-                        {authoredModel || 'Unknown model'}
+                    <Badge
+                      color={getVerdictBadgeColor(current.verdict)}
+                      variant="solid"
+                      size="2"
+                    >
+                      {getVerdictLabel(current.verdict).toUpperCase()}
+                    </Badge>
+                    {current.severity !== 'none' && (
+                      <Badge
+                        color={getSeverityBadgeColor(current.severity)}
+                        variant="soft"
+                        size="1"
+                      >
+                        {capitalize(current.severity)} severity
+                      </Badge>
+                    )}
+                    <Badge color="gray" variant="soft" size="1">
+                      {Math.round(current.confidence * 100)}% confidence
+                    </Badge>
+                    {current.kind === 'omission' && (
+                      <Badge color="amber" variant="outline" size="1">
+                        Omitted from response
+                      </Badge>
+                    )}
+                    {current.review_status === 'confirmed' && (
+                      <Badge color="green" variant="solid" size="1">
+                        Confirmed by you
+                        {current.confirmed_at != null
+                          ? ` · ${new Date(current.confirmed_at).toLocaleString(
+                              undefined,
+                              { dateStyle: 'medium', timeStyle: 'short' }
+                            )}`
+                          : ''}
+                      </Badge>
+                    )}
+                  </Flex>
+
+                  {/* Section 1 — extracted statement */}
+                  <Box>
+                    <Text as="div" size="2" weight="medium" mb="2">
+                      {current.kind === 'omission'
+                        ? 'What the response missed'
+                        : 'Extracted statement'}
+                    </Text>
+                    {current.kind === 'claim' &&
+                      current.exact_quote.trim() !== '' && (
+                        <Box
+                          p="3"
+                          mb="2"
+                          style={{
+                            background: 'var(--gray-a2)',
+                            border: '1px solid var(--gray-a5)',
+                            borderLeft: '3px solid var(--gray-8)',
+                            borderRadius: 'var(--radius-3)',
+                          }}
+                        >
+                          <Flex gap="2" align="start">
+                            <Box pt="1" style={{ color: 'var(--gray-9)' }}>
+                              <QuoteIcon />
+                            </Box>
+                            <Text size="2" style={{ fontStyle: 'italic' }}>
+                              &ldquo;{current.exact_quote}&rdquo;
+                            </Text>
+                          </Flex>
+                        </Box>
+                      )}
+                    {current.kind === 'omission' &&
+                      userQuestion != null &&
+                      userQuestion.trim() !== '' && (
+                        <Box
+                          p="3"
+                          mb="2"
+                          style={{
+                            background: 'var(--accent-a2)',
+                            border: '1px solid var(--accent-a5)',
+                            borderRadius: 'var(--radius-3)',
+                          }}
+                        >
+                          <Text as="div" size="1" color="gray" mb="1">
+                            Therapist asked
+                          </Text>
+                          <Text size="2">{userQuestion}</Text>
+                        </Box>
+                      )}
+                    <Flex gap="2" align="start">
+                      <Text size="2" color="gray" style={{ flexShrink: 0 }}>
+                        Claim:
                       </Text>
+                      <Text size="2">{current.normalized_claim}</Text>
+                    </Flex>
+                  </Box>
+
+                  <Separator size="4" />
+
+                  {/* Section 2 — judge reasoning */}
+                  <Box>
+                    <Text as="div" size="2" weight="medium" mb="2">
+                      Judge&rsquo;s reasoning
                     </Text>
-                    <Text size="1" color="gray">
-                      ·
+                    <Text size="2" color="gray" style={{ lineHeight: 1.6 }}>
+                      {current.reasoning}
                     </Text>
-                    <Text size="1" color="gray">
-                      Audited by Judge:{' '}
-                      <Text weight="medium">
-                        {judgeModel || 'Unknown judge'}
+                  </Box>
+
+                  <Separator size="4" />
+
+                  {/* Section 3 — transcript evidence */}
+                  <Box>
+                    <Text as="div" size="2" weight="medium" mb="2">
+                      Transcript evidence
+                    </Text>
+                    {showNoEvidenceCallout && (
+                      <Callout.Root color="red" size="2">
+                        <Callout.Icon>
+                          <ExclamationTriangleIcon />
+                        </Callout.Icon>
+                        <Callout.Text>
+                          No matching evidence found anywhere in the session
+                          transcript — this statement appears to be fabricated.
+                        </Callout.Text>
+                      </Callout.Root>
+                    )}
+                    {showEmptyEvidenceNote && (
+                      <Callout.Root color="gray" size="1">
+                        <Callout.Icon>
+                          <InfoCircledIcon />
+                        </Callout.Icon>
+                        <Callout.Text>
+                          The Fact Check did not attach transcript quotes for
+                          this statement.
+                        </Callout.Text>
+                      </Callout.Root>
+                    )}
+                    <Flex direction="column" gap="2">
+                      {evidence.map((item, idx) => (
+                        <Box
+                          key={`${item.paragraphIndex ?? 'na'}-${idx}`}
+                          p="3"
+                          style={{
+                            background: 'var(--gray-a2)',
+                            border: '1px solid var(--gray-a5)',
+                            borderRadius: 'var(--radius-3)',
+                          }}
+                        >
+                          <Flex align="center" gap="2" wrap="wrap" mb="2">
+                            {item.speaker != null &&
+                              item.speaker.trim() !== '' &&
+                              item.speaker.trim().toUpperCase() !==
+                                'UNKNOWN' && (
+                                <Badge color="blue" variant="soft" size="1">
+                                  <PersonIcon />
+                                  {item.speaker}
+                                </Badge>
+                              )}
+                            <Badge
+                              color="gray"
+                              variant="soft"
+                              size="1"
+                              title={
+                                item.timestampMs != null
+                                  ? `Transcript position ${formatEvidenceTimestamp(item.timestampMs)}`
+                                  : 'Unknown transcript position'
+                              }
+                            >
+                              <ClockIcon />
+                              {formatEvidenceTimestamp(item.timestampMs)}
+                            </Badge>
+                            {item.paragraphIndex != null && (
+                              <Text size="1" as="span">
+                                <Link
+                                  to={`#paragraph-${item.paragraphIndex}`}
+                                  title="Jump to this paragraph in the session transcript"
+                                  aria-label={`Jump to transcript paragraph ${item.paragraphIndex}`}
+                                  className="hover:underline"
+                                  style={{ color: 'var(--accent-11)' }}
+                                >
+                                  ¶{item.paragraphIndex}
+                                </Link>
+                              </Text>
+                            )}
+                          </Flex>
+                          <Text size="2" style={{ lineHeight: 1.6 }}>
+                            &ldquo;{item.quote}&rdquo;
+                          </Text>
+                        </Box>
+                      ))}
+                    </Flex>
+                  </Box>
+
+                  <Separator size="4" />
+
+                  {/* Footer metadata */}
+                  <Flex direction="column" gap="1">
+                    {summaryAssessment != null && summaryAssessment !== '' && (
+                      <Text
+                        size="1"
+                        color="gray"
+                        style={{ fontStyle: 'italic' }}
+                      >
+                        {summaryAssessment}
                       </Text>
-                    </Text>
-                    {verifiedDate !== null && (
+                    )}
+                    <Flex align="center" gap="2" wrap="wrap">
+                      <Text size="1" color="gray">
+                        Authored by:{' '}
+                        <Text weight="medium">
+                          {authoredModel || 'Unknown model'}
+                        </Text>
+                      </Text>
+                      <Text size="1" color="gray">
+                        ·
+                      </Text>
+                      <Text size="1" color="gray">
+                        Audited by Judge:{' '}
+                        <Text weight="medium">
+                          {judgeModel || 'Unknown judge'}
+                        </Text>
+                      </Text>
+                      {verifiedDate !== null && (
+                        <>
+                          <Text size="1" color="gray">
+                            ·
+                          </Text>
+                          <Text size="1" color="gray">
+                            {verifiedDate}
+                          </Text>
+                        </>
+                      )}
+                    </Flex>
+                  </Flex>
+                </Flex>
+              </ScrollArea>
+            )}
+
+            {(sorted.length > 1 ||
+              (current !== null &&
+                isDismissible(current) &&
+                current.review_token != null)) && (
+              <Flex justify="end" align="center" mt="4" gap="2" wrap="wrap">
+                <Flex direction="column" gap="1" align="end">
+                  <Flex gap="2" wrap="wrap" justify="end">
+                    {/* Per-statement action. Hidden for supported/confirmed findings. */}
+                    {current !== null &&
+                      isDismissible(current) &&
+                      current.review_token != null && (
+                        <AppTooltip content="Confirm that this finding is not an issue. Removes its highlight, updates accuracy and issue counts, and keeps this confirmation for future Fact Checks of unchanged content. Other statements are unchanged.">
+                          <span style={{ display: 'inline-block' }}>
+                            <Button
+                              size="2"
+                              variant="solid"
+                              color="green"
+                              disabled={dismissMutation.isPending}
+                              onClick={() =>
+                                dismissMutation.mutate({
+                                  statementId: current.id,
+                                  token: current.review_token as string,
+                                })
+                              }
+                            >
+                              {dismissMutation.isPending ? (
+                                'Dismissing…'
+                              ) : (
+                                <>
+                                  <TrashIcon /> Dismiss
+                                </>
+                              )}
+                            </Button>
+                          </span>
+                        </AppTooltip>
+                      )}
+                    {sorted.length > 1 && (
                       <>
-                        <Text size="1" color="gray">
-                          ·
-                        </Text>
-                        <Text size="1" color="gray">
-                          {verifiedDate}
-                        </Text>
+                        <Button
+                          size="2"
+                          variant="soft"
+                          color="gray"
+                          onClick={goPrev}
+                          disabled={dismissMutation.isPending}
+                        >
+                          <ChevronLeftIcon /> Prev
+                        </Button>
+                        <Button
+                          size="2"
+                          variant="soft"
+                          color="gray"
+                          onClick={goNext}
+                          disabled={dismissMutation.isPending}
+                        >
+                          Next <ChevronRightIcon />
+                        </Button>
                       </>
                     )}
                   </Flex>
-                </Flex>
-              </Flex>
-            </ScrollArea>
-          )}
-
-          {(sorted.length > 1 ||
-            (current !== null &&
-              isDismissible(current) &&
-              current.review_token != null)) && (
-            <Flex justify="end" align="center" mt="4" gap="2" wrap="wrap">
-              <Flex direction="column" gap="1" align="end">
-                <Flex gap="2" wrap="wrap" justify="end">
-                  {/* Per-statement action. Hidden for supported/confirmed findings. */}
-                  {current !== null &&
-                    isDismissible(current) &&
-                    current.review_token != null && (
-                      <AppTooltip content="Confirm that this finding is not an issue. Removes its highlight, updates accuracy and issue counts, and keeps this confirmation for future Fact Checks of unchanged content. Other statements are unchanged.">
-                        <span style={{ display: 'inline-block' }}>
-                          <Button
-                            size="2"
-                            variant="solid"
-                            color="green"
-                            disabled={dismissMutation.isPending}
-                            onClick={() =>
-                              dismissMutation.mutate({
-                                statementId: current.id,
-                                token: current.review_token as string,
-                              })
-                            }
-                          >
-                            {dismissMutation.isPending ? (
-                              'Dismissing…'
-                            ) : (
-                              <>
-                                <TrashIcon /> Dismiss
-                              </>
-                            )}
-                          </Button>
-                        </span>
-                      </AppTooltip>
-                    )}
-                  {sorted.length > 1 && (
-                    <>
-                      <Button
-                        size="2"
-                        variant="soft"
-                        color="gray"
-                        onClick={goPrev}
-                        disabled={dismissMutation.isPending}
-                      >
-                        <ChevronLeftIcon /> Prev
-                      </Button>
-                      <Button
-                        size="2"
-                        variant="soft"
-                        color="gray"
-                        onClick={goNext}
-                        disabled={dismissMutation.isPending}
-                      >
-                        Next <ChevronRightIcon />
-                      </Button>
-                    </>
+                  {dismissMutation.isError && (
+                    <Text size="1" color="red" role="alert">
+                      {mutationErrorMessage(dismissMutation.error)}
+                    </Text>
                   )}
                 </Flex>
-                {dismissMutation.isError && (
-                  <Text size="1" color="red" role="alert">
-                    {mutationErrorMessage(dismissMutation.error)}
-                  </Text>
-                )}
               </Flex>
-            </Flex>
-          )}
-        </DialogPrimitive.Content>
+            )}
+          </DialogPrimitive.Content>
+        </Theme>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>
   );
