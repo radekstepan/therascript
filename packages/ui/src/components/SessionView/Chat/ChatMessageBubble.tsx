@@ -1,5 +1,5 @@
 // packages/ui/src/components/SessionView/Chat/ChatMessageBubble.tsx
-import React, { useCallback, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   Box,
   Flex,
@@ -32,6 +32,7 @@ import {
 } from '../../../api/verification';
 import {
   VERIFIED_MARK_CLASS,
+  ACTIVE_VERIFIED_MARK_CLASS,
   getVerdictLabel,
   getVerdictMarkStyle,
   rehypeHighlightStatements,
@@ -54,6 +55,8 @@ interface ChatMessageBubbleProps {
   /** Briefly ring the bubble (deep-link highlight). */
   flashHighlight?: boolean;
   onStatementClick?: (messageId: number, statement: VerifiedStatement) => void;
+  /** Statement currently shown in the Fact Check panel — flash its mark. */
+  activeStatementId?: number | null;
 }
 
 function splitThinkingText(text: string) {
@@ -92,6 +95,7 @@ export function ChatMessageBubble({
   verification,
   flashHighlight,
   onStatementClick,
+  activeStatementId,
 }: ChatMessageBubbleProps) {
   const { thinkingText, visibleText } = splitThinkingText(message.text);
   const animatedText = useAnimatedText(
@@ -110,6 +114,38 @@ export function ChatMessageBubble({
     !thinkingText;
 
   const markdownContainerRef = useRef<HTMLDivElement>(null);
+  // Root of the rendered (visible) message text — markdown and plain-text
+  // paths both render inside it, so the active Fact Check mark is found
+  // with one query regardless of the render mode.
+  const bubbleContentRef = useRef<HTMLDivElement>(null);
+
+  // When the Fact Check panel steps (Prev/Next/arrows), bring the matching
+  // inline highlight into view and flash it. Re-running per selection
+  // change restarts the CSS flash even when stepping back to a mark that
+  // was already flashed.
+  useEffect(() => {
+    if (activeStatementId == null) return;
+    const root = bubbleContentRef.current;
+    if (!root) return;
+    try {
+      const mark = root.querySelector(
+        `mark[data-statement-id="${activeStatementId}"]`
+      );
+      if (mark && typeof (mark as HTMLElement).scrollIntoView === 'function') {
+        const reduceMotion =
+          typeof window !== 'undefined' &&
+          typeof window.matchMedia === 'function' &&
+          window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        (mark as HTMLElement).scrollIntoView({
+          block: 'nearest',
+          inline: 'nearest',
+          behavior: reduceMotion ? 'auto' : 'smooth',
+        });
+      }
+    } catch {
+      // Selector/query failures must never break message rendering.
+    }
+  }, [activeStatementId, displayText]);
 
   const showCopyButton = message.sender === 'ai' && !isCurrentlyStreaming;
   const isUser = message.sender === 'user';
@@ -211,10 +247,17 @@ export function ChatMessageBubble({
         if (!stmt) {
           return <mark {...props} />;
         }
+        const isActive =
+          activeStatementId != null && stmt.id === activeStatementId;
         return (
           <mark
             {...props}
-            className={cn(VERIFIED_MARK_CLASS, props.className)}
+            className={cn(
+              VERIFIED_MARK_CLASS,
+              isActive && ACTIVE_VERIFIED_MARK_CLASS,
+              props.className
+            )}
+            data-active={isActive ? 'true' : undefined}
             style={{ ...getVerdictMarkStyle(stmt.verdict), ...props.style }}
             role="button"
             tabIndex={0}
@@ -231,7 +274,7 @@ export function ChatMessageBubble({
         );
       },
     }),
-    [statementById, handleMarkActivate, handleMarkKeyDown]
+    [statementById, handleMarkActivate, handleMarkKeyDown, activeStatementId]
   );
 
   // Plain-text mode: slice displayText into plain/highlighted segments.
@@ -252,11 +295,17 @@ export function ChatMessageBubble({
       const stmt = statementById.get(segment.statementId);
       if (!stmt)
         return <React.Fragment key={idx}>{segment.text}</React.Fragment>;
+      const isActive =
+        activeStatementId != null && stmt.id === activeStatementId;
       return (
         <mark
           key={idx}
-          className={VERIFIED_MARK_CLASS}
+          className={cn(
+            VERIFIED_MARK_CLASS,
+            isActive && ACTIVE_VERIFIED_MARK_CLASS
+          )}
           data-verdict={segment.verdict}
+          data-active={isActive ? 'true' : undefined}
           style={getVerdictMarkStyle(segment.verdict)}
           role="button"
           tabIndex={0}
@@ -446,7 +495,10 @@ export function ChatMessageBubble({
               </Box>
             </Flex>
           ) : (
-            <Box className={cn(isUser ? 'text-white' : 'markdown-ai-message')}>
+            <Box
+              ref={bubbleContentRef}
+              className={cn(isUser ? 'text-white' : 'markdown-ai-message')}
+            >
               {showThinkingMarquee && (
                 <Box
                   mb={displayText.trim() !== '' ? '3' : '0'}

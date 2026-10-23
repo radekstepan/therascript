@@ -64,6 +64,8 @@ export interface StatementVerdictModalProps {
   summaryAssessment?: string | null;
   /** Therapist's prompt — shown as context for omissions. */
   userQuestion?: string | null;
+  /** Fires with the currently shown statement on open and every step. */
+  onSelectionChange?: (statement: VerifiedStatement | null) => void;
 }
 
 function getSeverityBadgeColor(
@@ -86,6 +88,58 @@ function getSeverityBadgeColor(
 
 function capitalize(value: string): string {
   return value.length === 0 ? value : value[0]!.toUpperCase() + value.slice(1);
+}
+
+/** localStorage slot for the Fact Check panel's last drag offset. */
+const PANEL_POSITION_STORAGE_KEY = 'therascript.fact-check-panel-pos';
+
+interface PanelDrag {
+  x: number;
+  y: number;
+}
+
+/** Clamp a drag offset so the dialog can never be dragged fully out of view. */
+function clampPanelDrag(x: number, y: number): PanelDrag {
+  if (typeof window === 'undefined') return { x, y };
+  const maxX = Math.max(0, window.innerWidth - 160);
+  const maxY = Math.max(0, window.innerHeight / 2 - 80);
+  return {
+    x: Math.min(Math.max(x, -24), maxX),
+    y: Math.min(Math.max(y, -maxY), maxY),
+  };
+}
+
+/** Last persisted panel offset, or the left-docked default. Never throws. */
+function loadPersistedPanelDrag(): PanelDrag {
+  try {
+    const raw = window.localStorage?.getItem(PANEL_POSITION_STORAGE_KEY);
+    if (raw == null) return { x: 0, y: 0 };
+    const parsed: unknown = JSON.parse(raw);
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      Number.isFinite((parsed as { x?: unknown }).x) &&
+      Number.isFinite((parsed as { y?: unknown }).y)
+    ) {
+      const { x, y } = parsed as { x: number; y: number };
+      return clampPanelDrag(x, y);
+    }
+  } catch {
+    // Corrupt storage or no DOM (tests/SSR): fall back to the dock.
+  }
+  return { x: 0, y: 0 };
+}
+
+/** Persist the panel offset. Never throws. */
+function persistPanelDrag(drag: PanelDrag): void {
+  try {
+    window.localStorage?.setItem(
+      PANEL_POSITION_STORAGE_KEY,
+      JSON.stringify(drag)
+    );
+  } catch {
+    // Storage unavailable (private mode, SSR): the panel still works.
+  }
 }
 
 /** Findings the user may confirm as not-an-issue (supported needs no action). */
@@ -139,6 +193,7 @@ export function StatementVerdictModal({
   verifiedAt,
   summaryAssessment,
   userQuestion,
+  onSelectionChange,
 }: StatementVerdictModalProps) {
   const queryClient = useQueryClient();
 
@@ -282,9 +337,15 @@ export function StatementVerdictModal({
   // --- Left-docked, draggable positioning ----------------------------------
   // The modal opens over the session chat (left half) instead of centered,
   // so the transcript (right half) stays visible and interactive beside
-  // it. The header doubles as a drag handle; the offset resets each time
-  // the modal opens so it always starts docked left.
-  const [drag, setDrag] = useState({ x: 0, y: 0 });
+  // it. The header doubles as a drag handle; the offset persists in
+  // localStorage across opens so the panel reappears exactly where the
+  // user left it instead of sliding in from the dock edge.
+  const [drag, setDrag] = useState(() => loadPersistedPanelDrag());
+  // Mirrors the latest drag offset synchronously: pointermove + pointerup
+  // can dispatch back-to-back (synthetic events, tests) before React
+  // flushes the setDrag re-render, so the drop-point persist must not
+  // wait for a render to observe the new offset.
+  const dragRef = useRef(drag);
   const dragStart = useRef<{
     startX: number;
     startY: number;
@@ -293,25 +354,33 @@ export function StatementVerdictModal({
   } | null>(null);
 
   useEffect(() => {
-    if (open) setDrag({ x: 0, y: 0 });
+    if (open) {
+      const restored = loadPersistedPanelDrag();
+      dragRef.current = restored;
+      setDrag(restored);
+    }
   }, [open]);
+
+  // Tell the chat thread which statement is shown so the note can flash
+  // the matching inline highlight (open + every Prev/Next/arrow step).
+  useEffect(() => {
+    if (open) onSelectionChange?.(current);
+  }, [open, current, onSelectionChange]);
 
   const handleDragMove = useCallback((event: React.PointerEvent) => {
     const s = dragStart.current;
     if (!s) return;
     const nextX = s.origX + (event.clientX - s.startX);
     const nextY = s.origY + (event.clientY - s.startY);
-    // Clamp so the dialog can never be dragged fully out of view.
-    const maxX = Math.max(0, window.innerWidth - 160);
-    const maxY = Math.max(0, window.innerHeight / 2 - 80);
-    setDrag({
-      x: Math.min(Math.max(nextX, -24), maxX),
-      y: Math.min(Math.max(nextY, -maxY), maxY),
-    });
+    const next = clampPanelDrag(nextX, nextY);
+    dragRef.current = next;
+    setDrag(next);
   }, []);
 
   const handleDragEnd = useCallback(() => {
     dragStart.current = null;
+    // Remember the drop point so the next open starts here immediately.
+    persistPanelDrag(dragRef.current);
   }, []);
 
   const handleDragStart = useCallback(
@@ -351,7 +420,7 @@ export function StatementVerdictModal({
         <Theme>
           <DialogPrimitive.Content
             data-testid="fact-check-modal"
-            className="rt-BaseDialogContent rt-DialogContent rt-r-size-3"
+            className="rt-BaseDialogContent rt-DialogContent rt-r-size-3 fact-check-panel"
             style={{
               maxWidth: 640,
               width: 'min(560px, calc(100vw - 48px))',

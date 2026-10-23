@@ -5,8 +5,8 @@
 // verdict modal title must read "Fact Check" and no "Judge Verdict"
 // string may remain user-visible in the verification flow.
 import React from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
@@ -817,5 +817,133 @@ describe('StatementVerdictModal dismissal refresh', () => {
         name: 'Dismiss',
       })
     ).toBeTruthy();
+  });
+});
+
+describe('StatementVerdictModal selection sync', () => {
+  const SECOND: VerifiedStatement = {
+    ...STATEMENT,
+    id: 12,
+    statement_index: 1,
+    exact_quote: 'The client attends weekly sessions.',
+    normalized_claim: 'The client attends weekly sessions.',
+    verdict: 'supported',
+    severity: 'none',
+  };
+
+  function renderSyncable(
+    onSelectionChange: (s: VerifiedStatement | null) => void
+  ) {
+    return renderWithClient(
+      <Theme>
+        <StatementVerdictModal
+          open
+          onOpenChange={() => {}}
+          statements={[STATEMENT, SECOND]}
+          initialStatementId={STATEMENT.id}
+          authoredModel="author-model"
+          judgeModel="judge-model"
+          verifiedAt={Date.now()}
+          onSelectionChange={onSelectionChange}
+        />
+      </Theme>
+    );
+  }
+
+  it('reports the shown statement on open and every Prev/Next step', async () => {
+    const user = userEvent.setup();
+    const onSelectionChange = vi.fn();
+    renderSyncable(onSelectionChange);
+
+    await screen.findByText('Fact Check');
+    expect(onSelectionChange).toHaveBeenCalledTimes(1);
+    expect(onSelectionChange).toHaveBeenCalledWith(
+      expect.objectContaining({ id: STATEMENT.id })
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(onSelectionChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: SECOND.id })
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Prev' }));
+    expect(onSelectionChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: STATEMENT.id })
+    );
+    expect(onSelectionChange).toHaveBeenCalledTimes(3);
+  });
+
+  it('reports the stepped-to statement for arrow-key navigation', async () => {
+    const onSelectionChange = vi.fn();
+    renderSyncable(onSelectionChange);
+
+    await screen.findByText('Fact Check');
+    expect(onSelectionChange).toHaveBeenCalledTimes(1);
+
+    fireEvent.keyDown(screen.getByTestId('fact-check-modal'), {
+      key: 'ArrowRight',
+    });
+    expect(onSelectionChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: SECOND.id })
+    );
+  });
+});
+
+describe('StatementVerdictModal position memory', () => {
+  const KEY = 'therascript.fact-check-panel-pos';
+
+  // jsdom has no PointerEvent constructor, so dispatch plain bubbling
+  // events with coordinates assigned (same approach as the drag tests).
+  function dispatchPointer(
+    target: Element,
+    type: 'pointerdown' | 'pointermove' | 'pointerup',
+    clientX: number,
+    clientY: number
+  ) {
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    Object.assign(event, { clientX, clientY, button: 0, pointerId: 1 });
+    target.dispatchEvent(event);
+  }
+
+  beforeEach(() => {
+    window.localStorage.removeItem(KEY);
+  });
+
+  afterEach(() => {
+    window.localStorage.removeItem(KEY);
+  });
+
+  it('reopens at the last position instead of the dock corner', async () => {
+    window.localStorage.setItem(KEY, JSON.stringify({ x: 120, y: 40 }));
+    renderModal();
+
+    const modal = await screen.findByTestId('fact-check-modal');
+    expect(modal.style.transform).toContain('translate(120px, 40px)');
+  });
+
+  it('persists the drop point after a header drag', async () => {
+    renderModal();
+
+    const modal = await screen.findByTestId('fact-check-modal');
+    const handle = screen.getByTestId('fact-check-drag-handle');
+    dispatchPointer(handle, 'pointerdown', 100, 100);
+    dispatchPointer(handle, 'pointermove', 160, 140);
+    dispatchPointer(handle, 'pointerup', 160, 140);
+
+    await waitFor(() => {
+      expect(modal.style.transform).toContain('translate(60px, 40px)');
+    });
+    expect(JSON.parse(window.localStorage.getItem(KEY)!)).toEqual({
+      x: 60,
+      y: 40,
+    });
+  });
+
+  it('falls back to the dock when stored position is corrupt', async () => {
+    window.localStorage.setItem(KEY, 'not-json{');
+    renderModal();
+
+    const modal = await screen.findByTestId('fact-check-modal');
+    expect(modal.style.transform).toContain('translate(0px, 0px)');
   });
 });

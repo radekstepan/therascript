@@ -242,8 +242,9 @@ test.describe('Fact check coverage', () => {
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText('FABRICATED', { exact: true })).toBeVisible();
 
-    // The panel plays a short enter animation: wait for its box to
-    // settle before measuring or dragging, or coordinates go stale.
+    // The panel renders immediately at its persisted position (no
+    // entrance animation): wait for its box to settle before measuring
+    // or dragging, or coordinates go stale.
     await expect
       .poll(async () => {
         const first = await dialog.boundingBox();
@@ -279,18 +280,35 @@ test.describe('Fact check coverage', () => {
     const after = await dialog.boundingBox();
     expect(after!.x).toBeGreaterThan(box!.x);
 
-    // Prev/Next step through both statements of the response.
+    // Prev/Next step through both statements of the response, and each
+    // step flashes its inline highlight in the note so the reader knows
+    // where they are.
+    const activeMark = page.locator('mark.verified-statement-mark-active');
     await dialog.getByRole('button', { name: 'Next' }).click();
     await expect(dialog.getByText('SUPPORTED', { exact: true })).toBeVisible();
     await expect(
       dialog.getByText('The client has weekly sessions.', { exact: true })
     ).toBeVisible();
+    await expect(activeMark).toHaveText('has weekly sessions');
     await dialog.getByRole('button', { name: 'Prev' }).click();
     await expect(dialog.getByText('FABRICATED', { exact: true })).toBeVisible();
+    await expect(activeMark).toHaveText('The client takes sertraline daily');
+
+    // The drop point persists: closing and reopening the panel restores
+    // it instead of docking left again.
+    await dialog.getByRole('button', { name: 'Close' }).click();
+    await expect(dialog).toBeHidden();
+    await metricsRow.getByText('1 Hallucination / Contradiction').click();
+    const reopened = page.getByTestId('fact-check-modal');
+    await expect(reopened).toBeVisible();
+    const reopenedBox = await reopened.boundingBox();
+    expect(reopenedBox).not.toBeNull();
+    expect(Math.abs(reopenedBox!.x - after!.x)).toBeLessThan(4);
+    expect(Math.abs(reopenedBox!.y - after!.y)).toBeLessThan(4);
 
     // Dismiss confirms the finding with the short label + trash icon.
-    await dialog.getByRole('button', { name: 'Dismiss' }).click();
-    await expect(dialog.getByText(/Confirmed by you/)).toBeVisible();
+    await reopened.getByRole('button', { name: 'Dismiss' }).click();
+    await expect(reopened.getByText(/Confirmed by you/)).toBeVisible();
   });
 
   test('re-clicking the same paragraph link re-highlights the paragraph', async ({

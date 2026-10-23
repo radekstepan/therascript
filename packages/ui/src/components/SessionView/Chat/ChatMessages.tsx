@@ -147,10 +147,22 @@ export function ChatMessages({
   const [verdictModal, setVerdictModal] = useState<VerdictModalState | null>(
     null
   );
+  // Statement currently shown in the Fact Check panel: the matching inline
+  // highlight in the note flashes so the reader knows where they are.
+  const [activeModalStatementId, setActiveModalStatementId] = useState<
+    number | null
+  >(null);
 
   const handleStatementClick = useCallback(
     (messageId: number, statement: VerifiedStatement) => {
       setVerdictModal({ messageId, statementId: statement.id });
+    },
+    []
+  );
+
+  const handleModalSelectionChange = useCallback(
+    (statement: VerifiedStatement | null) => {
+      setActiveModalStatementId(statement?.id ?? null);
     },
     []
   );
@@ -401,6 +413,11 @@ export function ChatMessages({
                 verification={verificationByMessageId.get(message.id) ?? null}
                 flashHighlight={flashMessageId === message.id}
                 onStatementClick={handleStatementClick}
+                activeStatementId={
+                  verdictModal !== null && verdictModal.messageId === message.id
+                    ? activeModalStatementId
+                    : null
+                }
               />
             </Box>
           );
@@ -410,7 +427,10 @@ export function ChatMessages({
       <StatementVerdictModal
         open={verdictModal !== null}
         onOpenChange={(open) => {
-          if (!open) setVerdictModal(null);
+          if (!open) {
+            setVerdictModal(null);
+            setActiveModalStatementId(null);
+          }
         }}
         statements={activeVerification?.statements ?? []}
         initialStatementId={verdictModal?.statementId ?? null}
@@ -419,6 +439,7 @@ export function ChatMessages({
         verifiedAt={activeVerification?.verified_at ?? null}
         summaryAssessment={activeVerification?.summary_assessment ?? null}
         userQuestion={activeUserQuestion}
+        onSelectionChange={handleModalSelectionChange}
       />
 
       <EditEntityModal

@@ -819,3 +819,86 @@ describe('ChatMessageBubble confirmed findings', () => {
     );
   });
 });
+
+describe('ChatMessageBubble active Fact Check step', () => {
+  const S1 = 'The client takes sertraline daily.';
+  const S2 = 'The client owns three cats.';
+  const TWO_TEXT = `${S1} ${S2}`;
+
+  const FIRST: VerifiedStatement = {
+    ...STATEMENT,
+    id: 61,
+    statement_index: 0,
+    exact_quote: S1,
+    normalized_claim: S1,
+    start_char: 0,
+    end_char: S1.length,
+  };
+  const SECOND: VerifiedStatement = {
+    ...STATEMENT,
+    id: 62,
+    statement_index: 1,
+    exact_quote: S2,
+    normalized_claim: S2,
+    start_char: S1.length + 1,
+    end_char: TWO_TEXT.length,
+    verdict: 'supported',
+    severity: 'none',
+  };
+  const TWO_STATEMENT_VERIFICATION: MessageVerification = {
+    ...VERIFICATION,
+    total_claims: 2,
+    supported_claims: 1,
+    fabricated_claims: 1,
+    statements: [FIRST, SECOND],
+  };
+
+  function renderActiveBubble(
+    renderMd: boolean,
+    activeStatementId: number | null | undefined
+  ) {
+    return renderWithClient(
+      <Theme>
+        <ChatMessageBubble
+          message={{ ...MESSAGE, text: TWO_TEXT }}
+          isCurrentlyStreaming={false}
+          isAiResponding={false}
+          renderMd={renderMd}
+          onStarClick={() => {}}
+          onCopyClick={() => {}}
+          verification={TWO_STATEMENT_VERIFICATION}
+          onStatementClick={() => {}}
+          activeStatementId={activeStatementId}
+        />
+      </Theme>
+    );
+  }
+
+  it.each([false, true])(
+    'flags only the active statement mark (renderMd=%s)',
+    (renderMd) => {
+      const { container } = renderActiveBubble(renderMd, SECOND.id);
+      const active = container.querySelectorAll(
+        'mark.verified-statement-mark-active'
+      );
+      expect(active).toHaveLength(1);
+      expect(active[0]?.textContent).toBe(S2);
+      expect(active[0]?.getAttribute('data-active')).toBe('true');
+      // The other statement stays highlighted but not active.
+      const idle = container.querySelectorAll(
+        'mark.verified-statement-mark:not(.verified-statement-mark-active)'
+      );
+      expect(idle).toHaveLength(1);
+      expect(idle[0]?.textContent).toBe(S1);
+    }
+  );
+
+  it('flags nothing when no panel step is selected', () => {
+    const { container } = renderActiveBubble(false, null);
+    expect(
+      container.querySelectorAll('mark.verified-statement-mark-active')
+    ).toHaveLength(0);
+    // Both highlights still render.
+    expect(container.querySelectorAll('mark')).toHaveLength(2);
+  });
+});

@@ -530,6 +530,16 @@ button[class*='rt-IconButton']:not(:disabled):hover {
   width: 100% !important;
 }
 
+/* --- Fact Check panel (docked, position-persistent) --- */
+/* The panel reappears exactly where the user left it (offset restored
+   from localStorage before paint), so the global dialogSlideIn entrance
+   is disabled here — otherwise the panel visibly slides up from the
+   dock corner on every open. */
+.rt-DialogContent[data-testid='fact-check-modal'] {
+  animation: none;
+}
+/* --- End Fact Check panel --- */
+
 /* --- Verified statement highlights (LLM Judge) --- */
 /* Inline <mark> overlays in session chat notes. Resting fills are set
    inline per verdict (one alpha step down); hover switches ONLY the
@@ -555,9 +565,46 @@ button[class*='rt-IconButton']:not(:disabled):hover {
   outline-offset: 1px;
 }
 
+/* Active Fact Check step: the panel's Prev/Next buttons move this class
+   to the matching inline highlight so the reader sees where they are in
+   the note. The flash runs in the verdict's color (red/amber/green) and
+   settles on a tinted ring that persists while the step is selected. */
+.verified-statement-mark-active {
+  animation: verified-mark-flash 0.9s ease-out 2;
+}
+
+.verified-statement-mark-active[data-verdict='fabricated'],
+.verified-statement-mark-active[data-verdict='contradicted'] {
+  --verified-flash: var(--red-a7);
+  box-shadow: 0 0 0 2px var(--red-a6);
+}
+
+.verified-statement-mark-active[data-verdict='partially_supported'],
+.verified-statement-mark-active[data-verdict='omission'] {
+  --verified-flash: var(--amber-a7);
+  box-shadow: 0 0 0 2px var(--amber-a6);
+}
+
+.verified-statement-mark-active[data-verdict='supported'] {
+  --verified-flash: var(--green-a7);
+  box-shadow: 0 0 0 2px var(--green-a6);
+}
+
+@keyframes verified-mark-flash {
+  0% {
+    box-shadow: 0 0 0 5px var(--verified-flash, var(--accent-a6));
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .verified-statement-mark {
     transition: none;
+  }
+  .verified-statement-mark-active {
+    animation: none;
   }
 }
 /* --- End verified statement highlights --- */

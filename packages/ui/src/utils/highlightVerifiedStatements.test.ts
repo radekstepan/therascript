@@ -434,6 +434,48 @@ describe('resolveStatementSpans fallback normalization', () => {
     expect(spans).toHaveLength(1);
     expect(text.slice(spans[0]!.start, spans[0]!.end)).toBe(text);
   });
+
+  it('matches quotes whose trailing period is absent from the note text', () => {
+    // The Judge often closes a mid-sentence quote with a period the note
+    // does not have; markdown mode (no worker spans) must still find it.
+    const text = 'The client takes sertraline daily and has weekly sessions.';
+    const statements = [
+      stmt({
+        id: 1,
+        exact_quote: 'The client takes sertraline daily.',
+        start_char: 0,
+        end_char: 34,
+      }),
+    ];
+    // Worker spans: the stored [0, 34) slice is trusted as-is (existing
+    // containment behavior, trailing space included).
+    const trusted = resolveStatementSpans(text, statements);
+    expect(trusted).toHaveLength(1);
+    expect(text.slice(trusted[0]!.start, trusted[0]!.end)).toBe(
+      'The client takes sertraline daily '
+    );
+    // Quote search (markdown/HAST mode): the punctuation-tolerant retry
+    // finds the words without the Judge's invented period.
+    const searched = resolveStatementSpans(text, statements, {
+      trustWorkerSpans: false,
+    });
+    expect(searched).toHaveLength(1);
+    expect(text.slice(searched[0]!.start, searched[0]!.end)).toBe(
+      'The client takes sertraline daily'
+    );
+  });
+
+  it('still prefers the verbatim match over the punctuation-stripped retry', () => {
+    // The bare (punctuation-stripped) quote matches earlier, but the
+    // verbatim quote matches later: the verbatim occurrence must win.
+    const text = 'We say daily often. They say daily.';
+    const spans = resolveStatementSpans(text, [
+      stmt({ id: 1, exact_quote: 'say daily.' }),
+    ]);
+    expect(spans).toHaveLength(1);
+    expect(text.slice(spans[0]!.start, spans[0]!.end)).toBe('say daily.');
+    expect(spans[0]!.start).toBe(text.indexOf('They say daily.') + 5);
+  });
 });
 
 describe('rehypeHighlightStatements cross-node matching', () => {

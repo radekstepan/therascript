@@ -53,6 +53,9 @@ export interface TextSegment {
 /** Class applied to every verification <mark> (styling in global.css). */
 export const VERIFIED_MARK_CLASS = 'verified-statement-mark';
 
+/** Extra class on the mark matching the Fact Check panel's current step. */
+export const ACTIVE_VERIFIED_MARK_CLASS = 'verified-statement-mark-active';
+
 // --- normalization (mirrors the worker's span rules) -------------------------
 
 const MARKDOWN_STRIP_CHARS = new Set(['*', '_', '`', '~']);
@@ -365,6 +368,18 @@ function findAnchorSpan(
   return null;
 }
 
+/**
+ * Trailing sentence punctuation the Judge LLM tends to append to a quote
+ * even when the note text continues past the quoted words (e.g. the quote
+ * ends `daily.` but the note reads `daily and has ...`). Stripped for a
+ * secondary full-quote search when the verbatim search misses.
+ */
+const TRAILING_PUNCTUATION_RE = /[.,!?;:]+$/;
+
+function stripTrailingPunctuation(norm: string): string {
+  return norm.replace(TRAILING_PUNCTUATION_RE, '');
+}
+
 export interface ResolveSpansOptions {
   /**
    * Trust worker-persisted `start_char`/`end_char` when the slice matches
@@ -378,8 +393,9 @@ export interface ResolveSpansOptions {
  * Resolve each statement to a non-overlapping raw-text span. Prefers the
  * worker-persisted span when its slice matches the quote (normalized
  * equality or prefix/suffix anchor match); otherwise searches for the
- * quote (normalized full match, mid-quote `...` clause fallback, then
- * prefix+suffix anchor fallback). Returns spans sorted by start offset.
+ * quote (normalized full match, trailing-punctuation-tolerant retry,
+ * mid-quote `...` clause fallback, then prefix+suffix anchor fallback).
+ * Returns spans sorted by start offset.
  */
 export function resolveStatementSpans(
   text: string,
@@ -424,10 +440,16 @@ export function resolveStatementSpans(
       }
     }
 
-    // Pass 2: normalized full-quote search, then mid-quote `...` clause
+    // Pass 2: normalized full-quote search (plus a trailing-punctuation
+    // tolerant retry — the Judge often closes a mid-sentence quote with a
+    // period the note text doesn't have), then mid-quote `...` clause
     // fallback, then prefix+suffix anchor fallback.
+    const bareQuoteNorm = stripTrailingPunctuation(quoteNorm);
     const span =
       findNormalizedSpan(idx, quoteNorm, used) ??
+      (bareQuoteNorm.length > 0 && bareQuoteNorm !== quoteNorm
+        ? findNormalizedSpan(idx, bareQuoteNorm, used)
+        : null) ??
       findEllipsisClauseSpan(idx, cleaned, used) ??
       findAnchorSpan(idx, quoteNorm, used);
     if (!span) continue;
