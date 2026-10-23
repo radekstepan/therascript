@@ -252,7 +252,7 @@ Atomic claims and omissions extracted from an audited message, each with a verdi
 **Indices:** `idx_verified_statements_msg`, `idx_verified_statements_verdict`, `idx_verified_statements_session`
 
 #### `verification_statement_reviews` (V22)
-Durable human confirmations of individual findings ("Dismiss Statement (Confirmed)"). Message-owned (`message_id` FK with cascade) and deliberately independent of the disposable statement/assessment rows: reviews survive per-response clears and the worker's delete/reinsert cycle, and are matched back to current rows by `(message_id, context_revision, finding_key)`. Reset All Verifications and full data resets delete them; message/chat/session deletion cascades.
+Durable human confirmations of individual findings (the "Dismiss" action in the Fact Check panel). Message-owned (`message_id` FK with cascade) and deliberately independent of the disposable statement/assessment rows: reviews survive per-response clears and the worker's delete/reinsert cycle, and are matched back to current rows by `(message_id, context_revision, finding_key)`. Reset All Verifications and full data resets delete them; message/chat/session deletion cascades.
 
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|

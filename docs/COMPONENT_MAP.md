@@ -49,7 +49,7 @@ This document provides a detailed breakdown of the monorepo's package structure,
 
 ### Responsibilities
 - **User Interaction:** Provides interfaces for uploading audio, chatting with AI, and viewing results.
-- **Hallucination Audit Hub:** `/verification` page with live job banner, accuracy analytics, and Issues/Coverage/Job History tabs (`src/components/Verification/`), plus inline verdict highlighting in chat bubbles (`src/utils/highlightVerifiedStatements.ts`) and per-finding dismissal ("Confirmed by you") via `StatementVerdictModal.tsx`.
+- **Hallucination Audit Hub:** `/verification` page with live job banner, accuracy analytics, and Issues/Coverage/Job History tabs (`src/components/Verification/`), plus inline verdict highlighting in chat bubbles (`src/utils/highlightVerifiedStatements.ts`) and per-finding dismissal ("Confirmed by you") via `StatementVerdictModal.tsx` — a modeless panel docked left of the transcript with a draggable header and a right-aligned Prev/Next + Dismiss footer (e2e: `tests/e2e/fact-check.spec.ts`).
 - **Speaker-Aware Transcripts:** Renders speaker labels, supports in-place speaker rename modal, and accepts upload-time `numSpeakers` input.
 - **State Management:** Manages local UI state (theme, sidebar) and server state (caching, optimistic updates).
 - **Streaming:** Handles Server-Sent Events (SSE) for real-time chat responses (`src/hooks/useMessageStream.ts`).

@@ -1053,7 +1053,7 @@ function runMigrations(dbInstance: DB) {
       }
 
       // NEW MIGRATION: Version 22 for durable human review of individual
-      // fact-check findings ("Dismiss Statement (Confirmed)").
+      // fact-check findings (the "Dismiss" action).
       // - `verification_statement_reviews`: independent per-finding
       //   confirmations owned by the MESSAGE (FK/cascade on message
       //   deletion). Deliberately NOT dependent on the disposable

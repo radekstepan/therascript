@@ -119,7 +119,7 @@
 | `/settings` | `SettingsPage` |
 
 ### Deep-links
-- `?highlightMsg=<messageId>` on a session chat route scrolls to and flashes that message, opening its Fact Check modal when verified (`ChatMessages.tsx`; used by the Issues feed and Job History failure details).
+- `?highlightMsg=<messageId>` on a session chat route scrolls to and flashes that message, opening its modeless Fact Check panel (docked left of the transcript) when verified (`ChatMessages.tsx`; used by the Issues feed and Job History failure details).
 - `#paragraph-<id>` scrolls the session transcript to that paragraph with a brief highlight (`Transcription.tsx` virtuoso scroll; the desktop panel is always active, small screens auto-switch to the Transcript tab via `shouldActivateTranscriptTab`). Fact Check evidence `¶N` references link here (same-page hash, so chat context is preserved).
 
 ### Pages (`/components/*.tsx`)
