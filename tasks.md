@@ -25,7 +25,10 @@ For background on the Verification Agent and LLM lifecycle, see `AGENTS.md` (§1
   - **Why:** with no left-side action remaining, `space-between` pushed the steppers unpredictably; right-pinning matches the dialog-close affordance and other modal footers.
   - **Tests:** new "footer alignment" case in `StatementVerdictModal.test.tsx` asserting Prev/Next share a right-justified row and no Clear button exists; 16/16 modal tests pass.
 
-- Rename "Dismiss Statement (Confirmed)" to "Dismiss" with a trahscan delete icon
+- [x] Rename "Dismiss Statement (Confirmed)" to "Dismiss" with a trahscan delete icon
+  - **Done:** Dismiss button in `StatementVerdictModal.tsx` now reads "Dismiss" with a `TrashIcon`; tooltip, pending state, and "Confirmed by you" badge unchanged.
+  - **Why:** the old label restated the stored review status instead of the action; the icon keeps the destructive affordance recognizable at a glance.
+  - **Tests:** updated all `StatementVerdictModal.test.tsx` references; 16/16 pass.
 
 - Make it so that Fact Check modal shows to the left of the Transcript and we can see both modal and the transcript. Make the modal moveable too.
 

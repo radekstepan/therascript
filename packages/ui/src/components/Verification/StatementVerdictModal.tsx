@@ -26,6 +26,7 @@ import {
   InfoCircledIcon,
   PersonIcon,
   QuoteIcon,
+  TrashIcon,
 } from '@radix-ui/react-icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
@@ -571,9 +572,13 @@ export function StatementVerdictModal({
                             })
                           }
                         >
-                          {dismissMutation.isPending
-                            ? 'Dismissing…'
-                            : 'Dismiss Statement (Confirmed)'}
+                          {dismissMutation.isPending ? (
+                            'Dismissing…'
+                          ) : (
+                            <>
+                              <TrashIcon /> Dismiss
+                            </>
+                          )}
                         </Button>
                       </span>
                     </AppTooltip>

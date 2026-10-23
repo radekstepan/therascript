@@ -420,7 +420,7 @@ describe('StatementVerdictModal dismissal', () => {
     const { unmount } = renderDismissable([STATEMENT], STATEMENT.id);
     expect(
       await screen.findByRole('button', {
-        name: 'Dismiss Statement (Confirmed)',
+        name: 'Dismiss',
       })
     ).toBeTruthy();
     unmount();
@@ -428,9 +428,7 @@ describe('StatementVerdictModal dismissal', () => {
     // Supported claims need no action: no Dismiss button.
     renderDismissable([SUPPORTED], SUPPORTED.id);
     expect(await screen.findByText('Fact Check')).toBeTruthy();
-    expect(
-      screen.queryByRole('button', { name: 'Dismiss Statement (Confirmed)' })
-    ).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Dismiss' })).toBeNull();
   });
 
   it('shows "Confirmed by you" with original Judge details for confirmed rows', async () => {
@@ -438,9 +436,7 @@ describe('StatementVerdictModal dismissal', () => {
     expect(await screen.findByText(/Confirmed by you/)).toBeTruthy();
     // Original Judge verdict is preserved, not rewritten.
     expect(screen.getByText('FABRICATED')).toBeTruthy();
-    expect(
-      screen.queryByRole('button', { name: 'Dismiss Statement (Confirmed)' })
-    ).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Dismiss' })).toBeNull();
   });
 
   it('dismisses with id+token, updates cache, and stays on the statement', async () => {
@@ -490,7 +486,7 @@ describe('StatementVerdictModal dismissal', () => {
     );
 
     const dismissButton = await screen.findByRole('button', {
-      name: 'Dismiss Statement (Confirmed)',
+      name: 'Dismiss',
     });
     await user.click(dismissButton);
     expect(mockDismissStatement).toHaveBeenCalledWith(11, 'v1.modal-token');
@@ -545,9 +541,7 @@ describe('StatementVerdictModal dismissal', () => {
     );
     expect(await screen.findByText(/Confirmed by you/)).toBeTruthy();
     expect(screen.getByText('FABRICATED')).toBeTruthy();
-    expect(
-      screen.queryByRole('button', { name: 'Dismiss Statement (Confirmed)' })
-    ).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Dismiss' })).toBeNull();
     // Navigation through all statements is preserved.
     expect(screen.getByRole('button', { name: 'Next' })).toBeTruthy();
   });
@@ -562,16 +556,14 @@ describe('StatementVerdictModal dismissal', () => {
     );
     renderDismissable([STATEMENT, SUPPORTED], STATEMENT.id);
     const dismissButton = await screen.findByRole('button', {
-      name: 'Dismiss Statement (Confirmed)',
+      name: 'Dismiss',
     });
     await user.click(dismissButton);
 
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toMatch(/stale confirmation token/);
     // Controls restored, modal still open on the same statement.
-    expect(
-      screen.getByRole('button', { name: 'Dismiss Statement (Confirmed)' })
-    ).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Dismiss' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Next' })).toHaveProperty(
       'disabled',
       false
@@ -697,7 +689,7 @@ describe('StatementVerdictModal dismissal refresh', () => {
       [{ ...refreshedVerification, statements: [STATEMENT] }]
     );
     const dismissButton = await screen.findByRole('button', {
-      name: 'Dismiss Statement (Confirmed)',
+      name: 'Dismiss',
     });
     await user.click(dismissButton);
 
@@ -733,7 +725,7 @@ describe('StatementVerdictModal dismissal refresh', () => {
     );
     expect(
       await screen.findByRole('button', {
-        name: 'Dismiss Statement (Confirmed)',
+        name: 'Dismiss',
       })
     ).toBeTruthy();
   });
