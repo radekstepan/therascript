@@ -927,6 +927,65 @@ describe('getGlobalVerificationAnalytics', () => {
     );
     expect(summaryS2?.isFullyVerified).toBe(false);
     expect(summaryS2?.averageAccuracy).toBeNull();
+    // Predominant chat model: s1 mixes 'llama' + unrecorded (tie on
+    // counts — nulls sort last), s2 is all 'mistral'.
+    expect(summaryS1?.predominantModel).toBe('llama');
+    expect(summaryS2?.predominantModel).toBe('mistral');
+  });
+
+  it('reports the predominant chat model across all chats of a session', () => {
+    const sessionId = insertSession('Multi');
+    const chatA = insertChat(sessionId);
+    const chatB = insertChat(sessionId);
+    const seedChat = (chatId: number, models: Array<string | null>) => {
+      insertMessage({
+        chatId,
+        sender: 'user',
+        text: 'Question?',
+        timestamp: T0 - 1000,
+      });
+      models.forEach((model, i) => {
+        insertMessage({
+          chatId,
+          sender: 'ai',
+          text: `Response ${i}.`,
+          timestamp: T0 + i * 1000,
+          model,
+        });
+      });
+    };
+    // Chat A: 2x alpha; chat B: 3x beta → beta predominates.
+    seedChat(chatA, ['alpha', 'alpha']);
+    seedChat(chatB, ['beta', 'beta', 'beta']);
+    const stats = verificationRepository.getGlobalVerificationAnalytics();
+    const summary = stats.sessionsSummary.find(
+      (s) => s.sessionId === sessionId
+    );
+    expect(summary?.totalAiMessages).toBe(5);
+    expect(summary?.predominantModel).toBe('beta');
+  });
+
+  it('reports null predominant model when no model was recorded', () => {
+    const sessionId = insertSession('Nomodel');
+    const chatId = insertChat(sessionId);
+    insertMessage({
+      chatId,
+      sender: 'user',
+      text: 'Question?',
+      timestamp: T0 - 1000,
+    });
+    insertMessage({
+      chatId,
+      sender: 'ai',
+      text: 'Response without a model.',
+      timestamp: T0,
+      model: null,
+    });
+    const stats = verificationRepository.getGlobalVerificationAnalytics();
+    const summary = stats.sessionsSummary.find(
+      (s) => s.sessionId === sessionId
+    );
+    expect(summary?.predominantModel).toBeNull();
   });
 
   it('excludes sessions with no user messages from sessionsSummary', () => {

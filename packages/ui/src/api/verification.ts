@@ -335,6 +335,8 @@ export interface SessionVerificationSummary {
   isFullyVerified: boolean;
   flaggedIssues: number;
   averageAccuracy: number | null;
+  /** Most common chat LLM across the session's verifiable AI messages (null when unrecorded). */
+  predominantModel?: string | null;
 }
 
 export interface VerificationGlobalStats {

@@ -44,12 +44,13 @@ export function CoverageTab({
 
   return (
     <div style={{ overflowX: 'auto' }}>
-      <Table.Root size="2" style={{ minWidth: '760px' }}>
+      <Table.Root size="2" style={{ minWidth: '880px' }}>
         <Table.Header>
           <Table.Row>
             <Table.ColumnHeaderCell>Session</Table.ColumnHeaderCell>
             <Table.ColumnHeaderCell>Client</Table.ColumnHeaderCell>
             <Table.ColumnHeaderCell>Date</Table.ColumnHeaderCell>
+            <Table.ColumnHeaderCell>Chat LLM</Table.ColumnHeaderCell>
             <Table.ColumnHeaderCell>Status</Table.ColumnHeaderCell>
             <Table.ColumnHeaderCell justify="end">
               Coverage
@@ -92,6 +93,30 @@ export function CoverageTab({
                   <Text size="2" color="gray">
                     {formatIsoDateToYMD(session.date)}
                   </Text>
+                </Table.Cell>
+                <Table.Cell>
+                  {session.predominantModel ? (
+                    <Text
+                      size="2"
+                      title={`Most common chat model across this session's chats`}
+                      style={{
+                        maxWidth: '180px',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {session.predominantModel}
+                    </Text>
+                  ) : (
+                    <Text
+                      size="2"
+                      color="gray"
+                      title="No model recorded for this session's chats"
+                    >
+                      —
+                    </Text>
+                  )}
                 </Table.Cell>
                 <Table.Cell>
                   {status === 'verified' ? (

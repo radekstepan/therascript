@@ -1749,6 +1749,7 @@ export const verificationRepository = {
         failedAiMessages: number;
         flaggedIssues: number;
         averageAccuracy: number | null;
+        predominantModel: string | null;
       }>(
         `SELECT s.id AS sessionId, s.sessionName, s.clientName, s.date,
                 (SELECT COUNT(*) FROM messages m
@@ -1763,7 +1764,13 @@ export const verificationRepository = {
                    AND vs.verdict IN ('fabricated', 'contradicted', 'partially_supported', 'omission')
                    AND ${UNRESOLVED_STATEMENT_PREDICATE}) AS flaggedIssues,
                 (SELECT AVG(mv2.accuracy_score) * 100.0 FROM message_verifications mv2
-                 WHERE mv2.session_id = s.id AND mv2.status = 'completed') AS averageAccuracy
+                 WHERE mv2.session_id = s.id AND mv2.status = 'completed') AS averageAccuracy,
+                (SELECT m.model FROM messages m
+                 INNER JOIN chats c ON c.id = m.chatId
+                 WHERE c.sessionId = s.id AND ${VERIFIABLE_AI_MESSAGE_FILTER}
+                 GROUP BY m.model
+                 ORDER BY COUNT(*) DESC, (m.model IS NULL), m.model ASC
+                 LIMIT 1) AS predominantModel
          FROM sessions s
          WHERE s.status = 'completed' ${sessionFilter}
            AND EXISTS (
@@ -1846,6 +1853,7 @@ export const verificationRepository = {
             r.totalAiMessages > 0 && r.verifiedAiMessages >= r.totalAiMessages,
           flaggedIssues: r.flaggedIssues,
           averageAccuracy: r.averageAccuracy,
+          predominantModel: r.predominantModel ?? null,
         })
       );
 

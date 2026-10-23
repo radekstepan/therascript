@@ -24,6 +24,21 @@ test.describe('Verification transcripts coverage', () => {
     await gotoAndResetMocks(page);
   });
 
+  test('coverage table shows the predominant chat LLM per transcript', async ({
+    page,
+  }) => {
+    await page.goto('/verification');
+    await page.getByRole('tab', { name: 'Transcripts coverage' }).click();
+
+    const header = page.getByRole('columnheader', { name: 'Chat LLM' });
+    await expect(header).toBeVisible();
+    // The mocked stats fixture seeds qwen2.5-7b-instruct as the
+    // predominant chat model for the Intake Session row.
+    await expect(
+      page.getByRole('cell', { name: 'qwen2.5-7b-instruct' })
+    ).toBeVisible();
+  });
+
   test('session name links to the session transcript view', async ({
     page,
   }) => {

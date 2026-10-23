@@ -107,6 +107,7 @@ const STATS_FIXTURE: VerificationGlobalStats = {
       isFullyVerified: false,
       flaggedIssues: 1,
       averageAccuracy: 87.5,
+      predominantModel: 'qwen2.5-7b-instruct',
     },
   ],
 };

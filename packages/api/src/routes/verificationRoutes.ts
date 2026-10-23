@@ -244,6 +244,7 @@ const SessionVerificationSummarySchema = t.Object({
   isFullyVerified: t.Boolean(),
   flaggedIssues: t.Number(),
   averageAccuracy: t.Union([t.Number(), t.Null()]),
+  predominantModel: t.Union([t.String(), t.Null()]),
 });
 
 const VerificationGlobalStatsSchema = t.Object({

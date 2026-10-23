@@ -520,6 +520,12 @@ export interface SessionVerificationSummary {
   flaggedIssues: number;
   /** Mean per-message accuracy on the 0–100 percent scale (null when nothing verified). */
   averageAccuracy: number | null;
+  /**
+   * Most common chat LLM (`messages.model`) across the session's
+   * verifiable AI messages (ties break alphabetically, nulls last).
+   * Null when no model was recorded.
+   */
+  predominantModel: string | null;
 }
 
 export interface VerificationGlobalStats {

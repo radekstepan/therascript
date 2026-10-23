@@ -18,6 +18,7 @@ const SUMMARY: SessionVerificationSummary = {
   isFullyVerified: false,
   flaggedIssues: 1,
   averageAccuracy: 87.5,
+  predominantModel: 'qwen2.5-7b-instruct',
 };
 
 function renderTab() {
@@ -49,6 +50,33 @@ describe('CoverageTab accuracy display', () => {
     expect(badge.getAttribute('title')).toMatch(
       /Mean fact accuracy across 4 verified AI responses/
     );
+  });
+});
+
+describe('CoverageTab chat LLM column', () => {
+  it('renders the predominant chat model for the session', () => {
+    renderTab();
+    expect(
+      screen.getByRole('columnheader', { name: 'Chat LLM' })
+    ).toBeTruthy();
+    expect(screen.getByText('qwen2.5-7b-instruct')).toBeTruthy();
+  });
+
+  it('renders a dash when no model was recorded', () => {
+    render(
+      <MemoryRouter>
+        <Theme>
+          <CoverageTab
+            sessions={[{ ...SUMMARY, predominantModel: null }]}
+            onAuditSession={vi.fn()}
+          />
+        </Theme>
+      </MemoryRouter>
+    );
+    const header = screen.getByRole('columnheader', { name: 'Chat LLM' });
+    expect(header).toBeTruthy();
+    const row = screen.getByRole('row', { name: /Intake Session/ });
+    expect(row.textContent).toContain('—');
   });
 });
 

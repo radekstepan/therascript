@@ -209,6 +209,7 @@ export const sessionVerificationSummarySchema = z.object({
   isFullyVerified: z.boolean(),
   flaggedIssues: z.number().int().nonnegative(),
   averageAccuracy: z.number().nullable(),
+  predominantModel: z.string().nullable().optional().default(null),
 });
 
 export const globalVerificationAnalyticsSchema = z.object({
