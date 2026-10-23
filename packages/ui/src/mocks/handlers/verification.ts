@@ -11,10 +11,16 @@
 // Owned spec files: verification-coverage.spec.ts,
 // verification-chart-padding.spec.ts,
 // verification-model-accuracy-scroll.spec.ts,
-// verification-live-banner.spec.ts.
+// verification-live-banner.spec.ts, fact-check.spec.ts (chat
+// verifications + dismiss/delete below).
 import { http, HttpResponse } from 'msw';
 import type { VerificationGlobalStats } from '../../api/verification';
-import { e2eVerificationJobs } from '../state';
+import {
+  e2eVerificationJobs,
+  readFactCheckStatements,
+  readFactCheckVerifications,
+  writeFactCheckVerifications,
+} from '../state';
 
 const STATS_FIXTURE: VerificationGlobalStats = {
   totalMessagesAudited: 4,
@@ -116,7 +122,81 @@ export const verificationHandlers = [
     })
   ),
   http.get('/api/verification/stats', () => HttpResponse.json(STATS_FIXTURE)),
-  http.get('/api/verification/statements', () =>
-    HttpResponse.json({ items: [], total: 0, limit: 50, offset: 0 })
+  http.get('/api/verification/statements', () => {
+    const items = readFactCheckStatements();
+    return HttpResponse.json({
+      items,
+      total: items.length,
+      limit: 50,
+      offset: 0,
+    });
+  }),
+  // Chat-scoped verdicts for the session chat view
+  // (fetchChatVerifications). Injected per-spec via
+  // POST /api/__e2e/set-fact-check; empty by default.
+  http.get('/api/sessions/:sessionId/chats/:chatId/verifications', () =>
+    HttpResponse.json(readFactCheckVerifications())
   ),
+  // Dismiss one finding as confirmed (fact-check.spec.ts exercises the
+  // modal Dismiss button). Wrong/missing tokens are rejected like the
+  // real backend (409) so the modal's error path stays honest.
+  http.post(
+    '/api/verification/statements/:statementId/dismiss',
+    async ({ params, request }) => {
+      const statementId = Number(params.statementId);
+      const body = (await request.json().catch(() => ({}))) as {
+        expectedReviewToken?: string;
+      };
+      const verifications = readFactCheckVerifications();
+      for (const verification of verifications) {
+        const statements = verification.statements ?? [];
+        const idx = statements.findIndex((s) => s.id === statementId);
+        if (idx < 0) continue;
+        const current = statements[idx]!;
+        if (
+          current.review_token == null ||
+          body.expectedReviewToken !== current.review_token
+        ) {
+          return HttpResponse.json(
+            { message: 'stale confirmation token' },
+            { status: 409 }
+          );
+        }
+        const confirmed = {
+          ...current,
+          review_status: 'confirmed' as const,
+          confirmed_at: Date.now(),
+          review_id: 900 + statementId,
+        };
+        const nextVerification = {
+          ...verification,
+          statements: statements.map((s) =>
+            s.id === statementId ? confirmed : s
+          ),
+        };
+        writeFactCheckVerifications(
+          verifications.map((v) =>
+            v.id === verification.id ? nextVerification : v
+          )
+        );
+        return HttpResponse.json({
+          statement: confirmed,
+          verification: nextVerification,
+        });
+      }
+      return HttpResponse.json(
+        { message: 'statement not found' },
+        { status: 404 }
+      );
+    }
+  ),
+  // Clear one response's verification (the failed-verification "Clear"
+  // button in ChatMessageBubble).
+  http.delete('/api/verification/messages/:messageId', ({ params }) => {
+    const messageId = Number(params.messageId);
+    writeFactCheckVerifications(
+      readFactCheckVerifications().filter((v) => v.message_id !== messageId)
+    );
+    return HttpResponse.json({ message: 'cleared' });
+  }),
 ];

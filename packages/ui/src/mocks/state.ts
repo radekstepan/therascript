@@ -10,6 +10,11 @@
 // the MSW service worker. Specs that need a clean baseline call
 // POST /api/__e2e/reset in their `beforeEach` (see handlers/e2e.ts),
 // which invokes `e2eMockSeed()` below.
+import type {
+  FlaggedStatementItem,
+  MessageVerification,
+} from '../api/verification';
+
 const NOW_ISO = new Date().toISOString();
 const INTAKE_DATE = '2026-06-23';
 
@@ -585,6 +590,79 @@ export const writeReadiness = (next: ReadinessShape) => {
   }
 };
 
+// --- Fact-check fixtures (fact-check.spec.ts) --------------------------------
+// Injected per-spec via POST /api/__e2e/set-fact-check: chat-scoped
+// message verifications (with nested statements) for the session chat
+// view, the dashboard's flagged-statements feed, and the chat-10
+// messages they annotate.
+//
+// Unlike the module-level `e2e*` stores above, these live in
+// `localStorage` (like the readiness flag): MSW v2 resolves handlers
+// in the page realm, so a full document load (`page.goto`) wipes
+// module state — including seeds injected before the navigation.
+// `localStorage` survives navigations within the context and is
+// cleared by `e2eMockSeed` (POST /api/__e2e/reset). All default to
+// empty (matching the dashboard's default fixtures).
+const FACT_CHECK_VERIFICATIONS_KEY = 'e2e:fact-check-verifications';
+const FACT_CHECK_STATEMENTS_KEY = 'e2e:fact-check-statements';
+const FACT_CHECK_CHAT_MESSAGES_KEY = 'e2e:fact-check-chat-messages';
+
+function readFactCheckFixture<T>(key: string): T[] {
+  try {
+    if (typeof localStorage === 'undefined') return [];
+    const raw = localStorage.getItem(key);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeFactCheckFixture(key: string, value: unknown[]): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Ignore — unavailable storage keeps the default empty fixtures.
+  }
+}
+
+function clearFactCheckFixture(key: string): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.removeItem(key);
+  } catch {
+    // Ignore.
+  }
+}
+
+export function readFactCheckVerifications(): MessageVerification[] {
+  return readFactCheckFixture<MessageVerification>(
+    FACT_CHECK_VERIFICATIONS_KEY
+  );
+}
+export function writeFactCheckVerifications(next: MessageVerification[]): void {
+  writeFactCheckFixture(FACT_CHECK_VERIFICATIONS_KEY, next);
+}
+export function readFactCheckStatements(): FlaggedStatementItem[] {
+  return readFactCheckFixture<FlaggedStatementItem>(FACT_CHECK_STATEMENTS_KEY);
+}
+export function writeFactCheckStatements(next: FlaggedStatementItem[]): void {
+  writeFactCheckFixture(FACT_CHECK_STATEMENTS_KEY, next);
+}
+export function readFactCheckChatMessages(): MockChatMessage[] {
+  return readFactCheckFixture<MockChatMessage>(FACT_CHECK_CHAT_MESSAGES_KEY);
+}
+export function writeFactCheckChatMessages(next: MockChatMessage[]): void {
+  writeFactCheckFixture(FACT_CHECK_CHAT_MESSAGES_KEY, next);
+}
+export function clearFactCheckFixtures(): void {
+  clearFactCheckFixture(FACT_CHECK_VERIFICATIONS_KEY);
+  clearFactCheckFixture(FACT_CHECK_STATEMENTS_KEY);
+  clearFactCheckFixture(FACT_CHECK_CHAT_MESSAGES_KEY);
+}
+
 export const e2eMockSeed = () => {
   setMockLlmApiToken(null);
   // Reset the LLM "active model" + "loaded" flags + base URL too so
@@ -651,6 +729,7 @@ export const e2eMockSeed = () => {
   setE2eSession1Transcript(seedSession1Transcript());
   setE2eUploadError(null);
   setE2eVerificationJobs([]);
+  clearFactCheckFixtures();
   setE2eLocalModels([...LOCAL_MODELS]);
   setE2eAnalysisJobs([
     {

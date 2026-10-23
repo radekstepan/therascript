@@ -6,11 +6,19 @@
 // readiness.spec.ts calls POST /api/__e2e/set-ready to flip the
 // readiness overlay on/off.
 import { http, HttpResponse } from 'msw';
+import type {
+  FlaggedStatementItem,
+  MessageVerification,
+} from '../../api/verification';
+import type { MockChatMessage } from '../state';
 import {
   e2eMockSeed,
   readReadiness,
   setE2eUploadError,
   setE2eVerificationJobs,
+  writeFactCheckChatMessages,
+  writeFactCheckStatements,
+  writeFactCheckVerifications,
   writeReadiness,
   type E2EVerificationJob,
   type ReadinessShape,
@@ -44,6 +52,30 @@ export const e2eHandlers = [
       jobs?: E2EVerificationJob[];
     };
     setE2eVerificationJobs(Array.isArray(body.jobs) ? body.jobs : []);
+    return HttpResponse.json({ ok: true });
+  }),
+  // Fact-check fixture injection (fact-check.spec.ts). Seeds the
+  // chat-scoped verifications for the session view, the dashboard's
+  // flagged-statements feed, and the chat-10 messages they annotate.
+  // Stored in localStorage so the fixtures survive the full document
+  // loads between seeding and asserting (MSW v2 resolves handlers in
+  // the page realm, where module state is wiped by navigation).
+  // Anything omitted resets to empty via POST /api/__e2e/reset.
+  http.post('/api/__e2e/set-fact-check', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      verifications?: MessageVerification[];
+      statements?: FlaggedStatementItem[];
+      chatMessages?: MockChatMessage[];
+    };
+    writeFactCheckVerifications(
+      Array.isArray(body.verifications) ? body.verifications : []
+    );
+    writeFactCheckStatements(
+      Array.isArray(body.statements) ? body.statements : []
+    );
+    writeFactCheckChatMessages(
+      Array.isArray(body.chatMessages) ? body.chatMessages : []
+    );
     return HttpResponse.json({ ok: true });
   }),
   http.post('/api/__e2e/set-ready', async ({ request }) => {

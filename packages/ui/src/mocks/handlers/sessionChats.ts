@@ -14,6 +14,7 @@ import {
   mockActiveModel,
   mockChatMessages,
   mockMessageCounter,
+  readFactCheckChatMessages,
   setE2eSessionChats,
   setMockMessageCounter,
 } from '../state';
@@ -223,16 +224,19 @@ export const sessionChatsHandlers = [
   // GET /api/sessions/:sessionId/chats/:chatId — used by the chat
   // panel when the user navigates between chats. Returns the
   // canned mock transcript from the existing chat spec handler when
-  // chatId === 10, otherwise returns an empty chat.
+  // chatId === 10, otherwise returns an empty chat. When the
+  // fact-check fixtures are seeded (fact-check.spec.ts), the seeded
+  // messages take precedence so the annotated AI response renders.
   http.get('/api/sessions/:sessionId/chats/:chatId', ({ params }) => {
     const chatId = parseInt(params.chatId as string, 10);
     if (chatId === 10) {
+      const seeded = readFactCheckChatMessages();
       return HttpResponse.json({
         id: 10,
         sessionId: 1,
         timestamp: Date.parse('2026-06-23T12:30:00.000Z'),
         name: null,
-        messages: mockChatMessages,
+        messages: seeded.length > 0 ? seeded : mockChatMessages,
       });
     }
     return HttpResponse.json({
