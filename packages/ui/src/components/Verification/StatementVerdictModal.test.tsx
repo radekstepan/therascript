@@ -365,6 +365,63 @@ describe('StatementVerdictModal footer alignment', () => {
   });
 });
 
+describe('StatementVerdictModal left-dock and drag', () => {
+  // jsdom has no PointerEvent constructor, so testing-library's
+  // fireEvent.pointerDown drops clientX/clientY. Dispatch plain
+  // bubbling events with coordinates assigned: React's onPointerDown
+  // listens to the native event type regardless of constructor.
+  function dispatchPointer(
+    target: Element,
+    type: 'pointerdown' | 'pointermove' | 'pointerup',
+    clientX: number,
+    clientY: number
+  ) {
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    Object.assign(event, { clientX, clientY, button: 0, pointerId: 1 });
+    target.dispatchEvent(event);
+  }
+
+  it('docks left of center so the transcript stays visible', async () => {
+    renderModal();
+
+    const modal = await screen.findByTestId('fact-check-modal');
+    // Fixed left dock (not centered): the right half of a side-by-side
+    // session view stays uncovered for the transcript.
+    expect(modal.style.position).toBe('fixed');
+    expect(modal.style.left).toBe('24px');
+    expect(modal.style.top).toBe('50%');
+  });
+
+  it('moves the modal when the header handle is dragged', async () => {
+    renderModal();
+
+    const modal = await screen.findByTestId('fact-check-modal');
+    const handle = screen.getByTestId('fact-check-drag-handle');
+    expect(handle.style.cursor).toBe('move');
+
+    dispatchPointer(handle, 'pointerdown', 100, 100);
+    dispatchPointer(handle, 'pointermove', 160, 140);
+    dispatchPointer(handle, 'pointerup', 160, 140);
+
+    await waitFor(() => {
+      expect(modal.style.transform).toContain('translate(60px, 40px)');
+    });
+  });
+
+  it('does not start a drag from the header Close button', async () => {
+    renderModal();
+
+    const modal = await screen.findByTestId('fact-check-modal');
+    const before = modal.style.transform;
+    const close = screen.getByRole('button', { name: 'Close' });
+    dispatchPointer(close, 'pointerdown', 100, 100);
+    dispatchPointer(close, 'pointermove', 300, 300);
+    dispatchPointer(close, 'pointerup', 300, 300);
+
+    expect(modal.style.transform).toBe(before);
+  });
+});
+
 describe('StatementVerdictModal dismissal', () => {
   const SUPPORTED: VerifiedStatement = {
     ...STATEMENT,

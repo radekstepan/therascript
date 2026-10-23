@@ -30,6 +30,9 @@ For background on the Verification Agent and LLM lifecycle, see `AGENTS.md` (§1
   - **Why:** the old label restated the stored review status instead of the action; the icon keeps the destructive affordance recognizable at a glance.
   - **Tests:** updated all `StatementVerdictModal.test.tsx` references; 16/16 pass.
 
-- Make it so that Fact Check modal shows to the left of the Transcript and we can see both modal and the transcript. Make the modal moveable too.
+- [x] Make it so that Fact Check modal shows to the left of the Transcript and we can see both modal and the transcript. Make the modal moveable too.
+  - **Done:** `StatementVerdictModal.tsx` is now a modeless left-docked panel (fixed `left: 24px`, vertically centered, 560px max) with no overlay, so the transcript stays visible and interactive beside it; header is a pointer-capture drag handle with viewport clamping (position resets on open). Uses raw `@radix-ui/react-dialog` primitives with `modal={false}` + the same `rt-DialogContent` surface classes, because the Themes `Dialog.Root` hardcodes `modal: true`; Escape-to-close and `role="dialog"` preserved.
+  - **Why:** a centered modal covered the transcript and blocked interacting with it, defeating side-by-side evidence comparison; a docked modeless panel lets the reader cross-check quotes against the transcript.
+  - **Tests:** new "left-dock and drag" cases (dock position, header-drag moves the panel, Close button doesn't start drags); 19/19 pass; `tsc --noEmit` clean.
 
 - Make sure we have e2e coverage around fact checking including the Fact Check page and individual session transcript page
