@@ -40,3 +40,13 @@ For background on the Verification Agent and LLM lifecycle, see `AGENTS.md` (§1
   - **Why:** the Fact Check modal/panel previously had unit coverage only; the mocked dashboard returned empty fixtures, so neither surface was exercised end-to-end.
   - **Tests:** 2 new e2e specs pass (incl. `--repeat-each=2`); neighboring suites green (verification-coverage, chat-navigation, transcript-edit, speaker-rename — 7/7); full ui unit suite 304/304. Fixtures live in `localStorage` because MSW v2 resolves handlers in the page realm and full `page.goto` loads wipe module state — this also explains why the pre-existing seed-then-navigate specs (jobs-queue, live-banner) fail in this environment on the clean tree; left untouched as out of scope.
   - Follow-ups for a later batch: migrate the older `set-verification-jobs` fixtures to the same `localStorage` pattern; re-check the red seed-based specs.
+
+- [x] Same-hash paragraph links re-highlight
+  - **Done:** `Transcription.tsx` extracts scroll+highlight into a shared `highlightParagraphById` callback (timeout reset, not stacked) used by the `location.hash` effect and a new document-level click listener for `a[href*="#paragraph-"]` (document-level because evidence links portal to `document.body`; containment match because Router renders full hrefs). Re-clicking `#paragraph-282` while on it now scrolls to and re-highlights it.
+  - **Why:** the hash effect only reruns on location change, so same-hash clicks silently did nothing.
+  - **Tests:** new `fact-check.spec.ts` case (highlight → clear → same-hash re-click → highlighted); 6/6 e2e on repeat; 145/145 Verification+SessionView unit tests.
+
+- [x] Dismiss button left, grey, bold
+  - **Done:** `StatementVerdictModal.tsx` footer is now `space-between`: grey solid bold Dismiss pinned left, Prev/Next right (unchanged). Unit test rewritten to assert the left/right split, grey `data-accent-color`, and bold label.
+  - **Why:** Dismiss is the primary per-finding action and reads better as the footer's left anchor; grey de-emphasizes vs. the old green while bold keeps it legible.
+  - **Tests:** rewritten footer-layout cases; 20/20 modal tests pass. (Also fixed the e2e drag test to press at the handle center — the old corner offset landed in theme padding.)

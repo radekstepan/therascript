@@ -633,6 +633,39 @@ export function Transcription({
   const hasSpeakers = paragraphs.some((p) => p.speaker);
   const speakersVisible = session.showSpeakers !== 0;
 
+  const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+
+  // Scroll to + briefly highlight one paragraph by id. Shared by the
+  // `#paragraph-N` deep-link effect and the document click listener
+  // below, so re-clicking the *same* paragraph link (no hash change,
+  // so the effect never reruns) still re-highlights.
+  const highlightParagraphById = useCallback(
+    (paragraphId: number) => {
+      const list = transcriptContent || [];
+      const idx = list.findIndex((p) => p.id === paragraphId);
+      if (idx < 0 || !virtuosoRef.current) return;
+      console.log(
+        `[Transcription] Scrolling to paragraph id=${paragraphId} at index=${idx}`
+      );
+      virtuosoRef.current.scrollToIndex({
+        index: idx,
+        align: 'center',
+        behavior: 'smooth',
+      });
+      setHighlightedParagraphIndex(idx);
+      if (highlightTimeoutRef.current) {
+        clearTimeout(highlightTimeoutRef.current);
+      }
+      highlightTimeoutRef.current = setTimeout(
+        () => setHighlightedParagraphIndex(null),
+        2000
+      );
+    },
+    [transcriptContent]
+  );
+
   // Scroll to paragraph based on hash
   useEffect(() => {
     if (!isTabActive) return;
@@ -642,27 +675,46 @@ export function Transcription({
         const paragraphIdStr = hash.substring('paragraph-'.length);
         const paragraphId = parseInt(paragraphIdStr, 10);
         if (!isNaN(paragraphId)) {
-          const idx = paragraphs.findIndex((p) => p.id === paragraphId);
-          if (idx >= 0) {
-            setTimeout(() => {
-              if (virtuosoRef.current) {
-                console.log(
-                  `[Transcription] Scrolling to paragraph id=${paragraphId} at index=${idx}`
-                );
-                virtuosoRef.current.scrollToIndex({
-                  index: idx,
-                  align: 'center',
-                  behavior: 'smooth',
-                });
-                setHighlightedParagraphIndex(idx);
-                setTimeout(() => setHighlightedParagraphIndex(null), 2000);
-              }
-            }, 100);
-          }
+          const timer = setTimeout(() => {
+            highlightParagraphById(paragraphId);
+          }, 100);
+          return () => clearTimeout(timer);
         }
       }
     }
-  }, [location.hash, paragraphs, isTabActive]);
+    return undefined;
+  }, [location.hash, paragraphs, isTabActive, highlightParagraphById]);
+
+  // Re-clicking a `#paragraph-N` jump link while already on that hash
+  // changes nothing in the router (no location update, so the effect
+  // above never reruns and the highlight never returns). Catch those
+  // clicks at the document level — Fact Check evidence links portal
+  // to `document.body`, outside this subtree — and highlight directly.
+  // The router still handles different-hash navigation as before;
+  // double triggers are harmless (the clear timeout is reset, not
+  // stacked).
+  useEffect(() => {
+    if (!isTabActive) return;
+    const onClick = (event: MouseEvent) => {
+      // React Router renders hash-only `to`s as full `href`s (e.g.
+      // `/sessions/1/chats/10#paragraph-2`), so match on containment.
+      const anchor = (event.target as HTMLElement | null)?.closest?.(
+        'a[href*="#paragraph-"]'
+      );
+      if (!anchor) return;
+      const match = anchor.getAttribute('href')?.match(/#paragraph-(\d+)$/);
+      if (!match) return;
+      highlightParagraphById(parseInt(match[1]!, 10));
+    };
+    document.addEventListener('click', onClick);
+    return () => {
+      document.removeEventListener('click', onClick);
+      if (highlightTimeoutRef.current) {
+        clearTimeout(highlightTimeoutRef.current);
+        highlightTimeoutRef.current = null;
+      }
+    };
+  }, [isTabActive, highlightParagraphById]);
 
   const handleSaveParagraphInternal = async (
     paragraphId: number,

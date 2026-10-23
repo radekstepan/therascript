@@ -327,7 +327,7 @@ describe('StatementVerdictModal clear action removed', () => {
   });
 });
 
-describe('StatementVerdictModal footer alignment', () => {
+describe('StatementVerdictModal footer layout', () => {
   const SECOND: VerifiedStatement = {
     ...STATEMENT,
     id: 12,
@@ -338,7 +338,7 @@ describe('StatementVerdictModal footer alignment', () => {
     severity: 'none',
   };
 
-  it('right-aligns the Prev/Next navigation (no left-side actions)', async () => {
+  it('pins Dismiss left and the Prev/Next navigation right', async () => {
     renderWithClient(
       <Theme>
         <StatementVerdictModal
@@ -353,15 +353,47 @@ describe('StatementVerdictModal footer alignment', () => {
       </Theme>
     );
 
-    const next = await screen.findByRole('button', { name: 'Next' });
+    const dismiss = await screen.findByRole('button', { name: 'Dismiss' });
     const prev = screen.getByRole('button', { name: 'Prev' });
-    // Both steppers share one row container pinned to the right edge;
-    // the response-scoped Clear action (the old left column) is gone.
+    const next = screen.getByRole('button', { name: 'Next' });
+    // Dismiss renders before the steppers (left column of a
+    // space-between footer); the steppers share a right-justified row.
+    expect(
+      Boolean(
+        dismiss.compareDocumentPosition(prev) & Node.DOCUMENT_POSITION_FOLLOWING
+      )
+    ).toBe(true);
     const row = next.closest('div');
     expect(row).not.toBeNull();
     expect(row!.contains(prev)).toBe(true);
-    expect(row!.className).toMatch(/jc-end|justify-end|justify-content/);
+    expect(row!.className).toMatch(/jc-end|justify-end/);
+    const footer = dismiss.closest('div');
+    expect(footer).not.toBeNull();
+    expect(footer!.className).toMatch(/jc-space-between|justify-between/);
+    expect(footer!.contains(prev)).toBe(true);
     expect(screen.queryByRole('button', { name: /Clear/ })).toBeNull();
+  });
+
+  it('renders the Dismiss button grey and bold', async () => {
+    renderWithClient(
+      <Theme>
+        <StatementVerdictModal
+          open
+          onOpenChange={() => {}}
+          statements={[STATEMENT]}
+          initialStatementId={STATEMENT.id}
+          authoredModel="author-model"
+          judgeModel="judge-model"
+          verifiedAt={Date.now()}
+        />
+      </Theme>
+    );
+
+    const dismiss = await screen.findByRole('button', { name: 'Dismiss' });
+    // Grey solid variant (not the old green), bold label. Radix
+    // Themes carries the color on a data attribute, not a class.
+    expect(dismiss.getAttribute('data-accent-color')).toBe('gray');
+    expect(dismiss.style.fontWeight).toBe('bold');
   });
 });
 

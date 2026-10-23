@@ -665,38 +665,42 @@ export function StatementVerdictModal({
               (current !== null &&
                 isDismissible(current) &&
                 current.review_token != null)) && (
-              <Flex justify="end" align="center" mt="4" gap="2" wrap="wrap">
+              <Flex justify="between" align="center" mt="4" gap="2" wrap="wrap">
+                {/* Per-statement action, pinned left. Hidden for
+                    supported/confirmed findings. */}
+                {current !== null &&
+                isDismissible(current) &&
+                current.review_token != null ? (
+                  <AppTooltip content="Confirm that this finding is not an issue. Removes its highlight, updates accuracy and issue counts, and keeps this confirmation for future Fact Checks of unchanged content. Other statements are unchanged.">
+                    <span style={{ display: 'inline-block' }}>
+                      <Button
+                        size="2"
+                        variant="solid"
+                        color="gray"
+                        style={{ fontWeight: 'bold' }}
+                        disabled={dismissMutation.isPending}
+                        onClick={() =>
+                          dismissMutation.mutate({
+                            statementId: current.id,
+                            token: current.review_token as string,
+                          })
+                        }
+                      >
+                        {dismissMutation.isPending ? (
+                          'Dismissing…'
+                        ) : (
+                          <>
+                            <TrashIcon /> Dismiss
+                          </>
+                        )}
+                      </Button>
+                    </span>
+                  </AppTooltip>
+                ) : (
+                  <Box />
+                )}
                 <Flex direction="column" gap="1" align="end">
                   <Flex gap="2" wrap="wrap" justify="end">
-                    {/* Per-statement action. Hidden for supported/confirmed findings. */}
-                    {current !== null &&
-                      isDismissible(current) &&
-                      current.review_token != null && (
-                        <AppTooltip content="Confirm that this finding is not an issue. Removes its highlight, updates accuracy and issue counts, and keeps this confirmation for future Fact Checks of unchanged content. Other statements are unchanged.">
-                          <span style={{ display: 'inline-block' }}>
-                            <Button
-                              size="2"
-                              variant="solid"
-                              color="green"
-                              disabled={dismissMutation.isPending}
-                              onClick={() =>
-                                dismissMutation.mutate({
-                                  statementId: current.id,
-                                  token: current.review_token as string,
-                                })
-                              }
-                            >
-                              {dismissMutation.isPending ? (
-                                'Dismissing…'
-                              ) : (
-                                <>
-                                  <TrashIcon /> Dismiss
-                                </>
-                              )}
-                            </Button>
-                          </span>
-                        </AppTooltip>
-                      )}
                     {sorted.length > 1 && (
                       <>
                         <Button

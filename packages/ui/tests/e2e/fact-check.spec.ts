@@ -267,10 +267,12 @@ test.describe('Fact check coverage', () => {
       page.getByText('I have been feeling anxious for the past few months')
     ).toBeVisible();
 
-    // Dragging the header handle moves the panel.
+    // Dragging the header handle moves the panel. Press down at the
+    // handle's own center (hover position): the panel has real theme
+    // padding, so a hardcoded offset from the panel corner can land
+    // in the padding instead of on the handle.
     const handle = page.getByTestId('fact-check-drag-handle');
     await handle.hover();
-    await page.mouse.move(box!.x + 200, box!.y + 20);
     await page.mouse.down();
     await page.mouse.move(box!.x + 300, box!.y + 60, { steps: 5 });
     await page.mouse.up();
@@ -289,5 +291,45 @@ test.describe('Fact check coverage', () => {
     // Dismiss confirms the finding with the short label + trash icon.
     await dialog.getByRole('button', { name: 'Dismiss' }).click();
     await expect(dialog.getByText(/Confirmed by you/)).toBeVisible();
+  });
+
+  test('re-clicking the same paragraph link re-highlights the paragraph', async ({
+    page,
+  }) => {
+    await page.goto('/sessions/1/chats/10');
+
+    const metricsRow = page
+      .locator('[data-testid="note-metrics-row"]:visible')
+      .first();
+    await metricsRow.getByText('1 Hallucination / Contradiction').click();
+
+    const dialog = page.getByTestId('fact-check-modal');
+    await expect(dialog).toBeVisible();
+    // Statement 2 carries transcript evidence with a ¶2 jump link.
+    await dialog.getByRole('button', { name: 'Next' }).click();
+    const jumpLink = dialog.getByRole('link', {
+      name: 'Jump to transcript paragraph 2',
+    });
+    await expect(jumpLink).toBeVisible();
+
+    const highlighted = page.locator('.highlight-paragraph', {
+      hasText: 'That sounds difficult',
+    });
+    await jumpLink.click();
+    await expect(highlighted).toBeVisible();
+
+    // The highlight clears after ~2s; wait for the clear so the
+    // re-click below proves a fresh highlight (count polling, not a
+    // vacuous not-visible on zero matches).
+    await expect
+      .poll(async () => page.locator('.highlight-paragraph').count(), {
+        timeout: 10000,
+      })
+      .toBe(0);
+
+    // Same URL hash as before — the router changes nothing, but the
+    // paragraph must highlight again.
+    await jumpLink.click();
+    await expect(highlighted).toBeVisible();
   });
 });
