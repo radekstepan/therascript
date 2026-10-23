@@ -22,3 +22,5 @@ For background on the Verification Agent and LLM lifecycle, see `AGENTS.md` (§1
 - Rename "Dismiss Statement (Confirmed)" to "Dismiss" with a trahscan delete icon
 
 - Make it so that Fact Check modal shows to the left of the Transcript and we can see both modal and the transcript. Make the modal moveable too.
+
+- Make sure we have e2e coverage around fact checking including the Fact Check page and individual session transcript page
