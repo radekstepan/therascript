@@ -26,7 +26,6 @@ import {
   InfoCircledIcon,
   PersonIcon,
   QuoteIcon,
-  TrashIcon,
 } from '@radix-ui/react-icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
@@ -36,10 +35,7 @@ import type {
   StatementSeverity,
   VerifiedStatement,
 } from '../../api/verification';
-import {
-  deleteMessageVerification,
-  dismissStatementVerification,
-} from '../../api/verification';
+import { dismissStatementVerification } from '../../api/verification';
 import {
   formatEvidenceTimestamp,
   getVerdictBadgeColor,
@@ -59,12 +55,6 @@ export interface StatementVerdictModalProps {
   summaryAssessment?: string | null;
   /** Therapist's prompt — shown as context for omissions. */
   userQuestion?: string | null;
-  /**
-   * Owning chat message id. Enables the "Clear Response Fact Check"
-   * footer action (delete the whole response's verification + invalidate
-   * + close) so the message returns to the unverified pool for re-audit.
-   */
-  messageId?: number | null;
 }
 
 function getSeverityBadgeColor(
@@ -140,29 +130,8 @@ export function StatementVerdictModal({
   verifiedAt,
   summaryAssessment,
   userQuestion,
-  messageId,
 }: StatementVerdictModalProps) {
   const queryClient = useQueryClient();
-
-  const clearMutation = useMutation({
-    mutationFn: () => {
-      if (messageId === undefined || messageId === null) {
-        throw new Error('Message id missing for clear verification.');
-      }
-      return deleteMessageVerification(messageId);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['chatVerifications'] });
-      queryClient.invalidateQueries({ queryKey: ['verificationStats'] });
-      onOpenChange(false);
-    },
-    onError: (error: Error) => {
-      console.error(
-        `[StatementVerdictModal] Failed to clear verification for message ${messageId}:`,
-        error
-      );
-    },
-  });
 
   // Immediate cache update from an authoritative assessment (success
   // payload or 404/409 refresh), then refetch every dependent prefix.
@@ -577,49 +546,14 @@ export function StatementVerdictModal({
           </ScrollArea>
         )}
 
-        {(sorted.length > 1 || messageId != null) && (
+        {(sorted.length > 1 ||
+          (current !== null &&
+            isDismissible(current) &&
+            current.review_token != null)) && (
           <Flex justify="between" align="center" mt="4" gap="2" wrap="wrap">
-            {messageId != null ? (
-              <Flex direction="column" gap="1" align="start">
-                {/* Scope + recheck behavior, since "Clear Verification"
-                    reads as if it might clear only the statement shown. */}
-                <AppTooltip
-                  content={
-                    sorted.length > 1
-                      ? `Deletes all ${sorted.length} fact-check statements for this response — not just the one shown above. The response returns to the unverified pool and will be re-checked on the next audit. Your per-finding confirmations are kept and will re-apply to matching findings.`
-                      : `Deletes this response's fact-check statement. The response returns to the unverified pool and will be re-checked on the next audit. Your per-finding confirmations are kept and will re-apply to matching findings.`
-                  }
-                >
-                  <span style={{ display: 'inline-block' }}>
-                    <Button
-                      size="2"
-                      variant="soft"
-                      color="red"
-                      disabled={
-                        clearMutation.isPending || dismissMutation.isPending
-                      }
-                      onClick={() => clearMutation.mutate()}
-                    >
-                      <TrashIcon />{' '}
-                      {clearMutation.isPending
-                        ? 'Clearing…'
-                        : 'Clear Response Fact Check'}
-                    </Button>
-                  </span>
-                </AppTooltip>
-                {clearMutation.isError && (
-                  <Text size="1" color="red">
-                    Couldn&apos;t clear — try again.
-                  </Text>
-                )}
-              </Flex>
-            ) : (
-              <Box />
-            )}
             <Flex direction="column" gap="1" align="end">
               <Flex gap="2" wrap="wrap" justify="end">
-                {/* Per-statement action, separate from the response-scoped
-                    Clear above. Hidden for supported/confirmed findings. */}
+                {/* Per-statement action. Hidden for supported/confirmed findings. */}
                 {current !== null &&
                   isDismissible(current) &&
                   current.review_token != null && (
@@ -629,9 +563,7 @@ export function StatementVerdictModal({
                           size="2"
                           variant="solid"
                           color="green"
-                          disabled={
-                            dismissMutation.isPending || clearMutation.isPending
-                          }
+                          disabled={dismissMutation.isPending}
                           onClick={() =>
                             dismissMutation.mutate({
                               statementId: current.id,

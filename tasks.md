@@ -15,7 +15,10 @@ For background on the Verification Agent and LLM lifecycle, see `AGENTS.md` (§1
 
 ## Tasks
 
-- remove "Cleare Response Fact Check button from Fact Check modal
+- [x] remove "Cleare Response Fact Check button from Fact Check modal
+  - **Done:** deleted the "Clear Response Fact Check" footer action (plus its `clearMutation` and the now-unused `messageId` modal prop) from `packages/ui/src/components/Verification/StatementVerdictModal.tsx`; `ChatMessages.tsx` no longer passes `messageId`. Per-response clearing stays available for failed verifications via the "Clear" button in `ChatMessageBubble.tsx`, and via Reset All Verifications on the `/verification` hub.
+  - **Why:** the response-scoped delete did not belong in a per-statement verdict modal (its tooltip had to explain it cleared all N statements, not the one shown); failed-message retry keeps its own inline entry point.
+  - **Tests:** `StatementVerdictModal.test.tsx` — removed the clear-action suite, replaced with a "clear action removed" assertion; all 15 modal tests + 39 `SessionView/Chat` tests pass.
 
 - Align Prev and Next buttons in Fact Check to the right
 
