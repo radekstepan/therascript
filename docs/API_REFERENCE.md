@@ -105,7 +105,7 @@ LLM Fact-Verification & Hallucination Audit ("LLM Judge") job management, analyt
 
 **Stats Query Parameters (`GET /api/verification/stats`):**
 - `sessionId`, `model`, `startDate`, `endDate` — Optional filters.
-- Response includes `failedMessagesCount` (messages whose latest attempt ended `failed`) and per-session `failedAiMessages` alongside verified counts.
+- Response includes `failedMessagesCount` (messages whose latest attempt ended `failed`) and per-session `failedAiMessages` alongside verified counts, plus per-session `predominantModel` (most common chat LLM across the session's verifiable AI messages, `null` when unrecorded).
 
 **Statements Query Parameters (`GET /api/verification/statements`):**
 - `verdict`, `severity`, `authoredModel`, `sessionId`, `search`, `limit`, `offset` — Optional filters (`verdict`/`severity` accept comma-separated lists).
