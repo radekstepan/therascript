@@ -23,6 +23,8 @@ For background on the Verification Agent and LLM lifecycle, see `AGENTS.md` (§1
 
   Writeup: `packages/ui/src/components/Verification/ModelAccuracyCard.tsx` — `ProportionBar` is wrapped in `AppTooltip` (Radix, portaled) with a per-model readout (name, supported/partial/contradicted-fabricated counts, total claims across audited responses); the bar keeps its `role="img"` label and gains `tabIndex={0}` for keyboard. Reason: a bare bar forces users to guess the mix, and a non-portaled tooltip would be clipped by the table's `overflow-x` scroller — the portal escapes it. Regression coverage in `ModelAccuracyCard.test.tsx` (hover shows own model's breakdown, different model differs, keyboard focus opens it).
 
-- [ ] Fact Check page, Job History Action has "View details" that's cuttoff. Just say "View" so it's a single line.
+- [x] Fact Check page, Job History Action has "View details" that's cuttoff. Just say "View" so it's a single line.
+
+  Writeup: `packages/ui/src/components/Verification/JobHistoryTab.tsx` — the failure-details `Action` button now reads `View` (with a `View failure details` tooltip) instead of `View details`. Reason: the `size="1"` button in the narrow right-aligned column wrapped/truncated; the shorter label fits on one line. The header `LastRunResultCard` banner keeps its roomier `View details` label. Updated `JobHistoryTab.details.test.tsx` and `verification-job-history.spec.ts` (exact match, since the banner's `View details` also contains `View`).
 
 - [ ] Fact Check page, Transcripts coverage, add a column that says what was the (predominant) chat LLM across all chats for that transcript.

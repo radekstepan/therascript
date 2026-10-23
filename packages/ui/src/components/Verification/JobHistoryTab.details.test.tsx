@@ -6,9 +6,9 @@
 //   - Mixed runs (completed + failed_messages > 0) render "Completed with
 //     errors", never unqualified success.
 //   - Terminal rows show the checked/failed outcome split.
-//   - Failed and mixed runs offer "View details", opening per-message
+//   - Failed and mixed runs offer "View", opening per-message
 //     reasons with links to the affected session/chat/note.
-//   - Clean completed runs show no View details action.
+//   - Clean completed runs show no View action.
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
@@ -163,11 +163,11 @@ describe('JobHistoryTab failure outcomes', () => {
     expect(screen.getAllByText('completed')).toHaveLength(1);
   });
 
-  it('offers View details only for failed or mixed runs', async () => {
+  it('offers View only for failed or mixed runs', async () => {
     renderTab();
 
     const buttons = await screen.findAllByRole('button', {
-      name: 'View details',
+      name: 'View',
     });
     expect(buttons).toHaveLength(2);
   });
@@ -176,7 +176,7 @@ describe('JobHistoryTab failure outcomes', () => {
     renderTab();
 
     const buttons = await screen.findAllByRole('button', {
-      name: 'View details',
+      name: 'View',
     });
     fireEvent.click(buttons[0]);
 

@@ -502,7 +502,7 @@ export const cancelVerificationJob = async (
 
 /**
  * Fetches failed message assessments attributable to one job run
- * (powers the Job History "View details" dialog).
+ * (powers the Job History "View" dialog).
  */
 export const fetchVerificationJobFailures = async (
   jobId: number

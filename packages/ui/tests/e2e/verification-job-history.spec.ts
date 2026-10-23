@@ -2,7 +2,7 @@
 //
 // E2E for failure-aware verification job history: a mixed-outcome run
 // (completed + failed_messages > 0) renders "Completed with errors"
-// with its outcome split, and "View details" opens the failure dialog
+// with its outcome split, and "View" opens the failure dialog
 // with the persisted job summary. The per-message failures endpoint
 // returns an empty list in the mock worker (no failures were seeded),
 // so the dialog shows the re-audit note alongside the summary.
@@ -67,7 +67,7 @@ test.describe('Verification job history failures', () => {
     }, MIXED_JOB);
   });
 
-  test('mixed run shows Completed with errors and a View details dialog', async ({
+  test('mixed run shows Completed with errors and a View dialog', async ({
     page,
   }) => {
     await page.goto('/verification');
@@ -78,7 +78,9 @@ test.describe('Verification job history failures', () => {
     await expect(page.getByText('Completed with errors')).toBeVisible();
     await expect(page.getByText('2 checked · 1 failed')).toBeVisible();
 
-    await page.getByRole('button', { name: 'View details' }).click();
+    // The banner's "View details" button also contains "View" — match
+    // the Job History action exactly.
+    await page.getByRole('button', { name: 'View', exact: true }).click();
     const dialog = page.getByRole('dialog', {
       name: 'Audit #8 — failure details',
     });

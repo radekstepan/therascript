@@ -293,9 +293,10 @@ export function JobHistoryTab() {
                     <Button
                       size="1"
                       variant="soft"
+                      title="View failure details"
                       onClick={() => setDetailsJob(job)}
                     >
-                      View details
+                      View
                     </Button>
                   ) : (
                     <Text size="1" color="gray">
