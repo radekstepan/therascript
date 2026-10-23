@@ -207,7 +207,7 @@ describe('IssuesFeedTab pagination clamp', () => {
       items: [ITEM],
       total: 26,
       limit: 25,
-      offset: params.offset ?? 0,
+      offset: params?.offset ?? 0,
     }));
     const { queryClient } = renderTab();
     expect(await screen.findByText('Page 1 of 2')).toBeTruthy();
@@ -219,7 +219,7 @@ describe('IssuesFeedTab pagination clamp', () => {
       items: [ITEM],
       total: 1,
       limit: 25,
-      offset: params.offset ?? 0,
+      offset: params?.offset ?? 0,
     }));
     await act(async () => {
       await queryClient.invalidateQueries({
