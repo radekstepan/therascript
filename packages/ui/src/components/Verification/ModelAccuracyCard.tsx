@@ -5,11 +5,32 @@ import React from 'react';
 import { Card, Flex, Heading, Text, Table, Badge } from '@radix-ui/themes';
 import { Cpu } from 'lucide-react';
 import type { ModelAccuracyStat } from '../../api/verification';
+import { AppTooltip } from '../Shared/AppTooltip';
 
 function accuracyColor(pct: number): 'green' | 'amber' | 'red' {
   if (pct >= 92) return 'green';
   if (pct >= 80) return 'amber';
   return 'red';
+}
+
+/**
+ * Per-model tooltip body. Radix Themes renders Tooltip content inside
+ * a `<p>`, so this uses only phrasing content (spans/line breaks) —
+ * no block layout that would be invalid there. Radix renders the
+ * tooltip in a portal, so the readout escapes the table's
+ * `overflow-x: auto` scroller instead of being clipped by it.
+ */
+function ProportionBarTooltipContent({ stat }: { stat: ModelAccuracyStat }) {
+  const bad = stat.contradictedClaims + stat.fabricatedClaims;
+  return (
+    <span>
+      <strong>{stat.model}</strong>
+      <br />
+      {`${stat.supportedClaims} supported · ${stat.partialClaims} partial · ${bad} contradicted/fabricated`}
+      <br />
+      {`${stat.totalClaims} claims across ${stat.messagesAudited} audited response${stat.messagesAudited === 1 ? '' : 's'}`}
+    </span>
+  );
 }
 
 function ProportionBar({ stat }: { stat: ModelAccuracyStat }) {
@@ -21,26 +42,29 @@ function ProportionBar({ stat }: { stat: ModelAccuracyStat }) {
       ? ((stat.contradictedClaims + stat.fabricatedClaims) / total) * 100
       : 0;
   return (
-    <div
-      role="img"
-      aria-label={`${stat.model}: ${supported.toFixed(0)}% supported, ${partial.toFixed(0)}% partial, ${bad.toFixed(0)}% contradicted or fabricated`}
-      style={{
-        display: 'flex',
-        height: '10px',
-        borderRadius: 'var(--radius-full)',
-        overflow: 'hidden',
-        backgroundColor: 'var(--gray-a4)',
-        minWidth: '120px',
-      }}
-    >
+    <AppTooltip content={<ProportionBarTooltipContent stat={stat} />}>
       <div
-        style={{ width: `${supported}%`, backgroundColor: 'var(--green-9)' }}
-      />
-      <div
-        style={{ width: `${partial}%`, backgroundColor: 'var(--amber-9)' }}
-      />
-      <div style={{ width: `${bad}%`, backgroundColor: 'var(--red-9)' }} />
-    </div>
+        role="img"
+        tabIndex={0}
+        aria-label={`${stat.model}: ${supported.toFixed(0)}% supported, ${partial.toFixed(0)}% partial, ${bad.toFixed(0)}% contradicted or fabricated`}
+        style={{
+          display: 'flex',
+          height: '10px',
+          borderRadius: 'var(--radius-full)',
+          overflow: 'hidden',
+          backgroundColor: 'var(--gray-a4)',
+          minWidth: '120px',
+        }}
+      >
+        <div
+          style={{ width: `${supported}%`, backgroundColor: 'var(--green-9)' }}
+        />
+        <div
+          style={{ width: `${partial}%`, backgroundColor: 'var(--amber-9)' }}
+        />
+        <div style={{ width: `${bad}%`, backgroundColor: 'var(--red-9)' }} />
+      </div>
+    </AppTooltip>
   );
 }
 

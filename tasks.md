@@ -19,7 +19,9 @@ For background on the Verification Agent and LLM lifecycle, see `AGENTS.md` (§1
 
   Writeup: `packages/ui/src/styles/global.css` — `.verified-statement-mark-active` now runs `verified-mark-flash 0.9s ease-out 1` (was `2`) with `box-shadow: none` (was a persistent 2px verdict ring). Keyframes animate `background-color` from the verdict tint (`--verified-flash` red/amber/green `a5`) with only the `0%` frame, so the mark flashes once and settles back into its resting fill. Reason: the repeating ring flash was distracting and the persistent border fought the resting underline styles; a single background pulse orients the reader without lingering chrome.
 
-- [ ] Accuracy by Authoring LLM - Claim mix little bar chart needs onhover tooltip. Make sure it won't be cutoff by the UI.
+- [x] Accuracy by Authoring LLM - Claim mix little bar chart needs onhover tooltip. Make sure it won't be cutoff by the UI.
+
+  Writeup: `packages/ui/src/components/Verification/ModelAccuracyCard.tsx` — `ProportionBar` is wrapped in `AppTooltip` (Radix, portaled) with a per-model readout (name, supported/partial/contradicted-fabricated counts, total claims across audited responses); the bar keeps its `role="img"` label and gains `tabIndex={0}` for keyboard. Reason: a bare bar forces users to guess the mix, and a non-portaled tooltip would be clipped by the table's `overflow-x` scroller — the portal escapes it. Regression coverage in `ModelAccuracyCard.test.tsx` (hover shows own model's breakdown, different model differs, keyboard focus opens it).
 
 - [ ] Fact Check page, Job History Action has "View details" that's cuttoff. Just say "View" so it's a single line.
 

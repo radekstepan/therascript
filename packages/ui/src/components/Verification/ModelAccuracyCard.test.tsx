@@ -16,9 +16,10 @@
 // overflow-x owner on the table's ancestor chain, min-width kept on
 // the table) rather than pixel measurements, so styling tweaks that
 // keep a single scroller stay green.
-import React from 'react';
+import React, { act } from 'react';
 import { describe, it, expect } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, within, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { Theme } from '@radix-ui/themes';
 import type { ModelAccuracyStat } from '../../api/verification';
 import { ModelAccuracyCard } from './ModelAccuracyCard';
@@ -173,5 +174,91 @@ describe('ModelAccuracyCard rate scales', () => {
       expect(pct).toBeGreaterThanOrEqual(0);
       expect(pct).toBeLessThanOrEqual(100);
     }
+  });
+});
+
+describe('ModelAccuracyCard claim mix tooltip', () => {
+  // The Claim mix bar owns an AppTooltip (Radix, portaled) readout with
+  // that model's own claim counts — hovering the bar must show its
+  // breakdown, and a different model's bar must show different content.
+  // Radix renders the tooltip in a portal, so the readout escapes the
+  // table's overflow-x scroller instead of being clipped by it.
+  const TOOLTIP_STATS: ModelAccuracyStat[] = [
+    makeStat({
+      model: 'model-alpha',
+      messagesAudited: 4,
+      totalClaims: 8,
+      supportedClaims: 7,
+      partialClaims: 0,
+      contradictedClaims: 1,
+      fabricatedClaims: 0,
+    }),
+    makeStat({
+      model: 'model-beta',
+      messagesAudited: 2,
+      totalClaims: 5,
+      supportedClaims: 1,
+      partialClaims: 2,
+      contradictedClaims: 1,
+      fabricatedClaims: 1,
+    }),
+  ];
+
+  it('shows the hovered model its own claim breakdown', async () => {
+    const user = userEvent.setup();
+    renderCard(TOOLTIP_STATS);
+
+    const bar = screen.getByRole('img', {
+      name: 'model-alpha: 88% supported, 0% partial, 13% contradicted or fabricated',
+    });
+    await user.hover(bar);
+    await waitFor(
+      () => {
+        const tooltip = screen.getByRole('tooltip');
+        expect(tooltip.textContent).toContain('model-alpha');
+        expect(tooltip.textContent).toContain('7 supported');
+        expect(tooltip.textContent).toContain('8 claims across 4 audited');
+        expect(tooltip.textContent).not.toContain('model-beta');
+      },
+      { timeout: 3000 }
+    );
+  });
+
+  it('shows a different model different content', async () => {
+    const user = userEvent.setup();
+    renderCard(TOOLTIP_STATS);
+
+    const bar = screen.getByRole('img', {
+      name: 'model-beta: 20% supported, 40% partial, 40% contradicted or fabricated',
+    });
+    await user.hover(bar);
+    await waitFor(
+      () => {
+        const tooltip = screen.getByRole('tooltip');
+        expect(tooltip.textContent).toContain('model-beta');
+        expect(tooltip.textContent).toContain('1 supported');
+        expect(tooltip.textContent).toContain('2 partial');
+        expect(tooltip.textContent).not.toContain('model-alpha');
+      },
+      { timeout: 3000 }
+    );
+  });
+
+  it('opens the bar tooltip on keyboard focus', async () => {
+    renderCard(TOOLTIP_STATS);
+
+    const bar = screen.getByRole('img', {
+      name: /model-alpha:/,
+    });
+    act(() => {
+      (bar as HTMLElement).focus();
+    });
+    await waitFor(
+      () => {
+        const tooltip = screen.getByRole('tooltip');
+        expect(tooltip.textContent).toContain('model-alpha');
+      },
+      { timeout: 3000 }
+    );
   });
 });
