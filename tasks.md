@@ -15,15 +15,4 @@ For background on the Verification Agent and LLM lifecycle, see `AGENTS.md` (§1
 
 ## Tasks
 
-- [x] Consistent human-readable LLM display names in Fact Check + Settings Detailed Usage Logs (DB values unchanged, UI overrides only):
-  - `qwen3.5-9b` (pass-through)
-  - `Unknown Model` (canonical label; null/empty/`Unknown model` casing normalizes to this)
-  - `gemma3:12b-it-qat` -> `gemma3-12b`
-  - `qwen/qwen3.5-9b` -> `qwen3.5-9b`
-  - `qwen3.8-27b` (pass-through)
-
-  **Writeup — what/why:** Added a single shared UI override, `formatModelDisplayName` (`packages/ui/src/utils/modelDisplay.ts` + `modelDisplay.test.ts`), so every surface renders the same human name while the DB keeps the raw id. Explicit pins cover `gemma3:12b-it-qat` → `gemma3-12b` and `qwen/qwen3.5-9b` → `qwen3.5-9b`; a generic `vendor/model` slash-strip fallback covers future prefixed ids (e.g. `qwen/qwen3.8-27b`); missing/legacy-cased unknowns collapse to `Unknown Model`. Applied consistently across Fact Check (audit banner Judge, job history, failure details, issues-feed filter + `authored → Judge` line, accuracy-by-model table/tooltips/aria, trend filter + empty-state, coverage `Chat LLM`, verdict-modal footer) and Settings Detailed Usage Logs (model filter dropdowns + table column). Raw ids stay as React keys, filter values, `title` tooltips, and API params, so filtering and API behavior are unchanged. Reason: raw registry ids (`:`/`/` qualified) leaked into the UI inconsistently; a central display-only mapping fixes readability without a data migration. Verified with `yarn vitest run` on the new unit test plus the affected Verification component suites (55 tests passing). Changeset: `.changeset/human-model-display-names.md` (patch `@therascript/ui`, `@therascript/config` — includes the pre-existing uncommitted `qwen3.8-27b` pricing row needed for cost display).
-
-- [x] Merge same-display-name models in Accuracy by Authoring LLM (follow-up: display mapping can alias two raw ids to one human name):
-
-  **Writeup — what/why:** Added `mergeModelAccuracyStatsByDisplayName` (`packages/ui/src/utils/modelDisplay.ts` + tests) which folds `byModel` rows sharing a display name (e.g. `qwen/qwen3.5-9b` + `qwen3.5-9b`) into one row: counts summed, accuracy/fabrication/contradiction/omissions rates recomputed with the backend's pooled formulas, `averageAccuracyScore` as a messages-weighted mean, backend sort order kept. `ModelAccuracyCard` renders the merged rows so the table never shows one human name twice; filter dropdowns (trend, issues feed, usage logs) keep raw ids as API values and gained a raw-id `title` tooltip when the label differs. Reason: the backend groups `byModel` by raw stored id, so without merging the new display names would render duplicate lines with split counts. Verified with `yarn vitest run` (13 files, 105 tests passing, incl. new merge unit + card tests). Changeset: `.changeset/merge-model-accuracy-display-names.md` (patch `@therascript/ui`).
+...
