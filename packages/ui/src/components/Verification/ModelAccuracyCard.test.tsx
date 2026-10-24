@@ -177,6 +177,48 @@ describe('ModelAccuracyCard rate scales', () => {
   });
 });
 
+describe('ModelAccuracyCard display-name merging', () => {
+  // The backend groups by raw stored id, so `qwen/qwen3.5-9b` and
+  // `qwen3.5-9b` arrive as separate rows sharing one display name. The
+  // card must fold them into a single `qwen3.5-9b` row (counts summed)
+  // instead of rendering the same human name twice.
+  it('merges aliased raw ids into one row per display name', () => {
+    renderCard([
+      makeStat({
+        model: 'qwen/qwen3.5-9b',
+        messagesAudited: 3,
+        totalClaims: 10,
+        supportedClaims: 8,
+        contradictedClaims: 1,
+        fabricatedClaims: 1,
+        omissions: 1,
+        accuracyPercent: 0, // stale per-row value: merge recomputes it
+        fabricationRate: 0,
+        contradictionRate: 0,
+      }),
+      makeStat({
+        model: 'qwen3.5-9b',
+        messagesAudited: 1,
+        totalClaims: 4,
+        supportedClaims: 4,
+        accuracyPercent: 0,
+      }),
+    ]);
+    const table = screen.getByRole('table');
+    // One data row (header row + exactly one body row).
+    expect(within(table as HTMLElement).getAllByRole('row')).toHaveLength(2);
+    expect(
+      within(table as HTMLElement).getByRole('rowheader', {
+        name: 'qwen3.5-9b',
+      })
+    ).toBeDefined();
+    // Merged counts: 3 + 1 audited, 10 + 4 claims.
+    const cells = within(table as HTMLElement).getAllByRole('cell');
+    expect(cells[1]?.textContent).toBe('4');
+    expect(cells[2]?.textContent).toBe('14');
+  });
+});
+
 describe('ModelAccuracyCard claim mix tooltip', () => {
   // The Claim mix bar owns an AppTooltip (Radix, portaled) readout with
   // that model's own claim counts — hovering the bar must show its

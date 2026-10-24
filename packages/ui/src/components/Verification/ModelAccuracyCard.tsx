@@ -6,7 +6,7 @@ import { Card, Flex, Heading, Text, Table, Badge } from '@radix-ui/themes';
 import { Cpu } from 'lucide-react';
 import type { ModelAccuracyStat } from '../../api/verification';
 import { AppTooltip } from '../Shared/AppTooltip';
-import { formatModelDisplayName } from '../../utils/modelDisplay';
+import { mergeModelAccuracyStatsByDisplayName } from '../../utils/modelDisplay';
 
 function accuracyColor(pct: number): 'green' | 'amber' | 'red' {
   if (pct >= 92) return 'green';
@@ -23,10 +23,9 @@ function accuracyColor(pct: number): 'green' | 'amber' | 'red' {
  */
 function ProportionBarTooltipContent({ stat }: { stat: ModelAccuracyStat }) {
   const bad = stat.contradictedClaims + stat.fabricatedClaims;
-  const displayModel = formatModelDisplayName(stat.model);
   return (
     <span>
-      <strong>{displayModel}</strong>
+      <strong>{stat.model}</strong>
       <br />
       {`${stat.supportedClaims} supported · ${stat.partialClaims} partial · ${bad} contradicted/fabricated`}
       <br />
@@ -48,7 +47,7 @@ function ProportionBar({ stat }: { stat: ModelAccuracyStat }) {
       <div
         role="img"
         tabIndex={0}
-        aria-label={`${formatModelDisplayName(stat.model)}: ${supported.toFixed(0)}% supported, ${partial.toFixed(0)}% partial, ${bad.toFixed(0)}% contradicted or fabricated`}
+        aria-label={`${stat.model}: ${supported.toFixed(0)}% supported, ${partial.toFixed(0)}% partial, ${bad.toFixed(0)}% contradicted or fabricated`}
         style={{
           display: 'flex',
           height: '10px',
@@ -71,6 +70,14 @@ function ProportionBar({ stat }: { stat: ModelAccuracyStat }) {
 }
 
 export function ModelAccuracyCard({ stats }: { stats: ModelAccuracyStat[] }) {
+  // The backend groups by raw stored id, so aliased ids sharing a display
+  // name arrive as separate rows. Fold them into one row per display name
+  // (counts summed, rates recomputed) so the table never shows the same
+  // human name twice. Raw ids stay untouched upstream (filters/API params).
+  const merged = React.useMemo(
+    () => mergeModelAccuracyStatsByDisplayName(stats),
+    [stats]
+  );
   return (
     <Card size="3">
       <Flex align="center" gap="2" mb="1">
@@ -82,7 +89,7 @@ export function ModelAccuracyCard({ stats }: { stats: ModelAccuracyStat[] }) {
         response.
       </Text>
 
-      {stats.length === 0 ? (
+      {merged.length === 0 ? (
         <Flex direction="column" align="center" justify="center" gap="2" py="6">
           <Text size="2" color="gray">
             No audited responses yet. Run a verification audit to compare
@@ -148,19 +155,11 @@ export function ModelAccuracyCard({ stats }: { stats: ModelAccuracyStat[] }) {
                 </Table.Row>
               </Table.Header>
               <Table.Body>
-                {stats.map((stat) => (
+                {merged.map((stat) => (
                   <Table.Row key={stat.model}>
                     <Table.RowHeaderCell>
-                      <Text
-                        size="2"
-                        weight="medium"
-                        title={
-                          formatModelDisplayName(stat.model) !== stat.model
-                            ? stat.model
-                            : undefined
-                        }
-                      >
-                        {formatModelDisplayName(stat.model)}
+                      <Text size="2" weight="medium">
+                        {stat.model}
                       </Text>
                     </Table.RowHeaderCell>
                     {/* Middle-align: cells inherit baseline alignment, which

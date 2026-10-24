@@ -306,7 +306,13 @@ export function AccuracyTimelineCard({
           <Select.Content>
             <Select.Item value={ALL_MODELS}>All Models</Select.Item>
             {models.map((model) => (
-              <Select.Item key={model} value={model}>
+              <Select.Item
+                key={model}
+                value={model}
+                title={
+                  formatModelDisplayName(model) !== model ? model : undefined
+                }
+              >
                 {formatModelDisplayName(model)}
               </Select.Item>
             ))}

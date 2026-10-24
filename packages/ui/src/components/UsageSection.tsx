@@ -375,12 +375,24 @@ export function UsageSection() {
           <Select.Content>
             <Select.Item value="all">All Models</Select.Item>
             {Object.keys(statsData?.llm.callsByModel || {}).map((model) => (
-              <Select.Item key={model} value={model}>
+              <Select.Item
+                key={model}
+                value={model}
+                title={
+                  formatModelDisplayName(model) !== model ? model : undefined
+                }
+              >
                 {formatModelDisplayName(model)}
               </Select.Item>
             ))}
             {Object.keys(statsData?.whisper.callsByModel || {}).map((model) => (
-              <Select.Item key={model} value={model}>
+              <Select.Item
+                key={model}
+                value={model}
+                title={
+                  formatModelDisplayName(model) !== model ? model : undefined
+                }
+              >
                 {formatModelDisplayName(model)}
               </Select.Item>
             ))}

@@ -176,7 +176,7 @@
 | File | Purpose |
 |------|---------|
 | `highlightVerifiedStatements.ts` | Inline verdict highlighting: worker-span validation + normalized quote search for plain-text and Markdown (`rehypeHighlightStatements`) paths |
-| `modelDisplay.ts` | Human-readable LLM display names: `formatModelDisplayName` maps stored ids (`gemma3:12b-it-qat` → `gemma3-12b`, `qwen/qwen3.5-9b` → `qwen3.5-9b`, missing → `Unknown Model`) for Fact Check + Settings usage logs; DB values unchanged |
+| `modelDisplay.ts` | Human-readable LLM display names: `formatModelDisplayName` maps stored ids (`gemma3:12b-it-qat` → `gemma3-12b`, `qwen/qwen3.5-9b` → `qwen3.5-9b`, missing → `Unknown Model`) for Fact Check + Settings usage logs; `mergeModelAccuracyStatsByDisplayName` folds same-name `byModel` rows into one (DB values unchanged) |
 
 ### State Management (`/store/*.ts`) — Jotai atoms
 | Directory/File | Purpose |
