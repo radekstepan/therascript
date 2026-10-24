@@ -202,8 +202,8 @@ Per-message audit summary: one row per audited AI message (`message_id` is UNIQU
 | `chat_id` | INTEGER | NOT NULL, FK → chats(id) ON DELETE CASCADE | Parent chat |
 | `session_id` | INTEGER | NOT NULL, FK → sessions(id) ON DELETE CASCADE | Parent session |
 | `verification_job_id` | INTEGER | NULL, FK → verification_jobs(id) ON DELETE SET NULL | Audit run that produced this verdict |
-| `authored_model` | TEXT | NULL | LLM that wrote the message (from `messages.model`) |
-| `judge_model` | TEXT | NOT NULL | Judge LLM that produced the verdict |
+| `authored_model` | TEXT | NULL | LLM that wrote the message (from `messages.model`; raw id — UI renders `formatModelDisplayName`, NULL/missing → `Unknown Model`) |
+| `judge_model` | TEXT | NOT NULL | Judge LLM that produced the verdict (raw id — UI renders `formatModelDisplayName`) |
 | `status` | TEXT | NOT NULL, DEFAULT 'completed' | 'completed' \| 'failed' \| 'skipped' (CHECK) |
 | `total_claims` | INTEGER | NOT NULL, DEFAULT 0 | Atomic claims extracted |
 | `supported_claims` | INTEGER | NOT NULL, DEFAULT 0 | Claims verified against the transcript |

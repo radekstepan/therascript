@@ -104,8 +104,8 @@ LLM Fact-Verification & Hallucination Audit ("LLM Judge") job management, analyt
 - Optional Judge LLM overrides — `modelName`, `contextSize`, `thinkingBudget`, `temperature`, `topP`, `repeatPenalty`, `numGpuLayers`, `baseUrl`. Omitted fields fall back to global config, except `temperature` which defaults to `0.3` for deterministic verdict JSON. The resolved config is snapshotted into the job row; job creation never mutates the user's global chat model.
 
 **Stats Query Parameters (`GET /api/verification/stats`):**
-- `sessionId`, `model`, `startDate`, `endDate` — Optional filters.
-- Response includes `failedMessagesCount` (messages whose latest attempt ended `failed`) and per-session `failedAiMessages` alongside verified counts, plus per-session `predominantModel` (most common chat LLM across the session's verifiable AI messages, `null` when unrecorded).
+- `sessionId`, `model`, `startDate`, `endDate` — Optional filters (`model` takes the raw stored id).
+- Response includes `failedMessagesCount` (messages whose latest attempt ended `failed`) and per-session `failedAiMessages` alongside verified counts, plus per-session `predominantModel` (most common chat LLM across the session's verifiable AI messages, `null` when unrecorded). All model ids in responses are raw; the UI renders them via `formatModelDisplayName` (`packages/ui/src/utils/modelDisplay.ts`).
 
 **Statements Query Parameters (`GET /api/verification/statements`):**
 - `verdict`, `severity`, `authoredModel`, `sessionId`, `search`, `limit`, `offset` — Optional filters (`verdict`/`severity` accept comma-separated lists).

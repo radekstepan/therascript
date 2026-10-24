@@ -24,13 +24,14 @@ import {
   ExclamationTriangleIcon,
 } from '@radix-ui/react-icons';
 import { ExternalLink, SearchX } from 'lucide-react';
-import {
-  fetchFlaggedStatements,
-  type StatementSeverity,
-  type StatementVerdict,
+import { fetchFlaggedStatements } from '../../api/verification';
+import type {
+  StatementSeverity,
+  StatementVerdict,
 } from '../../api/verification';
 import { useDebounce } from '../../hooks/useDebounce';
 import { formatTimestamp } from '../../helpers';
+import { formatModelDisplayName } from '../../utils/modelDisplay';
 
 const VERDICT_OPTIONS: {
   value: StatementVerdict;
@@ -222,7 +223,7 @@ export function IssuesFeedTab({
               <Select.Item value="__all__">All models</Select.Item>
               {models.map((model) => (
                 <Select.Item key={model} value={model}>
-                  {model}
+                  {formatModelDisplayName(model)}
                 </Select.Item>
               ))}
             </Select.Content>
@@ -407,8 +408,8 @@ export function IssuesFeedTab({
                     ·
                   </Text>
                   <Text size="1" color="gray">
-                    {item.authoredModel ?? 'Unknown model'} → Judge:{' '}
-                    {item.judgeModel}
+                    {formatModelDisplayName(item.authoredModel)} → Judge:{' '}
+                    {formatModelDisplayName(item.judgeModel)}
                   </Text>
                   <Text size="1" color="gray">
                     ·

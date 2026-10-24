@@ -20,6 +20,7 @@ import {
   type VerificationTimepointStat,
 } from '../../api/verification';
 import { AppTooltip } from '../Shared/AppTooltip';
+import { formatModelDisplayName } from '../../utils/modelDisplay';
 
 const ALL_MODELS = '__all__';
 
@@ -306,7 +307,7 @@ export function AccuracyTimelineCard({
             <Select.Item value={ALL_MODELS}>All Models</Select.Item>
             {models.map((model) => (
               <Select.Item key={model} value={model}>
-                {model}
+                {formatModelDisplayName(model)}
               </Select.Item>
             ))}
           </Select.Content>
@@ -358,7 +359,7 @@ export function AccuracyTimelineCard({
           <Text size="2" color="gray">
             {selectedModel === ALL_MODELS
               ? 'No audited responses yet. Run a verification audit to see trends.'
-              : `No audited responses for “${selectedModel}” yet.`}
+              : `No audited responses for “${formatModelDisplayName(selectedModel)}” yet.`}
           </Text>
         </Flex>
       ) : (

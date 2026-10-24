@@ -7,6 +7,7 @@ import { Flex, Text, Table, Badge, Button, Card } from '@radix-ui/themes';
 import { ShieldCheck, RotateCcw, FolderSearch } from 'lucide-react';
 import type { SessionVerificationSummary } from '../../api/verification';
 import { formatIsoDateToYMD } from '../../helpers';
+import { formatModelDisplayName } from '../../utils/modelDisplay';
 
 export function CoverageTab({
   sessions,
@@ -98,7 +99,12 @@ export function CoverageTab({
                   {session.predominantModel ? (
                     <Text
                       size="2"
-                      title={`Most common chat model across this session's chats`}
+                      title={
+                        formatModelDisplayName(session.predominantModel) !==
+                        session.predominantModel
+                          ? `${session.predominantModel} (most common chat model across this session's chats)`
+                          : `Most common chat model across this session's chats`
+                      }
                       style={{
                         maxWidth: '180px',
                         overflow: 'hidden',
@@ -106,7 +112,7 @@ export function CoverageTab({
                         whiteSpace: 'nowrap',
                       }}
                     >
-                      {session.predominantModel}
+                      {formatModelDisplayName(session.predominantModel)}
                     </Text>
                   ) : (
                     <Text

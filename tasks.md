@@ -15,9 +15,11 @@ For background on the Verification Agent and LLM lifecycle, see `AGENTS.md` (§1
 
 ## Tasks
 
-Make sure the LLMs in Fact Check, Settings Detailed Usage Logs shows these "human" names. Do not rename in the DB, have UI overrides that are consistent:
-qwen3.5-9b
-Unknown Model	
-gemma3:12b-it-qat -> gemma3-12b
-qwen/qwen3.5-9b -> qwen3.5-9b
-qwen3.8-27b
+- [x] Consistent human-readable LLM display names in Fact Check + Settings Detailed Usage Logs (DB values unchanged, UI overrides only):
+  - `qwen3.5-9b` (pass-through)
+  - `Unknown Model` (canonical label; null/empty/`Unknown model` casing normalizes to this)
+  - `gemma3:12b-it-qat` -> `gemma3-12b`
+  - `qwen/qwen3.5-9b` -> `qwen3.5-9b`
+  - `qwen3.8-27b` (pass-through)
+
+  **Writeup — what/why:** Added a single shared UI override, `formatModelDisplayName` (`packages/ui/src/utils/modelDisplay.ts` + `modelDisplay.test.ts`), so every surface renders the same human name while the DB keeps the raw id. Explicit pins cover `gemma3:12b-it-qat` → `gemma3-12b` and `qwen/qwen3.5-9b` → `qwen3.5-9b`; a generic `vendor/model` slash-strip fallback covers future prefixed ids (e.g. `qwen/qwen3.8-27b`); missing/legacy-cased unknowns collapse to `Unknown Model`. Applied consistently across Fact Check (audit banner Judge, job history, failure details, issues-feed filter + `authored → Judge` line, accuracy-by-model table/tooltips/aria, trend filter + empty-state, coverage `Chat LLM`, verdict-modal footer) and Settings Detailed Usage Logs (model filter dropdowns + table column). Raw ids stay as React keys, filter values, `title` tooltips, and API params, so filtering and API behavior are unchanged. Reason: raw registry ids (`:`/`/` qualified) leaked into the UI inconsistently; a central display-only mapping fixes readability without a data migration. Verified with `yarn vitest run` on the new unit test plus the affected Verification component suites (55 tests passing). Changeset: `.changeset/human-model-display-names.md` (patch `@therascript/ui`, `@therascript/config` — includes the pre-existing uncommitted `qwen3.8-27b` pricing row needed for cost display).

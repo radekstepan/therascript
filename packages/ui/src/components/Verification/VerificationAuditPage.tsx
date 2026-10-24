@@ -36,6 +36,7 @@ import {
 import { useVerificationStream } from '../../hooks/useVerificationStream';
 import { toastMessageAtom } from '../../store';
 import { VerificationAnalyticsSection } from './VerificationAnalyticsSection';
+import { formatModelDisplayName } from '../../utils/modelDisplay';
 import { StartVerificationModal } from './StartVerificationModal';
 import { IssuesFeedTab } from './IssuesFeedTab';
 import { CoverageTab } from './CoverageTab';
@@ -118,7 +119,7 @@ function LiveJobBanner({ job }: { job: VerificationJob }) {
               {display.model_name && (
                 <Text size="2" color="gray" weight="regular">
                   {' '}
-                  · Judge {display.model_name}
+                  · Judge {formatModelDisplayName(display.model_name)}
                 </Text>
               )}
             </Heading>

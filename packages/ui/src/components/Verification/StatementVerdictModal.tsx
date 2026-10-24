@@ -51,6 +51,7 @@ import {
   getVerdictLabel,
   parseStatementEvidence,
 } from '../../utils/highlightVerifiedStatements';
+import { formatModelDisplayName } from '../../utils/modelDisplay';
 
 export interface StatementVerdictModalProps {
   open: boolean;
@@ -702,7 +703,7 @@ export function StatementVerdictModal({
                       <Text size="1" color="gray">
                         Authored by:{' '}
                         <Text weight="medium">
-                          {authoredModel || 'Unknown model'}
+                          {formatModelDisplayName(authoredModel)}
                         </Text>
                       </Text>
                       <Text size="1" color="gray">
@@ -711,7 +712,7 @@ export function StatementVerdictModal({
                       <Text size="1" color="gray">
                         Audited by Judge:{' '}
                         <Text weight="medium">
-                          {judgeModel || 'Unknown judge'}
+                          {formatModelDisplayName(judgeModel)}
                         </Text>
                       </Text>
                       {verifiedDate !== null && (

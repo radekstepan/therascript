@@ -25,6 +25,10 @@ import {
   type VerificationJob,
 } from '../../api/verification';
 import { formatTimestamp } from '../../helpers';
+import {
+  formatModelDisplayName,
+  UNKNOWN_MODEL_DISPLAY_NAME,
+} from '../../utils/modelDisplay';
 
 function formatDurationMs(durationMs: number | null): string | null {
   if (durationMs === null || durationMs === undefined) return null;
@@ -85,10 +89,10 @@ function FailureRow({ failure }: { failure: FailedVerificationItem }) {
       )}
       <Text size="1" color="gray">
         {[
-          `Judge ${failure.judgeModel}`,
+          `Judge ${formatModelDisplayName(failure.judgeModel)}`,
           failure.authoredModel
-            ? `note by ${failure.authoredModel}`
-            : 'note by unknown model',
+            ? `note by ${formatModelDisplayName(failure.authoredModel)}`
+            : `note by ${UNKNOWN_MODEL_DISPLAY_NAME}`,
           tokens,
           duration,
           formatTimestamp(failure.verifiedAt),
@@ -135,7 +139,9 @@ export function JobFailuresDialog({
           {job?.status === 'failed'
             ? `All ${failed} attempted assessment${failed === 1 ? '' : 's'} failed.`
             : `${succeeded} of ${job?.total_messages ?? 0} checked, ${failed} failed.`}{' '}
-          {job?.model_name ? `Judge ${job.model_name}. ` : ''}
+          {job?.model_name
+            ? `Judge ${formatModelDisplayName(job.model_name)}. `
+            : ''}
           Reasons persist on the job and its notes; this dialog reads them back
           from the API.
         </Dialog.Description>

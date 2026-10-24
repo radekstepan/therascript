@@ -6,6 +6,7 @@ import { Card, Flex, Heading, Text, Table, Badge } from '@radix-ui/themes';
 import { Cpu } from 'lucide-react';
 import type { ModelAccuracyStat } from '../../api/verification';
 import { AppTooltip } from '../Shared/AppTooltip';
+import { formatModelDisplayName } from '../../utils/modelDisplay';
 
 function accuracyColor(pct: number): 'green' | 'amber' | 'red' {
   if (pct >= 92) return 'green';
@@ -22,9 +23,10 @@ function accuracyColor(pct: number): 'green' | 'amber' | 'red' {
  */
 function ProportionBarTooltipContent({ stat }: { stat: ModelAccuracyStat }) {
   const bad = stat.contradictedClaims + stat.fabricatedClaims;
+  const displayModel = formatModelDisplayName(stat.model);
   return (
     <span>
-      <strong>{stat.model}</strong>
+      <strong>{displayModel}</strong>
       <br />
       {`${stat.supportedClaims} supported · ${stat.partialClaims} partial · ${bad} contradicted/fabricated`}
       <br />
@@ -46,7 +48,7 @@ function ProportionBar({ stat }: { stat: ModelAccuracyStat }) {
       <div
         role="img"
         tabIndex={0}
-        aria-label={`${stat.model}: ${supported.toFixed(0)}% supported, ${partial.toFixed(0)}% partial, ${bad.toFixed(0)}% contradicted or fabricated`}
+        aria-label={`${formatModelDisplayName(stat.model)}: ${supported.toFixed(0)}% supported, ${partial.toFixed(0)}% partial, ${bad.toFixed(0)}% contradicted or fabricated`}
         style={{
           display: 'flex',
           height: '10px',
@@ -149,8 +151,16 @@ export function ModelAccuracyCard({ stats }: { stats: ModelAccuracyStat[] }) {
                 {stats.map((stat) => (
                   <Table.Row key={stat.model}>
                     <Table.RowHeaderCell>
-                      <Text size="2" weight="medium">
-                        {stat.model}
+                      <Text
+                        size="2"
+                        weight="medium"
+                        title={
+                          formatModelDisplayName(stat.model) !== stat.model
+                            ? stat.model
+                            : undefined
+                        }
+                      >
+                        {formatModelDisplayName(stat.model)}
                       </Text>
                     </Table.RowHeaderCell>
                     {/* Middle-align: cells inherit baseline alignment, which

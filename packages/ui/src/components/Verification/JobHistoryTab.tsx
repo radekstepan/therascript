@@ -27,6 +27,7 @@ import {
 } from '../../api/verification';
 import { toastMessageAtom } from '../../store';
 import { formatTimestamp } from '../../helpers';
+import { formatModelDisplayName } from '../../utils/modelDisplay';
 import { JobFailuresDialog } from './JobFailuresDialog';
 
 function statusBadgeColor(
@@ -234,7 +235,11 @@ export function JobHistoryTab() {
                   )}
                 </Table.Cell>
                 <Table.Cell>
-                  <Text size="2">{job.model_name ?? '—'}</Text>
+                  <Text size="2" title={job.model_name ?? undefined}>
+                    {job.model_name
+                      ? formatModelDisplayName(job.model_name)
+                      : '—'}
+                  </Text>
                 </Table.Cell>
                 <Table.Cell>
                   <Flex align="center" gap="2" style={{ minWidth: '140px' }}>

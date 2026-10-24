@@ -21,6 +21,7 @@ import {
   useUsageLogs,
 } from '../hooks/useUsage';
 import { formatCurrency } from '../utils';
+import { formatModelDisplayName } from '../utils/modelDisplay';
 
 const WEEK_OPTIONS = [4, 8, 12] as const;
 
@@ -375,12 +376,12 @@ export function UsageSection() {
             <Select.Item value="all">All Models</Select.Item>
             {Object.keys(statsData?.llm.callsByModel || {}).map((model) => (
               <Select.Item key={model} value={model}>
-                {model}
+                {formatModelDisplayName(model)}
               </Select.Item>
             ))}
             {Object.keys(statsData?.whisper.callsByModel || {}).map((model) => (
               <Select.Item key={model} value={model}>
-                {model}
+                {formatModelDisplayName(model)}
               </Select.Item>
             ))}
           </Select.Content>
@@ -511,7 +512,9 @@ export function UsageSection() {
                   <Text size="2">{log.source}</Text>
                 </Box>
                 <Box style={{ width: '110px', paddingRight: '12px' }}>
-                  <Text size="2">{log.model}</Text>
+                  <Text size="2" title={log.model}>
+                    {formatModelDisplayName(log.model)}
+                  </Text>
                 </Box>
                 <Box style={{ width: '160px', paddingRight: '12px' }}>
                   {log.type === 'llm' ? (

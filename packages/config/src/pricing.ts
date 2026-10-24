@@ -20,6 +20,7 @@ export const pricing: PricingConfig = {
     'qwen3.6-27b': { promptCostPer1M: 0.2885, completionCostPer1M: 2.65 },
     'qwen/qwen3.6-27b': { promptCostPer1M: 0.2885, completionCostPer1M: 2.65 },
     'qwen3.6-27b-mtp': { promptCostPer1M: 0.2885, completionCostPer1M: 2.65 },
+    'qwen3.8-27b': { promptCostPer1M: 0.2, completionCostPer1M: 2.5 },
     default: { promptCostPer1M: 0.15, completionCostPer1M: 0.6 },
   },
   whisper: {

@@ -135,7 +135,7 @@
 | Directory | Purpose |
 |-----------|---------|
 | `Analysis/` | Analysis jobs UI, `AnalysisJobsPage.tsx` |
-| `Verification/` | Fact Check hub: `VerificationAuditPage.tsx`, `StartVerificationModal.tsx`, `CoverageTab.tsx`, `IssuesFeedTab.tsx`, `JobHistoryTab.tsx`, `StatementVerdictModal.tsx`, analytics cards |
+| `Verification/` | Fact Check hub: `VerificationAuditPage.tsx`, `StartVerificationModal.tsx`, `CoverageTab.tsx`, `IssuesFeedTab.tsx`, `JobHistoryTab.tsx`, `StatementVerdictModal.tsx`, analytics cards (model ids render via `utils/modelDisplay.ts`, raw ids stay as filter/API values) |
 | `SessionView/` | Session detail, chat, transcript display, speaker rename modal |
 | `StandaloneChatView/` | Standalone chat interface |
 | `Search/` | Search UI components |
@@ -176,6 +176,7 @@
 | File | Purpose |
 |------|---------|
 | `highlightVerifiedStatements.ts` | Inline verdict highlighting: worker-span validation + normalized quote search for plain-text and Markdown (`rehypeHighlightStatements`) paths |
+| `modelDisplay.ts` | Human-readable LLM display names: `formatModelDisplayName` maps stored ids (`gemma3:12b-it-qat` → `gemma3-12b`, `qwen/qwen3.5-9b` → `qwen3.5-9b`, missing → `Unknown Model`) for Fact Check + Settings usage logs; DB values unchanged |
 
 ### State Management (`/store/*.ts`) — Jotai atoms
 | Directory/File | Purpose |
