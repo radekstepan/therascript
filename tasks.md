@@ -15,4 +15,9 @@ For background on the Verification Agent and LLM lifecycle, see `AGENTS.md` (§1
 
 ## Tasks
 
-...
+Make sure the LLMs in Fact Check, Settings Detailed Usage Logs shows these "human" names. Do not rename in the DB, have UI overrides that are consistent:
+qwen3.5-9b
+Unknown Model	
+gemma3:12b-it-qat -> gemma3-12b
+qwen/qwen3.5-9b -> qwen3.5-9b
+qwen3.8-27b
