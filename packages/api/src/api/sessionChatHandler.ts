@@ -36,6 +36,7 @@ import {
   cleanLlmOutput,
   prepareLlmChatMessages,
   extractVisibleAnswer,
+  buildTranscriptSessionNote,
 } from '@therascript/services';
 import {
   computeContextUsageForChat,
@@ -170,6 +171,17 @@ export const addSessionChatMessage = async ({
       systemPromptText +=
         '\n\nSpeaker labels are disabled for this transcript. Do not invent or use speaker names (like "SPEAKER_01" or "John"). Refer to speakers descriptively (e.g., "the therapist" or "the patient") without using explicit names or labels.';
     }
+
+    // Per-session transcript context (speaker count from the explicit
+    // upload-time `numSpeakers` choice + pure-text disclaimer). Prepended
+    // to the system prompt so every transcript question carries it, and
+    // placed before the transcript block to keep the
+    // [system + note + transcript] prefix stable across turns for KV-cache
+    // reuse.
+    const sessionNote = buildTranscriptSessionNote(
+      sessionData.numSpeakers ?? null
+    );
+    systemPromptText = `${sessionNote}\n\n${systemPromptText}`;
 
     // KV-cache-friendly prompt layout (Task 14): the transcript is injected
     // into the system prefix so the token prefix [system + transcript] is

@@ -22,6 +22,7 @@ export {
   configureFileService,
   copyAllUploadsTo,
 } from './fileService.js';
+export { buildTranscriptSessionNote } from './transcriptContext.js';
 export {
   streamLlmChat,
   streamLlmChatDetailed,

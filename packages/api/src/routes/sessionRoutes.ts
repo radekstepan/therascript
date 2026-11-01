@@ -260,6 +260,7 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
             sessionRepository.updateMetadata(newSess.id, {
               audioPath: savedAudioId,
               status: 'queued',
+              numSpeakers: resolvedNumSpeakers,
             });
 
             await startTranscriptionJob(newSess.id, resolvedNumSpeakers);

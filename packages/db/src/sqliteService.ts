@@ -95,7 +95,7 @@ export const schema = `
 `;
 
 // --- NEW MIGRATION LOGIC ---
-export const LATEST_SCHEMA_VERSION = 22;
+export const LATEST_SCHEMA_VERSION = 23;
 
 // --- NEW SYSTEM PROMPTS ---
 export const SYSTEM_PROMPT_TEMPLATES = {
@@ -1155,6 +1155,42 @@ function runMigrations(dbInstance: DB) {
         dbInstance.pragma(`user_version = 22`);
         currentVersion = 22;
         console.log('[db Migrator] Version 22 applied.');
+      }
+
+      // NEW MIGRATION: Version 23 to persist the explicit upload-time
+      // speaker count (`numSpeakers`) on sessions. The upload form offers
+      // an optional "number of speakers" dropdown that drives Whisper
+      // diarization; until now that value was passed to the transcription
+      // job but never stored, so LLM prompts could not tell the model how
+      // many voices to expect. NULL means unknown / diarization disabled
+      // (legacy rows, or uploads with numSpeakers 0/1).
+      if (currentVersion < 23) {
+        console.log('[db Migrator] Applying version 23...');
+        const v23Tables = (
+          dbInstance
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+            .all() as { name: string }[]
+        ).map((row) => row.name);
+        if (v23Tables.includes('sessions')) {
+          const sessionColumns = dbInstance.pragma('table_info(sessions)') as {
+            name: string;
+          }[];
+          if (!sessionColumns.some((col) => col.name === 'numSpeakers')) {
+            console.log(
+              '[db Migrator V23] Adding "numSpeakers" to sessions...'
+            );
+            dbInstance.exec(
+              'ALTER TABLE sessions ADD COLUMN numSpeakers INTEGER NULL'
+            );
+          }
+        } else {
+          console.log(
+            '[db Migrator V23] Skipping numSpeakers ALTER (no sessions table).'
+          );
+        }
+        dbInstance.pragma(`user_version = 23`);
+        currentVersion = 23;
+        console.log('[db Migrator] Version 23 applied.');
       }
     })();
     console.log(

@@ -37,6 +37,7 @@ import {
   streamWithRetry,
   extractVisibleAnswer,
   prepareLlmChatMessages,
+  buildTranscriptSessionNote,
   type StreamResult,
   type LlmChatChunk,
 } from '@therascript/services';
@@ -1748,16 +1749,19 @@ export function buildJudgeActiveSettingsUpdate(
 }
 
 /**
- * Judge system prompt with the ground-truth transcript appended, mirroring
- * Session Chat (`sessionChatHandler.ts` injects the transcript into the
- * system prefix so the static prefix stays KV-cache-friendly across calls).
+ * Judge system prompt with the per-session transcript context note and the
+ * ground-truth transcript appended, mirroring Session Chat
+ * (`sessionChatHandler.ts` injects the transcript into the system prefix
+ * so the static prefix stays KV-cache-friendly across calls).
  */
 function buildJudgeSystemPrompt(
   basePrompt: string,
-  transcriptText: string
+  transcriptText: string,
+  numSpeakers?: number | null
 ): string {
+  const sessionNote = buildTranscriptSessionNote(numSpeakers ?? null);
   return (
-    `${basePrompt}\n\n--- GROUND-TRUTH SESSION TRANSCRIPT ---\n` +
+    `${basePrompt}\n\n${sessionNote}\n\n--- GROUND-TRUTH SESSION TRANSCRIPT ---\n` +
     `"""\n${transcriptText}\n"""\n--- END TRANSCRIPT ---`
   );
 }
@@ -2625,6 +2629,29 @@ export async function processVerificationJob(
       return show;
     };
 
+    // Per-session explicit upload-time speaker count (sessions.numSpeakers):
+    // the Judge system prompt states how many speakers the transcript
+    // involves, plus the pure-text (no non-verbal cues) disclaimer.
+    const numSpeakersCache = new Map<number, number | null>();
+    const getSessionNumSpeakers = (sessionId: number): number | null => {
+      if (numSpeakersCache.has(sessionId)) {
+        return numSpeakersCache.get(sessionId) ?? null;
+      }
+      let num: number | null = null;
+      try {
+        const session = sessionRepository.findById(sessionId);
+        num =
+          typeof session?.numSpeakers === 'number' ? session.numSpeakers : null;
+      } catch (err) {
+        console.warn(
+          `[Verification Worker ${jobId}] Failed to load session ${sessionId}; assuming numSpeakers unknown:`,
+          err
+        );
+      }
+      numSpeakersCache.set(sessionId, num);
+      return num;
+    };
+
     let processed = 0;
 
     const publishProgress = (extra?: {
@@ -2844,14 +2871,22 @@ export async function processVerificationJob(
         // from the actual remaining window so the Judge call never overflows
         // it. When the fixed prompt/answer cannot fit, record a failed
         // assessment instead of sending a request known to overflow.
+        // The per-session transcript context note (speaker count + pure-text
+        // disclaimer) rides in the system prompt, so it counts toward the
+        // fixed system overhead.
         const userQuestion = candidate.userQuestion ?? null;
+        const sessionNoteForBudget = buildTranscriptSessionNote(
+          getSessionNumSpeakers(sessionId)
+        );
         const judgeUserSkeleton = buildJudgeUserMessage(
           userQuestion,
           visibleAnswer
         );
         const allocation = allocateJudgeContextBudget({
           contextSize,
-          systemPromptTokens: estimateTokens(judgeSystemPrompt),
+          systemPromptTokens: estimateTokens(
+            `${judgeSystemPrompt}\n\n${sessionNoteForBudget}`
+          ),
           skeletonTokens: estimateTokens(judgeUserSkeleton),
         });
         if (!allocation.feasible) {
@@ -2933,7 +2968,8 @@ export async function processVerificationJob(
             sender: 'system',
             text: buildJudgeSystemPrompt(
               judgeSystemPrompt,
-              transcriptContext.text
+              transcriptContext.text,
+              getSessionNumSpeakers(sessionId)
             ),
             timestamp: Date.now(),
           },

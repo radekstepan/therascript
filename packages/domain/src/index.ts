@@ -121,6 +121,8 @@ export interface BackendSession {
   duration?: number | null;
   errorMessage?: string | null;
   showSpeakers?: number | null;
+  /** Explicit upload-time speaker count (drives diarization). NULL/0/1 = disabled or unknown. */
+  numSpeakers?: number | null;
   chats?: (Omit<ChatMetadata, 'tags'> & { sessionId: number })[];
   /** Number of chats linked to the session. Populated by list endpoints only, not a DB column. */
   chatCount?: number;

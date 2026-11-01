@@ -62,6 +62,7 @@ vi.mock('@therascript/services', async (importOriginal) => {
     // Use the real answer-extraction helper: the reduce-prompt tests below
     // verify its integration with legacy/imported summaries.
     extractVisibleAnswer: actual.extractVisibleAnswer,
+    buildTranscriptSessionNote: actual.buildTranscriptSessionNote,
   };
 });
 

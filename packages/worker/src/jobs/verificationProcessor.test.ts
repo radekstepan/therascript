@@ -60,6 +60,12 @@ vi.mock('@therascript/services', () => ({
   extractVisibleAnswer: vi.fn((text: string) => text),
   // Plain passthrough (not a vi.fn): the job-running describes call
   // `vi.resetAllMocks()` in `beforeEach`, which would wipe a mock
+  // implementation. Returns a stable stub containing the substrings
+  // layout assertions check for.
+  buildTranscriptSessionNote: (numSpeakers?: number | null) =>
+    `SESSION CONTEXT mock note (speakers: ${numSpeakers ?? 'unknown'}; pure text transcription).`,
+  // Plain passthrough (not a vi.fn): the job-running describes call
+  // `vi.resetAllMocks()` in `beforeEach`, which would wipe a mock
   // implementation. The [system, user] fixtures are already well-formed,
   // so passthrough is faithful; the layout is asserted behaviorally via
   // the messages passed to `streamLlmChatDetailed`.
@@ -1272,6 +1278,13 @@ describe('processVerificationJob — judge hardening', () => {
     );
     expect(judgeMessages[0].text).toContain('--- END TRANSCRIPT ---');
     expect(judgeMessages[0].text).toContain('I take Sertraline every morning');
+    // Per-session context note (upload-time speaker count + pure-text
+    // disclaimer) rides in the same system prefix, ahead of the transcript.
+    expect(judgeMessages[0].text).toContain('SESSION CONTEXT');
+    expect(judgeMessages[0].text).toContain('pure text');
+    expect(judgeMessages[0].text.indexOf('SESSION CONTEXT')).toBeLessThan(
+      judgeMessages[0].text.indexOf('--- GROUND-TRUTH SESSION TRANSCRIPT ---')
+    );
     // The user turn carries only the therapist question + audited answer.
     expect(judgeMessages[1].sender).toBe('user');
     expect(judgeMessages[1].text).toContain("THERAPIST'S PROMPT / QUESTION");

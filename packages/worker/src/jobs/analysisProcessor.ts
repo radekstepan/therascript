@@ -22,6 +22,7 @@ import {
   parseJsonObjectFromLlm,
   streamWithRetry,
   extractVisibleAnswer,
+  buildTranscriptSessionNote,
   type StreamResult,
   type LlmChatChunk,
 } from '@therascript/services';
@@ -609,7 +610,7 @@ export async function processAnalysisJob(
               id: 0,
               chatId: 0,
               sender: 'system',
-              text: `Your task is to follow the user's instructions precisely. Original question: "${jobRecord?.original_prompt}"`,
+              text: `${buildTranscriptSessionNote(session.numSpeakers ?? null)}\n\nYour task is to follow the user's instructions precisely. Original question: "${jobRecord?.original_prompt}"`,
               timestamp: Date.now(),
             },
             {
@@ -624,6 +625,13 @@ export async function processAnalysisJob(
           mapMessages = [
             {
               id: 0,
+              chatId: 0,
+              sender: 'system',
+              text: buildTranscriptSessionNote(session.numSpeakers ?? null),
+              timestamp: Date.now(),
+            },
+            {
+              id: 1,
               chatId: 0,
               sender: 'user',
               text: `USER'S QUESTION: "${jobRecord?.original_prompt}"\n\nTRANSCRIPT: """${transcriptText}"""\n\nYOUR TASK: Analyze the transcript and write a concise summary that directly answers the user's question *only for this specific session* (max 250 words).`,

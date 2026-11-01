@@ -19,7 +19,7 @@ let _selectAllSessionsStmt: DbStatement | null = null;
 const selectAllSessionsStmt = (): DbStatement => {
   if (!_selectAllSessionsStmt) {
     _selectAllSessionsStmt = db.prepare(
-      'SELECT id, fileName, clientName, sessionName, date, sessionType, therapy, audioPath, status, whisperJobId, transcriptTokenCount, duration, errorMessage, showSpeakers FROM sessions ORDER BY date DESC, id DESC'
+      'SELECT id, fileName, clientName, sessionName, date, sessionType, therapy, audioPath, status, whisperJobId, transcriptTokenCount, duration, errorMessage, showSpeakers, numSpeakers FROM sessions ORDER BY date DESC, id DESC'
     );
   }
   return _selectAllSessionsStmt;
@@ -33,7 +33,7 @@ const selectAllSessionsWithChatCountsStmt = (): DbStatement => {
     // factCheckedChatCount counts chats with at least one completed
     // message verification (drives the fact-checked icon in the list).
     _selectAllSessionsWithChatCountsStmt = db.prepare(
-      "SELECT s.id, s.fileName, s.clientName, s.sessionName, s.date, s.sessionType, s.therapy, s.audioPath, s.status, s.whisperJobId, s.transcriptTokenCount, s.duration, s.errorMessage, s.showSpeakers, COUNT(c.id) AS chatCount, (SELECT COUNT(DISTINCT mv.chat_id) FROM message_verifications mv INNER JOIN chats c2 ON c2.id = mv.chat_id WHERE c2.sessionId = s.id AND mv.status = 'completed') AS factCheckedChatCount FROM sessions s LEFT JOIN chats c ON c.sessionId = s.id AND EXISTS (SELECT 1 FROM messages m WHERE m.chatId = c.id AND m.sender = 'user') GROUP BY s.id ORDER BY s.date DESC, s.id DESC"
+      "SELECT s.id, s.fileName, s.clientName, s.sessionName, s.date, s.sessionType, s.therapy, s.audioPath, s.status, s.whisperJobId, s.transcriptTokenCount, s.duration, s.errorMessage, s.showSpeakers, s.numSpeakers, COUNT(c.id) AS chatCount, (SELECT COUNT(DISTINCT mv.chat_id) FROM message_verifications mv INNER JOIN chats c2 ON c2.id = mv.chat_id WHERE c2.sessionId = s.id AND mv.status = 'completed') AS factCheckedChatCount FROM sessions s LEFT JOIN chats c ON c.sessionId = s.id AND EXISTS (SELECT 1 FROM messages m WHERE m.chatId = c.id AND m.sender = 'user') GROUP BY s.id ORDER BY s.date DESC, s.id DESC"
     );
   }
   return _selectAllSessionsWithChatCountsStmt;
@@ -43,7 +43,7 @@ let _selectSessionByIdStmt: DbStatement | null = null;
 const selectSessionByIdStmt = (): DbStatement => {
   if (!_selectSessionByIdStmt) {
     _selectSessionByIdStmt = db.prepare(
-      'SELECT id, fileName, clientName, sessionName, date, sessionType, therapy, audioPath, status, whisperJobId, transcriptTokenCount, duration, errorMessage, showSpeakers FROM sessions WHERE id = ?'
+      'SELECT id, fileName, clientName, sessionName, date, sessionType, therapy, audioPath, status, whisperJobId, transcriptTokenCount, duration, errorMessage, showSpeakers, numSpeakers FROM sessions WHERE id = ?'
     );
   }
   return _selectSessionByIdStmt;
@@ -53,7 +53,7 @@ let _updateSessionMetadataStmt: DbStatement | null = null;
 const updateSessionMetadataStmt = (): DbStatement => {
   if (!_updateSessionMetadataStmt) {
     _updateSessionMetadataStmt = db.prepare(
-      `UPDATE sessions SET clientName = ?, sessionName = ?, date = ?, sessionType = ?, therapy = ?, fileName = ?, audioPath = ?, status = ?, whisperJobId = ?, transcriptTokenCount = ?, duration = ?, errorMessage = ?, showSpeakers = ? WHERE id = ?`
+      `UPDATE sessions SET clientName = ?, sessionName = ?, date = ?, sessionType = ?, therapy = ?, fileName = ?, audioPath = ?, status = ?, whisperJobId = ?, transcriptTokenCount = ?, duration = ?, errorMessage = ?, showSpeakers = ?, numSpeakers = ? WHERE id = ?`
     );
   }
   return _updateSessionMetadataStmt;
@@ -241,6 +241,7 @@ export const sessionRepository = {
         updatedData.duration,
         updatedData.errorMessage || null,
         updatedData.showSpeakers ?? 1,
+        updatedData.numSpeakers ?? null,
         id
       );
       if (info.changes === 0) {

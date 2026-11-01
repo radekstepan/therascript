@@ -95,6 +95,7 @@ export const listSessions = ({ set }: SessionHandlerContextNoSessionData) => {
       duration: s.duration,
       errorMessage: s.errorMessage,
       showSpeakers: s.showSpeakers,
+      numSpeakers: s.numSpeakers,
       chatCount: s.chatCount,
       factCheckedChatCount: s.factCheckedChatCount,
     }));
@@ -138,6 +139,7 @@ export const getSessionDetails = ({
       duration: sessionData.duration,
       errorMessage: sessionData.errorMessage,
       showSpeakers: sessionData.showSpeakers,
+      numSpeakers: sessionData.numSpeakers,
       chats: chatMetadata,
     };
   } catch (error) {
@@ -284,6 +286,7 @@ export const updateSessionMetadata = async ({
       duration: updatedSession.duration,
       errorMessage: updatedSession.errorMessage,
       showSpeakers: updatedSession.showSpeakers,
+      numSpeakers: updatedSession.numSpeakers,
     };
   } catch (error) {
     console.error(

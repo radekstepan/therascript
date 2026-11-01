@@ -123,6 +123,7 @@ function sessionCtx(text: string, chatId = 7): SessionCtx {
       sessionName: 'Session',
       showSpeakers: 1,
       transcriptTokenCount: 10,
+      numSpeakers: 2,
     },
     chatData: { id: chatId, sessionId: 1 },
   } as unknown as SessionCtx;
@@ -192,5 +193,34 @@ describe('session chat prompt layout (Task 14)', () => {
       .mock.calls.find((c) => c[1] === 'user');
     expect(userSave).toBeDefined();
     expect(userSave![2]).toBe('hello');
+  });
+
+  it('prepends the session context note with the upload-time speaker count', async () => {
+    const res = await addSessionChatMessage(sessionCtx('hello'));
+    await res.text();
+
+    const sentMessages = vi.mocked(streamChatResponse).mock.calls[0]![0];
+    const systemMsg = sentMessages[0]!;
+    expect(systemMsg.sender).toBe('system');
+    expect(systemMsg.text).toContain('SESSION CONTEXT');
+    expect(systemMsg.text).toContain('2 speakers');
+    expect(systemMsg.text).toContain('pure text');
+    expect(systemMsg.text).toContain('Do not infer emotions');
+    // The note precedes the transcript block in the same system prefix.
+    expect(systemMsg.text.indexOf('SESSION CONTEXT')).toBeLessThan(
+      systemMsg.text.indexOf('CONTEXT TRANSCRIPT')
+    );
+  });
+
+  it('falls back to an unknown-speaker note when numSpeakers was not specified', async () => {
+    const ctx = sessionCtx('hello');
+    (ctx.sessionData as any).numSpeakers = null;
+    const res = await addSessionChatMessage(ctx);
+    await res.text();
+
+    const sentMessages = vi.mocked(streamChatResponse).mock.calls[0]![0];
+    const systemMsg = sentMessages[0]!;
+    expect(systemMsg.text).toContain('SESSION CONTEXT');
+    expect(systemMsg.text).toContain('not specified at upload');
   });
 });

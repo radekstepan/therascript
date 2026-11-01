@@ -229,7 +229,7 @@ describe('initializeDatabase — v21 verification diagnostics columns', () => {
 
   it('ends at latest schema version', () => {
     expect(userVersion(db)).toBe(LATEST_SCHEMA_VERSION);
-    expect(LATEST_SCHEMA_VERSION).toBe(22);
+    expect(LATEST_SCHEMA_VERSION).toBe(23);
   });
 
   it('creates verification_jobs with outcome counters and phase snapshot columns', () => {
@@ -285,9 +285,9 @@ describe('initializeDatabase — v22 statement reviews', () => {
       }>
     ).map((c) => c.name);
 
-  it('ends at schema version 22', () => {
-    expect(userVersion(db)).toBe(22);
-    expect(LATEST_SCHEMA_VERSION).toBe(22);
+  it('ends at schema version 23', () => {
+    expect(userVersion(db)).toBe(23);
+    expect(LATEST_SCHEMA_VERSION).toBe(23);
   });
 
   it('creates verification_statement_reviews owned by the message', () => {
@@ -351,8 +351,8 @@ describe('initializeDatabase — v22 statement reviews', () => {
     expect(row.material_revision).toBeNull();
   });
 
-  it('is idempotent — re-running migrations keeps version 22', () => {
+  it('is idempotent — re-running migrations keeps version 23', () => {
     expect(() => initializeDatabase(db)).not.toThrow();
-    expect(userVersion(db)).toBe(22);
+    expect(userVersion(db)).toBe(23);
   });
 });
