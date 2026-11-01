@@ -238,8 +238,13 @@ export function LlmSettingsForm({
   // local-machine concept, so we skip the estimate entirely when the user
   // is targeting a remote endpoint — there's no local GPU to size against
   // and the backend's `estimate-vram` endpoint 404s for remote-only models.
-  // The AbortController cancels in-flight requests when dependencies change
-  // so stale responses can't overwrite the latest one.
+  // The request is debounced (~500ms) so typing "30000" fires one probe
+  // for the settled value instead of one per keystroke ("3", "30", "300",
+  // ...). Each keystroke used to shell out a `lms load --estimate-only`
+  // child on the backend with no timeout, and `lms` can hang indefinitely —
+  // leaking one spinning process per keystroke (PPID 1 after API restart).
+  // The AbortController still cancels in-flight requests when dependencies
+  // change so stale responses can't overwrite the latest one.
   useEffect(() => {
     if (state.isRemote) {
       setVramEstimate(null);
@@ -262,30 +267,40 @@ export function LlmSettingsForm({
       return;
     }
 
-    const controller = new AbortController();
-    estimateModelVram(
-      state.selectedModel,
-      contextSize,
-      state.numGpuLayers,
-      controller.signal,
-      llmStatus?.defaultBaseUrl
-    )
-      .then((data) => {
-        if (controller.signal.aborted) return;
-        setVramEstimate(data);
-      })
-      .catch((err) => {
-        if (controller.signal.aborted) return;
-        setVramEstimate({
-          model: state.selectedModel,
-          context_size: contextSize,
-          estimated_vram_bytes: null,
-          estimated_ram_bytes: null,
-          vram_per_token_bytes: null,
-          error: err.message,
+    let controller: AbortController | null = null;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      if (cancelled) return;
+      controller = new AbortController();
+      const signal = controller.signal;
+      estimateModelVram(
+        state.selectedModel,
+        contextSize,
+        state.numGpuLayers,
+        signal,
+        llmStatus?.defaultBaseUrl
+      )
+        .then((data) => {
+          if (signal.aborted) return;
+          setVramEstimate(data);
+        })
+        .catch((err) => {
+          if (signal.aborted) return;
+          setVramEstimate({
+            model: state.selectedModel,
+            context_size: contextSize,
+            estimated_vram_bytes: null,
+            estimated_ram_bytes: null,
+            vram_per_token_bytes: null,
+            error: err.message,
+          });
         });
-      });
-    return () => controller.abort();
+    }, 500);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      controller?.abort();
+    };
   }, [
     state.isRemote,
     state.selectedModel,

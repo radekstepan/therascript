@@ -324,6 +324,15 @@ async function nativeLMStudioEstimate(
   contextSize?: number,
   gpu?: string
 ): Promise<VramEstimate | null> {
+  // `lms load --estimate-only` has been observed to hang indefinitely
+  // (dozens of orphaned spinning processes, PPID 1 after API restarts).
+  // Bound every spawn so a wedged CLI degrades to "estimate unavailable"
+  // instead of leaking a permanent process per keystroke/request.
+  const spawnOpts = {
+    timeout: 15000,
+    killSignal: 'SIGKILL' as const,
+    maxBuffer: 1024 * 1024,
+  };
   try {
     let output: string;
 
@@ -339,18 +348,30 @@ async function nativeLMStudioEstimate(
       if (gpu) args.push('--gpu', gpu);
 
       try {
-        const result = await execFileAsync(binary, args);
+        const result = await execFileAsync(binary, args, spawnOpts);
         output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
       } catch (err: any) {
         output = `${err?.stdout ?? ''}${err?.stderr ?? ''}`;
         const parsedFromError = parseLMStudioEstimateOutput(output);
         if (parsedFromError) return parsedFromError;
 
+        if (
+          err?.killed ||
+          (typeof err?.message === 'string' &&
+            err.message.includes('ETIMEDOUT'))
+        ) {
+          console.warn(
+            `[LlmService] VRAM estimate timed out for ${modelKey} (context ${contextSize ?? 'default'}), falling back`
+          );
+          return null;
+        }
+
         const contextFlag =
           contextSize !== undefined ? ` --context-length ${contextSize}` : '';
         const gpuFlag = gpu ? ` --gpu ${gpu}` : '';
         const shellResult = await execAsync(
-          `"${binary}" load --estimate-only "${modelKey}"${contextFlag}${gpuFlag}`
+          `"${binary}" load --estimate-only "${modelKey}"${contextFlag}${gpuFlag}`,
+          spawnOpts
         );
         output = `${shellResult.stdout ?? ''}${shellResult.stderr ?? ''}`;
       }
@@ -364,6 +385,8 @@ async function nativeLMStudioEstimate(
     return null;
   }
 }
+
+const inFlightVramEstimates = new Map<string, Promise<VramEstimate | null>>();
 
 export async function fetchVramUsage(
   model: LlmModelInfo,
@@ -387,15 +410,28 @@ export async function fetchVramUsage(
   const gpuFlag =
     numGpuLayers === 0 ? 'off' : numGpuLayers === 99 ? 'max' : undefined;
 
-  const est = await nativeLMStudioEstimate(model.name, contextSize, gpuFlag);
-  if (est) return est;
+  // Singleflight concurrent identical probes (UI debounce + status-poll
+  // background estimate racing) onto one child process instead of N.
+  const inFlightKey = `${model.name}|${contextSize ?? ''}|${gpuFlag ?? ''}`;
+  const inFlight = inFlightVramEstimates.get(inFlightKey);
+  if (inFlight) return inFlight;
 
-  // Fallback to manual calculation if lms estimation fails or is not available
-  const fallbackContextSize =
-    contextSize ?? model.defaultContextSize ?? undefined;
-  if (fallbackContextSize === undefined) return null;
+  const promise = (async () => {
+    const est = await nativeLMStudioEstimate(model.name, contextSize, gpuFlag);
+    if (est) return est;
 
-  return estimateVramUsage(model, fallbackContextSize, numGpuLayers);
+    // Fallback to manual calculation if lms estimation fails or is not available
+    const fallbackContextSize =
+      contextSize ?? model.defaultContextSize ?? undefined;
+    if (fallbackContextSize === undefined) return null;
+
+    return estimateVramUsage(model, fallbackContextSize, numGpuLayers);
+  })().finally(() => {
+    if (inFlightVramEstimates.get(inFlightKey) === promise)
+      inFlightVramEstimates.delete(inFlightKey);
+  });
+  inFlightVramEstimates.set(inFlightKey, promise);
+  return promise;
 }
 
 async function isLlmApiResponsive(baseUrl?: string): Promise<boolean> {
