@@ -1,7 +1,7 @@
 # GPU-enabled Dockerfile for transcription - uses NVIDIA CUDA.
 # Stack: Parakeet (NeMo) ASR + pyannote Community-1 diarization.
 # Parakeet FP16 is ~1.3GB VRAM; Community-1 diarization shares the GPU.
-FROM nvidia/cuda:12.6.0-cudnn9-runtime-ubuntu22.04
+FROM nvidia/cuda:12.6.0-cudnn-runtime-ubuntu22.04
 
 WORKDIR /app
 
