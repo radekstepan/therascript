@@ -42,6 +42,12 @@ const getTableSchema = (db: Database, tableName: string): TableSchema => {
   };
 };
 
+// Virtual/aggregated fields that live in the Zod schema but not as real database
+// columns (e.g. computed via JOINs in SELECT queries).
+const virtualFieldsByTable: Record<string, Set<string>> = {
+  sessions: new Set(['chats', 'chatCount', 'factCheckedChatCount']),
+};
+
 const validateSchemaAgainstZod = (
   tableSchema: TableSchema,
   zodSchema: z.ZodSchema<any>,
@@ -49,6 +55,7 @@ const validateSchemaAgainstZod = (
 ): { valid: boolean; warnings: string[] } => {
   const warnings: string[] = [];
   const dbColumns = tableSchema.columns.map((col) => col.name);
+  const virtualFields = virtualFieldsByTable[tableName] ?? new Set<string>();
 
   const zodShape = (zodSchema as any)._def?.shape();
   if (!zodShape) {
@@ -59,8 +66,7 @@ const validateSchemaAgainstZod = (
 
   // Check for missing columns
   for (const field of zodFields) {
-    // Ignore virtual/aggregated fields that are present in the Zod schema but not in the database table
-    if (tableName === 'sessions' && field === 'chats') continue;
+    if (virtualFields.has(field)) continue;
 
     if (!dbColumns.includes(field)) {
       warnings.push(
