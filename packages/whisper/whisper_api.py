@@ -244,10 +244,29 @@ async def _idle_unload() -> None:
         pass
 
 
+def _unload_parakeet_only() -> None:
+    """Free the Parakeet ASR singleton while keeping the diarizer.
+
+    ASR and diarization run sequentially (attribution only needs the word
+    list), so holding both in VRAM during diarization wastes ~1.3-2.4GB.
+    Thread-safe; a concurrent transcribe re-loads on demand.
+    """
+    global _parakeet_model, _parakeet_device
+    with _models_lock:
+        if _parakeet_model is None:
+            return
+        print("[WhisperManager] Unloading Parakeet ASR before diarization to free VRAM...")
+        _parakeet_model = None
+        _parakeet_device = None
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
 def build_model_status() -> ModelStatus:
     # Report the device actually selected by jobs (torch visibility), not just
     # host GPU presence. Falls back to live CUDA availability before any job ran.
-    device = _parakeet_device or ("cuda" if torch.cuda.is_available() else "cpu")
+    device = _parakeet_device or _diarizer_device or ("cuda" if torch.cuda.is_available() else "cpu")
     # Use pynvml (NVIDIA Management Library) for VRAM if available
     vram_mb = 0
     try:
@@ -260,9 +279,17 @@ def build_model_status() -> ModelStatus:
     except:
         pass # Not NVIDIA or not available
 
+    # Either singleton counts as loaded: ASR is freed before diarization,
+    # so a diarizing job reports the diarizer instead of "no model".
+    parakeet_loaded = _parakeet_model is not None
+    diarizer_loaded = _diarizer is not None
     return ModelStatus(
-        loaded=_parakeet_model is not None,
-        model_name=PARAKEET_MODEL_ID if _parakeet_model is not None else None,
+        loaded=parakeet_loaded or diarizer_loaded,
+        model_name=(
+            PARAKEET_MODEL_ID
+            if parakeet_loaded
+            else (DIARIZATION_MODEL_ID if diarizer_loaded else None)
+        ),
         device=device,
         vram_allocated_mb=vram_mb,
         last_used=_model_last_used if _model_last_used > 0 else None,
@@ -300,17 +327,42 @@ def unload_models(force: bool = False) -> bool:
     return True
 
 
-async def ensure_llm_unloaded() -> None:
-    """Unload any LLM model before loading Whisper to free VRAM."""
+async def ensure_llm_unloaded() -> bool:
+    """Unload any LLM model before loading transcription models to free VRAM.
+
+    Returns True only when the LLM API confirmed the unload (2xx). A False
+    return is LOUD on purpose: proceeding with a resident chat model is the
+    #1 CUDA OOM cause on 12GB cards, and a quiet skip here used to hide it
+    (notably on Linux, where `host.docker.internal` needs the compose
+    `extra_hosts: host-gateway` mapping to resolve at all).
+    """
     try:
-        print("[WhisperManager] Requesting LLM model unload before Whisper load...")
+        print("[WhisperManager] Requesting LLM model unload before transcription load...")
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.post(LLM_UNLOAD_URL)
-            print(f"[WhisperManager] LLM unload response: {response.status_code}")
-    except httpx.ConnectError:
-        print("[WhisperManager] LLM API not reachable, skipping unload")
+            ok = 200 <= response.status_code < 300
+            print(f"[WhisperManager] LLM unload response: {response.status_code} (unload_ok={ok})")
+            if not ok:
+                print(
+                    f"[WhisperManager] WARNING: LLM unload not confirmed "
+                    f"(HTTP {response.status_code} from {LLM_UNLOAD_URL}). "
+                    f"A resident chat model WILL compete for VRAM and may OOM this job."
+                )
+            return ok
+    except httpx.ConnectError as e:
+        print(
+            f"[WhisperManager] WARNING: LLM API not reachable at {LLM_UNLOAD_URL} ({e}); "
+            f"cannot confirm the chat model was unloaded. On Linux this usually means "
+            f"the container cannot resolve host.docker.internal (compose extra_hosts). "
+            f"Proceeding — a resident LLM may OOM this job."
+        )
+        return False
     except Exception as e:
-        print(f"[WhisperManager] Could not unload LLM model: {e}")
+        print(
+            f"[WhisperManager] WARNING: Could not unload LLM model: {e}. "
+            f"Proceeding — a resident LLM may OOM this job."
+        )
+        return False
 
 
 transcribe_semaphore = asyncio.Semaphore(TRANSCRIBE_CONCURRENCY)
@@ -451,8 +503,8 @@ def run_pipeline(
     as each phase starts so progress reporting tracks the real work (model
     loads are their own stage so a cold load never masquerades as
     transcription). ``is_cancelled``
-    (optional) aborts between ASR chunks; diarization itself is one
-    uninterruptible call. ``on_transcribe_progress`` (optional) receives
+    (optional) aborts between ASR chunks and between diarization windows.
+    ``on_transcribe_progress`` (optional) receives
     ``(completed_chunks, total_chunks)`` after each ASR chunk for real
     (non-interpolated) progress reporting.
     """
@@ -470,12 +522,17 @@ def run_pipeline(
     if diarize:
         if on_stage is not None:
             on_stage("model_loading")
+        # Sequential peaks, not summed: ASR words are extracted, so the
+        # Parakeet weights leave VRAM before the diarizer loads.
+        _unload_parakeet_only()
         print("[Whisper] Loading Community-1 diarizer...")
         diarizer = _get_diarizer(device)
         if on_stage is not None:
             on_stage("diarizing")
         print(f"[Whisper] Diarizing with Community-1 (num_speakers={num_speakers}, exclusive segments)...")
-        segments = diarizer.diarize(audio, num_speakers=num_speakers)
+        segments = diarizer.diarize(
+            audio, num_speakers=num_speakers, is_cancelled=is_cancelled
+        )
         print(f"[Whisper] {len(segments)} diarization segments")
         if on_stage is not None:
             on_stage("attributing")
@@ -540,6 +597,9 @@ async def run_transcription(
         return
 
     output_path = os.path.join(TEMP_OUTPUT_DIR, f"{job_id}.json")
+    # Did the pre-job LLM unload confirm (2xx)? None = never attempted
+    # (failure before that point). Read by the OOM hint below.
+    llm_unload_ok: Optional[bool] = None
 
     try:
         async with transcribe_semaphore:
@@ -565,7 +625,7 @@ async def run_transcription(
 
                 # Free LLM VRAM for transcription models; fail fast when
                 # diarization was requested but HF_TOKEN is missing.
-                await ensure_llm_unloaded()
+                llm_unload_ok = await ensure_llm_unloaded()
                 if diarize and not HF_TOKEN:
                     raise RuntimeError(
                         "HF_TOKEN is not set — cannot load diarization pipeline. "
@@ -730,7 +790,20 @@ async def run_transcription(
         err_str = str(e)
         # Prefix well-known failure categories so callers can surface them clearly.
         if err_str.startswith("[CUDA OOM]") or (torch.cuda.is_available() and "out of memory" in err_str.lower()):
-            tagged = err_str if err_str.startswith("[CUDA OOM]") else f"[CUDA OOM] {err_str}"
+            base = err_str if err_str.startswith("[CUDA OOM]") else f"[CUDA OOM] {err_str}"
+            if llm_unload_ok is False:
+                hint = (
+                    " Hint: the pre-job LLM unload did NOT confirm, so a local chat "
+                    "model is probably still holding VRAM. Unload it (app Settings or "
+                    "LM Studio) and retry; the service logs show the unload WARNING."
+                )
+            else:
+                hint = (
+                    " Hint: GPU memory is exhausted. Unload any local chat model and "
+                    "retry; for very long audio also try num_speakers=0 (no "
+                    "diarization) or a shorter file."
+                )
+            tagged = base + hint
         elif err_str.startswith("[AUTH ERROR]") or "401" in err_str or "403" in err_str or ("gated" in err_str.lower() and "huggingface" in err_str.lower()):
             tagged = err_str if err_str.startswith("[AUTH ERROR]") else f"[AUTH ERROR] {err_str}"
         else:

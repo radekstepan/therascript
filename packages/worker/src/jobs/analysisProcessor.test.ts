@@ -70,6 +70,14 @@ vi.mock('../services/streamPublisher.js', () => ({
   publishStreamEvent: vi.fn(),
 }));
 
+vi.mock('../services/queueActivity.js', () => ({
+  isTranscriptionQueueActive: vi.fn().mockResolvedValue(false),
+  getLlmQueueActivityForWorker: vi.fn().mockResolvedValue({
+    analysis: 0,
+    verification: 0,
+  }),
+}));
+
 // Stub out `bullmq`'s `Job` type import (only used in type position).
 // The helpers under test don't depend on the Job constructor.
 
@@ -79,12 +87,16 @@ vi.stubGlobal('fetch', mockFetch);
 const {
   unloadModelAtUrlForWorker,
   loadLlmModelForWorker,
+  listLoadedLlmInstancesForWorker,
   __resetLastWorkerBaseUrlForTests,
   assembleReducePrompt,
   computeMapCompletionCap,
   resolveEffectiveThinkingBudget,
 } = await import('./analysisProcessor.js');
 const { appSettingsRepository } = await import('@therascript/data');
+const { isTranscriptionQueueActive } = await import(
+  '../services/queueActivity.js'
+);
 
 const LOCAL_URL = 'http://localhost:1234';
 const REMOTE_URL = 'http://10.0.0.1:1234';
@@ -413,6 +425,94 @@ describe('analysis worker — loadLlmModelForWorker URL switching', () => {
       expect(calls).toHaveLength(2);
       expect(calls[0].url).toBe(`${REMOTE_URL}/api/v1/models`);
       expect(calls[1].url).toBe(`${REMOTE_URL}/api/v1/models/load`);
+    });
+  });
+
+  describe('loadLlmModelForWorker — transcription exclusion', () => {
+    it('throws without touching LM Studio when transcription is active (local target)', async () => {
+      vi.mocked(isTranscriptionQueueActive).mockResolvedValueOnce(true);
+
+      await expect(
+        loadLlmModelForWorker('meta/local-model', 4096, LOCAL_URL)
+      ).rejects.toThrow(/Cannot load local LLM model.*transcription/);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('proceeds when the activity check fails open', async () => {
+      vi.mocked(isTranscriptionQueueActive).mockRejectedValueOnce(
+        new Error('Redis down')
+      );
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({ models: [] }));
+      mockFetch.mockResolvedValueOnce(
+        makeJsonResponse({ instance_id: 'inst-1' })
+      );
+
+      await expect(
+        loadLlmModelForWorker('meta/local-model', 4096, LOCAL_URL)
+      ).resolves.toBeUndefined();
+    });
+
+    it('skips the check for remote targets', async () => {
+      vi.mocked(isTranscriptionQueueActive).mockClear();
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({ models: [] })); // pre-switch GET
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({ models: [] })); // main GET
+      mockFetch.mockResolvedValueOnce(
+        makeJsonResponse({ instance_id: 'remote-inst-1' })
+      );
+
+      await loadLlmModelForWorker('meta/remote-model', 4096, REMOTE_URL);
+
+      expect(isTranscriptionQueueActive).not.toHaveBeenCalled();
+    });
+
+    it('skips the check for CPU-only loads (numGpuLayers=0)', async () => {
+      vi.mocked(isTranscriptionQueueActive).mockClear();
+      mockFetch.mockResolvedValueOnce(makeJsonResponse({ models: [] }));
+      mockFetch.mockResolvedValueOnce(
+        makeJsonResponse({ instance_id: 'inst-1' })
+      );
+
+      await loadLlmModelForWorker('meta/local-model', 4096, LOCAL_URL, 0);
+
+      expect(isTranscriptionQueueActive).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('listLoadedLlmInstancesForWorker', () => {
+    it('returns loaded llm instances only', async () => {
+      mockFetch.mockResolvedValueOnce(
+        makeJsonResponse({
+          models: [
+            {
+              type: 'llm',
+              loaded_instances: [{ id: 'inst-1' }, { id: 'inst-2' }],
+            },
+            {
+              type: 'embedding',
+              loaded_instances: [{ id: 'emb-1' }],
+            },
+          ],
+        })
+      );
+
+      await expect(listLoadedLlmInstancesForWorker(LOCAL_URL)).resolves.toEqual(
+        [{ id: 'inst-1' }, { id: 'inst-2' }]
+      );
+      expect(recordCalls()[0].url).toBe(`${LOCAL_URL}/api/v1/models`);
+    });
+
+    it('throws on non-OK statuses and transport errors', async () => {
+      mockFetch.mockResolvedValueOnce(
+        makeJsonResponse({ error: 'gone' }, false, 500)
+      );
+      await expect(listLoadedLlmInstancesForWorker(LOCAL_URL)).rejects.toThrow(
+        /status 500/
+      );
+
+      mockFetch.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+      await expect(listLoadedLlmInstancesForWorker(LOCAL_URL)).rejects.toThrow(
+        'ECONNREFUSED'
+      );
     });
   });
 

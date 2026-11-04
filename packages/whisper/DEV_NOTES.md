@@ -23,6 +23,9 @@ diarization). Exposes `/transcribe`, `/status/:job_id`, `/cancel/:job_id`,
 - `PORT` (default 8000, Node proxy), `WHISPER_PYTHON_URL` (default `http://localhost:8001`)
 - `TEMP_INPUT_DIR` (default `/app/temp_inputs`), `TEMP_OUTPUT_DIR` (default `/app/temp_outputs`)
 - `HF_TOKEN` (Community-1 access), `PARAKEET_MODEL_ID`, `PARAKEET_CHUNK_SEC`
+- `PARAKEET_FP16` (default 1, CUDA only), `DIARIZATION_CHUNK_SEC` (default
+  600, 0 = single-pass), `DIARIZATION_CHUNK_OVERLAP_SEC` (default 30),
+  `LLM_UNLOAD_URL` (pre-job VRAM handoff)
 - `model_name` on `/transcribe` is accepted but ignored (always Parakeet)
 
 ## Flow
@@ -34,4 +37,6 @@ diarization). Exposes `/transcribe`, `/status/:job_id`, `/cancel/:job_id`,
 ## Gotchas
 - Large files require enough Docker RAM; first boot downloads ~2.5GB Parakeet
   weights + Community-1 into persistent HF/torch cache volumes
-- Models are load-once singletons; `POST /model/unload` frees VRAM
+- Models are load-once singletons; `POST /model/unload` frees VRAM.
+  Within a diarizing job Parakeet unloads before the diarizer loads
+  (sequential peaks); `GET /model/status` reports whichever is resident

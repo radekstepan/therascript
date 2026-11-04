@@ -22,11 +22,21 @@ services:
       - whisper_models:/root/.cache/whisper
       - hf_cache:/root/.cache/huggingface
       - torch_cache:/root/.cache/torch
+    # `host.docker.internal` does NOT resolve on Linux by default — without
+    # this mapping the container's pre-job LLM unload (VRAM handoff) fails
+    # silently and transcription runs against a loaded chat model (-> CUDA
+    # OOM on 12GB cards). Harmless on Docker Desktop (already defined).
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
     environment:
       - HF_TOKEN=${HF_TOKEN:-}
+      - LLM_UNLOAD_URL=${LLM_UNLOAD_URL:-http://host.docker.internal:3001/api/llm/unload}
       - PARAKEET_MODEL_ID=${PARAKEET_MODEL_ID:-nvidia/parakeet-tdt-0.6b-v2}
       - PARAKEET_CHUNK_SEC=${PARAKEET_CHUNK_SEC:-600}
       - PARAKEET_CHUNK_OVERLAP_SEC=${PARAKEET_CHUNK_OVERLAP_SEC:-10}
+      - PARAKEET_FP16=${PARAKEET_FP16:-1}
+      - DIARIZATION_CHUNK_SEC=${DIARIZATION_CHUNK_SEC:-600}
+      - DIARIZATION_CHUNK_OVERLAP_SEC=${DIARIZATION_CHUNK_OVERLAP_SEC:-30}
     restart: unless-stopped
     healthcheck:
       test: [ 'CMD', 'curl', '--fail', 'http://localhost:8000/health' ]

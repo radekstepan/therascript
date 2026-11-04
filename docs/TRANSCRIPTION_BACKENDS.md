@@ -29,9 +29,18 @@ audio → Parakeet TDT 0.6B v2 (NeMo, native word timestamps, no alignment)
   can neither freeze at a misleading value nor dip backwards.
 - **Diarization:** `pyannote/speaker-diarization-community-1` (CC-BY-4.0,
   soft-gated: accept conditions on Hugging Face + READ token for first
-  download). Words are attributed against the **exclusive** stream (one
-  speaker per frame); the overlapping stream is kept in
-  `CommunityDiarizer.last_full_annotation` for analytics only.
+  download). Long audio is split into `DIARIZATION_CHUNK_SEC` windows
+  (default 600s) with `DIARIZATION_CHUNK_OVERLAP_SEC` overlap (default
+  30s) so an hour never goes through pyannote in one VRAM-spiking call;
+  consecutive windows are label-aligned by maximum same-speaker overlap
+  in the shared region (optimal permutation search, deterministic ties)
+  and stitched at the overlap midpoint for exactly-once coverage.
+  `DIARIZATION_CHUNK_SEC=0` restores the legacy single-pass. Words are
+  attributed against the **exclusive** stream (one speaker per frame);
+  the overlapping stream is kept in
+  `CommunityDiarizer.last_full_annotation` for analytics only
+  (last window wins in chunked mode). Cancellation is polled at window
+  boundaries.
 - **Attribution:** `packages/whisper/pipeline/attribution.py`. Overlap-duration
   argmax per word (linear two-pointer walk over the sorted lists),
   midpoint tie-breaks with float tolerance, nearest-speaker assignment with
@@ -57,6 +66,10 @@ Env (whisper service; see `.env.example`, `docker-compose.yml`):
 PARAKEET_MODEL_ID=nvidia/parakeet-tdt-0.6b-v2
 PARAKEET_CHUNK_SEC=600
 PARAKEET_CHUNK_OVERLAP_SEC=10
+PARAKEET_FP16=1                     # 0 forces fp32
+DIARIZATION_CHUNK_SEC=600           # 0 disables diarization chunking
+DIARIZATION_CHUNK_OVERLAP_SEC=30
+LLM_UNLOAD_URL=http://host.docker.internal:3001/api/llm/unload
 HF_TOKEN=hf_...   # needs Community-1 access (see README setup)
 ```
 
@@ -104,28 +117,40 @@ and each job logs `using device=...`.
 | | GPU (e.g. RTX 3060 12GB) | CPU |
 |---|---|---|
 | Speed | Minutes per hour of audio | Functional but slow — roughly an order of magnitude slower; fine for short clips, patience required for hour-long sessions |
-| Precision | NeMo defaults (fp32) | Same fp32 code path (no int8 quantization — that was the old faster-whisper stack) |
-| VRAM | ~4–5.5GB peak (see below) | n/a (system RAM; models are ~2.5GB Parakeet + ~1GB diarizer on disk/in RAM) |
+| Precision | Parakeet fp16 on CUDA (`PARAKEET_FP16=1`; dtype failures retry once in fp32), Community-1 fp32 | fp32 throughout |
+| VRAM | ~3–4GB peak, sequential stages (see below) | n/a (system RAM; models are ~2.5GB Parakeet + ~1GB diarizer on disk/in RAM) |
 
-**VRAM budget (fp32, as shipped):**
+**VRAM budget (as shipped):**
 
 | Component | VRAM |
 |---|---|
-| Parakeet TDT 0.6B v2 weights | ~2.4–2.5 GB |
+| Parakeet TDT 0.6B v2 weights (fp16) | ~1.3 GB |
 | Parakeet activations (10-min chunks) | ~0.5–1 GB transient |
-| Community-1 (segmentation + embedding + clustering) | ~0.5–1 GB |
+| Community-1 weights + windowed activations | ~1–2 GB transient |
 | CUDA context / fragmentation | ~0.5–1 GB |
-| **Total peak** | **~4–5.5 GB** |
+| **Total peak (one stage at a time)** | **~3–4 GB** |
 
-A 12GB card (e.g. RTX 3060) holds this with ~6GB to spare. (FP16 would cut
-Parakeet weights to ~1.3GB, but the stock image runs NeMo fp32 defaults —
-deliberately, for maximum accuracy — and 12GB doesn't need the saving.)
+ASR and diarization peaks are sequential, never summed: the Parakeet
+weights leave VRAM before the diarizer loads (attribution only needs the
+word list). A 12GB card (e.g. RTX 3060) holds this with ~8GB to spare.
 
 The real 12GB collision risk is the **LLM**, not transcription: an 8B chat
-model can hold 6–9GB, which *plus* transcription would OOM. That's why the
-service unloads the LLM (`ensure_llm_unloaded`) before every transcription
-job — peaks are sequential, never summed. Don't run chat/analysis inference
-concurrently with a transcription.
+model can hold 6–9GB, which *plus* transcription would OOM. The "at most
+one service" invariant is enforced on both sides, not just hoped for:
+
+- **Transcription start** refuses (409) while analysis/verification jobs
+  are queued/running, evicts the local LLM (active URL *and* a stale local
+  model when chatting remote), and *verifies* zero loaded instances before
+  submitting — at API enqueue time and again in the worker at job start.
+- **Local LLM loads** (chat, set-model, analysis strategy, worker Judge
+  loads) refuse (409) while a transcription job is queued/running. Remote
+  targets and CPU-only (`numGpuLayers: 0`) loads are exempt — no local
+  VRAM involved.
+- The container still calls back to `POST /api/llm/unload`
+  (`ensure_llm_unloaded`, `LLM_UNLOAD_URL`) at job start as the last layer;
+  a non-confirming unload logs a loud WARNING and the OOM error hint names
+  the resident LLM as the likely cause. `host.docker.internal` resolves via
+  the compose `extra_hosts: host-gateway` mapping on Linux.
 
 **How to verify which device is active:**
 
@@ -137,7 +162,11 @@ concurrently with a transcription.
 ## Performance / memory notes
 
 - ASR + diarizer load once per process (singletons), not per request.
-  `POST /model/unload` frees them (restart also works).
+  `POST /model/unload` frees them (restart also works). Within a
+  diarizing job they are sequential, not co-resident: Parakeet unloads
+  before the diarizer loads.
+- OOM failures carry an actionable hint: when the pre-job LLM unload did
+  not confirm, the error names the resident chat model as the likely cause.
 
 ## Evaluation
 
@@ -170,6 +199,12 @@ plain WER is 0).
   cases for overlapped long-audio chunking (exact-once coverage, trailing
   chunk, cancellation). No downloads:
   `python3 packages/whisper/pipeline/test_backends_chunking.py`.
+- `packages/whisper/pipeline/test_diarization_chunking.py` — 8
+  model-independent cases for windowed diarization (single-pass short
+  audio, chunking disabled, swap realignment + midpoint stitching,
+  agreement/greedy/identity alignment, degenerate-tail planning,
+  cancellation). No downloads:
+  `python3 packages/whisper/pipeline/test_diarization_chunking.py`.
 - Existing `transcriptionProcessor.test.ts` (vitest) covers paragraph
   grouping and worker failure contracts.
 - Opt-in real-model check: run the eval script end-to-end against a local

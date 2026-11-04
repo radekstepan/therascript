@@ -24,11 +24,11 @@ Located in `packages/worker`, these agents run asynchronously to handle heavy co
 *   **Source:** `packages/worker/src/jobs/transcriptionProcessor.ts`
 *   **Responsibility:** "The Ears" (Now with Diarization)
 *   **Workflow:**
-    1.  Receives `sessionId` and `numSpeakers` from the API after file upload.
+    1.  Receives `sessionId` and `numSpeakers` from the API after file upload. The API refuses (409) while analysis/verification jobs are queued/running, evicts the local LLM (active URL + stale local model), and verifies zero loaded instances before enqueueing; the worker re-checks all three at job start (GPU exclusion: local LLM xor transcription).
     2.  Fetches audio path from SQLite.
-    3.  Submits audio to the **Transcription Service** (`packages/whisper`: Parakeet ASR + Community-1 diarization) and polls for completion.
+    3.  Submits audio to the **Transcription Service** (`packages/whisper`: Parakeet ASR + Community-1 diarization) and polls for completion. The container unloads the LLM at job start (`LLM_UNLOAD_URL`, loud WARNING when unconfirmed) and OOM errors carry an actionable hint.
     4.  **Post-Processing:**
-        *   The pipeline runs 3 stages: **Transcribe** (Parakeet ASR with native word timestamps — no alignment stage), **Diarize** (speaker identification via pyannote Community-1, exclusive stream), and **Attribute** (mapping words to speakers via `packages/whisper/pipeline/attribution.py`).
+        *   The pipeline runs 3 stages: **Transcribe** (Parakeet ASR fp16 on CUDA with native word timestamps — no alignment stage), **Diarize** (speaker identification via pyannote Community-1 chunked windows with overlap label alignment, exclusive stream; Parakeet unloads first so peaks are sequential), and **Attribute** (mapping words to speakers via `packages/whisper/pipeline/attribution.py`).
         *   Parses enriched segments into time-stamped paragraphs, splitting on speaker changes.
         *   Calculates token counts.
         *   Indexes paragraphs into **Elasticsearch** (`therascript_transcripts`), including the `speaker` label.
@@ -57,7 +57,7 @@ Located in `packages/worker`, these agents run asynchronously to handle heavy co
 *   **Responsibility:** "The Judge" — audits session-bound AI chat responses against the ground-truth session transcript and records per-claim verdicts for the Hallucination Audit (`/verification` UI hub).
 *   **Workflow:**
     1.  Receives a `jobId` from the API (`POST /api/verification/jobs` or single-chat verify). The job row snapshots the Judge LLM config (model, context size, temperature default `0.3`, thinking budget passed through uncapped, default `-1` = unrestricted) so the worker loads exactly the configured Judge; job *creation* never touches the user's global chat model.
-    2.  Loads the Judge model via `loadLlmModelForWorker` under the cross-worker LLM mutex (`packages/worker/src/llmWorkerMutex.ts`), so analysis and verification jobs never load/unload models concurrently.
+    2.  Loads the Judge model via `loadLlmModelForWorker` under the cross-worker LLM mutex (`packages/worker/src/llmWorkerMutex.ts`), so analysis and verification jobs never load/unload models concurrently. Local loads refuse while a transcription job is queued/running (GPU exclusion; remote/CPU-only targets exempt).
     3.  For each candidate AI message (newest-first, skipping already-verified unless forced):
         *   **Fast-path:** trivial conversational greetings (`isTrivialConversationalMessage`) complete immediately with zero LLM calls.
         *   **Claims extraction:** sends the ground-truth transcript (budgeted via `selectJudgeTranscriptContext`, speaker labels honoring `session.showSpeakers`) + therapist question + visible AI answer to the Judge LLM, which returns atomic claims with verdicts (`supported` / `partially_supported` / `contradicted` / `fabricated`), omissions, severity, and transcript evidence.
@@ -104,6 +104,7 @@ These operate in real-time via the API (`packages/api`) to facilitate user inter
     *   Full transcript of the specific session (up to context window limit).
     *   Recent chat history.
 *   **Capabilities:** Can quote the patient/therapist, identify CBT techniques used in the specific text, and clarify transcript ambiguities.
+*   **GPU exclusion:** Local model loads refuse (409) while a transcription job is queued/running; remote/CPU-only targets are exempt.
 *   **Memory:** Context is re-injected on every turn; state is stored in SQLite (`messages` table).
 *   **Cancellation:** Model unload on STOP is triggered client-side due to an Elysia 1.2.25 bug; see `docs/DATA_FLOWS.md` §6.
 

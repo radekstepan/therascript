@@ -15,6 +15,7 @@ import type { WhisperSegment } from '@therascript/domain';
 
 vi.mock('@therascript/config', () => ({
   default: {
+    llm: { baseURL: 'http://localhost:1234' },
     whisper: {
       apiUrl: 'http://whisper-test:8000',
       model: 'test-model',
@@ -22,6 +23,19 @@ vi.mock('@therascript/config', () => ({
     },
     elasticsearch: { url: 'http://es-test:9200' },
   },
+}));
+
+vi.mock('../services/queueActivity.js', () => ({
+  isTranscriptionQueueActive: vi.fn().mockResolvedValue(false),
+  getLlmQueueActivityForWorker: vi.fn().mockResolvedValue({
+    analysis: 0,
+    verification: 0,
+  }),
+}));
+
+vi.mock('./analysisProcessor.js', () => ({
+  unloadModelAtUrlForWorker: vi.fn().mockResolvedValue(0),
+  listLoadedLlmInstancesForWorker: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock('@therascript/data', () => ({
@@ -86,6 +100,11 @@ const { sessionRepository, messageRepository, chatRepository } = await import(
   '@therascript/data'
 );
 const { calculateTokenCount } = await import('@therascript/services');
+const { getLlmQueueActivityForWorker } = await import(
+  '../services/queueActivity.js'
+);
+const { unloadModelAtUrlForWorker, listLoadedLlmInstancesForWorker } =
+  await import('./analysisProcessor.js');
 
 const seg = (
   start: number,
@@ -108,6 +127,15 @@ const silent = () => {
 beforeEach(() => {
   vi.clearAllMocks();
   silent();
+  // The file-level afterEach runs restoreAllMocks, which wipes factory
+  // defaults — re-arm the GPU-exclusion collaborators to the idle state so
+  // tests that don't care about the guard see a free GPU.
+  vi.mocked(getLlmQueueActivityForWorker).mockResolvedValue({
+    analysis: 0,
+    verification: 0,
+  });
+  vi.mocked(unloadModelAtUrlForWorker).mockResolvedValue(0);
+  vi.mocked(listLoadedLlmInstancesForWorker).mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -439,5 +467,109 @@ describe('transcription worker — transcript token accounting (Task 11)', () =>
     await processTranscriptionJob(fakeJob({ sessionId: 1, numSpeakers: 0 }));
 
     expect(calculateTokenCount).toHaveBeenCalledWith('Hello world');
+  });
+});
+
+describe('transcription worker — GPU exclusion (job-start guard)', () => {
+  const fakeJob = (data: unknown) =>
+    ({
+      data,
+      updateProgress: vi.fn().mockResolvedValue(undefined),
+    }) as any;
+
+  const fakeSession = {
+    id: 1,
+    audioPath: '/audio/test.mp3',
+    clientName: 'Jane Doe',
+    sessionName: 'Intake',
+    date: '2026-01-01',
+    sessionType: null,
+    therapy: null,
+  };
+
+  it('refuses to start while analysis/verification jobs are queued or running', async () => {
+    vi.mocked(sessionRepository.findById).mockReturnValue(fakeSession as any);
+    vi.mocked(getLlmQueueActivityForWorker).mockResolvedValueOnce({
+      analysis: 1,
+      verification: 0,
+    });
+
+    await expect(
+      processTranscriptionJob(fakeJob({ sessionId: 1, numSpeakers: 0 }))
+    ).rejects.toThrow(/Cannot start transcription while 1 analysis/);
+    // Never touches the local LLM or the Whisper service.
+    expect(unloadModelAtUrlForWorker).not.toHaveBeenCalled();
+    expect(mockAxiosPost).not.toHaveBeenCalled();
+    expect(sessionRepository.updateMetadata).toHaveBeenCalledWith(1, {
+      status: 'failed',
+      errorMessage: expect.stringContaining('Cannot start transcription'),
+    });
+  });
+
+  it('refuses to start when local LLM instances are still loaded', async () => {
+    vi.mocked(sessionRepository.findById).mockReturnValue(fakeSession as any);
+    vi.mocked(getLlmQueueActivityForWorker).mockResolvedValueOnce({
+      analysis: 0,
+      verification: 0,
+    });
+    vi.mocked(listLoadedLlmInstancesForWorker).mockResolvedValueOnce([
+      { id: 'judge-inst-1' },
+    ]);
+
+    await expect(
+      processTranscriptionJob(fakeJob({ sessionId: 1, numSpeakers: 0 }))
+    ).rejects.toThrow(/1 local LLM instance\(s\) still loaded/);
+    expect(unloadModelAtUrlForWorker).toHaveBeenCalledWith(
+      'http://localhost:1234'
+    );
+    expect(mockAxiosPost).not.toHaveBeenCalled();
+    expect(sessionRepository.updateMetadata).toHaveBeenCalledWith(1, {
+      status: 'failed',
+      errorMessage: expect.stringContaining('still loaded'),
+    });
+  });
+
+  it('unloads and verifies before submitting when the GPU is free', async () => {
+    vi.mocked(sessionRepository.findById).mockReturnValue(fakeSession as any);
+    vi.mocked(chatRepository.createChat).mockReturnValue({ id: 10 } as any);
+    vi.mocked(messageRepository.addMessage).mockReturnValue({
+      id: 99,
+      timestamp: 123,
+    } as any);
+    vi.mocked(getLlmQueueActivityForWorker).mockResolvedValueOnce({
+      analysis: 0,
+      verification: 0,
+    });
+    vi.mocked(listLoadedLlmInstancesForWorker).mockResolvedValueOnce([]);
+    mockAxiosGet.mockResolvedValueOnce({ data: { status: 'ok' } }); // health
+    mockAxiosPost.mockResolvedValueOnce({
+      status: 202,
+      data: { job_id: 'whisper-guard' },
+    });
+    mockAxiosGet.mockResolvedValueOnce({
+      data: {
+        job_id: 'whisper-guard',
+        status: 'completed',
+        duration: 30,
+        result: {
+          text: 'hello',
+          language: 'en',
+          segments: [seg(0, 1, 'Hello')],
+        },
+      },
+    });
+
+    await processTranscriptionJob(fakeJob({ sessionId: 1, numSpeakers: 0 }));
+
+    expect(unloadModelAtUrlForWorker).toHaveBeenCalledWith(
+      'http://localhost:1234'
+    );
+    expect(listLoadedLlmInstancesForWorker).toHaveBeenCalledWith(
+      'http://localhost:1234'
+    );
+    expect(sessionRepository.updateMetadata).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ status: 'completed' })
+    );
   });
 });

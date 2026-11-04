@@ -61,6 +61,10 @@ vi.mock('./llamaCppRuntime.js', () => ({
   getLlmRuntime: vi.fn(() => mockRuntime),
 }));
 
+vi.mock('./jobQueueService.js', () => ({
+  isTranscriptionActive: vi.fn().mockResolvedValue(false),
+}));
+
 vi.mock('@therascript/data', () => ({
   templateRepository: {
     findByTitle: vi.fn().mockReturnValue(null),
@@ -122,6 +126,7 @@ const {
   fetchVramUsage,
   loadLlmModel,
   ensureModelLoaded,
+  listLoadedLlmInstances,
   unloadActiveModel,
   unloadModelAtUrl,
   ensureLlmReady,
@@ -153,8 +158,14 @@ const { streamLlmChatDetailed } = await import('@therascript/services');
 
 // Real load-attempt tracker (not mocked): defaults to idle so existing
 // tests exercise the normal sync path.
-const { markLoadStarted, __resetForTests: resetLoadAttemptForTests } =
-  await import('./loadAttemptTracker.js');
+const {
+  markLoadStarted,
+  getLastLoadAttempt,
+  __resetForTests: resetLoadAttemptForTests,
+} = await import('./loadAttemptTracker.js');
+
+const { isTranscriptionActive } = await import('./jobQueueService.js');
+const { ConflictError } = await import('../errors.js');
 
 describe('llamaCppService', () => {
   beforeEach(() => {
@@ -1281,6 +1292,149 @@ describe('llamaCppService', () => {
         'http://localhost:8001/model/unload',
         {},
         expect.objectContaining({ timeout: 5000 })
+      );
+    });
+  });
+
+  describe('transcription exclusion (GPU invariant)', () => {
+    const LOCAL_URL = 'http://localhost:1234';
+    const REMOTE_URL = 'http://10.0.0.1:1234';
+
+    beforeEach(() => {
+      resetLoadAttemptForTests();
+      vi.mocked(isRemoteLlmBaseUrl).mockReturnValue(false);
+      vi.mocked(getActiveBaseUrl).mockReturnValue(LOCAL_URL);
+      vi.mocked(getConfiguredNumGpuLayers).mockReturnValue(null);
+    });
+
+    it('loadLlmModel throws 409 without side effects when transcription is active', async () => {
+      vi.mocked(isTranscriptionActive).mockResolvedValueOnce(true);
+      mockRuntime.restartWithModel.mockClear();
+
+      const err = await loadLlmModel('meta/llama-3-8b', 4096).catch((e) => e);
+      expect(err).toBeInstanceOf(ConflictError);
+      expect(err.status).toBe(409);
+      expect(err.message).toMatch(/Cannot load local LLM model/);
+
+      // Guard fires before the Whisper unload, the runtime restart, and any
+      // LM Studio traffic.
+      expect(mockRuntime.restartWithModel).not.toHaveBeenCalled();
+      expect(mockAxiosPost).not.toHaveBeenCalled();
+      expect(mockAxiosGet).not.toHaveBeenCalled();
+      const attempt = getLastLoadAttempt();
+      expect(attempt.status).toBe('failed');
+      expect(attempt.error).toMatch(/transcription/);
+    });
+
+    it('loadLlmModel proceeds when the activity check fails open', async () => {
+      vi.mocked(isTranscriptionActive).mockRejectedValueOnce(
+        new Error('Redis down')
+      );
+      mockAxiosPost.mockResolvedValueOnce({ data: {} }); // whisper unload
+      mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } }); // enumerate
+      mockAxiosPost.mockResolvedValueOnce({ data: { instance_id: 'inst' } });
+
+      await expect(
+        loadLlmModel('meta/llama-3-8b', 4096)
+      ).resolves.toBeUndefined();
+    });
+
+    it('loadLlmModel skips the check for remote targets', async () => {
+      vi.mocked(isRemoteLlmBaseUrl).mockReturnValue(true);
+      vi.mocked(getActiveBaseUrl).mockReturnValue(REMOTE_URL);
+      vi.mocked(isTranscriptionActive).mockClear();
+      mockAxiosPost.mockResolvedValueOnce({ data: {} }); // whisper unload
+      mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
+      mockAxiosPost.mockResolvedValueOnce({ data: { instance_id: 'inst' } });
+
+      await loadLlmModel('meta/llama-3-8b', 4096, REMOTE_URL);
+
+      expect(isTranscriptionActive).not.toHaveBeenCalled();
+    });
+
+    it('loadLlmModel skips the check for CPU-only loads (numGpuLayers=0)', async () => {
+      vi.mocked(getConfiguredNumGpuLayers).mockReturnValue(0);
+      vi.mocked(isTranscriptionActive).mockClear();
+      mockAxiosPost.mockResolvedValueOnce({ data: {} }); // whisper unload
+      mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
+      mockAxiosPost.mockResolvedValueOnce({ data: { instance_id: 'inst' } });
+
+      await loadLlmModel('meta/llama-3-8b', 4096);
+
+      expect(isTranscriptionActive).not.toHaveBeenCalled();
+    });
+
+    it('ensureModelLoaded throws 409 when transcription is active (no load-state pollution)', async () => {
+      vi.mocked(isTranscriptionActive).mockResolvedValueOnce(true);
+
+      await expect(
+        ensureModelLoaded('meta/llama-3-8b', 4096)
+      ).rejects.toBeInstanceOf(ConflictError);
+      expect(mockAxiosGet).not.toHaveBeenCalled();
+      expect(mockAxiosPost).not.toHaveBeenCalled();
+      expect(getLastLoadAttempt().status).toBe('idle');
+    });
+
+    it('ensureModelLoaded skips the check for remote targets', async () => {
+      vi.mocked(isRemoteLlmBaseUrl).mockReturnValue(true);
+      vi.mocked(isTranscriptionActive).mockClear();
+      mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
+      mockAxiosPost.mockResolvedValueOnce({ data: {} }); // whisper unload
+      mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
+      mockAxiosPost.mockResolvedValueOnce({ data: { instance_id: 'inst' } });
+
+      await ensureModelLoaded('meta/llama-3-8b', 4096, REMOTE_URL);
+
+      expect(isTranscriptionActive).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('listLoadedLlmInstances', () => {
+    const LOCAL_URL = 'http://localhost:1234';
+
+    it('returns id + modelKey for loaded llm instances only', async () => {
+      mockAxiosGet.mockResolvedValueOnce({
+        data: {
+          models: [
+            {
+              type: 'llm',
+              publisher: 'meta',
+              key: 'llama-3-8b',
+              loaded_instances: [
+                { id: 'inst-1', config: { context_length: 4096 } },
+                { id: 'inst-2', config: { context_length: 4096 } },
+              ],
+            },
+            {
+              type: 'embedding',
+              publisher: 'lmstudio-community',
+              key: 'nomic',
+              loaded_instances: [{ id: 'emb-1', config: {} }],
+            },
+            {
+              type: 'llm',
+              publisher: 'meta',
+              key: 'unloaded-model',
+              loaded_instances: [],
+            },
+          ],
+        },
+      });
+
+      await expect(listLoadedLlmInstances(LOCAL_URL)).resolves.toEqual([
+        { id: 'inst-1', modelKey: 'meta/llama-3-8b' },
+        { id: 'inst-2', modelKey: 'meta/llama-3-8b' },
+      ]);
+      expect(mockAxiosGet).toHaveBeenCalledWith(
+        `${LOCAL_URL}/api/v1/models`,
+        expect.objectContaining({ timeout: 5000 })
+      );
+    });
+
+    it('throws on transport errors (callers decide warn-vs-fail)', async () => {
+      mockAxiosGet.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+      await expect(listLoadedLlmInstances(LOCAL_URL)).rejects.toThrow(
+        'ECONNREFUSED'
       );
     });
   });

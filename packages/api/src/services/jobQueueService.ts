@@ -29,6 +29,44 @@ const verificationQueue = new Queue<VerificationJobData>(
 console.log('[JobQueueService] BullMQ Queues initialized.');
 
 /**
+ * Returns true when the transcription queue holds any waiting, active, or
+ * delayed job. This is the source of truth for the GPU exclusion invariant
+ * ("at most one service": local LLM xor transcription) — session status rows
+ * can go stale after a crash, queue counts cannot.
+ */
+export const isTranscriptionActive = async (): Promise<boolean> => {
+  const counts = await transcriptionQueue.getJobCounts(
+    'wait',
+    'active',
+    'delayed'
+  );
+  return counts.wait + counts.active + counts.delayed > 0;
+};
+
+/**
+ * Returns waiting/active/delayed counts for the LLM-backed queues (analysis
+ * + verification). The transcription handoff refuses to start while these
+ * are non-zero so it never yanks a model out from under a running job.
+ */
+export const getLlmQueueActivity = async (): Promise<{
+  analysis: number;
+  verification: number;
+}> => {
+  const [analysisCounts, verificationCounts] = await Promise.all([
+    analysisQueue.getJobCounts('wait', 'active', 'delayed'),
+    verificationQueue.getJobCounts('wait', 'active', 'delayed'),
+  ]);
+  return {
+    analysis:
+      analysisCounts.wait + analysisCounts.active + analysisCounts.delayed,
+    verification:
+      verificationCounts.wait +
+      verificationCounts.active +
+      verificationCounts.delayed,
+  };
+};
+
+/**
  * Gets the number of active and waiting jobs for all queues.
  * @returns An object with total, transcription, analysis, and verification counts.
  */

@@ -2,9 +2,23 @@
 import config from '@therascript/config';
 import type { WhisperJobStatus } from '@therascript/domain';
 import axios from 'axios';
-import { ApiError, InternalServerError, NotFoundError } from '../errors.js';
-import { addTranscriptionJob } from './jobQueueService.js';
-import { unloadActiveModel } from './llamaCppService.js';
+import {
+  ApiError,
+  ConflictError,
+  InternalServerError,
+  NotFoundError,
+} from '../errors.js';
+import { addTranscriptionJob, getLlmQueueActivity } from './jobQueueService.js';
+import {
+  listLoadedLlmInstances,
+  unloadActiveModel,
+  unloadModelAtUrl,
+} from './llamaCppService.js';
+import {
+  getActiveBaseUrl,
+  getDefaultBaseUrl,
+  isRemoteLlmBaseUrl,
+} from './activeModelService.js';
 
 console.log('[Real Service] Using Real Transcription Service');
 
@@ -42,6 +56,24 @@ export async function startTranscriptionJob(
     );
   }
 
+  // Symmetric GPU exclusion: never yank a model out from under a running
+  // analysis/verification job — refuse with a 409 instead.
+  const llmActivity = await getLlmQueueActivity();
+  const llmJobsTotal = llmActivity.analysis + llmActivity.verification;
+  if (llmJobsTotal > 0) {
+    const parts = [
+      llmActivity.analysis > 0 ? `${llmActivity.analysis} analysis` : null,
+      llmActivity.verification > 0
+        ? `${llmActivity.verification} verification`
+        : null,
+    ].filter((p): p is string => p !== null);
+    throw new ConflictError(
+      `Cannot start transcription while ${parts.join(' + ')} job(s) are ` +
+        `queued or running. Transcription and the local LLM share one GPU — ` +
+        `wait for them to finish (or cancel them) and retry.`
+    );
+  }
+
   // Unload the LM Studio model to free up VRAM for Whisper.
   console.log(
     `[TranscriptionService] Attempting to unload LM Studio model to ensure VRAM availability for Whisper...`
@@ -50,6 +82,12 @@ export async function startTranscriptionJob(
     // stopWhenIdle: the transcription VRAM handoff wants LM Studio fully
     // down (not just model-free) before the Whisper job claims the GPU.
     await unloadActiveModel(undefined, undefined, true);
+    // unloadActiveModel only targets the ACTIVE base URL: when chatting via
+    // a remote server, a stale local model would otherwise survive the
+    // handoff and still hold local VRAM. Evict it explicitly.
+    if (isRemoteLlmBaseUrl(getActiveBaseUrl())) {
+      await unloadModelAtUrl(getDefaultBaseUrl());
+    }
     // Give a short pause for VRAM to actually be reclaimed by the OS/Driver
     await new Promise((resolve) => setTimeout(resolve, 1000));
     console.log('[TranscriptionService] LM Studio unload request completed.');
@@ -59,6 +97,29 @@ export async function startTranscriptionJob(
       error.message
     );
     // We proceed anyway. If LM Studio is down, it's not using VRAM.
+  }
+
+  // Verify the handoff instead of hoping: if local instances are STILL
+  // loaded (unload silently failed, model reloaded), refuse now with a 409
+  // rather than running into a CUDA OOM mid-job. An unreachable local
+  // server means no local VRAM is held, so enumeration failures are
+  // non-fatal (the worker re-verifies at job start regardless).
+  let resident: Awaited<ReturnType<typeof listLoadedLlmInstances>> = [];
+  try {
+    resident = await listLoadedLlmInstances(getDefaultBaseUrl());
+  } catch (error: any) {
+    console.warn(
+      '[TranscriptionService] Could not verify local LLM unload ' +
+        `(${error.message}); proceeding — the worker re-checks at job start.`
+    );
+  }
+  if (resident.length > 0) {
+    const names = resident.map((r) => `${r.modelKey} (${r.id})`).join(', ');
+    throw new ConflictError(
+      `Cannot start transcription: ${resident.length} local LLM instance(s) ` +
+        `still loaded (${names}). Unload the chat model and retry — ` +
+        `starting now would run out of GPU memory.`
+    );
   }
 
   console.log(

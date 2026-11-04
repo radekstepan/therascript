@@ -25,10 +25,19 @@ vi.mock('axios', () => ({
 
 vi.mock('./jobQueueService.js', () => ({
   addTranscriptionJob: vi.fn(),
+  getLlmQueueActivity: vi.fn(),
 }));
 
 vi.mock('./llamaCppService.js', () => ({
   unloadActiveModel: vi.fn(),
+  unloadModelAtUrl: vi.fn(),
+  listLoadedLlmInstances: vi.fn(),
+}));
+
+vi.mock('./activeModelService.js', () => ({
+  getActiveBaseUrl: vi.fn(),
+  getDefaultBaseUrl: vi.fn(),
+  isRemoteLlmBaseUrl: vi.fn(),
 }));
 
 const {
@@ -37,9 +46,16 @@ const {
   checkDiarizationReadiness,
   triggerDiarizationPrefetch,
 } = await import('./transcriptionService.js');
-const { addTranscriptionJob } = await import('./jobQueueService.js');
-const { unloadActiveModel } = await import('./llamaCppService.js');
-const { ApiError } = await import('../errors.js');
+const { addTranscriptionJob, getLlmQueueActivity } = await import(
+  './jobQueueService.js'
+);
+const { unloadActiveModel, unloadModelAtUrl, listLoadedLlmInstances } =
+  await import('./llamaCppService.js');
+const { getActiveBaseUrl, getDefaultBaseUrl, isRemoteLlmBaseUrl } =
+  await import('./activeModelService.js');
+const { ApiError, ConflictError } = await import('../errors.js');
+
+const LOCAL_URL = 'http://localhost:1234';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -83,13 +99,23 @@ describe('startTranscriptionJob (upload 503 gate)', () => {
     expect(addTranscriptionJob).not.toHaveBeenCalled();
   });
 
-  it('unloads the LLM and enqueues the job when Whisper is healthy', async () => {
+  it('unloads the LLM, verifies VRAM is free, and enqueues when Whisper is healthy', async () => {
     mockAxiosGet.mockResolvedValueOnce({ data: { status: 'ok' } });
+    vi.mocked(getLlmQueueActivity).mockResolvedValueOnce({
+      analysis: 0,
+      verification: 0,
+    });
     vi.mocked(unloadActiveModel).mockResolvedValueOnce(undefined as any);
+    vi.mocked(getActiveBaseUrl).mockReturnValue(LOCAL_URL);
+    vi.mocked(getDefaultBaseUrl).mockReturnValue(LOCAL_URL);
+    vi.mocked(isRemoteLlmBaseUrl).mockReturnValue(false);
+    vi.mocked(listLoadedLlmInstances).mockResolvedValueOnce([]);
     const { p, advanced } = run(7, 2);
     await advanced;
     await p;
     expect(unloadActiveModel).toHaveBeenCalledTimes(1);
+    expect(unloadModelAtUrl).not.toHaveBeenCalled();
+    expect(listLoadedLlmInstances).toHaveBeenCalledWith(LOCAL_URL);
     expect(addTranscriptionJob).toHaveBeenCalledWith({
       sessionId: 7,
       numSpeakers: 2,
@@ -98,14 +124,108 @@ describe('startTranscriptionJob (upload 503 gate)', () => {
 
   it('still enqueues when the LLM unload fails (non-fatal VRAM warning)', async () => {
     mockAxiosGet.mockResolvedValueOnce({ data: { status: 'ok' } });
+    vi.mocked(getLlmQueueActivity).mockResolvedValueOnce({
+      analysis: 0,
+      verification: 0,
+    });
     vi.mocked(unloadActiveModel).mockRejectedValueOnce(
       new Error('LM Studio down')
     );
+    vi.mocked(getActiveBaseUrl).mockReturnValue(LOCAL_URL);
+    vi.mocked(getDefaultBaseUrl).mockReturnValue(LOCAL_URL);
+    vi.mocked(isRemoteLlmBaseUrl).mockReturnValue(false);
+    vi.mocked(listLoadedLlmInstances).mockResolvedValueOnce([]);
     const { p, advanced } = run(3);
     await advanced;
     await p;
     expect(addTranscriptionJob).toHaveBeenCalledWith({
       sessionId: 3,
+      numSpeakers: 0,
+    });
+  });
+
+  it('throws a 409 without unloading when analysis/verification jobs are active', async () => {
+    mockAxiosGet.mockResolvedValueOnce({ data: { status: 'ok' } });
+    vi.mocked(getLlmQueueActivity).mockResolvedValueOnce({
+      analysis: 0,
+      verification: 2,
+    });
+    const { p } = run(5);
+    // Attach the rejection handler before any await so the rejection is
+    // never momentarily unhandled.
+    const assertion = expect(p).rejects.toMatchObject({ status: 409 });
+    await assertion;
+    await expect(p).rejects.toBeInstanceOf(ConflictError);
+    await expect(p).rejects.toThrow(/2 verification/);
+    expect(unloadActiveModel).not.toHaveBeenCalled();
+    expect(addTranscriptionJob).not.toHaveBeenCalled();
+  });
+
+  it('throws a 409 when local LLM instances are still loaded after unload', async () => {
+    mockAxiosGet.mockResolvedValueOnce({ data: { status: 'ok' } });
+    vi.mocked(getLlmQueueActivity).mockResolvedValueOnce({
+      analysis: 0,
+      verification: 0,
+    });
+    vi.mocked(unloadActiveModel).mockResolvedValueOnce(undefined as any);
+    vi.mocked(getActiveBaseUrl).mockReturnValue(LOCAL_URL);
+    vi.mocked(getDefaultBaseUrl).mockReturnValue(LOCAL_URL);
+    vi.mocked(isRemoteLlmBaseUrl).mockReturnValue(false);
+    vi.mocked(listLoadedLlmInstances).mockResolvedValueOnce([
+      { id: 'inst-1', modelKey: 'meta/llama-3-8b' },
+    ]);
+    const { p, advanced } = run(5);
+    // Attach the rejection handler before advancing timers so the rejection
+    // is never momentarily unhandled.
+    const assertion = expect(p).rejects.toMatchObject({ status: 409 });
+    await advanced;
+    await assertion;
+    await expect(p).rejects.toBeInstanceOf(ConflictError);
+    await expect(p).rejects.toThrow(/still loaded/);
+    expect(addTranscriptionJob).not.toHaveBeenCalled();
+  });
+
+  it('evicts the stale local model when the active URL is remote', async () => {
+    const REMOTE_URL = 'http://10.0.0.1:1234';
+    mockAxiosGet.mockResolvedValueOnce({ data: { status: 'ok' } });
+    vi.mocked(getLlmQueueActivity).mockResolvedValueOnce({
+      analysis: 0,
+      verification: 0,
+    });
+    vi.mocked(unloadActiveModel).mockResolvedValueOnce(undefined as any);
+    vi.mocked(unloadModelAtUrl).mockResolvedValueOnce(1);
+    vi.mocked(getActiveBaseUrl).mockReturnValue(REMOTE_URL);
+    vi.mocked(getDefaultBaseUrl).mockReturnValue(LOCAL_URL);
+    vi.mocked(isRemoteLlmBaseUrl).mockReturnValue(true);
+    vi.mocked(listLoadedLlmInstances).mockResolvedValueOnce([]);
+    const { p, advanced } = run(9);
+    await advanced;
+    await p;
+    expect(unloadModelAtUrl).toHaveBeenCalledWith(LOCAL_URL);
+    expect(addTranscriptionJob).toHaveBeenCalledWith({
+      sessionId: 9,
+      numSpeakers: 0,
+    });
+  });
+
+  it('still enqueues when the verify enumeration fails (server down holds no VRAM)', async () => {
+    mockAxiosGet.mockResolvedValueOnce({ data: { status: 'ok' } });
+    vi.mocked(getLlmQueueActivity).mockResolvedValueOnce({
+      analysis: 0,
+      verification: 0,
+    });
+    vi.mocked(unloadActiveModel).mockResolvedValueOnce(undefined as any);
+    vi.mocked(getActiveBaseUrl).mockReturnValue(LOCAL_URL);
+    vi.mocked(getDefaultBaseUrl).mockReturnValue(LOCAL_URL);
+    vi.mocked(isRemoteLlmBaseUrl).mockReturnValue(false);
+    vi.mocked(listLoadedLlmInstances).mockRejectedValueOnce(
+      new Error('ECONNREFUSED')
+    );
+    const { p, advanced } = run(11);
+    await advanced;
+    await p;
+    expect(addTranscriptionJob).toHaveBeenCalledWith({
+      sessionId: 11,
       numSpeakers: 0,
     });
   });

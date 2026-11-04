@@ -17,8 +17,10 @@ import {
 import {
   InternalServerError,
   BadRequestError,
+  ConflictError,
   NotFoundError,
 } from '../errors.js';
+import { isTranscriptionActive } from './jobQueueService.js';
 
 import {
   setActiveModelAndContextAndParams,
@@ -752,6 +754,63 @@ export const deleteLlmModel = async (modelPath: string): Promise<string> => {
   return await runtime.deleteModel(modelPath);
 };
 
+export interface LoadedLlmInstance {
+  id: string;
+  modelKey: string;
+}
+
+/**
+ * List LLM instances currently loaded on an LM Studio server.
+ * Single enumeration primitive behind load/unload/verify — same request
+ * every caller used to inline (`GET <url>/api/v1/models`, llm-only).
+ * Throws on transport/shape errors; callers decide warn-vs-fail.
+ */
+export const listLoadedLlmInstances = async (
+  targetUrl: string
+): Promise<LoadedLlmInstance[]> => {
+  const modelsRes = await axios.get<{ models: LmsModelRecord[] }>(
+    `${targetUrl}/api/v1/models`,
+    { timeout: 5000, headers: authHeadersFor(targetUrl) }
+  );
+  const models = modelsRes.data?.models ?? [];
+  return models
+    .filter((m) => m.type === 'llm')
+    .flatMap((m) =>
+      (m.loaded_instances ?? []).map((instance) => ({
+        id: instance.id,
+        modelKey: `${m.publisher}/${m.key}`,
+      }))
+    );
+};
+
+const LOCAL_LLM_TRANSCRIPTION_CONFLICT =
+  'a transcription job is queued or running. Transcription and the local LLM ' +
+  'share one GPU — wait for transcription to finish, or switch to a remote ' +
+  'LLM / CPU-only layers.';
+
+/**
+ * GPU exclusion gate: true when a *local* load must not proceed because
+ * transcription holds (or is about to hold) the GPU. Remote targets never
+ * touch local VRAM and CPU-only loads (`numGpuLayers: 0`) don't either, so
+ * both are exempt. A failed activity check (Redis down) fails OPEN with a
+ * warning — chat must not break when the queue is unreachable; the
+ * best-effort Whisper unload below remains as backstop.
+ */
+const isLocalLoadBlockedByTranscription = async (
+  targetUrl: string
+): Promise<boolean> => {
+  if (isRemoteLlmBaseUrl(targetUrl)) return false;
+  if (getConfiguredNumGpuLayers() === 0) return false;
+  try {
+    return await isTranscriptionActive();
+  } catch (err: any) {
+    console.warn(
+      `[LlmService] Transcription-activity check failed (${err.message}); proceeding with load.`
+    );
+    return false;
+  }
+};
+
 /**
  * Load a model via the LM Studio REST API.
  * Ensures the daemon/server are running first (skipped for remote URLs),
@@ -769,6 +828,17 @@ export const loadLlmModel = async (
   // Record the attempt so GET /api/llm/status can surface in-progress
   // and failed loads to the UI (set-model fires this fire-and-forget).
   markLoadStarted(modelPath);
+
+  // GPU exclusion: a local load on top of an active transcription OOMs
+  // 12GB cards (and Whisper refuses the reciprocal unload while busy, so
+  // "load anyway" would stack both). Refuse with a 409 the UI can show.
+  if (await isLocalLoadBlockedByTranscription(targetUrl)) {
+    const message =
+      `Cannot load local LLM model '${modelPath}': ` +
+      LOCAL_LLM_TRANSCRIPTION_CONFLICT;
+    markLoadFailed(modelPath, message);
+    throw new ConflictError(message);
+  }
 
   // Free any Whisper ASR model from VRAM so the chat load has room.
   // Symmetric to the LM Studio unload the transcription service performs
@@ -815,13 +885,7 @@ export const loadLlmModel = async (
 
   // Unload all currently loaded LLM model instances
   try {
-    const modelsRes = await axios.get<{ models: LmsModelRecord[] }>(
-      `${targetUrl}/api/v1/models`,
-      { timeout: 5000, headers: authHeadersFor(targetUrl) }
-    );
-    const loadedInstances = modelsRes.data.models
-      .filter((m) => m.type === 'llm')
-      .flatMap((m) => m.loaded_instances);
+    const loadedInstances = await listLoadedLlmInstances(targetUrl);
 
     for (const instance of loadedInstances) {
       try {
@@ -906,6 +970,15 @@ export const ensureModelLoaded = async (
   baseUrlOverride?: string | null
 ): Promise<void> => {
   const targetUrl = resolveLlmBaseUrl(baseUrlOverride);
+  // Same GPU exclusion as loadLlmModel, but without markLoadFailed: this is
+  // a transient conflict inside a chat/analysis request (which surfaces the
+  // 409 itself), not a load failure for the status poll.
+  if (await isLocalLoadBlockedByTranscription(targetUrl)) {
+    throw new ConflictError(
+      `Cannot start local LLM inference for '${modelPath}': ` +
+        LOCAL_LLM_TRANSCRIPTION_CONFLICT
+    );
+  }
   try {
     const res = await axios.get<{ models: LmsModelRecord[] }>(
       `${targetUrl}/api/v1/models`,
@@ -960,13 +1033,7 @@ export const unloadActiveModel = async (
   let unloadedCount = 0;
 
   try {
-    const modelsRes = await axios.get<{ models: LmsModelRecord[] }>(
-      `${targetUrl}/api/v1/models`,
-      { timeout: 5000, headers: authHeadersFor(targetUrl) }
-    );
-    const loadedInstances = modelsRes.data.models
-      .filter((m) => m.type === 'llm')
-      .flatMap((m) => m.loaded_instances);
+    const loadedInstances = await listLoadedLlmInstances(targetUrl);
 
     if (loadedInstances.length > 0) {
       // Unload all model instances in parallel for faster turnaround
@@ -1042,13 +1109,7 @@ export const unloadModelAtUrl = async (url: string): Promise<number> => {
   let unloadedCount = 0;
 
   try {
-    const modelsRes = await axios.get<{ models: LmsModelRecord[] }>(
-      `${targetUrl}/api/v1/models`,
-      { timeout: 5000, headers: authHeadersFor(targetUrl) }
-    );
-    const loadedInstances = modelsRes.data.models
-      .filter((m) => m.type === 'llm')
-      .flatMap((m) => m.loaded_instances);
+    const loadedInstances = await listLoadedLlmInstances(targetUrl);
 
     if (loadedInstances.length > 0) {
       await Promise.all(

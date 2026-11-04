@@ -19,6 +19,7 @@ import {
   clear as clearLoadedModelsTracker,
 } from './jobs/loadedModelsTracker.js';
 import { unloadModelAtUrlForWorker } from './jobs/analysisProcessor.js';
+import { closeQueueActivityReaders } from './services/queueActivity.js';
 
 console.log('[Worker] Initializing worker process...');
 
@@ -144,6 +145,7 @@ async function shutdown(signal: string) {
       );
     }
     clearLoadedModelsTracker();
+    await closeQueueActivityReaders();
     closeDb();
     console.log('[Worker] Database connection closed.');
     await closeElasticsearchClient();

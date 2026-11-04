@@ -30,6 +30,11 @@ import FormData from 'form-data';
 import fs from 'fs';
 import config from '@therascript/config';
 import { safeValidateTranscriptionJob } from '@therascript/domain';
+import { getLlmQueueActivityForWorker } from '../services/queueActivity.js';
+import {
+  listLoadedLlmInstancesForWorker,
+  unloadModelAtUrlForWorker,
+} from './analysisProcessor.js';
 
 const esClient = getElasticsearchClient(config.elasticsearch.url);
 
@@ -248,6 +253,42 @@ export default async function (job: Job<TranscriptionJobData, any, string>) {
   try {
     let durationInt: number | null = null;
     await job.updateProgress(5);
+    // GPU exclusion, job-start layer. The API checked at enqueue time, but a
+    // chat/analysis/verification load may have landed since, so re-check at
+    // the last moment: refuse while LLM-backed jobs run (never yank a model
+    // from under them), evict any resident local model, and VERIFY VRAM is
+    // actually free before the GPU work starts. Failing here with a clear
+    // message beats a CUDA OOM mid-job.
+    const llmActivity = await getLlmQueueActivityForWorker();
+    if (llmActivity.analysis + llmActivity.verification > 0) {
+      const parts = [
+        llmActivity.analysis > 0 ? `${llmActivity.analysis} analysis` : null,
+        llmActivity.verification > 0
+          ? `${llmActivity.verification} verification`
+          : null,
+      ].filter((p): p is string => p !== null);
+      throw new Error(
+        `Cannot start transcription while ${parts.join(' + ')} job(s) are ` +
+          `queued or running. Transcription and the local LLM share one GPU — ` +
+          `wait for them to finish (or cancel them) and retry.`
+      );
+    }
+    await unloadModelAtUrlForWorker(config.llm.baseURL);
+    let resident: Array<{ id: string }> = [];
+    try {
+      resident = await listLoadedLlmInstancesForWorker(config.llm.baseURL);
+    } catch (e: any) {
+      console.warn(
+        `[Transcription Worker] Could not verify local LLM unload (${e?.message ?? e}); proceeding.`
+      );
+    }
+    if (resident.length > 0) {
+      throw new Error(
+        `Cannot start transcription: ${resident.length} local LLM instance(s) ` +
+          `still loaded (${resident.map((r) => r.id).join(', ')}). Unload the ` +
+          `chat model and retry — starting now would run out of GPU memory.`
+      );
+    }
     sessionRepository.updateMetadata(sessionId, { status: 'transcribing' });
 
     const numSpeakers = validationResult.data.numSpeakers;

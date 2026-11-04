@@ -33,6 +33,7 @@ import {
   markUnloaded as trackerMarkUnloaded,
 } from './loadedModelsTracker.js';
 import { runWithLlmWorkerLock } from '../llmWorkerMutex.js';
+import { isTranscriptionQueueActive } from '../services/queueActivity.js';
 
 /**
  * Read the globally stored remote LLM API token. Worker-local counterpart
@@ -89,6 +90,34 @@ function resolveLlmApiTokenForWorker(url: string | undefined): string | null {
 }
 
 /**
+ * List LLM instances currently loaded on an LM Studio server.
+ * Worker-local counterpart of `listLoadedLlmInstances` in the API's
+ * `llamaCppService`. Throws on transport errors and non-OK statuses;
+ * callers decide warn-vs-fail.
+ */
+export async function listLoadedLlmInstancesForWorker(
+  url: string
+): Promise<Array<{ id: string }>> {
+  const res = await fetch(`${url}/api/v1/models`, {
+    headers: authHeadersForWorker(url),
+  });
+  if (!res.ok) {
+    throw new Error(
+      `LM Studio models request failed with status ${res.status}`
+    );
+  }
+  const data = (await res.json()) as {
+    models?: Array<{
+      type: string;
+      loaded_instances?: Array<{ id: string }>;
+    }>;
+  };
+  return (data.models || [])
+    .filter((m) => m.type === 'llm')
+    .flatMap((m) => m.loaded_instances || []);
+}
+
+/**
  * Unload any loaded LLM model instances on a specific URL via the LM Studio
  * REST API. Worker-local counterpart of `unloadModelAtUrl` in the API's
  * `llamaCppService`. Best-effort: per-instance failures and enumeration
@@ -98,48 +127,37 @@ function resolveLlmApiTokenForWorker(url: string | undefined): string | null {
  */
 export async function unloadModelAtUrlForWorker(url: string): Promise<number> {
   let unloadedCount = 0;
+  let instances: Array<{ id: string }>;
   try {
-    const res = await fetch(`${url}/api/v1/models`, {
-      headers: authHeadersForWorker(url),
-    });
-    if (res.ok) {
-      const data = (await res.json()) as {
-        models: Array<{
-          type: string;
-          loaded_instances: Array<{ id: string }>;
-        }>;
-      };
-      const instances = (data.models || [])
-        .filter((m) => m.type === 'llm')
-        .flatMap((m) => m.loaded_instances);
-      for (const instance of instances) {
-        try {
-          await fetch(`${url}/api/v1/models/unload`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              ...authHeadersForWorker(url),
-            },
-            body: JSON.stringify({ instance_id: instance.id }),
-          });
-          console.log(
-            `[Analysis Worker] Unloaded instance ${instance.id} from ${url}`
-          );
-          trackerMarkUnloaded(url, instance.id);
-          unloadedCount++;
-        } catch (e: any) {
-          console.warn(
-            `[Analysis Worker] Failed to unload ${instance.id} from ${url}:`,
-            e
-          );
-        }
-      }
-    }
+    instances = await listLoadedLlmInstancesForWorker(url);
   } catch (e) {
     console.warn(
       `[Analysis Worker] Could not enumerate loaded models at ${url} during pre-switch unload:`,
       e
     );
+    return 0;
+  }
+  for (const instance of instances) {
+    try {
+      await fetch(`${url}/api/v1/models/unload`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeadersForWorker(url),
+        },
+        body: JSON.stringify({ instance_id: instance.id }),
+      });
+      console.log(
+        `[Analysis Worker] Unloaded instance ${instance.id} from ${url}`
+      );
+      trackerMarkUnloaded(url, instance.id);
+      unloadedCount++;
+    } catch (e: any) {
+      console.warn(
+        `[Analysis Worker] Failed to unload ${instance.id} from ${url}:`,
+        e
+      );
+    }
   }
   return unloadedCount;
 }
@@ -177,6 +195,30 @@ export async function loadLlmModelForWorker(
   baseUrl?: string,
   numGpuLayers?: number | null
 ): Promise<void> {
+  // GPU exclusion (worker side of the API's load guard): a local load on
+  // top of an active transcription OOMs 12GB cards. Refuse before touching
+  // any URL state. Remote targets and CPU-only loads are exempt (no local
+  // VRAM); a failed activity check fails open so a Redis blip can't wedge
+  // the queue behind a guard.
+  const effectiveTarget = baseUrl ?? config.llm.baseURL;
+  if (effectiveTarget === config.llm.baseURL && numGpuLayers !== 0) {
+    let transcriptionRunning = false;
+    try {
+      transcriptionRunning = await isTranscriptionQueueActive();
+    } catch (e) {
+      console.warn(
+        '[Analysis Worker] Transcription-activity check failed; proceeding with load:',
+        e
+      );
+    }
+    if (transcriptionRunning) {
+      throw new Error(
+        `Cannot load local LLM model '${modelKey}': a transcription job is ` +
+          `queued or running. Transcription and the local LLM share one GPU — ` +
+          `retry this job once transcription finishes.`
+      );
+    }
+  }
   // If the target URL differs from the worker's last active base URL, evict
   // any model loaded on the previous URL so we don't leave a stale model in
   // VRAM on the other server.
