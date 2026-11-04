@@ -1,4 +1,7 @@
 import os
+
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
 import json
 import asyncio
 import subprocess
@@ -249,7 +252,9 @@ def _unload_parakeet_only() -> None:
 
     ASR and diarization run sequentially (attribution only needs the word
     list), so holding both in VRAM during diarization wastes ~1.3-2.4GB.
-    Thread-safe; a concurrent transcribe re-loads on demand.
+    Thread-safe; a concurrent transcribe re-loads on demand. Callers must
+    drop their own references to the returned backend first, otherwise the
+    singleton is unset but the Python object (and its weights) stays alive.
     """
     global _parakeet_model, _parakeet_device
     with _models_lock:
@@ -258,6 +263,25 @@ def _unload_parakeet_only() -> None:
         print("[WhisperManager] Unloading Parakeet ASR before diarization to free VRAM...")
         _parakeet_model = None
         _parakeet_device = None
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
+def _unload_diarizer_only() -> None:
+    """Free the Community-1 singleton before a new ASR stage loads.
+
+    The diarizer stays warm after a job for the next one, but Parakeet must
+    never load beside it: on a 12GB card their peaks are sequential, not
+    additive.
+    """
+    global _diarizer, _diarizer_device
+    with _models_lock:
+        if _diarizer is None:
+            return
+        print("[WhisperManager] Unloading diarizer before Parakeet ASR to free VRAM...")
+        _diarizer = None
+        _diarizer_device = None
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
@@ -510,6 +534,9 @@ def run_pipeline(
     """
     if on_stage is not None:
         on_stage("model_loading")
+    # A previous job may still hold the diarizer warm; unload it so Parakeet
+    # never loads beside it.
+    _unload_diarizer_only()
     print("[Whisper] Transcribing with Parakeet (native word timestamps, no alignment)...")
     asr = _get_parakeet_model(device)
     if on_stage is not None:
@@ -517,6 +544,10 @@ def run_pipeline(
     words, language = asr.transcribe(
         audio, is_cancelled=is_cancelled, on_progress=on_transcribe_progress
     )
+    # Drop the local reference BEFORE the singleton unload below, otherwise
+    # the backend object keeps the Parakeet weights alive and VRAM is not
+    # actually freed.
+    del asr
 
     print(f"[Whisper] {len(words)} words, language={language}")
     if diarize:
@@ -801,7 +832,7 @@ async def run_transcription(
                 hint = (
                     " Hint: GPU memory is exhausted. Unload any local chat model and "
                     "retry; for very long audio also try num_speakers=0 (no "
-                    "diarization) or a shorter file."
+                    "diarization), a lower PARAKEET_CHUNK_SEC, or a shorter file."
                 )
             tagged = base + hint
         elif err_str.startswith("[AUTH ERROR]") or "401" in err_str or "403" in err_str or ("gated" in err_str.lower() and "huggingface" in err_str.lower()):

@@ -16,7 +16,7 @@ audio → Parakeet TDT 0.6B v2 (NeMo, native word timestamps, no alignment)
 - **ASR:** `nvidia/parakeet-tdt-0.6b-v2` (English-only). Native word/segment
   timestamps with punctuation and capitalization, so there is no forced
   alignment stage. Long audio is chunked at `PARAKEET_CHUNK_SEC` (default
-  600s) with `PARAKEET_CHUNK_OVERLAP_SEC` (default 10s) overlap; words in the
+  300s) with `PARAKEET_CHUNK_OVERLAP_SEC` (default 10s) overlap; words in the
   overlap are deduplicated by midpoint region and timestamps are
   offset-merged. A cancel flag is polled at chunk boundaries. Per-chunk
   progress (`completed/total`, with a `(0, total)` report on entry) drives
@@ -64,7 +64,7 @@ Env (whisper service; see `.env.example`, `docker-compose.yml`):
 
 ```
 PARAKEET_MODEL_ID=nvidia/parakeet-tdt-0.6b-v2
-PARAKEET_CHUNK_SEC=600
+PARAKEET_CHUNK_SEC=300
 PARAKEET_CHUNK_OVERLAP_SEC=10
 PARAKEET_FP16=1                     # 0 forces fp32
 DIARIZATION_CHUNK_SEC=600           # 0 disables diarization chunking
@@ -125,14 +125,18 @@ and each job logs `using device=...`.
 | Component | VRAM |
 |---|---|
 | Parakeet TDT 0.6B v2 weights (fp16) | ~1.3 GB |
-| Parakeet activations (10-min chunks) | ~0.5–1 GB transient |
+| Parakeet activations (5-min chunks) | ~0.3–0.5 GB transient |
 | Community-1 weights + windowed activations | ~1–2 GB transient |
 | CUDA context / fragmentation | ~0.5–1 GB |
 | **Total peak (one stage at a time)** | **~3–4 GB** |
 
 ASR and diarization peaks are sequential, never summed: the Parakeet
 weights leave VRAM before the diarizer loads (attribution only needs the
-word list). A 12GB card (e.g. RTX 3060) holds this with ~8GB to spare.
+word list), and a warm diarizer from a previous job is evicted before the
+next ASR stage. The service also sets
+`PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` before importing torch
+so long chunks do not fragment the 12GB allocator. A 12GB card (e.g.
+RTX 3060) holds this with several GB to spare.
 
 The real 12GB collision risk is the **LLM**, not transcription: an 8B chat
 model can hold 6–9GB, which *plus* transcription would OOM. The "at most
@@ -162,9 +166,11 @@ one service" invariant is enforced on both sides, not just hoped for:
 ## Performance / memory notes
 
 - ASR + diarizer load once per process (singletons), not per request.
-  `POST /model/unload` frees them (restart also works). Within a
-  diarizing job they are sequential, not co-resident: Parakeet unloads
-  before the diarizer loads.
+  `POST /model/unload` frees them (restart also works). They are
+  sequential, not co-resident, in both directions: Parakeet unloads
+  before the diarizer loads, and a warm diarizer is unloaded before the
+  next ASR stage. Local references are dropped before each unload; the
+  singleton alone is not enough to free the weights.
 - OOM failures carry an actionable hint: when the pre-job LLM unload did
   not confirm, the error names the resident chat model as the likely cause.
 

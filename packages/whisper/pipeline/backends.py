@@ -24,12 +24,14 @@ PARAKEET_MODEL_ID = os.environ.get(
     "PARAKEET_MODEL_ID", "nvidia/parakeet-tdt-0.6b-v2"
 )
 # Single-pass attention limit; longer audio is chunked and timestamps are
-# offset-merged. ~24 min is the published full-attention figure; chunk well
-# below it for safety on smaller GPUs. Consecutive chunks overlap by
-# PARAKEET_CHUNK_OVERLAP_SEC so no word is cut at a boundary; words in the
-# overlap are deduplicated by keeping the copy whose midpoint falls in each
-# chunk's exclusive core region (first/last chunks keep their outer edge).
-PARAKEET_CHUNK_SEC = float(os.environ.get("PARAKEET_CHUNK_SEC", "600"))
+# offset-merged. ~24 min is the published full-attention figure, but
+# encoder self-attention memory grows quadratically: 300s keeps the largest
+# tensor under ~0.5GB so a 12GB card survives even if fp16 falls back to
+# fp32. Consecutive chunks overlap by PARAKEET_CHUNK_OVERLAP_SEC so no word
+# is cut at a boundary; words in the overlap are deduplicated by keeping the
+# copy whose midpoint falls in each chunk's exclusive core region (first/last
+# chunks keep their outer edge).
+PARAKEET_CHUNK_SEC = float(os.environ.get("PARAKEET_CHUNK_SEC", "300"))
 PARAKEET_CHUNK_OVERLAP_SEC = float(os.environ.get("PARAKEET_CHUNK_OVERLAP_SEC", "10"))
 PARAKEET_SAMPLE_RATE = 16000
 # fp16 halves Parakeet weights (~2.4GB -> ~1.3GB) and cuts activation memory.

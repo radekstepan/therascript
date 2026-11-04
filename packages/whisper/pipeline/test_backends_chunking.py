@@ -40,7 +40,7 @@ def _make_backend(chunk_sec, overlap_sec, word_step_sec=0.01):
 def _restore_defaults():
     import os as _os
 
-    backends.PARAKEET_CHUNK_SEC = float(_os.environ.get("PARAKEET_CHUNK_SEC", "600"))
+    backends.PARAKEET_CHUNK_SEC = float(_os.environ.get("PARAKEET_CHUNK_SEC", "300"))
     backends.PARAKEET_CHUNK_OVERLAP_SEC = float(
         _os.environ.get("PARAKEET_CHUNK_OVERLAP_SEC", "10")
     )
