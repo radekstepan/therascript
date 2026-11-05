@@ -96,6 +96,8 @@ export const listSessions = ({ set }: SessionHandlerContextNoSessionData) => {
       errorMessage: s.errorMessage,
       showSpeakers: s.showSpeakers,
       numSpeakers: s.numSpeakers,
+      therapistNote: s.therapistNote,
+      therapistNoteUpdatedAt: s.therapistNoteUpdatedAt,
       chatCount: s.chatCount,
       factCheckedChatCount: s.factCheckedChatCount,
     }));
@@ -140,6 +142,8 @@ export const getSessionDetails = ({
       errorMessage: sessionData.errorMessage,
       showSpeakers: sessionData.showSpeakers,
       numSpeakers: sessionData.numSpeakers,
+      therapistNote: sessionData.therapistNote,
+      therapistNoteUpdatedAt: sessionData.therapistNoteUpdatedAt,
       chats: chatMetadata,
     };
   } catch (error) {
@@ -169,6 +173,13 @@ export const updateSessionMetadata = async ({
   const metadataUpdate: Partial<BackendSession> = { ...restOfBody };
   if (showSpeakersInput !== undefined) {
     metadataUpdate.showSpeakers = showSpeakersInput ? 1 : 0;
+  }
+  if ('therapistNote' in validatedBody) {
+    // Normalize blank/empty saves to NULL (no note) and stamp every save —
+    // including clears — so the UI can tell which conversations predate it.
+    const trimmed = validatedBody.therapistNote?.trim() ?? '';
+    metadataUpdate.therapistNote = trimmed ? trimmed : null;
+    metadataUpdate.therapistNoteUpdatedAt = Date.now();
   }
 
   if (Object.keys(validatedBody).length === 0) {
@@ -287,6 +298,8 @@ export const updateSessionMetadata = async ({
       errorMessage: updatedSession.errorMessage,
       showSpeakers: updatedSession.showSpeakers,
       numSpeakers: updatedSession.numSpeakers,
+      therapistNote: updatedSession.therapistNote,
+      therapistNoteUpdatedAt: updatedSession.therapistNoteUpdatedAt,
     };
   } catch (error) {
     console.error(

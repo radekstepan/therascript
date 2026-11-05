@@ -229,7 +229,7 @@ describe('initializeDatabase — v21 verification diagnostics columns', () => {
 
   it('ends at latest schema version', () => {
     expect(userVersion(db)).toBe(LATEST_SCHEMA_VERSION);
-    expect(LATEST_SCHEMA_VERSION).toBe(23);
+    expect(LATEST_SCHEMA_VERSION).toBe(24);
   });
 
   it('creates verification_jobs with outcome counters and phase snapshot columns', () => {
@@ -285,9 +285,9 @@ describe('initializeDatabase — v22 statement reviews', () => {
       }>
     ).map((c) => c.name);
 
-  it('ends at schema version 23', () => {
-    expect(userVersion(db)).toBe(23);
-    expect(LATEST_SCHEMA_VERSION).toBe(23);
+  it('ends at schema version 24', () => {
+    expect(userVersion(db)).toBe(24);
+    expect(LATEST_SCHEMA_VERSION).toBe(24);
   });
 
   it('creates verification_statement_reviews owned by the message', () => {
@@ -351,8 +351,58 @@ describe('initializeDatabase — v22 statement reviews', () => {
     expect(row.material_revision).toBeNull();
   });
 
-  it('is idempotent — re-running migrations keeps version 23', () => {
+  it('is idempotent — re-running migrations keeps version 24', () => {
     expect(() => initializeDatabase(db)).not.toThrow();
-    expect(userVersion(db)).toBe(23);
+    expect(userVersion(db)).toBe(24);
+  });
+});
+
+describe('initializeDatabase — v24 therapist notes', () => {
+  let db: DB;
+
+  beforeEach(() => {
+    db = new Database(':memory:');
+    initializeDatabase(db);
+  });
+
+  const columnNames = (table: string): string[] =>
+    (
+      db.pragma(`table_info(${table})`, { simple: false }) as Array<{
+        name: string;
+      }>
+    ).map((c) => c.name);
+
+  it('ends at schema version 24', () => {
+    expect(userVersion(db)).toBe(24);
+    expect(LATEST_SCHEMA_VERSION).toBe(24);
+  });
+
+  it('adds nullable therapistNote and therapistNoteUpdatedAt columns to sessions', () => {
+    const cols = columnNames('sessions');
+    expect(cols).toContain('therapistNote');
+    expect(cols).toContain('therapistNoteUpdatedAt');
+
+    // Existing sessions start without a note: legacy-shaped rows carry NULLs.
+    db.prepare(
+      `INSERT INTO sessions (fileName, clientName, sessionName, date, sessionType, therapy) VALUES ('a.mp3', 'c', 's', '2024-01-01', 'intake', 'cbt')`
+    ).run();
+    const row = db
+      .prepare(
+        `SELECT therapistNote, therapistNoteUpdatedAt FROM sessions LIMIT 1`
+      )
+      .get() as {
+      therapistNote: string | null;
+      therapistNoteUpdatedAt: number | null;
+    };
+    expect(row.therapistNote).toBeNull();
+    expect(row.therapistNoteUpdatedAt).toBeNull();
+  });
+
+  it('is idempotent — re-running migrations keeps version 24', () => {
+    expect(() => initializeDatabase(db)).not.toThrow();
+    expect(userVersion(db)).toBe(24);
+    expect(
+      columnNames('sessions').filter((c) => c === 'therapistNote')
+    ).toHaveLength(1);
   });
 });

@@ -28,6 +28,9 @@ Session CRUD operations, audio file upload, and transcript access.
 - Before creating/enqueuing, API checks Whisper readiness via `GET /diarization/check`.
 - If diarization is not ready, API returns `503` and may trigger background prefetch.
 
+**Metadata Body Notes (`PUT /api/sessions/:sessionId/metadata`):**
+- Accepts optional `therapistNote` (string or `null`). Blank values clear the note; every save stamps `therapistNoteUpdatedAt`.
+
 ---
 
 ## Session Chats (`chatRoutes.ts`)

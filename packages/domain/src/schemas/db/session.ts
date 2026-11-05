@@ -16,6 +16,8 @@ export const sessionSchema = z.object({
   errorMessage: z.string().nullable().optional(),
   showSpeakers: z.boolean().nullable().optional(),
   numSpeakers: z.number().int().nullable().optional(),
+  therapistNote: z.string().nullable().optional(),
+  therapistNoteUpdatedAt: z.number().int().nullable().optional(),
   chatCount: z.number().int().nonnegative().optional(),
   factCheckedChatCount: z.number().int().nonnegative().optional(),
   chats: z

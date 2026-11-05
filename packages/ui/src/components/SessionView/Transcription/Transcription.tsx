@@ -12,6 +12,7 @@ import { TranscriptParagraph } from '../../Transcription/TranscriptParagraph';
 import { EditSessionModal } from '../../Shared/EditSessionModal';
 import { AppTooltip } from '../../Shared/AppTooltip';
 import { RenameSpeakersModal } from './RenameSpeakersModal';
+import { TherapistNotesModal } from './TherapistNotesModal';
 import { getUniqueSpeakers } from './speakerUtils';
 import {
   Box,
@@ -36,6 +37,7 @@ import {
   DotsHorizontalIcon,
   TrashIcon,
   CopyIcon,
+  FileTextIcon,
   Pencil1Icon,
   MixerHorizontalIcon,
   ExclamationTriangleIcon,
@@ -193,6 +195,8 @@ export function Transcription({
   const [isDeleteParaConfirmOpen, setIsDeleteParaConfirmOpen] = useState(false);
   const [isEditSessionModalOpen, setIsEditSessionModalOpen] = useState(false);
   const [isRenameSpeakersModalOpen, setIsRenameSpeakersModalOpen] =
+    useState(false);
+  const [isTherapistNotesModalOpen, setIsTherapistNotesModalOpen] =
     useState(false);
 
   const transcriptTokenCount = session?.transcriptTokenCount;
@@ -862,6 +866,21 @@ export function Transcription({
               'Therapy Type',
               'therapy'
             )}
+            {session.therapistNote?.trim() ? (
+              <Tooltip content="View therapist notes">
+                <Badge
+                  color="blue"
+                  variant="soft"
+                  radius="full"
+                  size="1"
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => setIsTherapistNotesModalOpen(true)}
+                >
+                  <FileTextIcon width="12" height="12" />
+                  Notes
+                </Badge>
+              </Tooltip>
+            ) : null}
             {typeof transcriptTokenCount === 'number' &&
               renderHeaderDetail(
                 ArchiveIcon,
@@ -891,6 +910,13 @@ export function Transcription({
                   onSelect={() => setIsEditSessionModalOpen(true)}
                 >
                   <Pencil1Icon className="mr-2 h-4 w-4" /> Edit Details
+                </DropdownMenu.Item>
+                <DropdownMenu.Item
+                  onSelect={() => setIsTherapistNotesModalOpen(true)}
+                >
+                  <FileTextIcon className="mr-2 h-4 w-4" />{' '}
+                  {session.therapistNote?.trim() ? 'Edit' : 'Add'} Therapist
+                  Notes
                 </DropdownMenu.Item>
                 <DropdownMenu.Item
                   onSelect={() => setIsRenameSpeakersModalOpen(true)}
@@ -1206,6 +1232,13 @@ export function Transcription({
         onOpenChange={setIsRenameSpeakersModalOpen}
         sessionId={session?.id ?? 0}
         transcriptContent={transcriptContent}
+      />
+      <TherapistNotesModal
+        isOpen={isTherapistNotesModalOpen}
+        onOpenChange={setIsTherapistNotesModalOpen}
+        sessionId={session?.id ?? 0}
+        initialNote={session?.therapistNote}
+        noteUpdatedAt={session?.therapistNoteUpdatedAt}
       />
     </>
   );

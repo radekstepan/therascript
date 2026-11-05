@@ -223,4 +223,56 @@ describe('session chat prompt layout (Task 14)', () => {
     expect(systemMsg.text).toContain('SESSION CONTEXT');
     expect(systemMsg.text).toContain('not specified at upload');
   });
+
+  it('injects THERAPIST NOTES ahead of the transcript when a note exists', async () => {
+    const ctx = sessionCtx('hello');
+    (ctx.sessionData as any).therapistNote =
+      'Patient arrived late, seemed distracted.';
+    const res = await addSessionChatMessage(ctx);
+    await res.text();
+
+    const sentMessages = vi.mocked(streamChatResponse).mock.calls[0]![0];
+    const systemMsg = sentMessages[0]!;
+    expect(systemMsg.sender).toBe('system');
+    // The distinctive block header (the SESSION CONTEXT preamble only
+    // names the block; this proves the note itself was injected).
+    expect(systemMsg.text).toContain(
+      'THERAPIST NOTES (written by the therapist'
+    );
+    expect(systemMsg.text).toContain(
+      'Patient arrived late, seemed distracted.'
+    );
+    // The note leads: it precedes the transcript block in the same prefix.
+    expect(
+      systemMsg.text.indexOf('THERAPIST NOTES (written by the therapist')
+    ).toBeLessThan(systemMsg.text.indexOf('CONTEXT TRANSCRIPT'));
+
+    // The user message stays clean — the note never leaks into chat history.
+    const latest = sentMessages[sentMessages.length - 1]!;
+    expect(latest.sender).toBe('user');
+    expect(latest.text).toBe('hello');
+  });
+
+  it('omits the notes block when no therapist note exists', async () => {
+    for (const therapistNote of [null, undefined, '', '   ']) {
+      messageStore.length = 0;
+      idCounter.next = 0;
+      vi.mocked(streamChatResponse).mockClear();
+
+      const ctx = sessionCtx('hello');
+      (ctx.sessionData as any).therapistNote = therapistNote;
+      const res = await addSessionChatMessage(ctx);
+      await res.text();
+
+      const sentMessages = vi.mocked(streamChatResponse).mock.calls[0]![0];
+      const systemMsg = sentMessages[0]!;
+      // The SESSION CONTEXT preamble still names the block; the injected
+      // block itself (with its distinctive header) must be absent.
+      expect(systemMsg.text).not.toContain(
+        'THERAPIST NOTES (written by the therapist'
+      );
+      // The transcript block is still injected.
+      expect(systemMsg.text).toContain('CONTEXT TRANSCRIPT');
+    }
+  });
 });

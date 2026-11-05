@@ -6,7 +6,7 @@ This document outlines the data structures used in SQLite (primary storage) and 
 
 Defined in `src/sqliteService.ts`. Migrations are handled programmatically via `user_version` pragma.
 
-**Current Schema Version:** 20
+**Current Schema Version:** 24
 
 ### Core Tables
 
@@ -26,6 +26,8 @@ Stores metadata for a therapy session.
 | `whisperJobId` | TEXT | NULL | Whisper service job reference |
 | `audioPath` | TEXT | NULL | Relative path to stored audio file |
 | `transcriptTokenCount` | INTEGER | NULL | Cached token count of full transcript |
+| `therapistNote` | TEXT | NULL | **Added in V24.** Optional therapist note, injected before the transcript in session-chat prompts |
+| `therapistNoteUpdatedAt` | INTEGER | NULL | **Added in V24.** Ms timestamp of the last note save (including clears) |
 
 #### `transcript_paragraphs`
 Stores the actual content of the session, segmented by time.

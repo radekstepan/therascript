@@ -66,12 +66,13 @@ This document details the step-by-step data flows for the core operations of the
 
     - User message saved to SQLite and indexed to ES (`messageRepository.ts`).
     - Full transcript text fetched from SQLite (`transcriptRepository.ts`).
+    - Optional therapist note fetched from the session row; when present it is injected ahead of the transcript as a `THERAPIST NOTES` block.
     - Chat history fetched from SQLite.
     - **Context Calculation:** `contextUsageService.ts` checks if content fits the model's window.
 
 3.  **LLM Inference (API -> LM Studio)**
 
-    - API streams the assembled context (System Prompt + Transcript + History + User Msg) to LM Studio.
+    - API streams the assembled context (System Prompt + Therapist Notes + Transcript + History + User Msg) to LM Studio.
     - **File:** `packages/api/src/services/llamaCppService.ts` -> `streamChatResponse`.
     - **Stored-reasoning isolation:** before sending, chat history is passed through `prepareLlmChatMessages` (`packages/services/src/thinking.ts`), which extracts visible answers from assistant turns via `extractVisibleAnswer`, drops reasoning-only turns, and merges adjacent user turns. The same safeguard runs again inside `streamLlmChatDetailed` so every caller (chat, analysis, future flows) is covered. Stored `<think>…</think>` reasoning is for display/debugging only; only visible answers may be reused as prompt context. User/system text (transcripts, questions) always passes through verbatim.
 

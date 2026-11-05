@@ -37,6 +37,8 @@ import {
   prepareLlmChatMessages,
   extractVisibleAnswer,
   buildTranscriptSessionNote,
+  buildTherapistNotesBlock,
+  calculateTokenCount,
 } from '@therascript/services';
 import {
   computeContextUsageForChat,
@@ -188,6 +190,14 @@ export const addSessionChatMessage = async ({
     // stable across turns and LM Studio can reuse its KV prefix cache.
     // (Previously the transcript rode along in the latest user message,
     // which invalidated the cache on every follow-up turn.)
+    // The optional therapist note leads, ahead of the transcript, so it
+    // reads as the therapist's framing for everything that follows.
+    const therapistNotesBlock = buildTherapistNotesBlock(
+      sessionData.therapistNote
+    );
+    if (therapistNotesBlock) {
+      systemPromptText += `\n\n${therapistNotesBlock}`;
+    }
     const transcriptBlock = transcriptString || 'No transcript available.';
     systemPromptText += `\n\n---\nCONTEXT TRANSCRIPT:\n"""\n${transcriptBlock}\n"""\n---`;
 
@@ -234,8 +244,17 @@ export const addSessionChatMessage = async ({
     ]);
 
     const configured = getConfiguredContextSize();
+    // The recommendation must cover the whole injected session context:
+    // transcript plus the therapist note block when one exists.
+    const therapistNoteTokens = sessionData.therapistNote?.trim()
+      ? (calculateTokenCount(sessionData.therapistNote) ?? null)
+      : null;
+    const sessionContextTokens =
+      sessionData.transcriptTokenCount != null || therapistNoteTokens != null
+        ? (sessionData.transcriptTokenCount ?? 0) + (therapistNoteTokens ?? 0)
+        : null;
     const recommendedContext = recommendContextSize({
-      transcriptTokens: sessionData.transcriptTokenCount ?? null,
+      transcriptTokens: sessionContextTokens,
       modelDefaultMax: null,
     });
     // Effective context size for truncation detection

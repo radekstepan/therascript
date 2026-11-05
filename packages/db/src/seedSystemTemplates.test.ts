@@ -17,6 +17,7 @@ import type { Database as DB } from 'better-sqlite3';
 import {
   initializeDatabase,
   SYSTEM_PROMPT_TEMPLATES,
+  LEGACY_SESSION_CHAT_PROMPT_TEXTS,
   LEGACY_VERIFICATION_JUDGE_PROMPT_TEXTS,
 } from './sqliteService.js';
 
@@ -107,6 +108,48 @@ describe('seedSystemTemplates — insert-only seeding', () => {
 
       expect(templateText(db, target.title)).toBe(target.text);
     }
+  });
+
+  it('upgrades a legacy system_prompt row to the therapist-notes prompt', () => {
+    initializeDatabase(db);
+
+    const target = SYSTEM_PROMPT_TEMPLATES.SESSION_CHAT;
+    expect(target.text).toContain('THERAPIST NOTES');
+    expect(LEGACY_SESSION_CHAT_PROMPT_TEXTS.length).toBeGreaterThan(0);
+    for (const legacyText of LEGACY_SESSION_CHAT_PROMPT_TEXTS) {
+      // Sanity: the legacy fixture must differ from the current default,
+      // otherwise this test would pass vacuously.
+      expect(legacyText).not.toBe(target.text);
+      // Simulate an existing database seeded by an older build.
+      db.prepare('UPDATE templates SET text = ? WHERE title = ?').run(
+        legacyText,
+        target.title
+      );
+      expect(templateText(db, target.title)).toBe(legacyText);
+
+      // Simulate an API/worker restart: the THERAPIST NOTES paragraph is added.
+      initializeDatabase(db);
+
+      expect(templateText(db, target.title)).toBe(target.text);
+    }
+  });
+
+  it('preserves a user-customized session chat prompt across restarts', () => {
+    initializeDatabase(db);
+
+    // A genuine user edit matches no legacy default, so the upgrade path
+    // must leave it alone.
+    const target = SYSTEM_PROMPT_TEMPLATES.SESSION_CHAT;
+    const customText = 'Custom session prompt. Be verbose and kind.';
+    expect(LEGACY_SESSION_CHAT_PROMPT_TEXTS).not.toContain(customText);
+    db.prepare('UPDATE templates SET text = ? WHERE title = ?').run(
+      customText,
+      target.title
+    );
+
+    initializeDatabase(db);
+
+    expect(templateText(db, target.title)).toBe(customText);
   });
 
   it('preserves a user-customized verification judge prompt across restarts', () => {

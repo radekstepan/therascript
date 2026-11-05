@@ -95,13 +95,13 @@ export const schema = `
 `;
 
 // --- NEW MIGRATION LOGIC ---
-export const LATEST_SCHEMA_VERSION = 23;
+export const LATEST_SCHEMA_VERSION = 24;
 
 // --- NEW SYSTEM PROMPTS ---
 export const SYSTEM_PROMPT_TEMPLATES = {
   SESSION_CHAT: {
     title: 'system_prompt',
-    text: `You are an AI assistant analyzing a therapy session transcript. You will be provided with the transcript context and chat history. Answer user questions based *only* on the provided information. Be concise. If the answer isn't present, state that clearly. Do not invent information. Always refer to speakers using the exact labels present in the transcript (e.g. "John:", "SPEAKER_01:"). Do not substitute generic terms like "Therapist" or "Patient" unless those exact labels appear in the transcript.`,
+    text: `You are an AI assistant analyzing a therapy session transcript. You will be provided with the transcript context and chat history. Answer user questions based *only* on the provided information. Be concise. If the answer isn't present, state that clearly. Do not invent information. Always refer to speakers using the exact labels present in the transcript (e.g. "John:", "SPEAKER_01:"). Do not substitute generic terms like "Therapist" or "Patient" unless those exact labels appear in the transcript. The therapist may also attach their own session notes, which appear before the transcript under THERAPIST NOTES when present. Treat those notes as authoritative extra context from the therapist — not as spoken transcript content — and say so when an answer comes from the notes rather than the transcript.`,
   },
   STANDALONE_CHAT: {
     title: 'system_standalone_prompt',
@@ -215,6 +215,16 @@ Respond with ONLY a valid JSON object (no markdown fences, no commentary) matchi
  * `SYSTEM_PROMPT_TEMPLATES.VERIFICATION_JUDGE.text` on startup; any other
  * text is treated as a genuine user edit and left untouched.
  */
+/**
+ * Previous built-in `system_prompt` default(s), before the THERAPIST NOTES
+ * paragraph was added. Rows matching one of these defaults are upgraded to
+ * the current `SYSTEM_PROMPT_TEMPLATES.SESSION_CHAT.text` on startup; any
+ * other text is treated as a genuine user edit and left untouched.
+ */
+export const LEGACY_SESSION_CHAT_PROMPT_TEXTS: readonly string[] = [
+  `You are an AI assistant analyzing a therapy session transcript. You will be provided with the transcript context and chat history. Answer user questions based *only* on the provided information. Be concise. If the answer isn't present, state that clearly. Do not invent information. Always refer to speakers using the exact labels present in the transcript (e.g. "John:", "SPEAKER_01:"). Do not substitute generic terms like "Therapist" or "Patient" unless those exact labels appear in the transcript.`,
+];
+
 export const LEGACY_VERIFICATION_JUDGE_PROMPT_TEXTS: readonly string[] = [
   `You are an expert fact-verification judge auditing an AI-generated therapy chat response against the ground-truth session transcript. You will be given:
 1. GROUND-TRUTH SESSION TRANSCRIPT: Paragraphs formatted as [P#<index> MM:SS] <SPEAKER>: <text>. Some transcripts have no speaker diarization; those paragraphs are formatted as [P#<index> MM:SS] <text> with no speaker label.
@@ -300,13 +310,21 @@ function seedSystemTemplates(dbInstance: DB) {
       console.log(`[db Seeder] Seeded system template: "${template.title}"`);
       continue;
     }
-    // One exception: a `system_verification_judge` row that still matches a
-    // prior built-in default is upgraded to the fixed Judge prompt so
-    // existing databases get it. Genuinely custom text never matches and is
-    // preserved.
+    // Exceptions: rows that still match a prior built-in default are
+    // upgraded to the current default so existing databases get the fix.
+    // Genuinely custom text never matches and is preserved.
     if (
       template.title === SYSTEM_PROMPT_TEMPLATES.VERIFICATION_JUDGE.title &&
       LEGACY_VERIFICATION_JUDGE_PROMPT_TEXTS.includes(existing.text)
+    ) {
+      updateStmt.run(template.text, template.title);
+      console.log(
+        `[db Seeder] Upgraded legacy system template: "${template.title}"`
+      );
+    }
+    if (
+      template.title === SYSTEM_PROMPT_TEMPLATES.SESSION_CHAT.title &&
+      LEGACY_SESSION_CHAT_PROMPT_TEXTS.includes(existing.text)
     ) {
       updateStmt.run(template.text, template.title);
       console.log(
@@ -1191,6 +1209,51 @@ function runMigrations(dbInstance: DB) {
         dbInstance.pragma(`user_version = 23`);
         currentVersion = 23;
         console.log('[db Migrator] Version 23 applied.');
+      }
+
+      // NEW MIGRATION: Version 24 for optional per-session therapist notes.
+      // - `therapistNote`: free text shown before the transcript in
+      //   session-chat prompts. NULL means the therapist wrote no note.
+      // - `therapistNoteUpdatedAt`: ms timestamp of the last note save
+      //   (including clears), so the UI can warn when a conversation
+      //   started before the current note revision.
+      if (currentVersion < 24) {
+        console.log('[db Migrator] Applying version 24...');
+        const v24Tables = (
+          dbInstance
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+            .all() as { name: string }[]
+        ).map((row) => row.name);
+        if (v24Tables.includes('sessions')) {
+          const sessionColumns = dbInstance.pragma('table_info(sessions)') as {
+            name: string;
+          }[];
+          if (!sessionColumns.some((col) => col.name === 'therapistNote')) {
+            console.log(
+              '[db Migrator V24] Adding "therapistNote" to sessions...'
+            );
+            dbInstance.exec(
+              'ALTER TABLE sessions ADD COLUMN therapistNote TEXT NULL'
+            );
+          }
+          if (
+            !sessionColumns.some((col) => col.name === 'therapistNoteUpdatedAt')
+          ) {
+            console.log(
+              '[db Migrator V24] Adding "therapistNoteUpdatedAt" to sessions...'
+            );
+            dbInstance.exec(
+              'ALTER TABLE sessions ADD COLUMN therapistNoteUpdatedAt INTEGER NULL'
+            );
+          }
+        } else {
+          console.log(
+            '[db Migrator V24] Skipping therapist note ALTERs (no sessions table).'
+          );
+        }
+        dbInstance.pragma(`user_version = 24`);
+        currentVersion = 24;
+        console.log('[db Migrator] Version 24 applied.');
       }
     })();
     console.log(

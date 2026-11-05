@@ -6,7 +6,8 @@ import React, {
   useState,
   useMemo,
 } from 'react';
-import { Box, Flex, Spinner, Text } from '@radix-ui/themes';
+import { Box, Flex, Spinner, Text, Callout } from '@radix-ui/themes';
+import { ExclamationTriangleIcon } from '@radix-ui/react-icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChatInput } from './ChatInput';
 import { ChatMessages } from './ChatMessages';
@@ -25,6 +26,7 @@ import type {
   ChatMessage,
   LlmStatus,
 } from '../../../types';
+import { isChatStaleForTherapistNote } from '../../../utils/therapistNotes';
 import {
   currentQueryAtom,
   toastMessageAtom,
@@ -720,6 +722,17 @@ export function ChatInterface({
   const isAiResponding =
     addMessageMutation.isPending || streamingAiMessageId !== null;
 
+  // Warn while typing in a conversation whose earlier turns were generated
+  // without the session's current therapist note.
+  const showStaleNoteWarning =
+    !isStandalone &&
+    currentQuery.trim() !== '' &&
+    isChatStaleForTherapistNote(
+      session?.therapistNote,
+      session?.therapistNoteUpdatedAt,
+      chatMessages
+    );
+
   return (
     <Flex
       direction="column"
@@ -811,6 +824,23 @@ export function ChatInterface({
           transition: 'opacity 0.2s ease-in-out',
         }}
       >
+        {showStaleNoteWarning && (
+          <Callout.Root
+            color="amber"
+            size="1"
+            mb="2"
+            data-testid="therapist-note-stale-warning"
+          >
+            <Callout.Icon>
+              <ExclamationTriangleIcon />
+            </Callout.Icon>
+            <Callout.Text>
+              This conversation started before the therapist notes were added,
+              so earlier answers don&apos;t include them. Start a new chat for
+              answers based on the current notes.
+            </Callout.Text>
+          </Callout.Root>
+        )}
         <ChatInput
           isStandalone={isStandalone}
           disabled={combinedIsLoading || !activeChatId}

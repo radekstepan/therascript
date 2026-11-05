@@ -143,6 +143,10 @@ export interface Session extends SessionMetadata {
   duration?: number | null;
   errorMessage?: string | null;
   showSpeakers?: number | null;
+  /** Optional free-text therapist note, injected before the transcript in session-chat prompts. */
+  therapistNote?: string | null;
+  /** Ms timestamp of the last therapist-note save (including clears). */
+  therapistNoteUpdatedAt?: number | null;
   chats: Pick<ChatSession, 'id' | 'sessionId' | 'timestamp' | 'name'>[];
   /** Number of chats with actual back-and-forth (at least one user message; populated by the list endpoint). */
   chatCount?: number | null;

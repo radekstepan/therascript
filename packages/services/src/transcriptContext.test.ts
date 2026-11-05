@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { buildTranscriptSessionNote } from './transcriptContext.js';
+import {
+  buildTranscriptSessionNote,
+  buildTherapistNotesBlock,
+} from './transcriptContext.js';
 
 describe('buildTranscriptSessionNote', () => {
   it('states the explicit speaker count when >= 2', () => {
@@ -28,10 +31,28 @@ describe('buildTranscriptSessionNote', () => {
     }
   });
 
-  it('treats therapist follow-up notes as extra information', () => {
+  it('treats therapist notes as extra information, not transcript content', () => {
     const note = buildTranscriptSessionNote(3);
-    expect(note).toContain('therapist may add');
+    expect(note).toContain('THERAPIST NOTES block before the transcript');
+    expect(note).toContain('therapist may also add observations');
     expect(note).toContain('extra information');
     expect(note).toContain('explicit spoken content');
+  });
+});
+
+describe('buildTherapistNotesBlock', () => {
+  it('returns an empty string when there is no note', () => {
+    for (const v of [null, undefined, '', '   ', '\n\t ']) {
+      expect(buildTherapistNotesBlock(v)).toBe('');
+    }
+  });
+
+  it('wraps the trimmed note in a delimited block', () => {
+    const block = buildTherapistNotesBlock('  Patient seemed tired today.  ');
+    expect(block).toContain('THERAPIST NOTES');
+    expect(block).toContain('Patient seemed tired today.');
+    expect(block).not.toContain('  Patient');
+    expect(block).toContain('"""');
+    expect(block).toContain('not spoken transcript content');
   });
 });

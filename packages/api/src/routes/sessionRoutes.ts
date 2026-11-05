@@ -89,6 +89,7 @@ const SessionMetadataUpdateBodySchema = t.Partial(
     audioPath: t.Optional(t.Union([t.String(), t.Null()])),
     transcriptTokenCount: t.Optional(t.Union([t.Number(), t.Null()])),
     showSpeakers: t.Optional(t.Boolean()),
+    therapistNote: t.Optional(t.Union([t.String(), t.Null()])),
   })
 );
 const SessionMetadataResponseSchema = t.Object({
@@ -106,6 +107,8 @@ const SessionMetadataResponseSchema = t.Object({
   duration: t.Optional(t.Union([t.Number(), t.Null()])),
   errorMessage: t.Optional(t.Union([t.String(), t.Null()])),
   showSpeakers: t.Optional(t.Union([t.Number(), t.Null()])),
+  therapistNote: t.Optional(t.Union([t.String(), t.Null()])),
+  therapistNoteUpdatedAt: t.Optional(t.Union([t.Number(), t.Null()])),
 });
 const SessionListResponseItemSchema = t.Object({
   ...SessionMetadataResponseSchema.properties,
@@ -137,6 +140,8 @@ const SessionWithChatsMetadataResponseSchema = t.Object({
   duration: t.Optional(t.Union([t.Number(), t.Null()])),
   errorMessage: t.Optional(t.Union([t.String(), t.Null()])),
   showSpeakers: t.Optional(t.Union([t.Number(), t.Null()])),
+  therapistNote: t.Optional(t.Union([t.String(), t.Null()])),
+  therapistNoteUpdatedAt: t.Optional(t.Union([t.Number(), t.Null()])),
   chats: t.Array(SessionChatMetadataSchema),
 });
 const TranscriptParagraphSchema = t.Object({

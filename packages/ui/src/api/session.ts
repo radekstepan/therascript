@@ -132,6 +132,7 @@ export const updateSessionMetadata = async (
       audioPath?: string | null;
       transcriptTokenCount?: number | null;
       showSpeakers?: boolean;
+      therapistNote?: string | null;
     }
   >
 ): Promise<SessionMetadata> => {

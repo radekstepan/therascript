@@ -113,7 +113,16 @@ export async function computeContextUsageForChat(options: {
       : getSystemPrompt(
           isStandalone ? 'system_standalone_prompt' : 'system_prompt'
         );
-  const systemTokens = calculateTokenCount(systemText);
+  // The therapist note rides in the system prefix (session chats only),
+  // so its tokens count as system tokens — mirroring the inference prompt.
+  const therapistNoteTokens =
+    !isStandalone && sessionData?.therapistNote?.trim()
+      ? calculateTokenCount(sessionData.therapistNote)
+      : null;
+  const systemTokens = sumParts([
+    calculateTokenCount(systemText),
+    therapistNoteTokens,
+  ]);
 
   // Transcript tokens: session-based only
   let transcriptTokens: number | null = null;

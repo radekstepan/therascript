@@ -123,6 +123,10 @@ export interface BackendSession {
   showSpeakers?: number | null;
   /** Explicit upload-time speaker count (drives diarization). NULL/0/1 = disabled or unknown. */
   numSpeakers?: number | null;
+  /** Optional free-text therapist note, injected before the transcript in session-chat prompts. NULL = no note. */
+  therapistNote?: string | null;
+  /** Ms timestamp of the last therapist-note save (including clears). NULL when never saved. */
+  therapistNoteUpdatedAt?: number | null;
   chats?: (Omit<ChatMetadata, 'tags'> & { sessionId: number })[];
   /** Number of chats linked to the session. Populated by list endpoints only, not a DB column. */
   chatCount?: number;
