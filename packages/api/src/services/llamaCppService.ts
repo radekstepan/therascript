@@ -51,10 +51,10 @@ import {
   markUnloaded as trackerMarkUnloaded,
 } from './loadedModelsTracker.js';
 import {
-  getLastLoadAttempt,
   markLoadStarted,
   markLoadSucceeded,
   markLoadFailed,
+  resetLoadAttempt,
 } from './loadAttemptTracker.js';
 import {
   streamLlmChatDetailed,
@@ -1032,6 +1032,12 @@ export const unloadActiveModel = async (
   const isRemote = isRemoteLlmBaseUrl(targetUrl);
   let unloadedCount = 0;
 
+  // An explicit unload ends whatever the tracker describes: a stale
+  // `failed` (or `loading`) record must not keep alarming the status
+  // poll after the user has moved on. Reset first so even a mid-unload
+  // throw leaves honest state.
+  resetLoadAttempt();
+
   try {
     const loadedInstances = await listLoadedLlmInstances(targetUrl);
 
@@ -1238,15 +1244,50 @@ export const syncModelStateOnBoot = async (
   }
 };
 
+/**
+ * Result of a model-status probe against an LM Studio server. Deliberately
+ * separates the three questions the UI needs answered independently:
+ * is the server up, what does the server actually have loaded, and is
+ * the requested model among it.
+ */
+export interface ModelStatusCheck {
+  /** Model info when the requested model is loaded, else null. */
+  model: LlmModelInfo | null;
+  /**
+   * Key of the LLM the server actually has loaded (first record with
+   * instances), or null when nothing is loaded. Reported separately
+   * from the configured active model so the UI can show a mismatch
+   * ("server has X, you configured Y") instead of silently adopting X.
+   */
+  actualLoadedModel: string | null;
+  /** False when the LM Studio API did not respond at all. */
+  serverReachable: boolean;
+}
+
+const UNREACHABLE_STATUS: ModelStatusCheck = {
+  model: null,
+  actualLoadedModel: null,
+  serverReachable: false,
+};
+
+/**
+ * Pure probe of LM Studio loaded state: never writes to `app_settings`.
+ * (An earlier version synced the persisted active model + context size
+ * to whatever the server reported on this read path; on a shared or
+ * remote server an out-of-band model change silently rewrote the user's
+ * configuration and the UI reported "loaded" for a model the user
+ * never picked. The destructive reconciliation lives in
+ * `syncModelStateOnBoot`, which runs once at server startup.)
+ */
 export const checkModelStatus = async (
   modelPath: string,
   baseUrlOverride?: string | null
-): Promise<LlmModelInfo | null> => {
+): Promise<ModelStatusCheck> => {
   const targetUrl = resolveLlmBaseUrl(baseUrlOverride);
   const isRemote = isRemoteLlmBaseUrl(targetUrl);
 
   const isUp = await isLlmApiResponsive(targetUrl);
-  if (!isUp) return null;
+  if (!isUp) return { ...UNREACHABLE_STATUS };
 
   try {
     const res = await axios.get<{ models: LmsModelRecord[] }>(
@@ -1254,56 +1295,18 @@ export const checkModelStatus = async (
       { timeout: 5000, headers: authHeadersFor(targetUrl) }
     );
 
-    // Find the currently LOADED model instance
+    // The model instance(s) the server actually has loaded right now.
+    // Reported as-is; never written back into settings (see docstring).
     const loadedModel = res.data.models.find(
       (m) => m.type === 'llm' && m.loaded_instances.length > 0
     );
-
-    // SYNC: Update the active model name to match reality if the server
-    // thinks something else is loaded. This fix ensures the UI shows
-    // the correct model state.
-    //
-    // SKIP while a model load is in flight: `POST /api/llm/set-model`
-    // persists the NEW target (Model B) and then loads it asynchronously.
-    // Until the load completes, LM Studio still reports the OLD model
-    // (Model A) as loaded — syncing that transient state back into
-    // `app_settings` would clobber the just-saved target every time the
-    // UI's `/api/llm/status` poll runs. The persisted Model B (+ context)
-    // is already the correct configuration, so leave it untouched.
-    const loadState = getLastLoadAttempt();
-    if (loadedModel && loadState.status === 'loading') {
-      console.log(
-        `[LlmService] Skipping settings sync during in-flight load of ${loadState.modelName ?? '(unknown target)'} (transient loaded model: ${loadedModel.key})`
-      );
-    }
-    if (loadedModel && loadState.status !== 'loading') {
-      if (getActiveModel() !== loadedModel.key) {
-        console.log(
-          `[LlmService] Syncing active model: ${getActiveModel()} -> ${loadedModel.key}`
-        );
-        setActiveModelName(loadedModel.key);
-      }
-
-      // Sync Context Size: LM Studio instance config shows actual context length
-      const firstInstance = loadedModel.loaded_instances[0];
-      const actualContext = firstInstance?.config?.context_length;
-      if (actualContext && getConfiguredContextSize() !== actualContext) {
-        console.log(
-          `[LlmService] Syncing context size: ${getConfiguredContextSize() ?? 'default'} -> ${actualContext}`
-        );
-        setConfiguredContextSize(actualContext);
-      }
-    }
-    // NOTE: we deliberately do NOT clear settings here when no instance is
-    // loaded. This function is called by the UI's /api/llm/status poll, and
-    // the user can legitimately have modelName=foo saved while LM Studio is
-    // momentarily starting up or the user is browsing before they click Load.
-    // The destructive reset lives in `syncModelStateOnBoot`, which runs once
-    // at server startup and never on a per-request path.
+    const actualLoadedModel: string | null = loadedModel
+      ? loadedModel.key
+      : null;
 
     // Now check if OUR requested model is the one loaded. The key must
     // match AND have at least one loaded instance: the status route maps
-    // a non-null return to `loaded: true`, so returning catalog info for
+    // a non-null model to `loaded: true`, so returning catalog info for
     // an unloaded model would report "loaded" forever and make Unload
     // unobservable in the UI.
     const target = res.data.models.find(
@@ -1312,7 +1315,8 @@ export const checkModelStatus = async (
         m.loaded_instances.length > 0
     );
 
-    if (!target) return null;
+    if (!target)
+      return { model: null, actualLoadedModel, serverReachable: true };
 
     // If the target model is currently loaded but we have no VRAM estimate yet,
     // kick off a background estimation (handles server restarts with a model
@@ -1349,26 +1353,30 @@ export const checkModelStatus = async (
     }
 
     return {
-      name: target.key,
-      modified_at: new Date(),
-      size: target.size_bytes,
-      digest: target.key,
-      details: {
-        format: target.format || 'gguf',
-        family: target.architecture || 'unknown',
-        families: null,
-        parameter_size: target.params_string || 'unknown',
-        quantization_level: target.quantization?.name || 'unknown',
+      model: {
+        name: target.key,
+        modified_at: new Date(),
+        size: target.size_bytes,
+        digest: target.key,
+        details: {
+          format: target.format || 'gguf',
+          family: target.architecture || 'unknown',
+          families: null,
+          parameter_size: target.params_string || 'unknown',
+          quantization_level: target.quantization?.name || 'unknown',
+        },
+        defaultContextSize: target.max_context_length || null,
+        size_vram:
+          loadedModel?.key === target.key
+            ? (getActiveModelVramEstimateBytes() ?? undefined)
+            : undefined,
+        architecture: null,
       },
-      defaultContextSize: target.max_context_length || null,
-      size_vram:
-        loadedModel?.key === target.key
-          ? (getActiveModelVramEstimateBytes() ?? undefined)
-          : undefined,
-      architecture: null,
+      actualLoadedModel,
+      serverReachable: true,
     };
   } catch (err) {
-    return null;
+    return { model: null, actualLoadedModel: null, serverReachable: true };
   }
 };
 

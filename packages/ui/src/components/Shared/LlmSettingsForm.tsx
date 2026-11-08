@@ -130,7 +130,13 @@ export function LlmSettingsForm({
     },
   });
 
-  const isModelLoaded = llmStatus?.loaded === true;
+  // Only treat the model as loaded when the loaded flag actually refers
+  // to the configured model — a transition-poll mismatch (or a server
+  // holding something else) must not lock the form behind "Unload it
+  // to change settings" for a model that isn't ours.
+  const isModelLoaded =
+    llmStatus?.loaded === true &&
+    llmStatus.modelChecked === llmStatus.activeModel;
   const isUnloading = unloadMutation.isPending;
 
   const selectedModelDetails = useMemo(

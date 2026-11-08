@@ -100,8 +100,17 @@ export function ChatInput({
     enabled: !disabled,
   });
 
-  const { isModelReady, isModelLoading, loadFailed, loadError } =
-    useLlmModelState(llmStatus);
+  const {
+    hasActiveModel,
+    isModelReady,
+    isModelLoading,
+    loadFailed,
+    loadError,
+    isServerUnreachable,
+    modelMismatch,
+    actualLoadedModel,
+    isSettledNotLoaded,
+  } = useLlmModelState(llmStatus);
 
   // No longer need setModelAndLoadMutation as SelectActiveModelModal handles setting/loading
   // const setModelAndLoadMutation = useMutation(...);
@@ -249,11 +258,24 @@ export function ChatInput({
   const starredButtonDisabled = isEffectivelyDisabled;
   const inputFieldDisabled = isEffectivelyDisabled;
 
+  // Name the disabled reason in the placeholder: a disabled input with
+  // the normal "Ask about the session..." prompt reads as broken, not
+  // as "no model loaded".
   const placeholderText = isModelLoading
     ? 'Model is loading, please wait…'
-    : isStandalone
-      ? 'Ask anything...'
-      : 'Ask about the session...';
+    : loadFailed
+      ? `Model failed to load — ${loadError ?? 'unknown error'}`
+      : isServerUnreachable
+        ? 'LLM server unreachable — check that it is running…'
+        : modelMismatch
+          ? `Server holds "${actualLoadedModel}" — load "${llmStatus?.activeModel}" to switch…`
+          : isSettledNotLoaded
+            ? 'Model not loaded — open Configure AI Model to load it…'
+            : !hasActiveModel
+              ? 'No model selected — open Configure AI Model…'
+              : isStandalone
+                ? 'Ask anything...'
+                : 'Ask about the session...';
 
   // --- Live Context Usage Preview (debounced) ---
   const [debouncedInput, setDebouncedInput] = useState<string>('');
@@ -382,9 +404,17 @@ export function ChatInput({
               content={
                 isModelLoading
                   ? 'Model is loading…'
-                  : isAiResponding
-                    ? 'AI is responding...'
-                    : 'Send message'
+                  : loadFailed
+                    ? `Model failed to load: ${loadError ?? 'unknown error'}`
+                    : isServerUnreachable
+                      ? 'LLM server unreachable'
+                      : modelMismatch
+                        ? `Server holds "${actualLoadedModel}" instead of "${llmStatus?.activeModel}"`
+                        : isSettledNotLoaded
+                          ? 'Model not loaded'
+                          : isAiResponding
+                            ? 'AI is responding...'
+                            : 'Send message'
               }
             >
               <IconButton
@@ -396,9 +426,17 @@ export function ChatInput({
                 aria-label={
                   isModelLoading
                     ? 'Model is loading'
-                    : isAiResponding
-                      ? 'AI is responding'
-                      : 'Send message'
+                    : loadFailed
+                      ? 'Model failed to load'
+                      : isServerUnreachable
+                        ? 'LLM server unreachable'
+                        : modelMismatch
+                          ? 'Server holds a different model'
+                          : isSettledNotLoaded
+                            ? 'Model not loaded'
+                            : isAiResponding
+                              ? 'AI is responding'
+                              : 'Send message'
                 }
               >
                 {isAiResponding || isModelLoading ? (

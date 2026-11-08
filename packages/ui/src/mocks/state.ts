@@ -102,6 +102,29 @@ export const MOCK_LOCAL_DEFAULT_BASE_URL = 'http://localhost:1234';
 export let mockActiveModel = '';
 export let mockModelLoaded = false;
 
+// --- Simulated LM Studio server state (remote-llm-status.spec.ts) --------
+// The real backend's status probe reports what the server *actually* has
+// loaded (`actualLoadedModel`) independently of the configured active
+// model. These overrides let specs simulate out-of-band server changes:
+//
+// - `mockServerReachable` (default true): false simulates a dead server.
+// - `mockServerLoadedOverride`: `undefined` (default) means "follow
+//   mockModelLoaded/mockActiveModel" (the common case); an explicit
+//   string simulates a stranger resident (mismatch); explicit `null`
+//   simulates an empty server while a model stays configured.
+// Reseeded by `e2eMockSeed` (POST /api/__e2e/reset); written via
+// POST /api/__e2e/set-llm-server-state.
+export let mockServerReachable = true;
+export let mockServerLoadedOverride: string | null | undefined = undefined;
+export const setMockServerReachable = (value: boolean) => {
+  mockServerReachable = value;
+};
+export const setMockServerLoadedOverride = (
+  value: string | null | undefined
+) => {
+  mockServerLoadedOverride = value;
+};
+
 // The "active" base URL the user most recently selected. `null` means
 // "use the local default" (which the /api/llm/status handler fills
 // in from MOCK_LOCAL_DEFAULT_BASE_URL). The real backend persists
@@ -676,6 +699,8 @@ export const e2eMockSeed = () => {
   setMockActiveModel('');
   setMockModelLoaded(false);
   setMockActiveBaseUrl(null);
+  setMockServerReachable(true);
+  setMockServerLoadedOverride(undefined);
   setE2eSessions([{ ...MOCK_INTAKE_SESSION }, { ...MOCK_FOLLOWUP_SESSION }]);
   setE2eSessionChats({
     1: [

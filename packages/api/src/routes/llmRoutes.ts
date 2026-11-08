@@ -37,7 +37,6 @@ import {
 } from '../services/activeModelService.js';
 import { getLastLoadAttempt } from '../services/loadAttemptTracker.js';
 import type {
-  LlmModelInfo,
   ModelDownloadJobStatus,
   ModelDownloadJobStatusState,
 } from '@therascript/domain';
@@ -101,6 +100,15 @@ const LlmStatusResponseSchema = t.Object({
   activeModel: t.String(),
   modelChecked: t.String(),
   loaded: t.Boolean(),
+  // Key of the LLM the server actually has loaded right now (first
+  // record with instances), or null when nothing is loaded. Independent
+  // of `activeModel` (the user's configured model): when the two differ
+  // the server holds something the user didn't ask for, and the UI
+  // shows a mismatch instead of silently adopting it.
+  actualLoadedModel: t.Union([t.String(), t.Null()]),
+  // False when the LM Studio API did not respond at all. Lets the UI
+  // distinguish "server down" from "server up, nothing loaded".
+  serverReachable: t.Boolean(),
   // The status handler spreads the full `LlmModelInfo` (name, size,
   // digest, details, defaultContextSize, size_vram, architecture, ...)
   // into `details` at `llmRoutes.ts:637-646`. Earlier this was typed
@@ -661,9 +669,10 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
             `[API Status] Checking status for model: ${modelNameToCheck} (Current Active: ${currentActiveModel}, Configured Context: ${currentConfiguredContext ?? 'default'}, Temperature: ${currentConfiguredTemperature}, TopP: ${currentConfiguredTopP}, RepeatPenalty: ${currentConfiguredRepeatPenalty}, NumGpuLayers: ${currentConfiguredNumGpuLayers ?? 'auto'}, ThinkingBudget: ${currentConfiguredThinkingBudget ?? 'unrestricted'}, ActiveBaseUrl: ${activeBaseUrl}, IsRemote: ${isRemoteBaseUrl}, HasRemoteApiToken: ${hasRemoteApiToken})`
           );
           try {
-            const loadedModelResult = await checkModelStatus(modelNameToCheck);
-            // Re-fetch since sync might have happened inside checkModelStatus
-            // (skipped while a load is in flight — see checkModelStatus).
+            const statusCheck = await checkModelStatus(modelNameToCheck);
+            // checkModelStatus is a pure probe now (it never writes
+            // settings), so these re-reads just reflect the persisted
+            // configuration at response time.
             const latestActiveModel = getActiveModel();
             const latestContextSize = getConfiguredContextSize();
             const loadAttempt = getLastLoadAttempt();
@@ -677,59 +686,36 @@ export const llmRoutes = new Elysia({ prefix: '/api/llm' })
                 : latestActiveModel;
 
             set.status = 200;
-            if (
-              loadedModelResult &&
-              'status' in loadedModelResult &&
-              loadedModelResult.status === 'unavailable'
-            ) {
-              return {
-                status: 'unavailable',
-                activeModel: reportedActiveModel,
-                modelChecked: modelNameToCheck,
-                loaded: false,
-                details: undefined,
-                configuredContextSize: latestContextSize,
-                configuredTemperature: currentConfiguredTemperature,
-                configuredTopP: currentConfiguredTopP,
-                configuredRepeatPenalty: currentConfiguredRepeatPenalty,
-                configuredNumGpuLayers: currentConfiguredNumGpuLayers,
-                configuredThinkingBudget: currentConfiguredThinkingBudget,
-                activeBaseUrl,
-                defaultBaseUrl,
-                isRemoteBaseUrl,
-                hasRemoteApiToken,
-                loadState: loadAttempt,
-              };
-            } else {
-              const loadedModelInfo = loadedModelResult as LlmModelInfo | null;
-              const detailsResponse = loadedModelInfo
-                ? {
-                    ...loadedModelInfo,
-                    modified_at: loadedModelInfo.modified_at.toISOString(),
-                    expires_at: loadedModelInfo.expires_at?.toISOString(),
-                    defaultContextSize:
-                      loadedModelInfo.defaultContextSize ?? null,
-                  }
-                : undefined;
-              return {
-                status: 'available',
-                activeModel: reportedActiveModel,
-                modelChecked: modelNameToCheck,
-                loaded: !!loadedModelInfo,
-                details: detailsResponse,
-                configuredContextSize: latestContextSize,
-                configuredTemperature: currentConfiguredTemperature,
-                configuredTopP: currentConfiguredTopP,
-                configuredRepeatPenalty: currentConfiguredRepeatPenalty,
-                configuredNumGpuLayers: currentConfiguredNumGpuLayers,
-                configuredThinkingBudget: currentConfiguredThinkingBudget,
-                activeBaseUrl,
-                defaultBaseUrl,
-                isRemoteBaseUrl,
-                hasRemoteApiToken,
-                loadState: loadAttempt,
-              };
-            }
+            const loadedModelInfo = statusCheck.model;
+            const detailsResponse = loadedModelInfo
+              ? {
+                  ...loadedModelInfo,
+                  modified_at: loadedModelInfo.modified_at.toISOString(),
+                  expires_at: loadedModelInfo.expires_at?.toISOString(),
+                  defaultContextSize:
+                    loadedModelInfo.defaultContextSize ?? null,
+                }
+              : undefined;
+            return {
+              status: statusCheck.serverReachable ? 'available' : 'unavailable',
+              activeModel: reportedActiveModel,
+              modelChecked: modelNameToCheck,
+              loaded: !!loadedModelInfo,
+              actualLoadedModel: statusCheck.actualLoadedModel,
+              serverReachable: statusCheck.serverReachable,
+              details: detailsResponse,
+              configuredContextSize: latestContextSize,
+              configuredTemperature: currentConfiguredTemperature,
+              configuredTopP: currentConfiguredTopP,
+              configuredRepeatPenalty: currentConfiguredRepeatPenalty,
+              configuredNumGpuLayers: currentConfiguredNumGpuLayers,
+              configuredThinkingBudget: currentConfiguredThinkingBudget,
+              activeBaseUrl,
+              defaultBaseUrl,
+              isRemoteBaseUrl,
+              hasRemoteApiToken,
+              loadState: loadAttempt,
+            };
           } catch (error: any) {
             console.error(
               `[API Status] Unexpected error checking status for ${modelNameToCheck}:`,

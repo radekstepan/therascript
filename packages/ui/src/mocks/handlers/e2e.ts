@@ -16,6 +16,8 @@ import {
   readReadiness,
   setE2eUploadError,
   setE2eVerificationJobs,
+  setMockServerLoadedOverride,
+  setMockServerReachable,
   writeFactCheckChatMessages,
   writeFactCheckStatements,
   writeFactCheckVerifications,
@@ -76,6 +78,34 @@ export const e2eHandlers = [
     writeFactCheckChatMessages(
       Array.isArray(body.chatMessages) ? body.chatMessages : []
     );
+    return HttpResponse.json({ ok: true });
+  }),
+  // Simulated LM Studio server state for GET /api/llm/status
+  // (remote-llm-status.spec.ts). Body:
+  //   { reachable?: boolean,
+  //     serverLoadedModel?: string | null,
+  //     followLoaded?: boolean }
+  // `followLoaded: true` clears the resident override back to
+  // "follow mockModelLoaded/mockActiveModel"; otherwise an explicit
+  // `serverLoadedModel` (string = stranger resident, null = empty
+  // server) wins. Omitted fields leave current state untouched.
+  http.post('/api/__e2e/set-llm-server-state', async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      reachable?: boolean;
+      serverLoadedModel?: string | null;
+      followLoaded?: boolean;
+    };
+    if (typeof body.reachable === 'boolean') {
+      setMockServerReachable(body.reachable);
+    }
+    if (body.followLoaded === true) {
+      setMockServerLoadedOverride(undefined);
+    } else if (
+      typeof body.serverLoadedModel === 'string' ||
+      body.serverLoadedModel === null
+    ) {
+      setMockServerLoadedOverride(body.serverLoadedModel);
+    }
     return HttpResponse.json({ ok: true });
   }),
   http.post('/api/__e2e/set-ready', async ({ request }) => {

@@ -11,7 +11,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Theme } from '@radix-ui/themes';
 import { ChatPanelHeader } from './ChatPanelHeader';
-import type { ChatMessage, Session } from '../../../types';
+import type { ChatMessage, LlmStatus, Session } from '../../../types';
 import type { MessageVerification } from '../../../api/verification';
 
 const { VERIFICATIONS, fetchChatVerificationsMock } = vi.hoisted(() => {
@@ -122,7 +122,11 @@ const CHECKED_VERIFICATIONS: MessageVerification[] = [
 
 function renderHeader(
   messages: ChatMessage[],
-  options?: { session?: Session | null; chatId?: number | null }
+  options?: {
+    session?: Session | null;
+    chatId?: number | null;
+    llmStatus?: LlmStatus;
+  }
 ) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -131,13 +135,14 @@ function renderHeader(
   });
   const session = options?.session === undefined ? SESSION : options.session;
   const chatId = options?.chatId === undefined ? 5 : options.chatId;
+  const llmStatus = options?.llmStatus;
   const view = render(
     <QueryClientProvider client={queryClient}>
       <Theme>
         <ChatPanelHeader
           session={session}
           activeChatId={chatId}
-          llmStatus={undefined}
+          llmStatus={llmStatus}
           isLoadingLlmStatus={false}
           onOpenLlmModal={vi.fn()}
           messages={messages}
@@ -350,5 +355,81 @@ describe('ChatPanelHeader verified-status icon', () => {
     );
     expect(screen.queryByRole('img', { name: /fact-checked/ })).toBeNull();
     expect(screen.queryByRole('button', { name: /fact check/i })).toBeNull();
+  });
+});
+
+describe('ChatPanelHeader model-state badge', () => {
+  const IDLE_LOAD_STATE = {
+    status: 'idle' as const,
+    modelName: null,
+    error: null,
+    attemptedAt: null,
+  };
+
+  function makeLlmStatus(overrides: Partial<LlmStatus> = {}): LlmStatus {
+    return {
+      status: 'available',
+      activeModel: 'qwen3.5-2b',
+      modelChecked: 'qwen3.5-2b',
+      loaded: false,
+      actualLoadedModel: null,
+      serverReachable: true,
+      activeBaseUrl: 'http://localhost:1234',
+      defaultBaseUrl: 'http://localhost:1234',
+      isRemoteBaseUrl: false,
+      loadState: { ...IDLE_LOAD_STATE },
+      ...overrides,
+    };
+  }
+
+  it('shows an explicit "Not loaded" badge for a settled unloaded model', () => {
+    // Post-unload production shape: the configured name stays while
+    // loaded flips false. The header must say so outright — a missing
+    // green check alone read as "still connected".
+    renderHeader([], {
+      llmStatus: makeLlmStatus(),
+    });
+    // getAllByText: Radix renders tooltip copies alongside visible text.
+    expect(screen.getAllByText('Not loaded').length).toBeGreaterThan(0);
+    // The configured name is still shown (right side), but not as a
+    // calm loaded display: no green check without loaded: true.
+    expect(screen.getAllByText('qwen3.5-2b').length).toBeGreaterThan(0);
+  });
+
+  it('shows no "Not loaded" badge when the model is loaded', () => {
+    renderHeader([], {
+      llmStatus: makeLlmStatus({
+        loaded: true,
+        actualLoadedModel: 'qwen3.5-2b',
+      }),
+    });
+    expect(screen.queryByText('Not loaded')).toBeNull();
+  });
+
+  it('names the stranger when the server holds a different model', () => {
+    renderHeader([], {
+      llmStatus: makeLlmStatus({ actualLoadedModel: 'someone-elses-model' }),
+    });
+    expect(
+      screen.getByRole('img', {
+        name: 'Server holds someone-elses-model instead of qwen3.5-2b',
+      })
+    ).not.toBeNull();
+    expect(screen.queryByText('Not loaded')).toBeNull();
+  });
+
+  it('alarms when the server is unreachable', () => {
+    renderHeader([], {
+      llmStatus: makeLlmStatus({
+        status: 'unavailable',
+        serverReachable: false,
+        activeBaseUrl: 'http://10.0.0.1:1234',
+        isRemoteBaseUrl: true,
+      }),
+    });
+    expect(
+      screen.getByRole('img', { name: 'LLM server unreachable' })
+    ).not.toBeNull();
+    expect(screen.queryByText('Not loaded')).toBeNull();
   });
 });

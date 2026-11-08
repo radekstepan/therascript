@@ -211,8 +211,32 @@ load failure reaches the UI:
 loaded truth comes from LM Studio itself), `loading` (attempt in
 flight), or `failed` with a human-readable `error` (usually LM Studio's
 own message, e.g. `No LM Runtime found for model format 'gguf'`). A new
-attempt overwrites the previous record. The state is process-local: a
-server restart resets it to idle.
+attempt overwrites the previous record. An explicit
+`POST /api/llm/unload` resets the tracker to idle so a stale failure
+does not keep alarming after the user has moved on. The state is
+process-local: a server restart resets it to idle.
+
+### Status reachability and server truth
+
+`GET /api/llm/status` answers three independent questions so the UI can
+render each settled state explicitly:
+
+- `status` (`available` | `unavailable`) + `serverReachable` (boolean):
+  whether the LM Studio API responded at all. `unavailable`/`false`
+  means the server is down — distinct from "up with nothing loaded".
+- `actualLoadedModel` (string | null): the model key the server
+  actually has loaded right now (first record with instances), or null
+  when nothing is loaded. Independent of `activeModel` (the user's
+  configured model): when the two differ, the server holds something
+  the user didn't ask for and the UI shows a mismatch.
+- `loaded` (boolean) + `details`: whether the *requested* model
+  (`modelChecked`) is the one loaded.
+
+The status probe is read-only: it never writes `app_settings`. (An
+earlier version synced the persisted active model to whatever the
+server reported; on a shared/remote server an out-of-band model change
+silently rewrote the user's configuration.) Reconciliation with server
+truth happens only in `syncModelStateOnBoot`, once at startup.
 
 Behaviour:
 

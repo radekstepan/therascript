@@ -160,6 +160,7 @@ const { streamLlmChatDetailed } = await import('@therascript/services');
 // tests exercise the normal sync path.
 const {
   markLoadStarted,
+  markLoadFailed,
   getLastLoadAttempt,
   __resetForTests: resetLoadAttemptForTests,
 } = await import('./loadAttemptTracker.js');
@@ -746,19 +747,52 @@ describe('llamaCppService', () => {
   });
 
   describe('checkModelStatus', () => {
-    it('returns null when API is not responsive', async () => {
-      // First mock returns true for isLlmApiResponsive, second returns null for actual call
+    const lmsRecord = (
+      publisher: string,
+      key: string,
+      loadedInstances: Array<{ id: string; config?: object }> = []
+    ) => ({
+      type: 'llm',
+      publisher,
+      key,
+      display_name: key,
+      architecture: 'llama',
+      quantization: { name: 'Q4_K_M', bits_per_weight: 4.5 },
+      size_bytes: 4_500_000_000,
+      params_string: '8B',
+      loaded_instances: loadedInstances.map((inst) => ({
+        id: inst.id,
+        config: { context_length: 4096, ...(inst.config ?? {}) },
+      })),
+      max_context_length: 8192,
+      format: 'gguf',
+    });
+
+    // First call for isLlmApiResponsive, second for actual data.
+    const mockModelsResponse = (models: object[]) => {
+      mockAxiosGet
+        .mockResolvedValueOnce({ status: 200, data: { models: [] } })
+        .mockResolvedValueOnce({ data: { models } });
+    };
+
+    it('reports unreachable when the API does not respond', async () => {
       mockAxiosGet.mockRejectedValueOnce(new Error('Connection refused'));
 
       const result = await checkModelStatus('meta/llama-3-8b');
-      expect(result).toBeNull();
-      // checkModelStatus must NEVER clear settings — it's called by the UI's
-      // /api/llm/status poll. The boot sync owns destructive resets.
+
+      expect(result).toEqual({
+        model: null,
+        actualLoadedModel: null,
+        serverReachable: false,
+      });
+      // checkModelStatus must NEVER write settings — it's called by the
+      // UI's /api/llm/status poll. The boot sync owns destructive resets.
       expect(clearModelAndContext).not.toHaveBeenCalled();
       expect(setActiveModelName).not.toHaveBeenCalled();
+      expect(setConfiguredContextSize).not.toHaveBeenCalled();
     });
 
-    it('returns null when the model is available but not loaded', async () => {
+    it('reports reachable with no model when the model is available but not loaded', async () => {
       // Regression: this used to return catalog info for a key match
       // with zero loaded instances, and the status route maps non-null
       // to `loaded: true` — so the UI reported "loaded" forever and an
@@ -766,33 +800,16 @@ describe('llamaCppService', () => {
       // counts as loaded. Settings must still be left alone: the user
       // may have the model staged (or just unloaded it); the boot sync
       // owns destructive resets.
-      // First call for isLlmApiResponsive, second for actual data
-      mockAxiosGet
-        .mockResolvedValueOnce({ status: 200, data: { models: [] } })
-        .mockResolvedValueOnce({
-          data: {
-            models: [
-              {
-                type: 'llm',
-                publisher: 'meta',
-                key: 'meta/llama-3-8b',
-                display_name: 'Llama 3 8B',
-                architecture: 'llama',
-                quantization: { name: 'Q4_K_M', bits_per_weight: 4.5 },
-                size_bytes: 4_500_000_000,
-                params_string: '8B',
-                loaded_instances: [],
-                max_context_length: 8192,
-                format: 'gguf',
-              },
-            ],
-          },
-        });
+      mockModelsResponse([lmsRecord('meta', 'meta/llama-3-8b')]);
 
       const result = await checkModelStatus('meta/llama-3-8b');
-      expect(result).toBeNull();
+
+      expect(result.serverReachable).toBe(true);
+      expect(result.model).toBeNull();
+      expect(result.actualLoadedModel).toBeNull();
       expect(clearModelAndContext).not.toHaveBeenCalled();
       expect(setActiveModelName).not.toHaveBeenCalled();
+      expect(setConfiguredContextSize).not.toHaveBeenCalled();
     });
 
     it('includes VRAM estimate when model is loaded', async () => {
@@ -801,126 +818,85 @@ describe('llamaCppService', () => {
       );
       vi.mocked(getActiveModelVramEstimateBytes).mockReturnValue(5_000_000_000);
 
-      // First call for isLlmApiResponsive, second for actual data
-      mockAxiosGet
-        .mockResolvedValueOnce({ status: 200, data: { models: [] } })
-        .mockResolvedValueOnce({
-          data: {
-            models: [
-              {
-                type: 'llm',
-                publisher: 'meta',
-                key: 'meta/llama-3-8b',
-                display_name: 'Llama 3 8B',
-                architecture: 'llama',
-                quantization: { name: 'Q4_K_M', bits_per_weight: 4.5 },
-                size_bytes: 4_500_000_000,
-                params_string: '8B',
-                loaded_instances: [
-                  {
-                    id: 'instance-1',
-                    config: { context_length: 4096 },
-                  },
-                ],
-                max_context_length: 8192,
-                format: 'gguf',
-              },
-            ],
-          },
-        });
+      mockModelsResponse([
+        lmsRecord('meta', 'meta/llama-3-8b', [{ id: 'instance-1' }]),
+      ]);
 
       const result = await checkModelStatus('meta/llama-3-8b');
-      expect(result).not.toBeNull();
-      expect(result!.size_vram).toBe(5_000_000_000);
+
+      expect(result.serverReachable).toBe(true);
+      expect(result.model).not.toBeNull();
+      expect(result.model!.size_vram).toBe(5_000_000_000);
+      expect(result.actualLoadedModel).toBe('meta/llama-3-8b');
       expect(clearModelAndContext).not.toHaveBeenCalled();
+      expect(setActiveModelName).not.toHaveBeenCalled();
+      expect(setConfiguredContextSize).not.toHaveBeenCalled();
     });
 
-    it('skips settings sync while a model load is in flight', async () => {
+    it('matches publisher-prefixed model paths against bare record keys', async () => {
+      // Stored actives may carry the `publisher/` prefix while LM Studio
+      // reports a bare key (or vice versa); both forms must count.
+      mockModelsResponse([
+        lmsRecord('meta', 'llama-3-8b', [{ id: 'instance-1' }]),
+      ]);
+
+      const result = await checkModelStatus('meta/llama-3-8b');
+
+      expect(result.model).not.toBeNull();
+      expect(result.model!.name).toBe('llama-3-8b');
+      expect(result.actualLoadedModel).toBe('llama-3-8b');
+    });
+
+    it('never adopts an externally loaded model into settings (idle tracker)', async () => {
+      // The read path used to sync the persisted active model + context
+      // to whatever the server reported; on a shared/remote server an
+      // out-of-band model change silently rewrote the user's config and
+      // the UI reported "loaded" for a model never picked. Now the
+      // stranger is only *reported* via actualLoadedModel.
+      resetLoadAttemptForTests();
+      vi.mocked(getActiveModel).mockReturnValue('stale-model');
+      try {
+        mockModelsResponse([
+          lmsRecord('meta', 'meta/llama-3-8b', [{ id: 'instance-1' }]),
+        ]);
+
+        const result = await checkModelStatus('stale-model');
+
+        expect(result.serverReachable).toBe(true);
+        expect(result.model).toBeNull();
+        expect(result.actualLoadedModel).toBe('meta/llama-3-8b');
+        expect(setActiveModelName).not.toHaveBeenCalled();
+        expect(setConfiguredContextSize).not.toHaveBeenCalled();
+        expect(clearModelAndContext).not.toHaveBeenCalled();
+      } finally {
+        vi.mocked(getActiveModel).mockReturnValue('default');
+      }
+    });
+
+    it('never adopts the transient model while a load is in flight', async () => {
       // Race: `POST /api/llm/set-model` persisted Model B (the load target)
       // and fired `loadLlmModel` asynchronously. LM Studio still has Model A
-      // loaded. The UI's `/api/llm/status` poll must NOT clobber the
-      // just-saved Model B (+ context) with Model A's transient state.
+      // loaded. The UI's `/api/llm/status` poll must report B as not yet
+      // loaded (with A visible as the actual resident) without touching
+      // the just-saved Model B (+ context).
       resetLoadAttemptForTests();
       markLoadStarted('org-b/model-b');
       vi.mocked(getActiveModel).mockReturnValue('org-b/model-b');
       try {
-        // First call for isLlmApiResponsive, second for actual data
-        mockAxiosGet
-          .mockResolvedValueOnce({ status: 200, data: { models: [] } })
-          .mockResolvedValueOnce({
-            data: {
-              models: [
-                {
-                  type: 'llm',
-                  publisher: 'org-a',
-                  key: 'org-a/model-a',
-                  display_name: 'Model A',
-                  architecture: 'llama',
-                  quantization: { name: 'Q4_K_M', bits_per_weight: 4.5 },
-                  size_bytes: 4_500_000_000,
-                  params_string: '8B',
-                  loaded_instances: [
-                    {
-                      id: 'instance-1',
-                      config: { context_length: 4096 },
-                    },
-                  ],
-                  max_context_length: 8192,
-                  format: 'gguf',
-                },
-              ],
-            },
-          });
+        mockModelsResponse([
+          lmsRecord('org-a', 'org-a/model-a', [{ id: 'instance-1' }]),
+        ]);
 
         const result = await checkModelStatus('org-b/model-b');
-        expect(result).toBeNull(); // Model B is not loaded yet
+
+        expect(result.serverReachable).toBe(true);
+        expect(result.model).toBeNull(); // Model B is not loaded yet
+        expect(result.actualLoadedModel).toBe('org-a/model-a');
         expect(setActiveModelName).not.toHaveBeenCalled();
         expect(setConfiguredContextSize).not.toHaveBeenCalled();
         expect(clearModelAndContext).not.toHaveBeenCalled();
       } finally {
         resetLoadAttemptForTests();
-        vi.mocked(getActiveModel).mockReturnValue('default');
-      }
-    });
-
-    it('still syncs settings from LM Studio when no load is in flight', async () => {
-      // Guard for the guard above: with an idle tracker, the legacy sync
-      // path must keep working so the UI reflects externally loaded models.
-      resetLoadAttemptForTests();
-      vi.mocked(getActiveModel).mockReturnValue('stale-model');
-      try {
-        mockAxiosGet
-          .mockResolvedValueOnce({ status: 200, data: { models: [] } })
-          .mockResolvedValueOnce({
-            data: {
-              models: [
-                {
-                  type: 'llm',
-                  publisher: 'meta',
-                  key: 'meta/llama-3-8b',
-                  display_name: 'Llama 3 8B',
-                  architecture: 'llama',
-                  quantization: { name: 'Q4_K_M', bits_per_weight: 4.5 },
-                  size_bytes: 4_500_000_000,
-                  params_string: '8B',
-                  loaded_instances: [
-                    {
-                      id: 'instance-1',
-                      config: { context_length: 4096 },
-                    },
-                  ],
-                  max_context_length: 8192,
-                  format: 'gguf',
-                },
-              ],
-            },
-          });
-
-        const result = await checkModelStatus('meta/llama-3-8b');
-        expect(result).not.toBeNull();
-        expect(setActiveModelName).toHaveBeenCalledWith('meta/llama-3-8b');
-        expect(setConfiguredContextSize).toHaveBeenCalledWith(4096);
-      } finally {
         vi.mocked(getActiveModel).mockReturnValue('default');
       }
     });
@@ -1617,6 +1593,26 @@ describe('llamaCppService', () => {
 
       expect(mockRuntime.stop).toHaveBeenCalled();
       expect(message).toBe('LM Studio server stopped (no models were loaded).');
+    });
+
+    it('resets a stale failed load attempt so the status poll stops alarming', async () => {
+      // A failed set-model leaves the tracker at `failed`; an explicit
+      // unload after that must clear it — otherwise the header keeps
+      // showing "Load failed" for a load the user has moved on from.
+      resetLoadAttemptForTests();
+      markLoadFailed('meta/llama-3-8b', 'boom');
+      mockAxiosGet.mockResolvedValueOnce({ data: { models: [] } });
+      try {
+        await unloadActiveModel();
+        expect(getLastLoadAttempt()).toEqual({
+          status: 'idle',
+          modelName: null,
+          error: null,
+          attemptedAt: null,
+        });
+      } finally {
+        resetLoadAttemptForTests();
+      }
     });
 
     it('tolerates unload failures and still reports the successful count', async () => {

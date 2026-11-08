@@ -19,11 +19,14 @@ import {
   mockActiveModel,
   mockLlmApiToken,
   mockModelLoaded,
+  mockServerLoadedOverride,
+  mockServerReachable,
   setE2eLocalModels,
   setMockActiveBaseUrl,
   setMockActiveModel,
   setMockLlmApiToken,
   setMockModelLoaded,
+  setMockServerLoadedOverride,
 } from '../state';
 
 // --- Model-pull job state machine (llm-pull-delete.spec.ts) -------------
@@ -98,6 +101,9 @@ export const llmHandlers = [
     if (body.modelName) {
       setMockActiveModel(body.modelName);
       setMockModelLoaded(true);
+      // A fresh load reconciles server truth: drop any injected
+      // out-of-band server state so status follows the new load.
+      setMockServerLoadedOverride(undefined);
     }
     if (typeof body.baseUrl === 'string' && body.baseUrl.trim().length > 0) {
       setMockActiveBaseUrl(body.baseUrl.trim());
@@ -124,16 +130,18 @@ export const llmHandlers = [
     });
   }),
 
-  // /api/llm/unload — the "Unload" button in the chat panel header
-  // fires this when the user wants to change a loaded model. The real
-  // backend's llamaCppService.unloadActiveModel() iterates loaded
-  // LM Studio instances and unloads each; for the mock we just flip
-  // the loaded flag so the next /api/llm/status poll reports
-  // `loaded: false`. We also clear the active model so a subsequent
-  // status check returns a clean "no model loaded" state.
+  // /api/llm/unload — the "Unload" button in the Configure AI Model
+  // dialog fires this when the user wants to change a loaded model. The
+  // real backend's llamaCppService.unloadActiveModel() iterates loaded
+  // LM Studio instances and unloads each, but deliberately keeps the
+  // configured active model name — so the mock only flips the loaded
+  // flag (and drops any injected server override: a real unload
+  // evicts every resident, stranger or not). The next /api/llm/status
+  // poll therefore reports the production post-unload shape: stale
+  // configured name + `loaded: false` + idle tracker.
   http.post('/api/llm/unload', () => {
     setMockModelLoaded(false);
-    setMockActiveModel('');
+    setMockServerLoadedOverride(undefined);
     return HttpResponse.json({ message: 'Model unloaded.' });
   }),
 
@@ -142,12 +150,29 @@ export const llmHandlers = [
   // the local default?" derivation mirrors
   // packages/api/src/services/activeModelService.ts:isRemoteLlmBaseUrl.
   http.get('/api/llm/status', () => {
-    const details = mockActiveModel ? localModelDetails(mockActiveModel) : null;
+    const reachable = mockServerReachable;
+    // Explicit override wins (spec-injected out-of-band server state);
+    // otherwise the server follows the loaded flag + active name.
+    const serverResident =
+      mockServerLoadedOverride !== undefined
+        ? mockServerLoadedOverride
+        : mockModelLoaded && mockActiveModel
+          ? mockActiveModel
+          : null;
+    const loaded =
+      reachable &&
+      mockModelLoaded &&
+      !!mockActiveModel &&
+      serverResident === mockActiveModel;
+    const details = loaded ? localModelDetails(mockActiveModel) : null;
     const effectiveBaseUrl = mockActiveBaseUrl ?? MOCK_LOCAL_DEFAULT_BASE_URL;
     return HttpResponse.json({
+      status: reachable ? 'available' : 'unavailable',
       activeModel: mockActiveModel,
       modelChecked: mockActiveModel,
-      loaded: mockModelLoaded,
+      loaded,
+      actualLoadedModel: reachable ? serverResident : null,
+      serverReachable: reachable,
       details,
       configuredContextSize: mockActiveModel ? 8192 : null,
       configuredTemperature: 0.7,

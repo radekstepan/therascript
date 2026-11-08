@@ -39,8 +39,11 @@ const SELECTED_LOCAL_MODEL = 'qwen2.5-7b-instruct';
 const STATUS_PATH = '/api/llm/status';
 
 interface StatusBody {
+  status: 'available' | 'unavailable';
   loaded: boolean;
   activeModel: string;
+  actualLoadedModel: string | null;
+  serverReachable: boolean;
   details: null | {
     name: string;
     modified_at: string;
@@ -80,11 +83,14 @@ async function resetMocks(page: Page) {
  * Elysia complained about — this is the exact regression we are
  * guarding against.
  */
-async function waitForStatusOk(page: Page): Promise<StatusBody> {
+async function waitForStatusOk(
+  page: Page,
+  timeout = 5_000
+): Promise<StatusBody> {
   const response: Response = await page.waitForResponse(
     (resp) =>
       resp.url().endsWith(STATUS_PATH) && resp.request().method() === 'GET',
-    { timeout: 5_000 }
+    { timeout }
   );
   const status = response.status();
   if (status !== 200) {
@@ -134,8 +140,11 @@ test.describe.serial('/api/llm/status response contract', () => {
     const status = await waitForStatusOk(page);
 
     // ---- 3. Body shape -------------------------------------------------
+    expect(status.status).toBe('available');
+    expect(status.serverReachable).toBe(true);
     expect(status.loaded).toBe(true);
     expect(status.activeModel).toBe(SELECTED_LOCAL_MODEL);
+    expect(status.actualLoadedModel).toBe(SELECTED_LOCAL_MODEL);
     expect(status.details).not.toBeNull();
     expect(status.details?.name).toBe(SELECTED_LOCAL_MODEL);
     // The full LlmModelInfo shape: name, modified_at (ISO string),
@@ -164,6 +173,8 @@ test.describe.serial('/api/llm/status response contract', () => {
     // The model name is surfaced in the chat panel header via
     // the model-name Text (matched by its text content).
     await expect(page.getByText(SELECTED_LOCAL_MODEL).first()).toBeVisible();
+    // ...and no "Not loaded" badge while the model is up.
+    await expect(page.getByText('Not loaded')).not.toBeVisible();
   });
 
   test('status returns 200 with loaded: false after unload', async ({
@@ -215,13 +226,125 @@ test.describe.serial('/api/llm/status response contract', () => {
     // ---- 3. The next status poll must be 200 with loaded: false -------
     const status = await waitForStatusOk(page);
     expect(status.loaded).toBe(false);
-    // After unload, the mock clears activeModel too — the contract
-    // is that a follow-up "no model" status has details: null.
+    // Production post-unload shape: the configured name stays (the
+    // backend never clears it on unload) while loaded flips false
+    // and details go null. The mock mirrors this exactly — an
+    // earlier mock cleared activeModel too, which hid the stale-name
+    // state from every spec.
+    expect(status.activeModel).toBe(SELECTED_LOCAL_MODEL);
+    expect(status.actualLoadedModel).toBeNull();
     expect(status.details).toBeNull();
 
     // The Unload mutation invalidates the status query, the callout
     // disappears, and the form re-enables. Verify the chat input
     // is now disabled (no model loaded).
+    await expect(chatInput).toBeDisabled();
+
+    // ---- 4. The header says so outright -------------------------------
+    // The configured name is still shown, but with an explicit
+    // "Not loaded" badge — never the calm loaded display.
+    await expect(page.getByText(SELECTED_LOCAL_MODEL).first()).toBeVisible();
+    await expect(page.getByText('Not loaded').first()).toBeVisible();
+  });
+
+  test('status reports a mismatch when the server holds a different model', async ({
+    page,
+  }) => {
+    // Simulates an out-of-band server change on a shared/remote box:
+    // the user configured model A, but the server actually holds B.
+    // The backend must report — not silently adopt — B.
+    await page.goto('/sessions/1');
+
+    const configureButton = page
+      .getByRole('button', { name: 'Configure AI Model' })
+      .first();
+    await expect(configureButton).toBeVisible();
+    await configureButton.click();
+
+    const dialog = page.getByRole('dialog').first();
+    await expect(dialog.getByText('Configure AI Model')).toBeVisible();
+
+    const modelCombobox = dialog.getByRole('combobox');
+    await modelCombobox.click();
+    await page
+      .getByRole('option', { name: new RegExp(SELECTED_LOCAL_MODEL) })
+      .click();
+    await dialog.getByRole('button', { name: /Save & Load Model/ }).click();
+
+    const chatInput = page
+      .locator('[data-testid="chat-input"]:visible')
+      .first();
+    await expect(chatInput).toBeEnabled();
+
+    // Inject the stranger resident. No query invalidation fires, so
+    // allow a full natural poll interval (5s) plus margin.
+    await page.evaluate(async () => {
+      await fetch('/api/__e2e/set-llm-server-state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serverLoadedModel: 'mistral-7b-local' }),
+      });
+    });
+    const status = await waitForStatusOk(page, 12_000);
+
+    expect(status.loaded).toBe(false);
+    // The configured model is untouched — no silent adoption.
+    expect(status.activeModel).toBe(SELECTED_LOCAL_MODEL);
+    expect(status.actualLoadedModel).toBe('mistral-7b-local');
+
+    // User-visible: the mismatch names the stranger, and the input
+    // stays disabled until the configured model is actually loaded.
+    await expect(
+      page.getByRole('img', {
+        name: `Server holds mistral-7b-local instead of ${SELECTED_LOCAL_MODEL}`,
+      })
+    ).toBeVisible();
+    await expect(chatInput).toBeDisabled();
+  });
+
+  test('status reports unreachable when the server stops responding', async ({
+    page,
+  }) => {
+    await page.goto('/sessions/1');
+
+    const configureButton = page
+      .getByRole('button', { name: 'Configure AI Model' })
+      .first();
+    await expect(configureButton).toBeVisible();
+    await configureButton.click();
+
+    const dialog = page.getByRole('dialog').first();
+    await expect(dialog.getByText('Configure AI Model')).toBeVisible();
+
+    const modelCombobox = dialog.getByRole('combobox');
+    await modelCombobox.click();
+    await page
+      .getByRole('option', { name: new RegExp(SELECTED_LOCAL_MODEL) })
+      .click();
+    await dialog.getByRole('button', { name: /Save & Load Model/ }).click();
+
+    const chatInput = page
+      .locator('[data-testid="chat-input"]:visible')
+      .first();
+    await expect(chatInput).toBeEnabled();
+
+    await page.evaluate(async () => {
+      await fetch('/api/__e2e/set-llm-server-state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reachable: false }),
+      });
+    });
+    const status = await waitForStatusOk(page, 12_000);
+
+    expect(status.status).toBe('unavailable');
+    expect(status.serverReachable).toBe(false);
+    expect(status.loaded).toBe(false);
+    expect(status.activeModel).toBe(SELECTED_LOCAL_MODEL);
+
+    await expect(
+      page.getByRole('img', { name: 'LLM server unreachable' })
+    ).toBeVisible();
     await expect(chatInput).toBeDisabled();
   });
 });

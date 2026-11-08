@@ -200,9 +200,20 @@ export interface LlmModelInfo {
   } | null;
 }
 export interface LlmStatus {
+  /** 'available' when the LM Studio API responded, 'unavailable' when it did not. */
+  status?: 'available' | 'unavailable';
   activeModel: string;
   modelChecked: string; // The model whose details are provided below
   loaded: boolean;
+  /**
+   * Key of the LLM the server actually has loaded right now, or null
+   * when nothing is loaded. Independent of `activeModel` (the
+   * configured model): when the two differ, the server holds something
+   * the user didn't ask for — a mismatch, not a load.
+   */
+  actualLoadedModel?: string | null;
+  /** False when the LM Studio API did not respond at all. */
+  serverReachable?: boolean;
   details?: LlmModelInfo | null; // Contains details of modelChecked, including defaultContextSize
   configuredContextSize?: number | null; // The num_ctx the backend is currently using for the activeModel
   configuredTemperature?: number;

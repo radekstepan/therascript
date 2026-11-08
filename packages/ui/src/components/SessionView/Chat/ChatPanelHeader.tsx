@@ -11,7 +11,6 @@ import {
   Progress,
 } from '@radix-ui/themes';
 import {
-  CheckCircledIcon,
   MixerVerticalIcon,
   LightningBoltIcon,
   ArchiveIcon,
@@ -25,6 +24,7 @@ import type {
   ChatMessage,
 } from '../../../types';
 import { AppTooltip } from '../../Shared/AppTooltip';
+import { LlmStatusBadge } from '../../Shared/LlmStatusBadge';
 import { ChatVerifiedStatusIcon } from './ChatVerifiedStatusIcon';
 import { cn } from '../../../utils';
 import prettyBytes from 'pretty-bytes';
@@ -62,7 +62,6 @@ export function ChatPanelHeader({
   activeModelDefaultContextSize,
   messages,
 }: ChatPanelHeaderProps) {
-  const modelName = llmStatus?.activeModel ?? 'No Model Selected';
   const isLoaded = llmStatus?.loaded ?? false;
   const isActiveModelLoaded =
     isLoaded && llmStatus?.modelChecked === llmStatus?.activeModel;
@@ -182,26 +181,6 @@ export function ChatPanelHeader({
   })();
   // --- END WARNING LOGIC ---
 
-  let statusTooltipContent = 'Loading status...';
-  if (!isLoadingLlmStatus) {
-    if (!llmStatus?.activeModel) {
-      statusTooltipContent =
-        'No AI model selected. Click "Configure Model" to choose one.';
-    } else if (isActiveModelLoaded) {
-      statusTooltipContent = `Active Model: ${modelName} (Loaded)${vramUsageString}`;
-    } else {
-      statusTooltipContent = `Active Model: ${modelName} (Not loaded or unavailable)`;
-    }
-  }
-
-  const renderStatusBadge = () => {
-    if (isLoadingLlmStatus) return <Spinner size="1" />;
-    if (!isActiveModelLoaded) return null;
-    return (
-      <CheckCircledIcon className="text-green-600" width="14" height="14" />
-    );
-  };
-
   return (
     <Box
       px="3"
@@ -211,11 +190,11 @@ export function ChatPanelHeader({
       <Flex justify="between" align="center" gap="3">
         {/* Left Side: Status and Context Info */}
         <Flex align="center" gap="2" style={{ minWidth: 0 }}>
-          <Tooltip content={statusTooltipContent}>
-            <Flex align="center" gap="1">
-              {renderStatusBadge()}
-            </Flex>
-          </Tooltip>
+          <LlmStatusBadge
+            llmStatus={llmStatus}
+            isLoadingLlmStatus={isLoadingLlmStatus}
+            vramSuffix={vramUsageString}
+          />
 
           {isActiveModelLoaded && (
             <Tooltip

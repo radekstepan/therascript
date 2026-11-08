@@ -30,6 +30,10 @@ describe('useLlmModelState', () => {
       isModelReady: false,
       loadFailed: false,
       loadError: null,
+      isServerUnreachable: false,
+      modelMismatch: false,
+      actualLoadedModel: null,
+      isSettledNotLoaded: false,
     });
   });
 
@@ -116,5 +120,99 @@ describe('useLlmModelState', () => {
     const { result } = renderHook(() => useLlmModelState(status));
     expect(result.current.loadFailed).toBe(false);
     expect(result.current.isModelLoading).toBe(true);
+  });
+
+  it('reports settled-not-loaded (never a spinner, never ready) after an unload', () => {
+    // Post-unload production shape: configured name stays, loaded is
+    // false, tracker idle. Headers must render an explicit
+    // "Not loaded" state from this — not the calm loaded display.
+    const { result } = renderHook(() =>
+      useLlmModelState(makeStatus({ actualLoadedModel: null }))
+    );
+    expect(result.current.hasActiveModel).toBe(true);
+    expect(result.current.isModelReady).toBe(false);
+    expect(result.current.isModelLoading).toBe(false);
+    expect(result.current.loadFailed).toBe(false);
+    expect(result.current.modelMismatch).toBe(false);
+    expect(result.current.isSettledNotLoaded).toBe(true);
+  });
+
+  it('reports unreachable when the server does not respond', () => {
+    const { result } = renderHook(() =>
+      useLlmModelState(
+        makeStatus({
+          status: 'unavailable',
+          serverReachable: false,
+          actualLoadedModel: null,
+        })
+      )
+    );
+    expect(result.current.isServerUnreachable).toBe(true);
+    expect(result.current.isModelReady).toBe(false);
+    expect(result.current.isSettledNotLoaded).toBe(false);
+  });
+
+  it('assumes reachable when reachability fields are missing (stale responses)', () => {
+    const status = makeStatus();
+    delete status.serverReachable;
+    delete status.status;
+    const { result } = renderHook(() => useLlmModelState(status));
+    expect(result.current.isServerUnreachable).toBe(false);
+  });
+
+  it('reports a mismatch when the server holds a different model', () => {
+    const { result } = renderHook(() =>
+      useLlmModelState(makeStatus({ actualLoadedModel: 'someone-elses-model' }))
+    );
+    expect(result.current.modelMismatch).toBe(true);
+    expect(result.current.actualLoadedModel).toBe('someone-elses-model');
+    expect(result.current.isModelReady).toBe(false);
+    expect(result.current.isSettledNotLoaded).toBe(false);
+  });
+
+  it('does not report a mismatch while a load is in flight', () => {
+    // During a load the server legitimately still holds the old model.
+    const { result } = renderHook(() =>
+      useLlmModelState(
+        makeStatus({
+          actualLoadedModel: 'old-model',
+          loadState: {
+            status: 'loading',
+            modelName: 'qwen3.5-2b',
+            error: null,
+            attemptedAt: '2026-10-18T21:14:09.000Z',
+          },
+        })
+      )
+    );
+    expect(result.current.isModelLoading).toBe(true);
+    expect(result.current.modelMismatch).toBe(false);
+  });
+
+  it('does not report a mismatch when the configured model itself is loaded', () => {
+    // An extra out-of-band resident must not demote the ready state.
+    const { result } = renderHook(() =>
+      useLlmModelState(
+        makeStatus({ loaded: true, actualLoadedModel: 'extra-resident' })
+      )
+    );
+    expect(result.current.isModelReady).toBe(true);
+    expect(result.current.modelMismatch).toBe(false);
+  });
+
+  it('treats publisher-prefixed keys as the same model', () => {
+    // The backend matches `publisher/key` against bare `key`; the
+    // mismatch detector must not false-positive on the same pair.
+    const { result } = renderHook(() =>
+      useLlmModelState(
+        makeStatus({
+          activeModel: 'qwen/qwen3.5-2b',
+          modelChecked: 'qwen/qwen3.5-2b',
+          actualLoadedModel: 'qwen3.5-2b',
+        })
+      )
+    );
+    expect(result.current.modelMismatch).toBe(false);
+    expect(result.current.isSettledNotLoaded).toBe(true);
   });
 });

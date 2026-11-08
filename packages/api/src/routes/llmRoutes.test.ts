@@ -66,6 +66,8 @@ const sampleStatusResponse = {
   activeModel: 'qwen3.6-27b-mtp',
   modelChecked: 'qwen3.6-27b-mtp',
   loaded: true,
+  actualLoadedModel: 'qwen3.6-27b-mtp',
+  serverReachable: true,
   details: {
     ...sampleModelInfo,
     modified_at: sampleModelInfo.modified_at.toISOString(),
@@ -198,6 +200,48 @@ describe('llmRoutes response schemas', () => {
     const broken = { ...sampleStatusResponse };
     delete (broken as Record<string, unknown>).loadState;
     expect(Value.Check(LlmStatusResponseSchema, broken)).toBe(false);
+  });
+
+  it('accepts an unreachable-server payload (status: unavailable)', () => {
+    // The `status: 'unavailable'` branch used to be dead code:
+    // checkModelStatus only ever returned info-or-null, so every
+    // response claimed 'available'. Now reachability is probed and
+    // the unavailable shape below is what the handler emits when LM
+    // Studio doesn't respond at all.
+    const unreachable = {
+      ...sampleStatusResponse,
+      status: 'unavailable' as const,
+      loaded: false,
+      actualLoadedModel: null,
+      serverReachable: false,
+      details: undefined,
+    };
+    expect(Value.Check(LlmStatusResponseSchema, unreachable)).toBe(true);
+  });
+
+  it('accepts a mismatch payload (server holds a model the user did not configure)', () => {
+    // checkModelStatus no longer adopts externally loaded models into
+    // settings; it reports them via actualLoadedModel so the UI can
+    // show "server has X, you configured Y".
+    const mismatch = {
+      ...sampleStatusResponse,
+      loaded: false,
+      actualLoadedModel: 'someone-elses-model',
+      details: undefined,
+    };
+    expect(Value.Check(LlmStatusResponseSchema, mismatch)).toBe(true);
+  });
+
+  it('rejects a status payload missing actualLoadedModel/serverReachable', () => {
+    // Both fields are required: the UI branches on them to render the
+    // mismatch and unreachable states. A handler that forgets them
+    // must fail here rather than 422 at runtime.
+    const missingActual = { ...sampleStatusResponse };
+    delete (missingActual as Record<string, unknown>).actualLoadedModel;
+    expect(Value.Check(LlmStatusResponseSchema, missingActual)).toBe(false);
+    const missingReachable = { ...sampleStatusResponse };
+    delete (missingReachable as Record<string, unknown>).serverReachable;
+    expect(Value.Check(LlmStatusResponseSchema, missingReachable)).toBe(false);
   });
 
   it('rejects a loadState with an unknown status value', () => {

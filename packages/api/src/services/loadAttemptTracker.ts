@@ -64,6 +64,18 @@ export const markLoadFailed = (modelName: string, error: string): void => {
   };
 };
 
+/**
+ * Reset the tracker to idle without recording an attempt. Called by the
+ * unload path: once the user explicitly unloads, a stale `failed` (or
+ * `loading`) record no longer describes reality, and the status poll
+ * would otherwise keep alarming about a load that is no longer in
+ * flight. The next `loadLlmModel` call overwrites this via
+ * `markLoadStarted` as usual.
+ */
+export const resetLoadAttempt = (): void => {
+  lastAttempt = { ...IDLE_STATE };
+};
+
 /** Snapshot of the last load attempt. Returned by copy; safe to serialize. */
 export const getLastLoadAttempt = (): LoadAttemptState => ({
   ...lastAttempt,
