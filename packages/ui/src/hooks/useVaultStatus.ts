@@ -53,6 +53,11 @@ export function useVaultStatus() {
     isLoading: query.isLoading,
     isFetching: query.isFetching,
     error: query.error ?? null,
+    // No successful status fetch yet (e.g. API still booting while the UI
+    // is already up). Callers must not treat this as "no vault exists":
+    // UNKNOWN_VAULT defaults hasVault to false, which would render the
+    // setup form instead of the unlock form.
+    isUnresolved: !query.data,
     refresh,
     clearVaultCaches,
   };

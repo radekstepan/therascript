@@ -183,6 +183,8 @@ function App() {
   const {
     vault,
     isLoading: isVaultLoading,
+    error: vaultError,
+    isUnresolved: isVaultUnresolved,
     refresh: refreshVault,
   } = useVaultStatus();
   const vaultGateOpen = vault.legacyFallback || vault.authenticated;
@@ -308,7 +310,12 @@ function App() {
     }
   };
 
-  if (isVaultLoading) {
+  // Until the first vault status fetch succeeds we know nothing about
+  // the server (it may still be booting while the UI is already up).
+  // Never render the vault setup/unlock choice on the UNKNOWN_VAULT
+  // fallback: its hasVault=false would show "Set vault password" for an
+  // existing vault, flipping to "Unlock vault" on the next poll/reload.
+  if (isVaultLoading || isVaultUnresolved) {
     return (
       <Toast.Provider swipeDirection="right">
         <RadixTheme
@@ -322,9 +329,16 @@ function App() {
           <Flex
             align="center"
             justify="center"
+            direction="column"
+            gap="3"
             style={{ position: 'fixed', inset: 0 }}
           >
             <Spinner size="3" />
+            {vaultError && (
+              <Text size="2" color="gray">
+                Connecting to server…
+              </Text>
+            )}
           </Flex>
         </RadixTheme>
       </Toast.Provider>
