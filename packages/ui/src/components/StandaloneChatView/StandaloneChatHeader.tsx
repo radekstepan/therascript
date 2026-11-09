@@ -423,7 +423,7 @@ export function StandaloneChatHeader({
                     </Text>
                   </Flex>
                 </Tooltip>
-              ) : llmStatus.isRemoteBaseUrl ? (
+              ) : isActiveModelLoaded && llmStatus.isRemoteBaseUrl ? (
                 <Tooltip
                   content={
                     llmStatus.activeBaseUrl
@@ -446,7 +446,7 @@ export function StandaloneChatHeader({
                     </Text>
                   </Flex>
                 </Tooltip>
-              ) : (
+              ) : isActiveModelLoaded ? (
                 <Flex
                   align="center"
                   gap="1"
@@ -458,7 +458,7 @@ export function StandaloneChatHeader({
                     </Text>
                   </AppTooltip>
                 </Flex>
-              ))}
+              ) : null)}
             <AppTooltip content="Configure AI Model">
               <Button
                 variant="soft"

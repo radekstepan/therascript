@@ -383,17 +383,16 @@ describe('ChatPanelHeader model-state badge', () => {
   }
 
   it('shows an explicit "Not loaded" badge for a settled unloaded model', () => {
-    // Post-unload production shape: the configured name stays while
-    // loaded flips false. The header must say so outright — a missing
-    // green check alone read as "still connected".
+    // Post-unload production shape: the configured name stays in status
+    // state but the header must not present it as the resident model —
+    // only the honest "Not loaded" badge plus the Configure button.
     renderHeader([], {
       llmStatus: makeLlmStatus(),
     });
     // getAllByText: Radix renders tooltip copies alongside visible text.
     expect(screen.getAllByText('Not loaded').length).toBeGreaterThan(0);
-    // The configured name is still shown (right side), but not as a
-    // calm loaded display: no green check without loaded: true.
-    expect(screen.getAllByText('qwen3.5-2b').length).toBeGreaterThan(0);
+    // The configured-but-unloaded name is hidden on the right side.
+    expect(screen.queryByText('qwen3.5-2b')).toBeNull();
   });
 
   it('shows no "Not loaded" badge when the model is loaded', () => {
