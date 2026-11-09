@@ -8,31 +8,24 @@
  * It then verifies that the database version matches the latest version expected by the code.
  */
 
-import { configureDb, db, closeDb } from '@therascript/db';
+import { db } from '@therascript/db';
 import { LATEST_SCHEMA_VERSION } from '@therascript/db/dist/sqliteService.js';
 import config from '../packages/config/dist/index.js';
+import { openDatabaseForScript } from './vaultCli.mjs';
 
 async function main() {
   console.log('--- Database Upgrade Check ---');
-  console.log(`Target database file: ${config.db.sqlitePath}`);
   console.log(`Code expects database schema version: ${LATEST_SCHEMA_VERSION}`);
 
+  let handle = null;
   try {
-    // 1. Configure the database using the path from your .env file.
-    // This is a crucial first step.
-    configureDb({
-      dbPath: config.db.sqlitePath,
-      isDev: config.server.nodeEnv !== 'production',
-    });
+    // 1. Open the vault (password via THERASCRIPT_VAULT_PASSWORD[(_FD)] or
+    // TTY prompt) or the legacy database. Opening runs migrations.
+    handle = await openDatabaseForScript();
+    console.log(`\nOpened ${handle.mode} database; migrations ran on open.`);
 
-    // 2. Access the 'db' object. The first time it's accessed, it automatically
-    // runs the `initializeDatabase` function, which in turn calls `runMigrations`.
-    // The migration logs ("Applying version X...") will be printed here.
-    console.log('\nConnecting to the database to trigger migration check...');
-    const dbInstance = db;
-
-    // 3. Explicitly verify the final version after migrations have run.
-    const finalVersion = dbInstance.pragma('user_version', { simple: true });
+    // 2. Explicitly verify the final version after migrations have run.
+    const finalVersion = db.pragma('user_version', { simple: true });
 
     console.log(`\n--- Verification ---`);
     console.log(`Database schema version is now: ${finalVersion}`);
@@ -51,9 +44,9 @@ async function main() {
     console.error(error.message);
     process.exit(1);
   } finally {
-    // 4. Ensure the database connection is closed.
+    // 3. Ensure the database connection is closed and keys are cleared.
     console.log('Closing database connection.');
-    closeDb();
+    handle?.close();
   }
 }
 

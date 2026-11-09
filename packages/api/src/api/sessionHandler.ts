@@ -6,11 +6,10 @@ import {
   messageRepository,
 } from '@therascript/data';
 import {
-  deleteUploadedAudioFile,
-  saveUploadedAudio,
-  getAudioAbsolutePath,
-} from '@therascript/services';
-import fsSync from 'node:fs';
+  isSessionAudioAvailable,
+  deleteSessionAudio,
+} from '../services/vaultAudioService.js';
+import { getVaultManager } from '../services/vaultManager.js';
 import type {
   BackendSession,
   StructuredTranscript,
@@ -40,6 +39,8 @@ import {
   updateTranscriptParagraphRequestSchema,
 } from '@therascript/domain';
 
+// Vault mode skips all Elasticsearch writes below (the FTS triggers keep
+// the in-database indexes in sync); the client stays for legacy mode.
 const esClient = getElasticsearchClient(config.elasticsearch.url);
 
 interface SessionHandlerContextNoSessionData {
@@ -416,7 +417,9 @@ export const updateTranscriptParagraph = async ({
     const esParagraphData = updatedTranscriptFromDb.find(
       (p: TranscriptParagraphData) => p.id === paragraphIndex
     ); // Added type for p
-    if (esParagraphData) {
+    // Vault mode keeps no Elasticsearch index; the FTS triggers index
+    // the updated row in the same transaction as the SQLite write above.
+    if (esParagraphData && !getVaultManager().isProtectionActive()) {
       await indexDocument(
         esClient,
         TRANSCRIPTS_INDEX,
@@ -437,7 +440,7 @@ export const updateTranscriptParagraph = async ({
       console.log(
         `[API UpdateParagraph ES] Updated paragraph ${paragraphIndex} for session ${sessionId} in ES.`
       );
-    } else {
+    } else if (!esParagraphData) {
       console.warn(
         `[API UpdateParagraph ES] Could not find updated paragraph ${paragraphIndex} in DB result to update ES.`
       );
@@ -510,12 +513,14 @@ export const deleteTranscriptParagraph = async ({
       transcriptTokenCount: tokenCount,
     });
 
-    // Delete from Elasticsearch
-    const esDocId = `${sessionId}_${paragraphIndex}`;
-    await deleteDocument(esClient, TRANSCRIPTS_INDEX, esDocId);
-    console.log(
-      `[API ES Delete] Deleted document ${esDocId} from Elasticsearch.`
-    );
+    // Delete from Elasticsearch (vault mode: FTS triggers handle it).
+    if (!getVaultManager().isProtectionActive()) {
+      const esDocId = `${sessionId}_${paragraphIndex}`;
+      await deleteDocument(esClient, TRANSCRIPTS_INDEX, esDocId);
+      console.log(
+        `[API ES Delete] Deleted document ${esDocId} from Elasticsearch.`
+      );
+    }
 
     console.log(
       `[API] Deleted paragraph ${paragraphIndex} for session ${sessionId}. New token count: ${tokenCount ?? 'N/A'}`
@@ -574,34 +579,37 @@ export const updateParagraphSpeakerHandler = async ({
       );
     }
 
-    // Update Elasticsearch (non-fatal)
-    try {
-      await esClient.updateByQuery({
-        index: TRANSCRIPTS_INDEX,
-        body: {
-          script: {
-            source: 'ctx._source.speaker = params.speaker',
-            lang: 'painless',
-            params: { speaker: speaker.trim() },
-          },
-          query: {
-            bool: {
-              must: [
-                { term: { session_id: sessionId } },
-                { term: { paragraph_index: paragraphIndex } },
-              ],
+    // Update Elasticsearch (non-fatal; skipped in vault mode: the FTS
+    // triggers reindex the row in the same transaction).
+    if (!getVaultManager().isProtectionActive()) {
+      try {
+        await esClient.updateByQuery({
+          index: TRANSCRIPTS_INDEX,
+          body: {
+            script: {
+              source: 'ctx._source.speaker = params.speaker',
+              lang: 'painless',
+              params: { speaker: speaker.trim() },
+            },
+            query: {
+              bool: {
+                must: [
+                  { term: { session_id: sessionId } },
+                  { term: { paragraph_index: paragraphIndex } },
+                ],
+              },
             },
           },
-        },
-      } as any);
-      console.log(
-        `[API updateParagraphSpeaker] ES updated paragraph ${paragraphIndex} speaker for session ${sessionId}.`
-      );
-    } catch (esError) {
-      console.error(
-        `[API updateParagraphSpeaker] ES update failed for paragraph ${paragraphIndex} (session ${sessionId}):`,
-        esError
-      );
+        } as any);
+        console.log(
+          `[API updateParagraphSpeaker] ES updated paragraph ${paragraphIndex} speaker for session ${sessionId}.`
+        );
+      } catch (esError) {
+        console.error(
+          `[API updateParagraphSpeaker] ES update failed for paragraph ${paragraphIndex} (session ${sessionId}):`,
+          esError
+        );
+      }
     }
 
     set.status = 200;
@@ -656,9 +664,14 @@ export const renameSpeakersHandler = async ({
   }
 
   try {
+    // Vault mode keeps no Elasticsearch index; the FTS triggers reindex
+    // renamed rows in the same transaction as the SQLite writes.
+    const skipEs = getVaultManager().isProtectionActive();
     for (const { from, to } of filtered) {
       // Update SQLite
       transcriptRepository.renameSpeaker(sessionId, from, to);
+
+      if (skipEs) continue;
 
       // Update Elasticsearch
       try {
@@ -715,8 +728,7 @@ export const getSessionAudioAvailability = ({
   // it) from a genuinely unsupported format without downloading the
   // recording just to observe a 404.
   try {
-    const absPath = getAudioAbsolutePath(sessionData.audioPath);
-    const available = !!absPath && fsSync.existsSync(absPath);
+    const available = isSessionAudioAvailable(sessionData.audioPath);
     set.status = 200;
     return { available };
   } catch (error) {
@@ -744,7 +756,7 @@ export const deleteSessionAudioHandler = async ({
     );
   }
   try {
-    await deleteUploadedAudioFile(audioIdentifier);
+    await deleteSessionAudio(audioIdentifier);
     console.log(
       `[API Delete Audio] Successfully deleted audio file for identifier: ${audioIdentifier}`
     );

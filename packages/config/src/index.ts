@@ -74,6 +74,8 @@ const uploadsDirFromEnv = getEnvVar(
 
 const resolvedDbPath = path.resolve(projectRoot, dbPathFromEnv);
 const resolvedUploadsDir = path.resolve(projectRoot, uploadsDirFromEnv);
+const vaultDirFromEnv = getEnvVar('VAULT_DIR', 'packages/api/data/vault');
+const resolvedVaultDir = path.resolve(projectRoot, vaultDirFromEnv);
 
 const config = {
   server: {
@@ -113,6 +115,9 @@ const config = {
   db: {
     sqlitePath: resolvedDbPath,
     uploadsDir: resolvedUploadsDir,
+  },
+  vault: {
+    dir: resolvedVaultDir,
   },
   upload: {
     allowedMimeTypes: allowedAudioMimeTypes,

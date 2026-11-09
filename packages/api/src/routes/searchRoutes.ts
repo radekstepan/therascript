@@ -15,6 +15,8 @@ import {
 } from '@therascript/elasticsearch-client';
 import config from '@therascript/config';
 import { InternalServerError, BadRequestError } from '../errors.js';
+import { getVaultManager } from '../services/vaultManager.js';
+import { searchAllFts } from '../services/ftsSearchService.js';
 import type {
   ApiSearchResultItem as UIApiSearchResultItem,
   ApiSearchResponse as UIApiSearchResponse,
@@ -80,6 +82,34 @@ export const searchRoutes = new Elysia({ prefix: '/api/search' })
             results: [],
             total: 0,
           };
+        }
+
+        // Vault mode serves search from the in-database FTS5 indexes;
+        // the Elasticsearch path below is legacy-only.
+        if (getVaultManager().isProtectionActive()) {
+          console.log(
+            `[API FTS Search] Query="${searchQuery}", Limit=${limit}, From=${from}, Type=${query.searchType}, Client=${query.clientName}`
+          );
+          try {
+            const response = searchAllFts({
+              query: searchQuery,
+              limit,
+              from,
+              clientName: query.clientName,
+              searchType: query.searchType,
+            });
+            set.status = 200;
+            return response;
+          } catch (error) {
+            console.error(
+              `[API FTS Search] Error for query "${searchQuery}":`,
+              error
+            );
+            throw new InternalServerError(
+              'Search failed due to an unexpected error.',
+              error instanceof Error ? error : undefined
+            );
+          }
         }
 
         console.log(
@@ -292,10 +322,9 @@ export const searchRoutes = new Elysia({ prefix: '/api/search' })
           }),
         },
         detail: {
-          summary:
-            'Search chat messages and transcript paragraphs via Elasticsearch',
+          summary: 'Search chat messages and transcript paragraphs',
           description:
-            'Performs full-text search using Elasticsearch. Returns results with highlights and relevance scores. Supports filtering by clientName and type (chat/transcript/all).',
+            'Performs full-text search (FTS5 in vault mode, Elasticsearch in legacy mode). Returns results with highlights and relevance scores. Supports filtering by clientName and type (chat/transcript/all).',
         },
       }
     )

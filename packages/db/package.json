@@ -12,11 +12,13 @@
   },
   "dependencies": {
     "@therascript/domain": "*",
-    "better-sqlite3": "^11.9.1"
+    "@therascript/vault": "*",
+    "better-sqlite3-multiple-ciphers": "^13.0.3"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.16.2",
+    "better-sqlite3": "^11.9.1",
     "typescript": "^5.5.4"
   }
 }

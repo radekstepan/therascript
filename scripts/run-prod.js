@@ -31,6 +31,9 @@ console.log(
 // --- Shutdown Service Configuration ---
 const SHUTDOWN_PORT = parseInt(process.env.SHUTDOWN_PORT || '9999', 10);
 const SHUTDOWN_HOST = process.env.SHUTDOWN_HOST || '0.0.0.0';
+// The API needs time to drain requests, abort streams, and lock the vault
+// (close the database + clear keys) before we escalate to SIGKILL.
+const GRACEFUL_EXIT_TIMEOUT_MS = 25_000;
 let shutdownHttpServer = null; // To store the server instance
 // --- End Shutdown Service Configuration ---
 
@@ -199,6 +202,8 @@ const concurrentlyArgs = [
   'bgGreen.bold,bgMagenta.bold,bgYellow.bold,bgCyan.bold,bgBlue.bold',
   '"yarn start:api:prod"',
   '"yarn dev:ui"', // Typically for prod you'd serve static UI assets, but dev:ui is fine for this setup
+  // Legacy-only. On vault-capable installs this exits 0 with a notice;
+  // the API supervises its own worker after unlock.
   '"yarn start:worker:prod"',
   '"yarn start:whisper"',
   '"yarn start:elasticsearch-manager"',
@@ -303,16 +308,19 @@ async function handleShutdown(reason, isRestart = false) {
       } else {
         // Graceful path: SIGTERM the whole process group so each child
         // (API, UI, worker, whisper-manager, ES-manager) can run its
-        // shutdown handler. The API uses this window to call
-        // `unloadActiveModel` + the LLM runtime stop on both local and
-        // remote URLs, which is the only way to free VRAM on a remote
-        // LM Studio host. After 5s we escalate to SIGKILL as a hard
-        // fallback in case any child is wedged.
+        // shutdown handler. The API uses this window to lock the vault
+        // (drain requests, stop the supervised worker, close the database,
+        // clear keys) and to call `unloadActiveModel` + the LLM runtime stop
+        // on both local and remote URLs. After the grace window we escalate
+        // to SIGKILL as a hard fallback in case any child is wedged.
         process.kill(-appProcess.pid, 'SIGTERM');
         console.log(
-          `[RunProd] SIGTERM sent to concurrently process group (PGID: ${appProcess.pid}). Waiting up to 5s for graceful exit...`
+          `[RunProd] SIGTERM sent to concurrently process group (PGID: ${appProcess.pid}). Waiting up to ${GRACEFUL_EXIT_TIMEOUT_MS / 1000}s for graceful exit...`
         );
-        const exited = await waitForProcessExit(appProcess, 5000);
+        const exited = await waitForProcessExit(
+          appProcess,
+          GRACEFUL_EXIT_TIMEOUT_MS
+        );
         if (!exited) {
           console.warn(
             '[RunProd] Graceful shutdown timed out, escalating to SIGKILL.'

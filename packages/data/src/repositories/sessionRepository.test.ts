@@ -53,7 +53,11 @@ const insertMessage = (opts: {
 
 beforeAll(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-repo-test-'));
-  configureDb({ dbPath: path.join(tmpDir, 'test.db'), isDev: false });
+  configureDb({
+    dbPath: path.join(tmpDir, 'test.db'),
+    isDev: false,
+    mode: 'legacy-plaintext',
+  });
   // Trigger lazy DB init (migrations + template seeding).
   run('SELECT 1');
 });

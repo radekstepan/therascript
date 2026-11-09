@@ -10,26 +10,26 @@ import {
   TRANSCRIPTS_INDEX,
   MESSAGES_INDEX,
 } from '@therascript/elasticsearch-client';
-import { closeDb, configureDb } from '@therascript/db';
+import { closeDb } from '@therascript/db';
 import config from '../packages/config/dist/index.js';
 import fs from 'node:fs/promises';
+import { vaultExistsForScript } from './vaultCli.mjs';
 
 async function main() {
   const rl = readline.createInterface({ input, output });
-
-  // Configure database to get correct paths
-  configureDb({
-    dbPath: config.db.sqlitePath,
-    isDev: config.server.nodeEnv !== 'production',
-  });
+  const hasVault = await vaultExistsForScript();
 
   console.log('📍 Target Paths:');
   console.log(`   - Database: ${config.db.sqlitePath}`);
   console.log(`   - Uploads: ${config.db.uploadsDir}`);
+  console.log(
+    `   - Vault: ${config.vault.dir}${hasVault ? ' (ACTIVE — will be wiped)' : ' (absent)'}`
+  );
   console.log(`   - Elasticsearch: ${config.elasticsearch.url}`);
 
   console.log(
-    '\n⚠️  WARNING: This will wipe ALL database records, Elasticsearch indices, and uploaded files.'
+    '\n⚠️  WARNING: This will wipe ALL database records, Elasticsearch indices, uploaded files' +
+      (hasVault ? ', and the entire password vault (irreversible).' : '.')
   );
   const answer = await rl.question(
     'Are you sure you want to proceed? (type "yes" to confirm): '
@@ -84,6 +84,17 @@ async function main() {
     console.log('✅ SQLite database deleted.');
   } catch (error) {
     console.error('❌ Error deleting SQLite database:', error.message);
+  }
+
+  // 4. Delete the password vault (no password needed to destroy it)
+  if (hasVault) {
+    try {
+      console.log(`Deleting vault directory: ${config.vault.dir}`);
+      await fs.rm(config.vault.dir, { recursive: true, force: true });
+      console.log('✅ Vault deleted.');
+    } catch (error) {
+      console.error('❌ Error deleting vault:', error.message);
+    }
   }
 
   console.log(

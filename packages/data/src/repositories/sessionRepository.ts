@@ -1,4 +1,9 @@
-import { db, type DbStatement, type DbRunResult } from '@therascript/db';
+import {
+  db,
+  registerStatementCacheClear,
+  type DbStatement,
+  type DbRunResult,
+} from '@therascript/db';
 import type {
   BackendSession,
   BackendSessionMetadata,
@@ -76,6 +81,18 @@ const findSessionByAudioPathStmt = (): DbStatement => {
   }
   return _findSessionByAudioPathStmt;
 };
+
+// Vault lock/restore closes and reopens the database: drop cached handles
+// so they re-prepare against the new connection.
+registerStatementCacheClear(() => {
+  _insertSessionStmt = null;
+  _selectAllSessionsStmt = null;
+  _selectAllSessionsWithChatCountsStmt = null;
+  _selectSessionByIdStmt = null;
+  _updateSessionMetadataStmt = null;
+  _deleteSessionStmt = null;
+  _findSessionByAudioPathStmt = null;
+});
 
 export const sessionRepository = {
   create: (

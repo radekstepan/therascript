@@ -32,8 +32,8 @@
 //   - `packages/data/src/repositories/appSettingsRepository.ts:21`
 //     (the new `llm_api_token: null` default in getSettings)
 import { describe, it, expect, beforeEach } from 'vitest';
-import Database from 'better-sqlite3';
-import type { Database as DB } from 'better-sqlite3';
+import Database from 'better-sqlite3-multiple-ciphers';
+import type { Database as DB } from 'better-sqlite3-multiple-ciphers';
 import { initializeDatabase, LATEST_SCHEMA_VERSION } from './sqliteService.js';
 
 // v18-shape schema: `app_settings` as it existed at the end of the
@@ -229,7 +229,7 @@ describe('initializeDatabase — v21 verification diagnostics columns', () => {
 
   it('ends at latest schema version', () => {
     expect(userVersion(db)).toBe(LATEST_SCHEMA_VERSION);
-    expect(LATEST_SCHEMA_VERSION).toBe(24);
+    expect(LATEST_SCHEMA_VERSION).toBe(25);
   });
 
   it('creates verification_jobs with outcome counters and phase snapshot columns', () => {
@@ -285,9 +285,9 @@ describe('initializeDatabase — v22 statement reviews', () => {
       }>
     ).map((c) => c.name);
 
-  it('ends at schema version 24', () => {
-    expect(userVersion(db)).toBe(24);
-    expect(LATEST_SCHEMA_VERSION).toBe(24);
+  it('ends at latest schema version', () => {
+    expect(userVersion(db)).toBe(25);
+    expect(LATEST_SCHEMA_VERSION).toBe(25);
   });
 
   it('creates verification_statement_reviews owned by the message', () => {
@@ -351,9 +351,9 @@ describe('initializeDatabase — v22 statement reviews', () => {
     expect(row.material_revision).toBeNull();
   });
 
-  it('is idempotent — re-running migrations keeps version 24', () => {
+  it('is idempotent — re-running migrations keeps latest version', () => {
     expect(() => initializeDatabase(db)).not.toThrow();
-    expect(userVersion(db)).toBe(24);
+    expect(userVersion(db)).toBe(25);
   });
 });
 
@@ -372,9 +372,9 @@ describe('initializeDatabase — v24 therapist notes', () => {
       }>
     ).map((c) => c.name);
 
-  it('ends at schema version 24', () => {
-    expect(userVersion(db)).toBe(24);
-    expect(LATEST_SCHEMA_VERSION).toBe(24);
+  it('ends at latest schema version', () => {
+    expect(userVersion(db)).toBe(25);
+    expect(LATEST_SCHEMA_VERSION).toBe(25);
   });
 
   it('adds nullable therapistNote and therapistNoteUpdatedAt columns to sessions', () => {
@@ -398,9 +398,9 @@ describe('initializeDatabase — v24 therapist notes', () => {
     expect(row.therapistNoteUpdatedAt).toBeNull();
   });
 
-  it('is idempotent — re-running migrations keeps version 24', () => {
+  it('is idempotent — re-running migrations keeps latest version', () => {
     expect(() => initializeDatabase(db)).not.toThrow();
-    expect(userVersion(db)).toBe(24);
+    expect(userVersion(db)).toBe(25);
     expect(
       columnNames('sessions').filter((c) => c === 'therapistNote')
     ).toHaveLength(1);

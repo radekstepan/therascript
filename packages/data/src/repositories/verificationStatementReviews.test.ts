@@ -198,7 +198,7 @@ const reviewRows = () =>
 beforeAll(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'verification-reviews-test-'));
   dbPath = path.join(tmpDir, 'test.db');
-  configureDb({ dbPath, isDev: false });
+  configureDb({ dbPath, isDev: false, mode: 'legacy-plaintext' });
   run('SELECT 1');
 });
 

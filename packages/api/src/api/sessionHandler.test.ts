@@ -555,7 +555,6 @@ describe('getSessionAudioAvailability', () => {
   });
 
   it('reports missing when the session has no audio path', () => {
-    mockGetAudioAbsolutePath.mockReturnValue(null);
     const set: Record<string, unknown> = {};
     const result = getSessionAudioAvailability(
       ctx({
@@ -565,6 +564,8 @@ describe('getSessionAudioAvailability', () => {
     );
     expect(set.status).toBe(200);
     expect(result).toEqual({ available: false });
-    expect(mockGetAudioAbsolutePath).toHaveBeenCalledWith(null);
+    // A null audio path short-circuits to missing: there is no path to
+    // resolve, so the relative->absolute resolver is never consulted.
+    expect(mockGetAudioAbsolutePath).not.toHaveBeenCalled();
   });
 });

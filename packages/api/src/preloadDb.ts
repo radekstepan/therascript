@@ -1,10 +1,24 @@
 // Add configuration at the top
 import { configureDb, db, closeDb } from '@therascript/db';
 import { calculateTokenCount } from '@therascript/services';
+import { readCurrentGenerationId } from '@therascript/vault';
 import config from '@therascript/config';
+
+// Preload seeds a fresh legacy dev database (later migrated through the
+// vault setup UI). It refuses to run once a vault exists — wipe first.
+const __vaultCheck = await readCurrentGenerationId(config.vault.dir).catch(
+  () => null
+);
+if (__vaultCheck) {
+  console.error(
+    '[Preload] FATAL: a vault already exists. Wipe it first (yarn db:wipe:dev) or seed into the running vault through the app.'
+  );
+  process.exit(1);
+}
 configureDb({
   dbPath: config.db.sqlitePath,
   isDev: !config.server.isProduction,
+  mode: 'legacy-plaintext',
 });
 
 import path from 'node:path';

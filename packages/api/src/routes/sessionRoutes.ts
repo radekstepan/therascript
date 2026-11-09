@@ -21,6 +21,16 @@ import {
   getAudioAbsolutePath,
 } from '@therascript/services';
 import {
+  saveSessionAudio,
+  deleteSessionAudio,
+  isVaultAudioId,
+  audioIdToOriginalName,
+  getVaultAudioPlaintextSize,
+  readVaultAudioRange,
+  readVaultAudioFull,
+} from '../services/vaultAudioService.js';
+import { getVaultManager } from '../services/vaultManager.js';
+import {
   startTranscriptionJob,
   checkDiarizationReadiness,
   triggerDiarizationPrefetch,
@@ -256,7 +266,7 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
               throw new InternalServerError('Failed to create session in DB.');
 
             const buffer = await audioFile.arrayBuffer();
-            const savedAudioId = await saveUploadedAudio(
+            const savedAudioId = await saveSessionAudio(
               newSess.id,
               originalFileName,
               Buffer.from(buffer)
@@ -288,7 +298,7 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
                 if (current) {
                   if (current.audioPath) {
                     try {
-                      await deleteUploadedAudioFile(current.audioPath);
+                      await deleteSessionAudio(current.audioPath);
                     } catch (delErr) {
                       console.error(
                         `Cleanup audio err for ${current.audioPath}:`,
@@ -427,9 +437,84 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
           )
           .get(
             '/:sessionId/audio',
-            (context: any) => {
+            async (context: any) => {
               const { request, set, sessionData } = context;
               const sid = sessionData.id;
+              const mimeTypes: Record<string, string> = {
+                '.mp3': 'audio/mpeg',
+                '.wav': 'audio/wav',
+                '.ogg': 'audio/ogg',
+                '.m4a': 'audio/mp4',
+                '.aac': 'audio/aac',
+                '.flac': 'audio/flac',
+                '.webm': 'audio/webm',
+              };
+              const contentTypeFor = (fileName: string): string =>
+                mimeTypes[path.extname(fileName).toLowerCase()] ||
+                'application/octet-stream';
+              // Vault mode: decrypt only the requested range.
+              if (
+                getVaultManager().isProtectionActive() &&
+                isVaultAudioId(sessionData.audioPath)
+              ) {
+                try {
+                  const audioId = sessionData.audioPath as string;
+                  const fileSize = await getVaultAudioPlaintextSize(audioId);
+                  const range = request.headers.get('range');
+                  const contentType = contentTypeFor(
+                    audioIdToOriginalName(audioId)
+                  );
+                  if (range) {
+                    const parts = range.replace(/bytes=/, '').split('-');
+                    const start = parseInt(parts[0], 10);
+                    const end = parts[1]
+                      ? parseInt(parts[1], 10)
+                      : fileSize - 1;
+                    if (
+                      !Number.isInteger(start) ||
+                      !Number.isInteger(end) ||
+                      start >= fileSize ||
+                      end >= fileSize ||
+                      start > end
+                    ) {
+                      set.status = 416;
+                      set.headers['Content-Range'] = `bytes */${fileSize}`;
+                      return 'Range Not Satisfiable';
+                    }
+                    const bytes = await readVaultAudioRange(
+                      audioId,
+                      start,
+                      end
+                    );
+                    set.status = 206;
+                    set.headers['Content-Range'] =
+                      `bytes ${start}-${end}/${fileSize}`;
+                    set.headers['Accept-Ranges'] = 'bytes';
+                    set.headers['Content-Length'] = bytes.length.toString();
+                    set.headers['Content-Type'] = contentType;
+                    return new Response(bytes as any);
+                  }
+                  const bytes = await readVaultAudioFull(audioId);
+                  set.status = 200;
+                  set.headers['Content-Length'] = bytes.length.toString();
+                  set.headers['Content-Type'] = contentType;
+                  set.headers['Accept-Ranges'] = 'bytes';
+                  return new Response(bytes as any);
+                } catch (error) {
+                  console.error(`[API Audio Err] ${sid}:`, error);
+                  if (error instanceof ApiError) throw error;
+                  if (
+                    error instanceof Error &&
+                    error.message.startsWith('Audio not found')
+                  ) {
+                    throw new NotFoundError(`Audio for session ${sid}`);
+                  }
+                  throw new InternalServerError(
+                    'Failed stream audio',
+                    error instanceof Error ? error : undefined
+                  );
+                }
+              }
               const absPath = getAudioAbsolutePath(sessionData.audioPath);
               if (!absPath || !fsSync.existsSync(absPath))
                 throw new NotFoundError(`Audio for session ${sid}`);
@@ -437,18 +522,7 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
                 const stats = fsSync.statSync(absPath);
                 const fileSize = stats.size;
                 const range = request.headers.get('range');
-                const ext = path.extname(absPath).toLowerCase();
-                const mimeTypes: Record<string, string> = {
-                  '.mp3': 'audio/mpeg',
-                  '.wav': 'audio/wav',
-                  '.ogg': 'audio/ogg',
-                  '.m4a': 'audio/mp4',
-                  '.aac': 'audio/aac',
-                  '.flac': 'audio/flac',
-                  '.webm': 'audio/webm',
-                };
-                const contentType =
-                  mimeTypes[ext] || 'application/octet-stream';
+                const contentType = contentTypeFor(absPath);
                 if (range) {
                   const parts = range.replace(/bytes=/, '').split('-');
                   const start = parseInt(parts[0], 10);
@@ -507,7 +581,7 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
               const audioId = sessionData.audioPath;
               try {
                 if (audioId) {
-                  await deleteUploadedAudioFile(audioId);
+                  await deleteSessionAudio(audioId);
                 } else {
                   console.warn(
                     `[API Del] No audio identifier for session ${sid}.`
@@ -524,21 +598,25 @@ export const sessionRoutes = new Elysia({ prefix: '/api' })
                     `[API Del] Deleted session ${sid} from SQLite (associated chats/paragraphs/messages cascaded).`
                   );
 
-                try {
-                  await deleteByQuery(esClient, TRANSCRIPTS_INDEX, {
-                    term: { session_id: sid },
-                  });
-                  await deleteByQuery(esClient, MESSAGES_INDEX, {
-                    term: { session_id: sid },
-                  });
-                  console.log(
-                    `[API Delete ES] Successfully deleted Elasticsearch documents for session ${sid}.`
-                  );
-                } catch (esDeleteError) {
-                  console.error(
-                    `[API Delete ES] Error deleting ES documents for session ${sid}:`,
-                    esDeleteError
-                  );
+                // Vault mode keeps no Elasticsearch index; the FTS triggers
+                // clean the in-database indexes as rows cascade.
+                if (!getVaultManager().isProtectionActive()) {
+                  try {
+                    await deleteByQuery(esClient, TRANSCRIPTS_INDEX, {
+                      term: { session_id: sid },
+                    });
+                    await deleteByQuery(esClient, MESSAGES_INDEX, {
+                      term: { session_id: sid },
+                    });
+                    console.log(
+                      `[API Delete ES] Successfully deleted Elasticsearch documents for session ${sid}.`
+                    );
+                  } catch (esDeleteError) {
+                    console.error(
+                      `[API Delete ES] Error deleting ES documents for session ${sid}:`,
+                      esDeleteError
+                    );
+                  }
                 }
                 set.status = 200;
                 return {

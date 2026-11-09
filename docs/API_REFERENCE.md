@@ -2,33 +2,58 @@
 
 All endpoints are prefixed with `/api/`.
 
+> **Vault gate:** when the encrypted vault is active, every endpoint below except the vault control path (`/api/vault/status|setup|unlock|lock|change-password`), `/api/health`, `/api/status/readiness`, `/api/schema`, and `/api/docs*` requires a valid vault session cookie. Missing/expired sessions return `401`. `/api/status/readiness` returns `503` while the database is still locked.
+
+---
+
+## Vault (`vaultRoutes.ts`)
+
+Password-protected vault control. The password is entered on every API boot; browser sessions are memory-only and revoked on lock/shutdown.
+
+| Method | Path                         | Purpose                                                                                     |
+| ------ | ---------------------------- | ------------------------------------------------------------------------------------------- |
+| `GET`  | `/api/vault/status`          | `{ status, hasVault, authenticated, legacyFallback }` for this browser session              |
+| `POST` | `/api/vault/setup`           | Create the vault (first use / legacy upgrade); body `{ password }`; sets the session cookie |
+| `POST` | `/api/vault/unlock`          | Unlock with `{ password }`; sets the session cookie                                         |
+| `POST` | `/api/vault/lock`            | Lock the vault and revoke every browser session (requires a valid session)                  |
+| `POST` | `/api/vault/change-password` | Rewrap the keys with `{ oldPassword, newPassword }` (requires a valid session)              |
+
+**Notes:**
+
+- Status values: `locked` | `unlocking` | `unlocked` | `locking`.
+- Setup/unlock enforce an origin allowlist (`403`) and per-IP rate limiting (`429`, `retryAfterMs` in the error details).
+- A valid session is a `therascript_vault_session` `HttpOnly`, `SameSite=Lax` cookie. It is `Secure` only when `CORS_ORIGIN` uses HTTPS. The cookie persists for 30 days, but the server-side token dies with the API process, so an API restart always prompts again.
+- Lock/change-password return `401` when the session is missing or the vault is already locked; concurrent transitions return `409`.
+
 ---
 
 ## Sessions (`sessionRoutes.ts`)
 
 Session CRUD operations, audio file upload, and transcript access.
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| `GET` | `/api/sessions` | List all sessions (metadata + `chatCount`) |
-| `POST` | `/api/sessions/upload` | Upload audio file with metadata, run diarization readiness gate, start transcription job |
-| `GET` | `/api/sessions/:sessionId` | Get session metadata and associated chat list |
-| `PUT` | `/api/sessions/:sessionId/metadata` | Update session metadata (clientName, date, etc.) |
-| `DELETE` | `/api/sessions/:sessionId` | Delete session, audio files, chats, paragraphs, and ES docs |
-| `GET` | `/api/sessions/:sessionId/transcript` | Get structured transcript content (paragraphs, including optional `speaker`) |
-| `PATCH` | `/api/sessions/:sessionId/speakers` | Rename one or more transcript speaker labels (`[{ from, to }]`) |
-| `PATCH` | `/api/sessions/:sessionId/transcript` | Update a specific transcript paragraph |
-| `DELETE` | `/api/sessions/:sessionId/transcript/:paragraphIndex` | Delete a single transcript paragraph |
-| `GET` | `/api/sessions/:sessionId/audio` | Stream the original session audio file (supports range requests) |
-| `GET` | `/api/sessions/:sessionId/audio/status` | Lightweight `{ available }` probe: does the referenced audio file exist on disk |
-| `DELETE` | `/api/sessions/:sessionId/audio` | Delete only the original audio file |
+| Method   | Path                                                  | Purpose                                                                                  |
+| -------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `GET`    | `/api/sessions`                                       | List all sessions (metadata + `chatCount`)                                               |
+| `POST`   | `/api/sessions/upload`                                | Upload audio file with metadata, run diarization readiness gate, start transcription job |
+| `GET`    | `/api/sessions/:sessionId`                            | Get session metadata and associated chat list                                            |
+| `PUT`    | `/api/sessions/:sessionId/metadata`                   | Update session metadata (clientName, date, etc.)                                         |
+| `DELETE` | `/api/sessions/:sessionId`                            | Delete session, audio files, chats, paragraphs, and ES docs                              |
+| `GET`    | `/api/sessions/:sessionId/transcript`                 | Get structured transcript content (paragraphs, including optional `speaker`)             |
+| `PATCH`  | `/api/sessions/:sessionId/speakers`                   | Rename one or more transcript speaker labels (`[{ from, to }]`)                          |
+| `PATCH`  | `/api/sessions/:sessionId/transcript`                 | Update a specific transcript paragraph                                                   |
+| `DELETE` | `/api/sessions/:sessionId/transcript/:paragraphIndex` | Delete a single transcript paragraph                                                     |
+| `GET`    | `/api/sessions/:sessionId/audio`                      | Stream the original session audio file (supports range requests)                         |
+| `GET`    | `/api/sessions/:sessionId/audio/status`               | Lightweight `{ available }` probe: does the referenced audio file exist on disk          |
+| `DELETE` | `/api/sessions/:sessionId/audio`                      | Delete only the original audio file                                                      |
 
 **Upload Body Notes (`POST /api/sessions/upload`):**
+
 - Accepts optional `numSpeakers` (numeric, clamped to `1..10`, default `2`).
 - Before creating/enqueuing, API checks Whisper readiness via `GET /diarization/check`.
 - If diarization is not ready, API returns `503` and may trigger background prefetch.
 
 **Metadata Body Notes (`PUT /api/sessions/:sessionId/metadata`):**
+
 - Accepts optional `therapistNote` (string or `null`). Blank values clear the note; every save stamps `therapistNoteUpdatedAt`.
 
 ---
@@ -37,16 +62,16 @@ Session CRUD operations, audio file upload, and transcript access.
 
 Session-bound chat operations. All routes are nested under `/api/sessions/:sessionId/chats`.
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| `POST` | `/api/sessions/:sessionId/chats` | Create a new chat within a session |
-| `GET` | `/api/sessions/:sessionId/chats/:chatId` | Get full details for a specific session chat |
-| `GET` | `/api/sessions/:sessionId/chats/:chatId/context-usage` | Estimate context usage for this session chat |
-| `POST` | `/api/sessions/:sessionId/chats/:chatId/messages` | Add user message and get AI response (**SSE stream**) |
-| `PATCH` | `/api/sessions/:sessionId/chats/:chatId/name` | Rename a session chat |
-| `DELETE` | `/api/sessions/:sessionId/chats/:chatId` | Delete a session chat and its messages |
-| `GET` | `/api/sessions/:sessionId/chats/:chatId/verifications` | Get fact-verification verdicts (with nested statements) for all AI messages in a chat |
-| `POST` | `/api/sessions/:sessionId/chats/:chatId/verify` | Trigger a single-chat (`single_chat` scope) fact-verification job; returns `{ jobId }` (`202`, `409` if a job is already active) |
+| Method   | Path                                                   | Purpose                                                                                                                          |
+| -------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `POST`   | `/api/sessions/:sessionId/chats`                       | Create a new chat within a session                                                                                               |
+| `GET`    | `/api/sessions/:sessionId/chats/:chatId`               | Get full details for a specific session chat                                                                                     |
+| `GET`    | `/api/sessions/:sessionId/chats/:chatId/context-usage` | Estimate context usage for this session chat                                                                                     |
+| `POST`   | `/api/sessions/:sessionId/chats/:chatId/messages`      | Add user message and get AI response (**SSE stream**)                                                                            |
+| `PATCH`  | `/api/sessions/:sessionId/chats/:chatId/name`          | Rename a session chat                                                                                                            |
+| `DELETE` | `/api/sessions/:sessionId/chats/:chatId`               | Delete a session chat and its messages                                                                                           |
+| `GET`    | `/api/sessions/:sessionId/chats/:chatId/verifications` | Get fact-verification verdicts (with nested statements) for all AI messages in a chat                                            |
+| `POST`   | `/api/sessions/:sessionId/chats/:chatId/verify`        | Trigger a single-chat (`single_chat` scope) fact-verification job; returns `{ jobId }` (`202`, `409` if a job is already active) |
 
 ---
 
@@ -54,15 +79,15 @@ Session-bound chat operations. All routes are nested under `/api/sessions/:sessi
 
 Standalone chat CRUD and message streaming (not bound to a session).
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| `POST` | `/api/chats` | Create a new standalone chat |
-| `GET` | `/api/chats` | List all standalone chats (metadata only) |
-| `GET` | `/api/chats/:chatId` | Get full details for a standalone chat |
-| `GET` | `/api/chats/:chatId/context-usage` | Estimate context usage for this standalone chat |
-| `POST` | `/api/chats/:chatId/messages` | Add message and get AI response (**SSE stream**) |
-| `PATCH` | `/api/chats/:chatId/details` | Update name and tags for a standalone chat |
-| `DELETE` | `/api/chats/:chatId` | Delete a standalone chat |
+| Method   | Path                               | Purpose                                          |
+| -------- | ---------------------------------- | ------------------------------------------------ |
+| `POST`   | `/api/chats`                       | Create a new standalone chat                     |
+| `GET`    | `/api/chats`                       | List all standalone chats (metadata only)        |
+| `GET`    | `/api/chats/:chatId`               | Get full details for a standalone chat           |
+| `GET`    | `/api/chats/:chatId/context-usage` | Estimate context usage for this standalone chat  |
+| `POST`   | `/api/chats/:chatId/messages`      | Add message and get AI response (**SSE stream**) |
+| `PATCH`  | `/api/chats/:chatId/details`       | Update name and tags for a standalone chat       |
+| `DELETE` | `/api/chats/:chatId`               | Delete a standalone chat                         |
 
 ---
 
@@ -70,14 +95,14 @@ Standalone chat CRUD and message streaming (not bound to a session).
 
 Multi-session analysis job creation and streaming progress.
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| `POST` | `/api/analysis-jobs` | Create a new multi-session analysis job |
-| `GET` | `/api/analysis-jobs` | List all analysis jobs |
-| `GET` | `/api/analysis-jobs/:jobId` | Get status and result of a single analysis job |
-| `GET` | `/api/analysis-jobs/:jobId/stream` | Stream analysis logs and tokens (**SSE stream**) |
-| `POST` | `/api/analysis-jobs/:jobId/cancel` | Request to cancel a running analysis job |
-| `DELETE` | `/api/analysis-jobs/:jobId` | Delete an analysis job and its data |
+| Method   | Path                               | Purpose                                          |
+| -------- | ---------------------------------- | ------------------------------------------------ |
+| `POST`   | `/api/analysis-jobs`               | Create a new multi-session analysis job          |
+| `GET`    | `/api/analysis-jobs`               | List all analysis jobs                           |
+| `GET`    | `/api/analysis-jobs/:jobId`        | Get status and result of a single analysis job   |
+| `GET`    | `/api/analysis-jobs/:jobId/stream` | Stream analysis logs and tokens (**SSE stream**) |
+| `POST`   | `/api/analysis-jobs/:jobId/cancel` | Request to cancel a running analysis job         |
+| `DELETE` | `/api/analysis-jobs/:jobId`        | Delete an analysis job and its data              |
 
 ---
 
@@ -85,21 +110,22 @@ Multi-session analysis job creation and streaming progress.
 
 LLM Fact-Verification & Hallucination Audit ("LLM Judge") job management, analytics, and verdict lookup. Only one verification job may be active at a time — creating a job (or resetting) while another is `pending`/`processing`/`canceling` returns `409 Conflict`.
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| `POST` | `/api/verification/jobs` | Create and enqueue a fact-verification job; returns `{ jobId }` (`202`) |
-| `GET` | `/api/verification/jobs` | List recent verification jobs (newest first) |
-| `GET` | `/api/verification/jobs/:jobId` | Get status and counters of a single verification job |
-| `GET` | `/api/verification/jobs/:jobId/stream` | Stream job progress events (**SSE stream**) |
-| `GET` | `/api/verification/jobs/:jobId/failures` | List failed message assessments attributable to one job run (`{ jobId, failures[] }`, `404` if the job does not exist) |
-| `POST` | `/api/verification/jobs/:jobId/cancel` | Request cancellation of a pending/processing job (`202`; `409` if already terminal) |
-| `GET` | `/api/verification/stats` | Global verification analytics (KPIs, per-model accuracy, trends, session coverage) |
-| `GET` | `/api/verification/statements` | List paginated/filterable flagged statements (human-confirmed findings excluded) |
-| `POST` | `/api/verification/statements/:statementId/dismiss` | Confirm one finding as not-an-issue; returns the finding plus authoritative parent (`200`; `400` / `404` / `409`, see below) |
-| `DELETE` | `/api/verification/messages/:messageId` | Clear the verification (and its statements) for a specific chat message (human confirmations preserved for re-audit) |
-| `DELETE` | `/api/verification/reset` | Clear all verifications, statements, jobs, and human confirmations (`409` while a job is active) |
+| Method   | Path                                                | Purpose                                                                                                                      |
+| -------- | --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `POST`   | `/api/verification/jobs`                            | Create and enqueue a fact-verification job; returns `{ jobId }` (`202`)                                                      |
+| `GET`    | `/api/verification/jobs`                            | List recent verification jobs (newest first)                                                                                 |
+| `GET`    | `/api/verification/jobs/:jobId`                     | Get status and counters of a single verification job                                                                         |
+| `GET`    | `/api/verification/jobs/:jobId/stream`              | Stream job progress events (**SSE stream**)                                                                                  |
+| `GET`    | `/api/verification/jobs/:jobId/failures`            | List failed message assessments attributable to one job run (`{ jobId, failures[] }`, `404` if the job does not exist)       |
+| `POST`   | `/api/verification/jobs/:jobId/cancel`              | Request cancellation of a pending/processing job (`202`; `409` if already terminal)                                          |
+| `GET`    | `/api/verification/stats`                           | Global verification analytics (KPIs, per-model accuracy, trends, session coverage)                                           |
+| `GET`    | `/api/verification/statements`                      | List paginated/filterable flagged statements (human-confirmed findings excluded)                                             |
+| `POST`   | `/api/verification/statements/:statementId/dismiss` | Confirm one finding as not-an-issue; returns the finding plus authoritative parent (`200`; `400` / `404` / `409`, see below) |
+| `DELETE` | `/api/verification/messages/:messageId`             | Clear the verification (and its statements) for a specific chat message (human confirmations preserved for re-audit)         |
+| `DELETE` | `/api/verification/reset`                           | Clear all verifications, statements, jobs, and human confirmations (`409` while a job is active)                             |
 
 **Create Job Body (`POST /api/verification/jobs`):**
+
 - `scope` (required) — `all_unverified` | `all_force` | `selected_sessions` | `single_chat`.
 - `sessionIds` — Required non-empty array when `scope` is `selected_sessions` (each session must exist).
 - `chatId` — Required when `scope` is `single_chat` (must be a session-bound chat).
@@ -107,10 +133,12 @@ LLM Fact-Verification & Hallucination Audit ("LLM Judge") job management, analyt
 - Optional Judge LLM overrides — `modelName`, `contextSize`, `thinkingBudget`, `temperature`, `topP`, `repeatPenalty`, `numGpuLayers`, `baseUrl`. Omitted fields fall back to global config, except `temperature` which defaults to `0.3` for deterministic verdict JSON. The resolved config is snapshotted into the job row; job creation never mutates the user's global chat model.
 
 **Stats Query Parameters (`GET /api/verification/stats`):**
+
 - `sessionId`, `model`, `startDate`, `endDate` — Optional filters (`model` takes the raw stored id).
 - Response includes `failedMessagesCount` (messages whose latest attempt ended `failed`) and per-session `failedAiMessages` alongside verified counts, plus per-session `predominantModel` (most common chat LLM across the session's verifiable AI messages, `null` when unrecorded). All model ids in responses are raw; the UI renders them via `formatModelDisplayName` (`packages/ui/src/utils/modelDisplay.ts`).
 
 **Statements Query Parameters (`GET /api/verification/statements`):**
+
 - `verdict`, `severity`, `authoredModel`, `sessionId`, `search`, `limit`, `offset` — Optional filters (`verdict`/`severity` accept comma-separated lists).
 
 **Dismiss Body (`POST /api/verification/statements/:statementId/dismiss`):**
@@ -121,6 +149,7 @@ LLM Fact-Verification & Hallucination Audit ("LLM Judge") job management, analyt
 - Every statement read carries `review_status` / `confirmed_at` / `review_id` / `review_token`. Confirmed partial/contradicted/fabricated claims count as supported (claim total unchanged); confirmed omissions leave the active omission count. Raw Judge verdicts are always preserved on the rows.
 
 **Job Outcome Fields (`verification_jobs` rows):**
+
 - `succeeded_messages` / `failed_messages` / `skipped_messages` — Finished-attempt outcome split. `processed_messages` counts finished attempts only (successes + failures).
 - `current_phase` (`waiting_for_lock` | `loading_judge` | `checking_message` | `generating` | `retrying` | `finishing`), `current_message_id`, `current_attempt`, `phase_updated_at` — Live phase snapshot for active jobs; cleared on terminal transitions. Reconnects and reloads read these from the SSE snapshot / `GET` endpoints.
 - A run where every attempted assessment fails lands on `failed`; a mixed run stays `completed` with an `error_message` starting "Completed with errors: …" and `failed_messages > 0` (clients must render the mixed label, never unqualified success).
@@ -130,13 +159,14 @@ LLM Fact-Verification & Hallucination Audit ("LLM Judge") job management, analyt
 
 ## Search (`searchRoutes.ts`)
 
-Full-text search across transcripts and chat messages via Elasticsearch.
+Full-text search across transcripts and chat messages. Vault mode uses the in-database SQLite FTS5 index; legacy-fallback mode uses Elasticsearch. The response contract is identical.
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| `GET` | `/api/search` | Search chat messages and transcript paragraphs |
+| Method | Path          | Purpose                                        |
+| ------ | ------------- | ---------------------------------------------- |
+| `GET`  | `/api/search` | Search chat messages and transcript paragraphs |
 
 **Query Parameters:**
+
 - `q` - Search query string
 - `limit` - Max results (1-100, default: 20)
 - `from` - Offset for pagination (default: 0)
@@ -149,17 +179,17 @@ Full-text search across transcripts and chat messages via Elasticsearch.
 
 Model listing, pulling, loading, and unloading.
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| `GET` | `/api/llm/available-models` | List locally available LLM models |
-| `POST` | `/api/llm/set-model` | Set active model and context size, trigger load |
-| `POST` | `/api/llm/unload` | Unload the currently active model from memory |
-| `POST` | `/api/llm/pull-model` | Initiate downloading a new LLM model |
-| `GET` | `/api/llm/pull-status/:jobId` | Get status/progress of an ongoing model pull job |
-| `POST` | `/api/llm/cancel-pull/:jobId` | Attempt to cancel an ongoing model pull job |
-| `POST` | `/api/llm/delete-model` | Delete a locally downloaded LLM model |
-| `POST` | `/api/llm/api-token` | Set or clear the global API token used to authenticate against remote LLM endpoints |
-| `GET` | `/api/llm/status` | Check loaded status and context sizes for active/specific model |
+| Method | Path                          | Purpose                                                                             |
+| ------ | ----------------------------- | ----------------------------------------------------------------------------------- |
+| `GET`  | `/api/llm/available-models`   | List locally available LLM models                                                   |
+| `POST` | `/api/llm/set-model`          | Set active model and context size, trigger load                                     |
+| `POST` | `/api/llm/unload`             | Unload the currently active model from memory                                       |
+| `POST` | `/api/llm/pull-model`         | Initiate downloading a new LLM model                                                |
+| `GET`  | `/api/llm/pull-status/:jobId` | Get status/progress of an ongoing model pull job                                    |
+| `POST` | `/api/llm/cancel-pull/:jobId` | Attempt to cancel an ongoing model pull job                                         |
+| `POST` | `/api/llm/delete-model`       | Delete a locally downloaded LLM model                                               |
+| `POST` | `/api/llm/api-token`          | Set or clear the global API token used to authenticate against remote LLM endpoints |
+| `GET`  | `/api/llm/status`             | Check loaded status and context sizes for active/specific model                     |
 
 ### Remote LLM API token
 
@@ -229,7 +259,7 @@ render each settled state explicitly:
   when nothing is loaded. Independent of `activeModel` (the user's
   configured model): when the two differ, the server holds something
   the user didn't ask for and the UI shows a mismatch.
-- `loaded` (boolean) + `details`: whether the *requested* model
+- `loaded` (boolean) + `details`: whether the _requested_ model
   (`modelChecked`) is the one loaded.
 
 The status probe is read-only: it never writes `app_settings`. (An
@@ -255,9 +285,9 @@ Behaviour:
 
 Whisper service transcription job status.
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| `GET` | `/api/transcription/status/:jobId` | Get status of a specific transcription job |
+| Method | Path                               | Purpose                                    |
+| ------ | ---------------------------------- | ------------------------------------------ |
+| `GET`  | `/api/transcription/status/:jobId` | Get status of a specific transcription job |
 
 ---
 
@@ -265,10 +295,10 @@ Whisper service transcription job status.
 
 Container status monitoring for project-related services.
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| `GET` | `/api/docker/status` | Get status of project-related Docker containers |
-| `GET` | `/api/docker/logs/:containerName` | Get recent logs from a specific project container |
+| Method | Path                              | Purpose                                           |
+| ------ | --------------------------------- | ------------------------------------------------- |
+| `GET`  | `/api/docker/status`              | Get status of project-related Docker containers   |
+| `GET`  | `/api/docker/logs/:containerName` | Get recent logs from a specific project container |
 
 ---
 
@@ -276,12 +306,18 @@ Container status monitoring for project-related services.
 
 Database export/import, re-index search, and system reset.
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| `POST` | `/api/admin/reindex-elasticsearch` | Delete and re-index all Elasticsearch data from SQLite |
-| `POST` | `/api/admin/reset-all-data` | Reset all application data (destructive) |
-| `GET` | `/api/admin/export-data` | Export all application data as a TAR archive |
-| `POST` | `/api/admin/import-data` | Import data from a TAR archive (overwrites existing) |
+| Method | Path                               | Purpose                                                                                           |
+| ------ | ---------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `POST` | `/api/admin/reindex-elasticsearch` | Delete and re-index all search data from SQLite (legacy ES mode; vault mode rebuilds FTS5)        |
+| `POST` | `/api/admin/reset-all-data`        | Reset all application data (destructive)                                                          |
+| `GET`  | `/api/admin/export-data`           | Export all application data as a plaintext `.tar` archive (legacy mode only; `400` in vault mode) |
+| `POST` | `/api/admin/export-data`           | Export a sealed `.tvbak` archive; body `{ backupPassword }` (works in vault and legacy mode)      |
+| `POST` | `/api/admin/import-data`           | Import a `.tar` or `.tvbak` archive (multipart `backupFile`, optional `backupPassword`)           |
+
+**Notes:**
+
+- In vault mode imports are staged into a new generation, verified, and committed atomically; a failure leaves the live vault untouched.
+- Encrypted backups use Argon2id + AES-GCM. The backup password is independent of the vault password.
 
 ---
 
@@ -289,9 +325,9 @@ Database export/import, re-index search, and system reset.
 
 System-level utilities.
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| `GET` | `/api/system/gpu-stats` | Get NVIDIA GPU statistics via `nvidia-smi` |
+| Method | Path                    | Purpose                                    |
+| ------ | ----------------------- | ------------------------------------------ |
+| `GET`  | `/api/system/gpu-stats` | Get NVIDIA GPU statistics via `nvidia-smi` |
 
 ---
 
@@ -299,12 +335,12 @@ System-level utilities.
 
 Message template CRUD operations.
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| `GET` | `/api/templates` | Get all saved templates |
-| `POST` | `/api/templates` | Create a new template |
-| `PUT` | `/api/templates/:id` | Update an existing template |
-| `DELETE` | `/api/templates/:id` | Delete a template |
+| Method   | Path                 | Purpose                     |
+| -------- | -------------------- | --------------------------- |
+| `GET`    | `/api/templates`     | Get all saved templates     |
+| `POST`   | `/api/templates`     | Create a new template       |
+| `PUT`    | `/api/templates/:id` | Update an existing template |
+| `DELETE` | `/api/templates/:id` | Delete a template           |
 
 ---
 
@@ -312,10 +348,10 @@ Message template CRUD operations.
 
 Background job queue status.
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| `GET` | `/api/jobs/active-count` | Get count of active and waiting background jobs (`{ total, transcription, analysis, verification }`) |
-| `POST` | `/api/jobs/reset-transcription` | Force-clear all queued/active transcription jobs (queue obliterate) |
+| Method | Path                            | Purpose                                                                                              |
+| ------ | ------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `GET`  | `/api/jobs/active-count`        | Get count of active and waiting background jobs (`{ total, transcription, analysis, verification }`) |
+| `POST` | `/api/jobs/reset-transcription` | Force-clear all queued/active transcription jobs (queue obliterate)                                  |
 
 ---
 
@@ -323,11 +359,11 @@ Background job queue status.
 
 Health check and readiness status.
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| `GET` | `/api/health` | Check API, Database, and Elasticsearch health |
-| `GET` | `/api/status/readiness` | Check if all dependent backend services are ready (returns `200` when ready, `503` when degraded but with structured body) |
-| `GET` | `/api/schema` | API schema info (redirects to Swagger UI at `/api/docs`) |
+| Method | Path                    | Purpose                                                                                                                    |
+| ------ | ----------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/api/health`           | Check API, Database, and Elasticsearch health                                                                              |
+| `GET`  | `/api/status/readiness` | Check if all dependent backend services are ready (returns `200` when ready, `503` when degraded but with structured body) |
+| `GET`  | `/api/schema`           | API schema info (redirects to Swagger UI at `/api/docs`)                                                                   |
 
 ---
 

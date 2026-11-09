@@ -8,10 +8,11 @@ import {
   chatRepository,
   usageRepository,
 } from '@therascript/data';
+import { calculateTokenCount } from '@therascript/services';
 import {
-  calculateTokenCount,
-  getAudioAbsolutePath,
-} from '@therascript/services';
+  resolveWorkerAudioPath,
+  shouldSkipElasticsearch,
+} from '../vaultContext.js';
 import type {
   StructuredTranscript,
   WhisperJobStatus,
@@ -243,12 +244,10 @@ export default async function (job: Job<TranscriptionJobData, any, string>) {
   const session = sessionRepository.findById(sessionId);
   if (!session) throw new Error(`Session ${sessionId} not found.`);
 
-  const audioPath = getAudioAbsolutePath(session.audioPath);
-  if (!audioPath) {
-    throw new Error(
-      `Audio path for session ${sessionId} is invalid or missing.`
-    );
-  }
+  // Vault recordings decrypt into a private staging file (cleaned up in
+  // the finally below); legacy uploads resolve in place.
+  const resolvedAudio = await resolveWorkerAudioPath(session.audioPath);
+  const audioPath = resolvedAudio.path;
 
   try {
     let durationInt: number | null = null;
@@ -383,7 +382,9 @@ export default async function (job: Job<TranscriptionJobData, any, string>) {
         },
       })
     );
-    if (esTranscriptDocs.length > 0) {
+    // Vault mode keeps no Elasticsearch index; the FTS triggers index
+    // the inserted rows in the same transactions as the SQLite writes.
+    if (esTranscriptDocs.length > 0 && !shouldSkipElasticsearch()) {
       await bulkIndexDocuments(esClient, TRANSCRIPTS_INDEX, esTranscriptDocs);
     }
 
@@ -403,17 +404,19 @@ export default async function (job: Job<TranscriptionJobData, any, string>) {
       aiMessageText
     );
 
-    // Index initial AI message
-    await indexDocument(esClient, MESSAGES_INDEX, String(aiMessage.id), {
-      message_id: String(aiMessage.id),
-      chat_id: newChat.id,
-      session_id: sessionId,
-      sender: 'ai',
-      text: aiMessageText,
-      timestamp: aiMessage.timestamp,
-      client_name: session.clientName,
-      session_name: session.sessionName,
-    });
+    // Index initial AI message (vault mode: FTS triggers handle it).
+    if (!shouldSkipElasticsearch()) {
+      await indexDocument(esClient, MESSAGES_INDEX, String(aiMessage.id), {
+        message_id: String(aiMessage.id),
+        chat_id: newChat.id,
+        session_id: sessionId,
+        sender: 'ai',
+        text: aiMessageText,
+        timestamp: aiMessage.timestamp,
+        client_name: session.clientName,
+        session_name: session.sessionName,
+      });
+    }
 
     await job.updateProgress(100);
     console.log(
@@ -433,5 +436,8 @@ export default async function (job: Job<TranscriptionJobData, any, string>) {
       errorMessage: errorMessage,
     });
     throw error; // Re-throw to let BullMQ know the job failed
+  } finally {
+    // Releases the vault plaintext staging file (no-op for legacy paths).
+    await resolvedAudio.cleanup().catch(() => {});
   }
 }

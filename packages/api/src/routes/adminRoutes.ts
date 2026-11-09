@@ -3,9 +3,11 @@ import {
   reindexElasticsearchService,
   resetAllDataService,
   exportDataService,
+  exportVaultBackupService,
   importDataService,
 } from '../api/adminHandler.js';
-import { InternalServerError } from '../errors.js'; // For error schema
+import { BadRequestError, InternalServerError } from '../errors.js'; // For error schema
+import { getVaultManager } from '../services/vaultManager.js';
 
 // Schema for the re-index response
 const ReindexResponseSchema = t.Object({
@@ -24,9 +26,11 @@ const ResetAllDataResponseSchema = t.Object({
 // --- NEW SCHEMAS ---
 const ImportBodySchema = t.Object({
   backupFile: t.File({
-    type: ['application/x-tar'],
-    error: 'A single .tar backup file is required.',
+    type: ['application/x-tar', 'application/octet-stream'],
+    error:
+      'A single backup file is required (.tar legacy or encrypted .tvbak).',
   }),
+  backupPassword: t.Optional(t.String({ maxLength: 1024 })),
 });
 
 const ImportResponseSchema = t.Object({
@@ -98,6 +102,13 @@ export const adminRoutes = new Elysia({ prefix: '/api/admin' })
       .get(
         '/export-data',
         async (context: Context) => {
+          // Vault mode exports only sealed, password-protected archives;
+          // use POST /export-data with a backup password instead.
+          if (getVaultManager().isProtectionActive()) {
+            throw new BadRequestError(
+              'Plaintext export is disabled in vault mode. POST a backup password to /api/admin/export-data instead.'
+            );
+          }
           const readableStream = await exportDataService();
           context.set.headers['Content-Type'] = 'application/x-tar';
           context.set.headers['Content-Disposition'] =
@@ -113,8 +124,44 @@ export const adminRoutes = new Elysia({ prefix: '/api/admin' })
             500: 'errorResponse',
           },
           detail: {
-            summary: 'Export all application data as a TAR archive',
+            summary:
+              'Export all application data as a TAR archive (legacy mode only)',
             produces: ['application/x-tar'],
+          },
+        }
+      )
+      .post(
+        '/export-data',
+        async (
+          context: Context & {
+            body: { backupPassword: string };
+          }
+        ) => {
+          const readableStream = await exportVaultBackupService(
+            context.body.backupPassword
+          );
+          context.set.headers['Content-Type'] = 'application/octet-stream';
+          context.set.headers['Content-Disposition'] =
+            `attachment; filename="therascript-backup-${new Date().toISOString().split('T')[0]}.tvbak"`;
+          context.set.status = 200;
+          return new Response(readableStream as any);
+        },
+        {
+          body: t.Object({
+            backupPassword: t.String({ minLength: 1, maxLength: 1024 }),
+          }),
+          response: {
+            200: t.Unknown({
+              description: 'An encrypted backup archive (.tvbak).',
+            }),
+            400: 'errorResponse',
+            500: 'errorResponse',
+          },
+          detail: {
+            summary: 'Export an encrypted backup archive',
+            description:
+              'Seals the full database snapshot plus recordings under the given backup password (Argon2id + AES-GCM). Works in vault and legacy mode.',
+            produces: ['application/octet-stream'],
           },
         }
       )
@@ -122,7 +169,9 @@ export const adminRoutes = new Elysia({ prefix: '/api/admin' })
         '/import-data',
         async (context) => {
           const { body, set } = context;
-          const result = await importDataService(body.backupFile);
+          const result = await importDataService(body.backupFile, {
+            backupPassword: body.backupPassword,
+          });
           set.status = 200;
           return result;
         },
@@ -131,11 +180,14 @@ export const adminRoutes = new Elysia({ prefix: '/api/admin' })
           response: {
             200: 'importResponse',
             400: 'errorResponse',
+            401: 'errorResponse',
             500: 'errorResponse',
           },
           detail: {
             summary:
-              'Import data from a TAR archive, overwriting all existing data',
+              'Import data from a backup archive, overwriting all existing data',
+            description:
+              'Accepts legacy .tar backups and encrypted .tvbak archives (with their backup password). In vault mode the import is staged into a new generation and committed atomically; failures leave the live vault untouched.',
             consumes: ['multipart/form-data'],
           },
         }

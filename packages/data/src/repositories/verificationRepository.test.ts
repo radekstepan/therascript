@@ -74,7 +74,11 @@ const insertMessage = (opts: {
 
 beforeAll(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'verification-repo-test-'));
-  configureDb({ dbPath: path.join(tmpDir, 'test.db'), isDev: false });
+  configureDb({
+    dbPath: path.join(tmpDir, 'test.db'),
+    isDev: false,
+    mode: 'legacy-plaintext',
+  });
   // Trigger lazy DB init (migrations to V21 + template seeding).
   run('SELECT 1');
 });

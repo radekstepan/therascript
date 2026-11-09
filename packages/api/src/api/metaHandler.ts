@@ -1,7 +1,8 @@
 // =========================================
 // File: packages/api/src/api/metaHandler.ts
 // =========================================
-import { checkDatabaseHealth } from '@therascript/db';
+import { checkDatabaseHealth, isDbUnlocked } from '@therascript/db';
+import { getVaultManager } from '../services/vaultManager.js';
 import {
   getElasticsearchClient,
   checkEsHealth,
@@ -22,6 +23,23 @@ interface MetaHandlerContext {
 }
 
 export const getReadinessStatus = async ({ set }: MetaHandlerContext) => {
+  // Locked vault: nothing is usable, and every check below would throw
+  // against the detached database (the LLM check reads app_settings).
+  // Short-circuit quietly instead of spamming the logs on every poll.
+  if (getVaultManager().isProtectionActive() && !isDbUnlocked()) {
+    set.status = 503;
+    return {
+      ready: false,
+      services: {
+        database: 'disconnected',
+        elasticsearch: 'disconnected',
+        llm: 'disconnected',
+        whisper: 'disconnected',
+      } as ServiceStatus,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
   const statuses: ServiceStatus = {
     database: 'disconnected',
     elasticsearch: 'disconnected',

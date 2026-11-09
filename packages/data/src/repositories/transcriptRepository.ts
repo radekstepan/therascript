@@ -4,6 +4,7 @@ import {
   run,
   get,
   transaction,
+  registerStatementCacheClear,
   type DbStatement,
 } from '@therascript/db';
 import type {
@@ -83,6 +84,17 @@ const deleteParagraphsStmt = (): DbStatement => {
   }
   return _deleteParagraphsStmt;
 };
+
+// Vault lock/restore closes and reopens the database: drop cached handles
+// so they re-prepare against the new connection.
+registerStatementCacheClear(() => {
+  _selectParagraphsStmt = null;
+  _insertParagraphStmt = null;
+  _updateParagraphStmt = null;
+  _updateParagraphSpeakerStmt = null;
+  _deleteParagraphByIndexStmt = null;
+  _deleteParagraphsStmt = null;
+});
 
 export const transcriptRepository = {
   findParagraphsBySessionId: (sessionId: number): StructuredTranscript => {

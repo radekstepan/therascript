@@ -9,6 +9,8 @@ import {
 } from '@radix-ui/react-icons';
 import type { SearchResultItem } from '../../types';
 import { formatTimestamp } from '../../helpers';
+import { useVaultStatus } from '../../hooks/useVaultStatus';
+import { escapeFtsSnippet } from '../../utils/escapeHtml';
 
 const formatParagraphTimestamp = (ms: number | undefined): string => {
   if (ms === undefined || isNaN(ms)) return '';
@@ -31,6 +33,10 @@ export function SearchResultList({
 }: SearchResultListProps) {
   const navigate = useNavigate();
   const location = useLocation(); // Get current location
+  // Vault search serves raw FTS5 excerpts (escape before render); the
+  // legacy Elasticsearch path arrives pre-escaped (encoder: html).
+  const { vault } = useVaultStatus();
+  const escapeSnippets = !vault.legacyFallback;
 
   const handleResultClick = (item: SearchResultItem) => {
     let path = '/';
@@ -89,11 +95,13 @@ export function SearchResultList({
   };
 
   const renderSnippet = (item: SearchResultItem) => {
-    // Prefer highlighted snippet if available
-    if (item.highlights?.text && item.highlights.text.length > 0) {
-      return { __html: item.highlights.text.join(' ... ') }; // Join if multiple fragments
-    }
-    return { __html: item.snippet }; // Fallback to plain snippet (already HTML escaped by ES usually)
+    const raw =
+      item.highlights?.text && item.highlights.text.length > 0
+        ? item.highlights.text.join(' ... ') // Join if multiple fragments
+        : item.snippet;
+    // Legacy ES snippets arrive HTML-escaped; FTS5 snippets are raw
+    // transcript text and must be escaped.
+    return { __html: escapeSnippets ? escapeFtsSnippet(raw) : raw };
   };
 
   if (results.length === 0) {

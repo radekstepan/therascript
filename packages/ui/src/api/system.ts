@@ -122,6 +122,21 @@ export const requestImportData = async (
 };
 
 /**
+ * Downloads an encrypted (.tvbak) backup sealed under the given backup
+ * password. The password travels in the POST body, never in the URL.
+ */
+export const requestExportVaultBackup = async (
+  backupPassword: string
+): Promise<Blob> => {
+  const response = await axios.post(
+    '/api/admin/export-data',
+    { backupPassword },
+    { responseType: 'blob', timeout: 300000 }
+  );
+  return response.data as Blob;
+};
+
+/**
  * Fetches NVIDIA GPU statistics from the backend.
  * @returns {Promise<GpuStats>} A promise resolving to the GPU statistics object.
  */

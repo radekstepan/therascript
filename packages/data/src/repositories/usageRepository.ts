@@ -1,4 +1,9 @@
-import { db, type DbStatement, type DbRunResult } from '@therascript/db';
+import {
+  db,
+  registerStatementCacheClear,
+  type DbStatement,
+  type DbRunResult,
+} from '@therascript/db';
 
 export interface UsageLog {
   id: number;
@@ -106,6 +111,13 @@ const getUsageLogsCountStmt = (): DbStatement => {
   }
   return _getUsageLogsCountStmt;
 };
+
+// Vault lock/restore closes and reopens the database: drop cached handles
+// so they re-prepare against the new connection.
+registerStatementCacheClear(() => {
+  _insertUsageLogStmt = null;
+  _getUsageLogsCountStmt = null;
+});
 
 export const usageRepository = {
   insertUsageLog: (params: InsertUsageLogParams): void => {

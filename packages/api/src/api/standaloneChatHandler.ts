@@ -50,7 +50,10 @@ import {
   chatRequestSchema,
   renameChatRequestSchema,
 } from '@therascript/domain';
+import { getVaultManager } from '../services/vaultManager.js';
 
+// Vault mode skips all Elasticsearch writes below (the FTS triggers keep
+// the in-database indexes in sync); the client stays for legacy mode.
 const esClient = getElasticsearchClient(config.elasticsearch.url);
 
 // Define precise return types matching the schemas where needed
@@ -174,24 +177,26 @@ export const addStandaloneChatMessage = async ({
       trimmedText
     );
 
-    // Index user message into Elasticsearch
-    await indexDocument(esClient, MESSAGES_INDEX, String(userMessage.id), {
-      message_id: String(userMessage.id),
-      chat_id: userMessage.chatId,
-      session_id: null, // Standalone chats have no session_id
-      sender: userMessage.sender,
-      text: userMessage.text,
-      timestamp: userMessage.timestamp,
-      // For standalone chats, include chat_name and tags if available from chatData
-      chat_name: chatData.name ?? null,
-      tags: chatData.tags ?? null,
-      // client_name and session_name are null for standalone chats
-      client_name: null,
-      session_name: null,
-    });
-    console.log(
-      `[API ES] Indexed User message ${userMessage.id} for standalone chat ${chatData.id}.`
-    );
+    // Index user message into Elasticsearch (vault mode: FTS triggers).
+    if (!getVaultManager().isProtectionActive()) {
+      await indexDocument(esClient, MESSAGES_INDEX, String(userMessage.id), {
+        message_id: String(userMessage.id),
+        chat_id: userMessage.chatId,
+        session_id: null, // Standalone chats have no session_id
+        sender: userMessage.sender,
+        text: userMessage.text,
+        timestamp: userMessage.timestamp,
+        // For standalone chats, include chat_name and tags if available from chatData
+        chat_name: chatData.name ?? null,
+        tags: chatData.tags ?? null,
+        // client_name and session_name are null for standalone chats
+        client_name: null,
+        session_name: null,
+      });
+      console.log(
+        `[API ES] Indexed User message ${userMessage.id} for standalone chat ${chatData.id}.`
+      );
+    }
 
     const currentMessages = messageRepository.findMessagesByChatId(chatData.id);
     if (currentMessages.length === 0) {
@@ -214,6 +219,9 @@ export const addStandaloneChatMessage = async ({
     // only this controller, which we abort manually on write failure, will stop
     // the underlying fetch to LM Studio and interrupt generation.
     const llmAbortController = new AbortController();
+    // Vault lock aborts in-flight generations through the same controller.
+    const unregisterVaultStream =
+      getVaultManager().registerStream(llmAbortController);
 
     let modelUnloaded = false;
     const triggerUnload = () => {
@@ -532,29 +540,32 @@ export const addStandaloneChatMessage = async ({
               getActiveModel()
             );
 
-            await indexDocument(
-              esClient,
-              MESSAGES_INDEX,
-              String(aiMessage.id),
-              {
-                message_id: String(aiMessage.id),
-                chat_id: aiMessage.chatId,
-                session_id: null,
-                sender: aiMessage.sender,
-                text: aiMessage.text,
-                timestamp: aiMessage.timestamp,
-                promptTokens: aiMessage.promptTokens,
-                completionTokens: aiMessage.completionTokens,
-                isTruncated: isTruncated,
-                chat_name: chatData.name ?? null,
-                tags: chatData.tags ?? null,
-                client_name: null,
-                session_name: null,
-              }
-            );
-            console.log(
-              `[API ES] Indexed AI message ${aiMessage.id} for standalone chat ${chatData.id}.`
-            );
+            // Vault mode: FTS triggers index the saved row; no ES write.
+            if (!getVaultManager().isProtectionActive()) {
+              await indexDocument(
+                esClient,
+                MESSAGES_INDEX,
+                String(aiMessage.id),
+                {
+                  message_id: String(aiMessage.id),
+                  chat_id: aiMessage.chatId,
+                  session_id: null,
+                  sender: aiMessage.sender,
+                  text: aiMessage.text,
+                  timestamp: aiMessage.timestamp,
+                  promptTokens: aiMessage.promptTokens,
+                  completionTokens: aiMessage.completionTokens,
+                  isTruncated: isTruncated,
+                  chat_name: chatData.name ?? null,
+                  tags: chatData.tags ?? null,
+                  client_name: null,
+                  session_name: null,
+                }
+              );
+              console.log(
+                `[API ES] Indexed AI message ${aiMessage.id} for standalone chat ${chatData.id}.`
+              );
+            }
             console.log(
               `[API ProcessStream Finally ${chatData.id}] Saved AI message (length: ${cleanedAiText.length}) to DB.`
             );
@@ -633,6 +644,7 @@ export const addStandaloneChatMessage = async ({
             sseController.close();
           } catch {}
         }
+        unregisterVaultStream();
         console.log(
           `[API ProcessStream Finally ${chatData.id}] Stream cleanup finished.`
         );
@@ -784,13 +796,16 @@ export const deleteStandaloneChat = async ({
       throw new NotFoundError(`Chat ${chatData.id} not found during deletion.`);
     }
 
-    // Delete associated messages from Elasticsearch
-    await deleteByQuery(esClient, MESSAGES_INDEX, {
-      term: { chat_id: chatData.id },
-    });
-    console.log(
-      `[API ES] Deleted Elasticsearch messages for standalone chat ${chatData.id}.`
-    );
+    // Delete associated messages from Elasticsearch (vault mode: FTS
+    // triggers clean the in-database index as rows cascade).
+    if (!getVaultManager().isProtectionActive()) {
+      await deleteByQuery(esClient, MESSAGES_INDEX, {
+        term: { chat_id: chatData.id },
+      });
+      console.log(
+        `[API ES] Deleted Elasticsearch messages for standalone chat ${chatData.id}.`
+      );
+    }
 
     console.log(`[API] Deleted standalone chat ${chatData.id}`);
     set.status = 200;

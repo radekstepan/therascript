@@ -14,7 +14,10 @@ import {
 } from '@radix-ui/themes';
 import * as Toast from '@radix-ui/react-toast';
 import { Cross2Icon, ExclamationTriangleIcon } from '@radix-ui/react-icons';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useVaultStatus } from './hooks/useVaultStatus';
+import { VaultScreen } from './components/Vault/VaultScreen';
+import { installVaultUnauthorizedHandler } from './api/vault';
 
 // Page Components
 import { LandingPage } from './components/LandingPage/LandingPage';
@@ -174,12 +177,34 @@ function App() {
   const [isSystemReady, setIsSystemReady] = useAtom(isSystemReadyAtom);
   const [isRestarting, setIsRestarting] = useAtom(isRestartingAtom);
 
+  // Vault gate: unauthenticated browsers land on the vault screen;
+  // legacy-fallback boots skip the gate entirely.
+  const queryClient = useQueryClient();
+  const {
+    vault,
+    isLoading: isVaultLoading,
+    refresh: refreshVault,
+  } = useVaultStatus();
+  const vaultGateOpen = vault.legacyFallback || vault.authenticated;
+
+  useEffect(() => {
+    if (vault.authenticated || vault.legacyFallback) return;
+    // Leaving (or never entering) the app: drop every cached query so no
+    // protected data survives next to the vault screen.
+    queryClient.clear();
+  }, [vault.authenticated, vault.legacyFallback, queryClient]);
+
+  useEffect(() => installVaultUnauthorizedHandler(queryClient), [queryClient]);
+
   const { data: readinessStatus, error: readinessError } = useQuery<
     ReadinessStatus,
     Error
   >({
     queryKey: ['systemReadiness'],
     queryFn: fetchReadinessStatus,
+    // Locked vault: the server short-circuits readiness to 503 anyway;
+    // don't poll a meaningless answer under the lock screen.
+    enabled: vaultGateOpen,
     refetchInterval: (query) => {
       const data = query.state.data;
       // If ready, stop polling. If not, poll every 3 seconds.
@@ -282,6 +307,47 @@ function App() {
       setToastMessageAtom(null);
     }
   };
+
+  if (isVaultLoading) {
+    return (
+      <Toast.Provider swipeDirection="right">
+        <RadixTheme
+          appearance={effectiveTheme}
+          accentColor={currentAccentColor}
+          panelBackground="solid"
+          radius="medium"
+          scaling="100%"
+          className={effectiveTheme === 'dark' ? 'custom-dark-theme' : ''}
+        >
+          <Flex
+            align="center"
+            justify="center"
+            style={{ position: 'fixed', inset: 0 }}
+          >
+            <Spinner size="3" />
+          </Flex>
+        </RadixTheme>
+      </Toast.Provider>
+    );
+  }
+
+  if (!vaultGateOpen) {
+    return (
+      <Toast.Provider swipeDirection="right">
+        <RadixTheme
+          appearance={effectiveTheme}
+          accentColor={currentAccentColor}
+          panelBackground="solid"
+          radius="medium"
+          scaling="100%"
+          className={effectiveTheme === 'dark' ? 'custom-dark-theme' : ''}
+        >
+          <GeneratedBackground />
+          <VaultScreen vault={vault} onAuthed={refreshVault} />
+        </RadixTheme>
+      </Toast.Provider>
+    );
+  }
 
   return (
     <Toast.Provider swipeDirection="right">

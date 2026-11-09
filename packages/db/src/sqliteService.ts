@@ -1,13 +1,66 @@
 // packages/db/src/sqliteService.ts
-import Database, {
-  type Database as DB,
-  type Transaction,
-} from 'better-sqlite3';
+import Database from 'better-sqlite3-multiple-ciphers';
 import path from 'node:path';
 import fs from 'node:fs';
 import { getConfig } from './config.js';
-import type { DbRunResult, DbStatement } from './types.js';
+import type { DbDatabase, DbRunResult, DbStatement } from './types.js';
 import { validateDatabaseSchema } from './schemaValidation.js';
+import { VaultLockedError, toFts5Query } from '@therascript/vault';
+
+export { VaultLockedError };
+export type { DbDatabase as SQLiteDatabase } from './types.js';
+
+/**
+ * True when the loaded binding can key databases. The binding is
+ * better-sqlite3-multiple-ciphers (SQLite3MultipleCiphers, default cipher);
+ * stock better-sqlite3 has no `key()` method, so a capability check — not
+ * a version sniff — tells them apart. The server uses this to decide
+ * between vault boot and the legacy-plaintext fallback (fail closed
+ * whenever a vault generation already exists).
+ */
+export function detectCipherSupport(): boolean {
+  const probe = new Database(':memory:');
+  try {
+    return typeof probe.key === 'function';
+  } catch {
+    return false;
+  } finally {
+    probe.close();
+  }
+}
+
+/** Plain open of a legacy (pre-vault) database file for migration reads. */
+export function openLegacyDatabase(filename: string): DbDatabase {
+  return new Database(filename);
+}
+
+/**
+ * Legacy migration primitive: byte-copies a quiesced plaintext database
+ * (the caller checkpoints the WAL first so the main file is complete) and
+ * encrypts the copy in place with the vault data key. Only the main file
+ * travels — sidecars stay behind. The copy preserves the source schema
+ * version, tables, indexes, triggers, and FTS5 content.
+ *
+ * The plaintext copy exists briefly inside the staging directory; crash
+ * recovery discards unsealed staged generations, so an interrupted
+ * migration never leaves a live plaintext vault file.
+ */
+export function copyPlaintextDbAndRekey(
+  stagedDbPath: string,
+  legacyDbPath: string,
+  key: Buffer
+): void {
+  if (!Buffer.isBuffer(key) || key.length !== 32) {
+    throw new Error('Invalid database key');
+  }
+  fs.copyFileSync(legacyDbPath, stagedDbPath);
+  const connection = new Database(stagedDbPath);
+  try {
+    connection.rekey(key);
+  } finally {
+    connection.close();
+  }
+}
 
 // MODIFIED: We will no longer hash this entire block.
 // It now represents the initial state of the database schema (Version 1).
@@ -95,7 +148,7 @@ export const schema = `
 `;
 
 // --- NEW MIGRATION LOGIC ---
-export const LATEST_SCHEMA_VERSION = 24;
+export const LATEST_SCHEMA_VERSION = 25;
 
 // --- NEW SYSTEM PROMPTS ---
 export const SYSTEM_PROMPT_TEMPLATES = {
@@ -286,7 +339,7 @@ Respond with ONLY a valid JSON object (no markdown fences, no commentary) matchi
 }`,
 ];
 
-function seedSystemTemplates(dbInstance: DB) {
+function seedSystemTemplates(dbInstance: DbDatabase) {
   console.log('[db Seeder] Checking for system prompt templates...');
   const checkStmt = dbInstance.prepare(
     'SELECT text FROM templates WHERE title = ?'
@@ -334,7 +387,89 @@ function seedSystemTemplates(dbInstance: DB) {
   }
 }
 
-function runMigrations(dbInstance: DB) {
+// --- FTS5 SEARCH INDEXES ---
+//
+// External-content FTS5 tables over `transcript_paragraphs` and
+// `messages`. The triggers keep the index in the same transaction as
+// the source write, so search results can never drift from the vault
+// contents. Porter stemming approximates the Elasticsearch `text.stem`
+// sub-field; fuzzy matching is a known gap.
+export const TRANSCRIPT_SEARCH_TABLE_SQL = `
+CREATE VIRTUAL TABLE IF NOT EXISTS transcript_search USING fts5(
+  text,
+  content = 'transcript_paragraphs',
+  content_rowid = 'rowid',
+  tokenize = 'porter unicode61'
+);
+CREATE TRIGGER IF NOT EXISTS transcript_search_ai AFTER INSERT ON transcript_paragraphs BEGIN
+  INSERT INTO transcript_search(rowid, text) VALUES (new.rowid, new.text);
+END;
+CREATE TRIGGER IF NOT EXISTS transcript_search_ad AFTER DELETE ON transcript_paragraphs BEGIN
+  INSERT INTO transcript_search(transcript_search, rowid, text) VALUES ('delete', old.rowid, old.text);
+END;
+CREATE TRIGGER IF NOT EXISTS transcript_search_au AFTER UPDATE ON transcript_paragraphs BEGIN
+  INSERT INTO transcript_search(transcript_search, rowid, text) VALUES ('delete', old.rowid, old.text);
+  INSERT INTO transcript_search(rowid, text) VALUES (new.rowid, new.text);
+END;
+`;
+
+export const MESSAGE_SEARCH_TABLE_SQL = `
+CREATE VIRTUAL TABLE IF NOT EXISTS message_search USING fts5(
+  text,
+  content = 'messages',
+  content_rowid = 'rowid',
+  tokenize = 'porter unicode61'
+);
+CREATE TRIGGER IF NOT EXISTS message_search_ai AFTER INSERT ON messages BEGIN
+  INSERT INTO message_search(rowid, text) VALUES (new.rowid, new.text);
+END;
+CREATE TRIGGER IF NOT EXISTS message_search_ad AFTER DELETE ON messages BEGIN
+  INSERT INTO message_search(message_search, rowid, text) VALUES ('delete', old.rowid, old.text);
+END;
+CREATE TRIGGER IF NOT EXISTS message_search_au AFTER UPDATE ON messages BEGIN
+  INSERT INTO message_search(message_search, rowid, text) VALUES ('delete', old.rowid, old.text);
+  INSERT INTO message_search(rowid, text) VALUES (new.rowid, new.text);
+END;
+`;
+
+/**
+ * Creates the FTS5 search tables + triggers when their content tables
+ * exist. Idempotent (IF NOT EXISTS throughout) so the V25 migrator, the
+ * staged-import path, and the admin rebuild can all call it safely.
+ */
+export function ensureFtsSearchTables(
+  connection: DbDatabase,
+  logPrefix = '[db FTS]'
+): void {
+  const tables = (
+    connection
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+      .all() as { name: string }[]
+  ).map((row) => row.name);
+  if (tables.includes('transcript_paragraphs')) {
+    connection.exec(TRANSCRIPT_SEARCH_TABLE_SQL);
+  } else {
+    console.log(
+      `${logPrefix} Skipping transcript_search (no transcript_paragraphs table).`
+    );
+  }
+  if (tables.includes('messages')) {
+    connection.exec(MESSAGE_SEARCH_TABLE_SQL);
+  } else {
+    console.log(`${logPrefix} Skipping message_search (no messages table).`);
+  }
+}
+
+function ftsTableExists(connection: DbDatabase, table: string): boolean {
+  const row = connection
+    .prepare(
+      "SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = ?"
+    )
+    .get(table) as { ok: number } | undefined;
+  return row?.ok === 1;
+}
+
+function runMigrations(dbInstance: DbDatabase) {
   let currentVersion = dbInstance.pragma('user_version', {
     simple: true,
   }) as number;
@@ -1255,6 +1390,37 @@ function runMigrations(dbInstance: DB) {
         currentVersion = 24;
         console.log('[db Migrator] Version 24 applied.');
       }
+
+      // NEW MIGRATION: Version 25 replaces the Elasticsearch transcript
+      // and message indexes with FTS5 virtual tables inside SQLite, so
+      // search no longer keeps a second plaintext copy of protected text
+      // outside the vault database. Content-sync
+      // triggers keep the indexes current in the same transaction as
+      // the source writes.
+      if (currentVersion < 25) {
+        console.log('[db Migrator] Applying version 25...');
+        ensureFtsSearchTables(dbInstance, /* logPrefix */ '[db Migrator V25]');
+        const v25Tables = (
+          dbInstance
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+            .all() as { name: string }[]
+        ).map((row) => row.name);
+        // Backfill the indexes from existing rows. Fresh installs have no
+        // rows yet, so the rebuild is a no-op there.
+        if (v25Tables.includes('transcript_search')) {
+          dbInstance.exec(
+            `INSERT INTO transcript_search(transcript_search) VALUES('rebuild')`
+          );
+        }
+        if (v25Tables.includes('message_search')) {
+          dbInstance.exec(
+            `INSERT INTO message_search(message_search) VALUES('rebuild')`
+          );
+        }
+        dbInstance.pragma(`user_version = 25`);
+        currentVersion = 25;
+        console.log('[db Migrator] Version 25 applied.');
+      }
     })();
     console.log(
       `[db Migrator] Migrations complete. Database is now at version ${currentVersion}.`
@@ -1265,40 +1431,137 @@ function runMigrations(dbInstance: DB) {
 }
 // --- END NEW MIGRATION LOGIC ---
 
-let dbInstance: DB | null = null;
+let dbInstance: DbDatabase | null = null;
 // REMOVED: const SCHEMA_HASH_KEY = 'schema_md5_v2';
 
-const getDb = (): DB => {
-  if (dbInstance === null) {
-    const { dbPath, isDev } = getConfig();
-    const dbDir = path.dirname(dbPath);
+/** Injectable cipher-capable constructor (defaults to the fork import). */
+export type SqliteDatabaseConstructor = new (
+  filename: string,
+  options?: Record<string, unknown>
+) => DbDatabase;
 
-    if (!fs.existsSync(dbDir)) {
-      console.log(`[db]: Creating database directory: ${dbDir}`);
-      fs.mkdirSync(dbDir, { recursive: true });
-    }
+export interface OpenVaultDbOptions {
+  /**
+   * Defaults to the `better-sqlite3-multiple-ciphers` import. Tests
+   * inject the stock `better-sqlite3` constructor to prove the
+   * plaintext binding fails closed.
+   */
+  databaseConstructor?: SqliteDatabaseConstructor;
+  /** Opening an existing vault fails when the file is missing. */
+  fileMustExist?: boolean;
+}
 
-    console.log(
-      `[db]: Initializing SQLite database connection for: ${dbPath} `
-    );
-    try {
-      dbInstance = new Database(dbPath, {
-        verbose: isDev ? console.log : undefined,
-      });
-      console.log(`[db]: Successfully connected to database: ${dbPath} `);
-      initializeDatabase(dbInstance);
-    } catch (err) {
-      console.error(
-        `[db]: FATAL: Could not connect or initialize database at ${dbPath}: `,
-        (err as Error).message
+/**
+ * Opens an existing vault database with its 32-byte data key. Fails
+ * closed when the binding cannot key databases, when the key is wrong
+ * (unreadable header), or when the file is missing. Never enables SQL
+ * tracing on keyed connections.
+ */
+export function openVaultDb(
+  filename: string,
+  key: Buffer,
+  options: OpenVaultDbOptions = {}
+): DbDatabase {
+  if (!Buffer.isBuffer(key) || key.length !== 32) {
+    throw new Error('Invalid database key');
+  }
+  const Ctor = options.databaseConstructor ?? Database;
+  const connection = new Ctor(filename, {
+    fileMustExist: options.fileMustExist ?? true,
+  });
+  try {
+    // Capability check, not a version sniff: stock better-sqlite3 has no
+    // `key()` method, so a plaintext binding fails closed here instead
+    // of opening the vault as (garbage) plaintext. The raw key travels
+    // as a Buffer argument, never inside SQL text (nothing to leak
+    // through query tracing or logs).
+    if (typeof connection.key !== 'function') {
+      throw new Error(
+        'Cipher support is required (better-sqlite3-multiple-ciphers)'
       );
-      process.exit(1);
     }
+    connection.key(key);
+    connection.prepare('SELECT count(*) FROM sqlite_schema').get();
+    connection.pragma('temp_store = MEMORY');
+    connection.pragma('journal_mode = WAL');
+    connection.pragma('busy_timeout = 5000');
+    connection.pragma('foreign_keys = ON');
+    return connection;
+  } catch (error) {
+    connection.close();
+    throw error;
+  }
+}
+
+/**
+ * Creates a brand-new vault database: same keying handshake as
+ * openVaultDb (without fileMustExist), then full schema initialization.
+ */
+export function createVaultDb(
+  filename: string,
+  key: Buffer,
+  options: Omit<OpenVaultDbOptions, 'fileMustExist'> = {}
+): DbDatabase {
+  const connection = openVaultDb(filename, key, {
+    ...options,
+    fileMustExist: false,
+  });
+  try {
+    initializeDatabase(connection);
+    return connection;
+  } catch (error) {
+    connection.close();
+    throw error;
+  }
+}
+
+/** Attaches an already-open, already-keyed connection as the global db. */
+export function attachUnlockedDb(connection: DbDatabase): void {
+  if (dbInstance) throw new Error('Database is already attached');
+  dbInstance = connection;
+}
+
+export function isDbUnlocked(): boolean {
+  return dbInstance !== null && dbInstance.open;
+}
+
+function openLegacyPlaintextDb(dbPath: string, isDev: boolean): DbDatabase {
+  const dbDir = path.dirname(dbPath);
+
+  if (!fs.existsSync(dbDir)) {
+    console.log(`[db]: Creating database directory: ${dbDir}`);
+    fs.mkdirSync(dbDir, { recursive: true });
+  }
+
+  console.log(`[db]: Initializing SQLite database connection for: ${dbPath} `);
+  try {
+    const connection = new Database(dbPath, {
+      verbose: isDev ? console.log : undefined,
+    });
+    console.log(`[db]: Successfully connected to database: ${dbPath} `);
+    initializeDatabase(connection);
+    return connection;
+  } catch (err) {
+    console.error(
+      `[db]: FATAL: Could not connect or initialize database at ${dbPath}: `,
+      (err as Error).message
+    );
+    process.exit(1);
+  }
+}
+
+const getDb = (): DbDatabase => {
+  if (dbInstance === null) {
+    const { dbPath, isDev, mode } = getConfig();
+    if (mode !== 'legacy-plaintext') {
+      throw new VaultLockedError();
+    }
+    dbInstance = openLegacyPlaintextDb(dbPath, isDev);
   }
   return dbInstance;
 };
 
-const dbProxyHandler: ProxyHandler<DB> = {
+const dbProxyHandler: ProxyHandler<DbDatabase> = {
   get(target, prop, receiver) {
     const db = getDb();
     const value = Reflect.get(db, prop, receiver);
@@ -1309,7 +1572,34 @@ const dbProxyHandler: ProxyHandler<DB> = {
   },
 };
 
-export const db: DB = new Proxy({} as DB, dbProxyHandler);
+export const db: DbDatabase = new Proxy({} as DbDatabase, dbProxyHandler);
+
+/**
+ * Cross-package prepared-statement registry. Repository modules that cache
+ * `db.prepare()` handles at module scope register a clearer here so
+ * lock/restore (which close and reopen the database) never leave stale
+ * statements bound to a dead connection (clear prepared-statement
+ * caches when detaching the database).
+ */
+const statementCacheClearCallbacks = new Set<() => void>();
+
+export function registerStatementCacheClear(callback: () => void): () => void {
+  statementCacheClearCallbacks.add(callback);
+  return () => {
+    statementCacheClearCallbacks.delete(callback);
+  };
+}
+
+function clearAllStatementCaches(): void {
+  statementCache.clear();
+  for (const callback of statementCacheClearCallbacks) {
+    try {
+      callback();
+    } catch (error) {
+      console.error('[db]: Statement cache clear callback failed:', error);
+    }
+  }
+}
 
 export function closeDb(): void {
   if (dbInstance && dbInstance.open) {
@@ -1318,7 +1608,7 @@ export function closeDb(): void {
       dbInstance.close();
       console.log('[db]: Database connection closed.');
       dbInstance = null; // Important to reset
-      statementCache.clear();
+      clearAllStatementCaches();
     } catch (error) {
       console.error('[db]: Error closing the database connection:', error);
     }
@@ -1326,7 +1616,7 @@ export function closeDb(): void {
 }
 
 // MODIFIED: initializeDatabase now runs migrations and seeds system prompts
-export function initializeDatabase(dbInstance: DB) {
+export function initializeDatabase(dbInstance: DbDatabase) {
   console.log('[db Init Func]: Attempting to initialize schema...');
   try {
     dbInstance.pragma('journal_mode = WAL');
@@ -1407,12 +1697,273 @@ export function all<T = any>(sql: string, ...params: any[]): T[] {
 export function exec(sql: string): void {
   getDb().exec(sql);
 }
-export function transaction<F extends (...args: any[]) => any>(
-  fn: F
-): Transaction<F> {
-  return getDb().transaction(fn);
+export function transaction<F extends (...args: any[]) => any>(fn: F): F {
+  // The driver preserves the input signature at runtime; the interface
+  // types the wrapper loosely to stay binding-agnostic.
+  return getDb().transaction(fn) as F;
 }
 
 export const checkDatabaseHealth = (): void => {
   getDb().pragma('quick_check');
 };
+
+// --- FTS5 SEARCH ---
+
+export interface FtsTranscriptHit {
+  /** transcript_paragraphs row id (ES `paragraph_index` parity). */
+  paragraphId: number;
+  sessionId: number;
+  paragraphIndex: number;
+  timestampMs: number;
+  clientName: string | null;
+  /**
+   * Snippet with `<mark>` highlights. Unlike the old Elasticsearch path
+   * (encoder: html), FTS5 does NOT escape the text: callers must escape
+   * transcript text before rendering.
+   */
+  excerpt: string;
+  /** bm25 rank (lower is more relevant); null for filter-only fallback. */
+  rank: number | null;
+}
+
+export interface FtsMessageHit {
+  messageId: number;
+  chatId: number;
+  sessionId: number | null;
+  sender: string;
+  timestamp: number;
+  excerpt: string;
+  rank: number | null;
+  clientName: string | null;
+  chatName: string | null;
+  tags: string | null;
+}
+
+export interface FtsSearchOptions {
+  /** Raw user input; translated to a safe MATCH query via toFts5Query. */
+  query: string;
+  limit?: number;
+  offset?: number;
+  clientName?: string | null;
+  sessionIds?: number[] | null;
+}
+
+export interface FtsSearchResult<T> {
+  rows: T[];
+  total: number;
+}
+
+function normalizeFtsPaging(options: FtsSearchOptions): {
+  limit: number;
+  offset: number;
+} {
+  const limit = Math.min(100, Math.max(1, Math.floor(options.limit ?? 20)));
+  const offset = Math.max(0, Math.floor(options.offset ?? 0));
+  return { limit, offset };
+}
+
+/**
+ * Transcript search over the FTS5 index. When the input has no searchable
+ * terms but filters are present, falls back to a plain recency-ordered
+ * query (mirrors the old Elasticsearch match_all-with-filters path).
+ */
+export function searchTranscriptsFts(
+  connection: DbDatabase,
+  options: FtsSearchOptions
+): FtsSearchResult<FtsTranscriptHit> {
+  const { limit, offset } = normalizeFtsPaging(options);
+  const clientName = options.clientName ?? null;
+  const sessionIds = (options.sessionIds ?? []).filter((id) =>
+    Number.isInteger(id)
+  );
+  const match = ftsTableExists(connection, 'transcript_search')
+    ? toFts5Query(options.query)
+    : null;
+
+  if (!match) {
+    if (!clientName && sessionIds.length === 0) return { rows: [], total: 0 };
+    return searchTranscriptsFallback(connection, {
+      limit,
+      offset,
+      clientName,
+      sessionIds,
+    });
+  }
+
+  const filters: string[] = [];
+  const params: unknown[] = [match];
+  if (clientName !== null) {
+    filters.push('s.clientName = ?');
+    params.push(clientName);
+  }
+  if (sessionIds.length > 0) {
+    filters.push(`p.sessionId IN (${sessionIds.map(() => '?').join(', ')})`);
+    params.push(...sessionIds);
+  }
+  const where = filters.length > 0 ? `AND ${filters.join(' AND ')}` : '';
+  const totalRow = connection
+    .prepare(
+      `SELECT COUNT(*) AS total
+       FROM transcript_search
+       JOIN transcript_paragraphs AS p ON p.rowid = transcript_search.rowid
+       JOIN sessions AS s ON s.id = p.sessionId
+       WHERE transcript_search MATCH ? ${where}`
+    )
+    .get(...params) as { total: number };
+  const rows = connection
+    .prepare(
+      `SELECT p.id AS paragraphId, p.sessionId AS sessionId,
+              p.paragraphIndex AS paragraphIndex, p.timestampMs AS timestampMs,
+              s.clientName AS clientName,
+              snippet(transcript_search, 0, '<mark>', '</mark>', '…', 24) AS excerpt,
+              bm25(transcript_search) AS rank
+       FROM transcript_search
+       JOIN transcript_paragraphs AS p ON p.rowid = transcript_search.rowid
+       JOIN sessions AS s ON s.id = p.sessionId
+       WHERE transcript_search MATCH ? ${where}
+       ORDER BY rank
+       LIMIT ? OFFSET ?`
+    )
+    .all(...params, limit, offset) as FtsTranscriptHit[];
+  return { rows, total: totalRow.total };
+}
+
+function searchTranscriptsFallback(
+  connection: DbDatabase,
+  options: {
+    limit: number;
+    offset: number;
+    clientName: string | null;
+    sessionIds: number[];
+  }
+): FtsSearchResult<FtsTranscriptHit> {
+  const filters: string[] = [];
+  const params: unknown[] = [];
+  if (options.clientName !== null) {
+    filters.push('s.clientName = ?');
+    params.push(options.clientName);
+  }
+  if (options.sessionIds.length > 0) {
+    filters.push(
+      `p.sessionId IN (${options.sessionIds.map(() => '?').join(', ')})`
+    );
+    params.push(...options.sessionIds);
+  }
+  const where = `WHERE ${filters.join(' AND ')}`;
+  const totalRow = connection
+    .prepare(
+      `SELECT COUNT(*) AS total FROM transcript_paragraphs AS p
+       JOIN sessions AS s ON s.id = p.sessionId ${where}`
+    )
+    .get(...params) as { total: number };
+  const rows = connection
+    .prepare(
+      `SELECT p.id AS paragraphId, p.sessionId AS sessionId,
+              p.paragraphIndex AS paragraphIndex, p.timestampMs AS timestampMs,
+              s.clientName AS clientName,
+              substr(p.text, 1, 200) AS excerpt, NULL AS rank
+       FROM transcript_paragraphs AS p
+       JOIN sessions AS s ON s.id = p.sessionId ${where}
+       ORDER BY p.timestampMs DESC
+       LIMIT ? OFFSET ?`
+    )
+    .all(...params, options.limit, options.offset) as FtsTranscriptHit[];
+  return { rows, total: totalRow.total };
+}
+
+/** Chat-message search over the FTS5 index (same fallback contract). */
+export function searchMessagesFts(
+  connection: DbDatabase,
+  options: FtsSearchOptions
+): FtsSearchResult<FtsMessageHit> {
+  const { limit, offset } = normalizeFtsPaging(options);
+  const clientName = options.clientName ?? null;
+  const match = ftsTableExists(connection, 'message_search')
+    ? toFts5Query(options.query)
+    : null;
+
+  if (!match) {
+    if (!clientName) return { rows: [], total: 0 };
+    const totalRow = connection
+      .prepare(
+        `SELECT COUNT(*) AS total FROM messages AS m
+         JOIN chats AS c ON c.id = m.chatId
+         LEFT JOIN sessions AS s ON s.id = c.sessionId
+         WHERE s.clientName = ?`
+      )
+      .get(clientName) as { total: number };
+    const rows = connection
+      .prepare(
+        `SELECT m.id AS messageId, m.chatId AS chatId, c.sessionId AS sessionId,
+                m.sender AS sender, m.timestamp AS timestamp,
+                substr(m.text, 1, 200) AS excerpt, NULL AS rank,
+                s.clientName AS clientName, c.name AS chatName, c.tags AS tags
+         FROM messages AS m
+         JOIN chats AS c ON c.id = m.chatId
+         LEFT JOIN sessions AS s ON s.id = c.sessionId
+         WHERE s.clientName = ?
+         ORDER BY m.timestamp DESC
+         LIMIT ? OFFSET ?`
+      )
+      .all(clientName, limit, offset) as FtsMessageHit[];
+    return { rows, total: totalRow.total };
+  }
+
+  const filters: string[] = [];
+  const params: unknown[] = [match];
+  if (clientName !== null) {
+    filters.push('s.clientName = ?');
+    params.push(clientName);
+  }
+  const where = filters.length > 0 ? `AND ${filters.join(' AND ')}` : '';
+  const totalRow = connection
+    .prepare(
+      `SELECT COUNT(*) AS total
+       FROM message_search
+       JOIN messages AS m ON m.rowid = message_search.rowid
+       JOIN chats AS c ON c.id = m.chatId
+       LEFT JOIN sessions AS s ON s.id = c.sessionId
+       WHERE message_search MATCH ? ${where}`
+    )
+    .get(...params) as { total: number };
+  const rows = connection
+    .prepare(
+      `SELECT m.id AS messageId, m.chatId AS chatId, c.sessionId AS sessionId,
+              m.sender AS sender, m.timestamp AS timestamp,
+              snippet(message_search, 0, '<mark>', '</mark>', '…', 24) AS excerpt,
+              bm25(message_search) AS rank,
+              s.clientName AS clientName, c.name AS chatName, c.tags AS tags
+       FROM message_search
+       JOIN messages AS m ON m.rowid = message_search.rowid
+       JOIN chats AS c ON c.id = m.chatId
+       LEFT JOIN sessions AS s ON s.id = c.sessionId
+       WHERE message_search MATCH ? ${where}
+       ORDER BY rank
+       LIMIT ? OFFSET ?`
+    )
+    .all(...params, limit, offset) as FtsMessageHit[];
+  return { rows, total: totalRow.total };
+}
+
+/**
+ * Rebuilds the transcript FTS index from source (used by the import path).
+ * Ensures the tables exist first so staged databases self-heal.
+ */
+export function rebuildTranscriptSearch(connection?: DbDatabase): void {
+  const db = connection ?? getDb();
+  ensureFtsSearchTables(db);
+  db.exec(`INSERT INTO transcript_search(transcript_search) VALUES('rebuild')`);
+}
+
+/** Rebuilds the message FTS index from source. */
+export function rebuildMessageSearch(connection?: DbDatabase): void {
+  const db = connection ?? getDb();
+  ensureFtsSearchTables(db);
+  db.exec(`INSERT INTO message_search(message_search) VALUES('rebuild')`);
+}
+
+/** Rebuilds both FTS indexes (admin reindex replacement). */
+export function rebuildAllSearchIndexes(connection?: DbDatabase): void {
+  rebuildTranscriptSearch(connection);
+  rebuildMessageSearch(connection);
+}

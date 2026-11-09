@@ -87,6 +87,47 @@ export class ConflictError extends ApiError {
 }
 
 /**
+ * Represents a 401 Unauthorized error.
+ * Used when the vault is locked (or the session is missing/invalid) and
+ * when a vault/backup password is incorrect.
+ */
+export class UnauthorizedError extends ApiError {
+  constructor(
+    message: string = 'Unauthorized',
+    details?: string | Record<string, any>
+  ) {
+    super(401, message, details);
+  }
+}
+
+/**
+ * Represents a 403 Forbidden error.
+ * Used when the request origin is not allowlisted for a state-changing
+ * vault operation.
+ */
+export class ForbiddenError extends ApiError {
+  constructor(
+    message: string = 'Forbidden',
+    details?: string | Record<string, any>
+  ) {
+    super(403, message, details);
+  }
+}
+
+/**
+ * Represents a 429 Too Many Requests error.
+ * Used when vault unlock/setup attempts exceed the rate limit.
+ */
+export class TooManyRequestsError extends ApiError {
+  constructor(
+    message: string = 'Too many requests',
+    details?: string | Record<string, any>
+  ) {
+    super(429, message, details);
+  }
+}
+
+/**
  * Represents a 500 Internal Server Error.
  * Used for unexpected server-side issues where the server cannot fulfill a valid request.
  * Avoid exposing sensitive details in production environments.

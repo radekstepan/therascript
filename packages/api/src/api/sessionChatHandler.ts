@@ -45,6 +45,7 @@ import {
   recommendContextSize,
 } from '../services/contextUsageService.js';
 import { stripSpeakerLabelsFromHistory } from '../services/speakerLabelUtils.js';
+import { getVaultManager } from '../services/vaultManager.js';
 import {
   getConfiguredContextSize,
   getActiveModel,
@@ -132,21 +133,25 @@ export const addSessionChatMessage = async ({
       trimmedText
     );
 
-    await indexDocument(esClient, MESSAGES_INDEX, String(userMessage.id), {
-      message_id: String(userMessage.id),
-      chat_id: userMessage.chatId,
-      session_id: sessionData.id,
-      sender: userMessage.sender,
-      text: userMessage.text,
-      timestamp: userMessage.timestamp,
-      client_name: sessionData.clientName,
-      session_name: sessionData.sessionName,
-      chat_name: null,
-      tags: null,
-    });
-    console.log(
-      `[API ES] Indexed User message ${userMessage.id} for session chat ${chatData.id}.`
-    );
+    // Vault mode keeps no Elasticsearch index; the FTS triggers index
+    // the row in the same transaction as the SQLite write above.
+    if (!getVaultManager().isProtectionActive()) {
+      await indexDocument(esClient, MESSAGES_INDEX, String(userMessage.id), {
+        message_id: String(userMessage.id),
+        chat_id: userMessage.chatId,
+        session_id: sessionData.id,
+        sender: userMessage.sender,
+        text: userMessage.text,
+        timestamp: userMessage.timestamp,
+        client_name: sessionData.clientName,
+        session_name: sessionData.sessionName,
+        chat_name: null,
+        tags: null,
+      });
+      console.log(
+        `[API ES] Indexed User message ${userMessage.id} for session chat ${chatData.id}.`
+      );
+    }
 
     const transcriptString = transcriptRepository.getTranscriptTextForSession(
       sessionData.id,
@@ -265,6 +270,9 @@ export const addSessionChatMessage = async ({
     // only this controller, which we abort manually on write failure, will stop
     // the underlying fetch to LM Studio and interrupt generation.
     const llmAbortController = new AbortController();
+    // Vault lock aborts in-flight generations through the same controller.
+    const unregisterVaultStream =
+      getVaultManager().registerStream(llmAbortController);
 
     let modelUnloaded = false;
     const triggerUnload = () => {
@@ -578,29 +586,32 @@ export const addSessionChatMessage = async ({
               getActiveModel()
             );
 
-            await indexDocument(
-              esClient,
-              MESSAGES_INDEX,
-              String(aiMessage.id),
-              {
-                message_id: String(aiMessage.id),
-                chat_id: aiMessage.chatId,
-                session_id: sessionData.id,
-                sender: aiMessage.sender,
-                text: aiMessage.text,
-                timestamp: aiMessage.timestamp,
-                promptTokens: aiMessage.promptTokens,
-                completionTokens: aiMessage.completionTokens,
-                isTruncated: isTruncated,
-                client_name: sessionData.clientName,
-                session_name: sessionData.sessionName,
-                chat_name: null,
-                tags: null,
-              }
-            );
-            console.log(
-              `[API ES] Indexed AI message ${aiMessage.id} for session chat ${chatData.id}.`
-            );
+            // Vault mode: FTS triggers index the saved row; no ES write.
+            if (!getVaultManager().isProtectionActive()) {
+              await indexDocument(
+                esClient,
+                MESSAGES_INDEX,
+                String(aiMessage.id),
+                {
+                  message_id: String(aiMessage.id),
+                  chat_id: aiMessage.chatId,
+                  session_id: sessionData.id,
+                  sender: aiMessage.sender,
+                  text: aiMessage.text,
+                  timestamp: aiMessage.timestamp,
+                  promptTokens: aiMessage.promptTokens,
+                  completionTokens: aiMessage.completionTokens,
+                  isTruncated: isTruncated,
+                  client_name: sessionData.clientName,
+                  session_name: sessionData.sessionName,
+                  chat_name: null,
+                  tags: null,
+                }
+              );
+              console.log(
+                `[API ES] Indexed AI message ${aiMessage.id} for session chat ${chatData.id}.`
+              );
+            }
             console.log(
               `[API ProcessStream Finally ${chatData.id}] Saved AI message (length: ${cleanedAiText.length}) to DB.`
             );
@@ -679,6 +690,7 @@ export const addSessionChatMessage = async ({
             sseController.close();
           } catch {}
         }
+        unregisterVaultStream();
         console.log(
           `[API ProcessStream Finally ${chatData.id}] Stream cleanup finished.`
         );
@@ -808,13 +820,16 @@ export const deleteSessionChat = async ({
         `Chat with ID ${chatData.id} not found during deletion.`
       );
 
-    // Delete associated messages from Elasticsearch
-    await deleteByQuery(esClient, MESSAGES_INDEX, {
-      term: { chat_id: chatData.id },
-    });
-    console.log(
-      `[API ES] Deleted Elasticsearch messages for session chat ${chatData.id}.`
-    );
+    // Delete associated messages from Elasticsearch (vault mode: FTS
+    // triggers clean the in-database index as rows cascade).
+    if (!getVaultManager().isProtectionActive()) {
+      await deleteByQuery(esClient, MESSAGES_INDEX, {
+        term: { chat_id: chatData.id },
+      });
+      console.log(
+        `[API ES] Deleted Elasticsearch messages for session chat ${chatData.id}.`
+      );
+    }
 
     console.log(`[API] Deleted session chat ${chatData.id}`);
     set.status = 200;

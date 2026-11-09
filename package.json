@@ -35,6 +35,7 @@
     "db:wipe": "yarn db:wipe:dev",
     "db:wipe:dev": "node --env-file=.env.api.dev ./scripts/wipe-data.js",
     "db:wipe:prod": "node --env-file=.env.api.prod ./scripts/wipe-data.js",
+    "vault:prepare-migration": "node ./scripts/prepare-vault-migration.mjs",
     "clean": "turbo run clean && rm -rf node_modules",
     "clean:dist": "turbo run clean",
     "_node_path_linux": "echo /home/susie/.nvm/versions/node/v23.10.0/bin/node",

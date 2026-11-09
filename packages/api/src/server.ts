@@ -21,18 +21,19 @@ import {
   getLoadedBaseUrls as getTrackedLoadedBaseUrls,
   clear as clearLoadedModelsTracker,
 } from './services/loadedModelsTracker.js';
-import { closeDb } from '@therascript/db';
+import { closeDb, isDbUnlocked } from '@therascript/db';
 import { closeQueues } from './services/jobQueueService.js';
 import {
   initializeIndices,
   checkEsHealth,
   closeElasticsearchClient,
 } from '@therascript/elasticsearch-client';
+import { getVaultManager } from './services/vaultManager.js';
+import { CLIENT_IP_HEADER } from './api/vaultHandler.js';
 
-configureDb({
-  dbPath: config.db.sqlitePath,
-  isDev: !config.server.isProduction,
-});
+// NOTE: configureDb() runs inside initializeServices() now — vault mode
+// must enable (recover layout, select vault vs legacy boot) before the
+// database layer is configured.
 configureFileService(config.db.uploadsDir);
 
 const ensureDirectoryExists = (dirPath: string, dirNameForLog: string) => {
@@ -79,6 +80,13 @@ async function checkLmStudioConnectionOnStartup() {
   // outcome — if LM Studio is down, the sync will detect that and clear
   // stale model + context so the UI doesn't show a phantom loaded model.
   // Never invoked from request handlers: see syncModelStateOnBoot.
+  // Skipped while the vault is locked (no database to reconcile with).
+  if (!isDbUnlocked()) {
+    console.log(
+      '[Server Startup] Vault locked: skipping active model state sync until unlock.'
+    );
+    return;
+  }
   try {
     console.log(
       '[Server Startup] Syncing active model state with LM Studio (one-shot)...'
@@ -95,7 +103,39 @@ async function checkLmStudioConnectionOnStartup() {
 
 async function initializeServices() {
   console.log('[Server Startup] Initializing services...');
+
+  // Vault first: recovers the generation layout, resumes interrupted
+  // cleanup, and selects vault vs legacy-plaintext boot. Vault mode
+  // starts HTTP locked (the database attaches on unlock); the legacy
+  // fallback keeps the historical eager-open behavior. Fails closed
+  // when a vault exists but cipher support is missing.
+  const bootMode = await getVaultManager().enable();
+  if (bootMode === 'vault') {
+    configureDb({ dbPath: config.db.sqlitePath, isDev: false });
+    console.log(
+      '[Server Startup] 🔒 Vault mode: HTTP is up but locked; unlock to attach the database.'
+    );
+  } else {
+    configureDb({
+      dbPath: config.db.sqlitePath,
+      isDev: !config.server.isProduction,
+      mode: 'legacy-plaintext',
+    });
+    console.log('[Server Startup] Legacy fallback boot: opening database.');
+    const { db } = await import('@therascript/db');
+    db.prepare('SELECT 1').get();
+  }
+
   await checkLmStudioConnectionOnStartup();
+
+  // Vault mode serves search from the in-database FTS5 indexes and keeps
+  // no Elasticsearch state; skip the ES dependency entirely.
+  if (getVaultManager().isProtectionActive()) {
+    console.log(
+      '[Server Startup] Vault mode: skipping Elasticsearch (FTS5 search).'
+    );
+    return;
+  }
 
   try {
     console.log(
@@ -140,9 +180,16 @@ const server = http.createServer(async (req, res) => {
     })
     .on('end', async () => {
       const bodyBuffer = Buffer.concat(bodyChunks);
+      // Stamp the socket address for vault rate limiting. Assigned here
+      // (not trusted from the client): any client-sent value is
+      // overwritten with the authoritative remote address.
+      const forwardedHeaders: Record<string, string | string[] | undefined> = {
+        ...req.headers,
+        [CLIENT_IP_HEADER]: req.socket.remoteAddress ?? 'unknown',
+      };
       const requestInit: RequestInit = {
         method: req.method,
-        headers: req.headers as HeadersInit,
+        headers: forwardedHeaders as HeadersInit,
         body:
           req.method !== 'GET' && req.method !== 'HEAD' && bodyBuffer.length > 0
             ? bodyBuffer
@@ -214,19 +261,35 @@ server.keepAliveTimeout = 0; // Disable keep-alive timeout if needed
 initializeServices()
   .then(() => {
     server.listen(config.server.port, config.server.host, () => {
+      const vaultMode = getVaultManager().getBootMode() ?? 'legacy-fallback';
+      const activeModel = (() => {
+        try {
+          return isDbUnlocked() ? getActiveModel() : '(locked)';
+        } catch {
+          return '(unavailable)';
+        }
+      })();
+      const configuredContext = (() => {
+        try {
+          return isDbUnlocked()
+            ? (getConfiguredContextSize() ?? 'default')
+            : '(locked)';
+        } catch {
+          return '(unavailable)';
+        }
+      })();
       console.log(`-------------------------------------------------------`);
       console.log(
         `🚀 Therapy Analyzer Backend (Elysia/Node) listening on ${config.server.host}:${config.server.port}`
       );
       console.log(`   Version: ${appVersion}`);
       console.log(`   Mode: ${config.server.nodeEnv}`);
+      console.log(`   Vault: ${vaultMode}`);
       console.log(`   CORS Origin Allowed: ${config.server.corsOrigin}`);
       console.log(`   DB Path: ${config.db.sqlitePath}`);
       console.log(`   LLM URL: ${config.llm.baseURL}`);
-      console.log(`   Active Model: ${getActiveModel()} (Active)`);
-      console.log(
-        `   Configured Context: ${getConfiguredContextSize() ?? 'default'}`
-      );
+      console.log(`   Active Model: ${activeModel} (Active)`);
+      console.log(`   Configured Context: ${configuredContext}`);
       console.log(`   Elasticsearch URL: ${config.elasticsearch.url}`);
       console.log(`-------------------------------------------------------`);
       console.log(
@@ -244,21 +307,47 @@ initializeServices()
   });
 
 let isShuttingDown = false;
+let forceExitTimer: ReturnType<typeof setTimeout> | null = null;
 async function shutdown(signal: string) {
-  if (isShuttingDown) return;
+  if (isShuttingDown) {
+    // Second signal (or a crash mid-shutdown): never trap the user in a
+    // hanging shutdown. Keys live only in process memory and die here.
+    console.log('\n[Server] Shutdown already in progress; forcing exit.');
+    process.exit(1);
+    return;
+  }
   isShuttingDown = true;
+  // Backstop above the longest graceful wait (10s request drain + model
+  // unloads + blocked keep-alive connections): the vault lock inside
+  // completes well before this; if anything hangs, exit anyway.
+  forceExitTimer = setTimeout(() => {
+    console.error('[Server] Graceful shutdown timed out; forcing exit.');
+    process.exit(1);
+  }, 25_000);
+  forceExitTimer.unref?.();
   console.log(`\n[Server] Received ${signal}. Shutting down gracefully...`);
   try {
-    await new Promise((resolve, reject) => {
+    // Stop accepting new connections, then abort active streams so
+    // server.close() cannot hang on an open SSE connection. The vault stays
+    // open here because model unload reads the active LLM settings from the
+    // database; the final lock runs after the unloads below.
+    const serverClosed = new Promise<void>((resolve, reject) => {
       server.close((err) => {
         if (err) {
           console.error('[Server] Error closing HTTP server:', err);
           return reject(err);
         }
         console.log('[Server] HTTP server closed.');
-        resolve(null);
+        resolve();
       });
     });
+    server.closeIdleConnections?.();
+    try {
+      await getVaultManager().prepareShutdown();
+    } catch (err) {
+      console.warn('[Server] Error preparing vault shutdown:', err);
+    }
+    await serverClosed;
     // Unload any loaded models before stopping the runtime
     try {
       await unloadActiveModel();
@@ -301,11 +390,20 @@ async function shutdown(signal: string) {
       console.warn('[Server] Error stopping LLM runtime:', err);
     }
     await closeQueues();
+    // Final vault lock: stops the supervised worker, closes the database,
+    // and clears keys. Runs inside the wrapper's shutdown grace window. The
+    // direct closeDb covers the legacy fallback boot.
+    try {
+      await getVaultManager().shutdown();
+    } catch (err) {
+      console.warn('[Server] Error during vault shutdown:', err);
+    }
     closeDb();
     await closeElasticsearchClient();
   } catch (err) {
     console.error('[Server] Error during graceful shutdown:', err);
   } finally {
+    if (forceExitTimer) clearTimeout(forceExitTimer);
     console.log('[Server] Shutdown complete.');
     process.exit(
       signal === 'SIGINT' ? 0 : 128 + (signal === 'SIGTERM' ? 15 : 0)

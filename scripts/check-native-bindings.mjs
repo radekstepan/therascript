@@ -36,6 +36,34 @@ for (const [pkg, binding] of Object.entries(required)) {
   }
 }
 
+// The vault's cipher-capable binding ships N-API prebuilds inside the
+// tarball (no compile step); the loader picks
+// `prebuilds/<platform>-<arch>.node`. Without that file the vault cannot
+// open and the server fails closed at boot.
+{
+  const prebuildPath = join(
+    nodeModules,
+    'better-sqlite3-multiple-ciphers',
+    'prebuilds',
+    `${process.platform}-${process.arch}.node`
+  );
+  if (!existsSync(prebuildPath)) {
+    console.error('');
+    console.error(
+      '[check-native-bindings] MISSING prebuilt binding for better-sqlite3-multiple-ciphers.'
+    );
+    console.error(`  expected: ${prebuildPath}`);
+    console.error('');
+    console.error('  This usually means one of:');
+    console.error('    1. An incomplete install. Re-run `yarn install --force`.');
+    console.error('    2. An unsupported platform/arch combo. This package ships');
+    console.error('       linux/darwin/win32 × x64/arm64 prebuilds; anything else');
+    console.error('       needs a node-gyp build from the fork repository.');
+    console.error('');
+    failed += 1;
+  }
+}
+
 if (failed > 0) {
   process.exit(1);
 }

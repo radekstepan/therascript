@@ -19,6 +19,7 @@ import {
   Spinner,
   Callout,
   Strong,
+  TextField,
 } from '@radix-ui/themes';
 import { renderMarkdownAtom } from '../store/ui/renderMarkdownAtom';
 import { LlmManagementModal } from './SessionView/Modals/LlmManagementModal';
@@ -47,10 +48,13 @@ import {
   requestReindexElasticsearch,
   requestResetAllData,
   requestImportData,
+  requestExportVaultBackup,
   requestResetTranscriptionQueue,
 } from '../api/api';
 import { cn } from '../utils';
 import { API_BASE_URL } from '../api/baseUrl';
+import { useVaultStatus } from '../hooks/useVaultStatus';
+import { changeVaultPassword, vaultErrorMessage } from '../api/vault';
 
 export function SettingsPage() {
   const [renderMarkdown, setRenderMarkdown] = useAtom(renderMarkdownAtom);
@@ -64,6 +68,14 @@ export function SettingsPage() {
   const [isImportConfirmOpen, setIsImportConfirmOpen] = useState(false);
   const [isResetQueueConfirmOpen, setIsResetQueueConfirmOpen] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
+  const [importPassword, setImportPassword] = useState('');
+  const [exportPassword, setExportPassword] = useState('');
+  const [isExporting, setIsExporting] = useState(false);
+  const [oldVaultPassword, setOldVaultPassword] = useState('');
+  const [newVaultPassword, setNewVaultPassword] = useState('');
+  const [confirmVaultPassword, setConfirmVaultPassword] = useState('');
+  const { vault } = useVaultStatus();
+  const vaultActive = !vault.legacyFallback;
 
   const resetTranscriptionQueueMutation = useMutation({
     mutationFn: requestResetTranscriptionQueue,
@@ -126,18 +138,39 @@ export function SettingsPage() {
     mutationFn: (file: File) => {
       const formData = new FormData();
       formData.append('backupFile', file);
+      if (importPassword) formData.append('backupPassword', importPassword);
       return requestImportData(formData);
     },
     onSuccess: (data) => {
       setToast(`✅ Import successful: ${data.message}`);
       queryClient.invalidateQueries();
       setImportFile(null);
+      setImportPassword('');
     },
     onError: (error: Error) => {
       setToast(`❌ Import failed: ${error.message}`);
     },
     onSettled: () => {
       setIsImportConfirmOpen(false);
+    },
+  });
+
+  const changePasswordMutation = useMutation({
+    mutationFn: ({
+      oldPassword,
+      newPassword,
+    }: {
+      oldPassword: string;
+      newPassword: string;
+    }) => changeVaultPassword(oldPassword, newPassword),
+    onSuccess: () => {
+      setToast('✅ Vault password changed.');
+      setOldVaultPassword('');
+      setNewVaultPassword('');
+      setConfirmVaultPassword('');
+    },
+    onError: (error: unknown) => {
+      setToast(`❌ Password change failed: ${vaultErrorMessage(error)}`);
     },
   });
 
@@ -160,13 +193,62 @@ export function SettingsPage() {
     window.location.href = `${API_BASE_URL}/api/admin/export-data`;
   };
 
+  const handleVaultExportClick = async () => {
+    if (!exportPassword) {
+      setToast('Enter a backup password to seal the export.');
+      return;
+    }
+    setIsExporting(true);
+    try {
+      const blob = await requestExportVaultBackup(exportPassword);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `therascript-backup-${new Date().toISOString().split('T')[0]}.tvbak`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setToast('✅ Encrypted backup downloaded.');
+      setExportPassword('');
+    } catch (error) {
+      setToast(
+        `❌ Export failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleChangePasswordClick = () => {
+    if (newVaultPassword !== confirmVaultPassword) {
+      setToast('New passwords do not match.');
+      return;
+    }
+    if (newVaultPassword.length < 8) {
+      setToast('New password must be at least 8 characters.');
+      return;
+    }
+    changePasswordMutation.mutate({
+      oldPassword: oldVaultPassword,
+      newPassword: newVaultPassword,
+    });
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
-      if (file.type === 'application/x-tar' || file.name.endsWith('.tar')) {
+      const isTar =
+        file.type === 'application/x-tar' || file.name.endsWith('.tar');
+      const isEncrypted =
+        file.name.endsWith('.tvbak') ||
+        file.type === 'application/octet-stream';
+      if (isTar || isEncrypted) {
         setImportFile(file);
       } else {
-        setToast('Invalid file type. Please select a .tar backup file.');
+        setToast(
+          'Invalid file type. Please select a .tar or .tvbak backup file.'
+        );
         setImportFile(null);
         e.target.value = '';
       }
@@ -285,6 +367,57 @@ export function SettingsPage() {
             </Box>
           </Card>
 
+          {vaultActive && (
+            <Card mb="6">
+              <Box p="4">
+                <Heading as="h2" size="5" mb="2">
+                  Vault
+                </Heading>
+                <Text as="p" size="2" color="gray" mb="4">
+                  Status: {vault.authenticated ? 'Unlocked' : vault.status}. The
+                  vault locks automatically when the app shuts down, and unlocks
+                  with your password on the next start.
+                </Text>
+                <Text as="div" size="3" weight="medium" mb="2">
+                  Change Vault Password
+                </Text>
+                <Flex direction="column" gap="2" maxWidth="360px">
+                  <TextField.Root
+                    type="password"
+                    placeholder="Current password"
+                    autoComplete="current-password"
+                    value={oldVaultPassword}
+                    onChange={(e) => setOldVaultPassword(e.target.value)}
+                  />
+                  <TextField.Root
+                    type="password"
+                    placeholder="New password (min 8 characters)"
+                    autoComplete="new-password"
+                    value={newVaultPassword}
+                    onChange={(e) => setNewVaultPassword(e.target.value)}
+                  />
+                  <TextField.Root
+                    type="password"
+                    placeholder="Confirm new password"
+                    autoComplete="new-password"
+                    value={confirmVaultPassword}
+                    onChange={(e) => setConfirmVaultPassword(e.target.value)}
+                  />
+                  <Box>
+                    <Button
+                      variant="soft"
+                      onClick={handleChangePasswordClick}
+                      disabled={changePasswordMutation.isPending}
+                    >
+                      {changePasswordMutation.isPending ? <Spinner /> : null}
+                      Change Password
+                    </Button>
+                  </Box>
+                </Flex>
+              </Box>
+            </Card>
+          )}
+
           <Card
             variant="surface"
             style={
@@ -301,13 +434,34 @@ export function SettingsPage() {
                 <Text size="3" weight="medium">
                   Export All Data
                 </Text>
-                <Button variant="soft" onClick={handleExportClick}>
-                  <DownloadIcon /> Export All Data
-                </Button>
+                {vaultActive ? (
+                  <Flex gap="2" align="center">
+                    <TextField.Root
+                      type="password"
+                      placeholder="Backup password"
+                      autoComplete="new-password"
+                      value={exportPassword}
+                      onChange={(e) => setExportPassword(e.target.value)}
+                    />
+                    <Button
+                      variant="soft"
+                      onClick={handleVaultExportClick}
+                      disabled={isExporting}
+                    >
+                      {isExporting ? <Spinner /> : <DownloadIcon />}
+                      Export Encrypted
+                    </Button>
+                  </Flex>
+                ) : (
+                  <Button variant="soft" onClick={handleExportClick}>
+                    <DownloadIcon /> Export All Data
+                  </Button>
+                )}
               </Flex>
               <Text as="p" size="2" color="gray" mb="4">
-                Download a full backup of your database and uploaded audio files
-                as a single `.tar` archive.
+                {vaultActive
+                  ? 'Download a full backup of your database and recordings as an encrypted `.tvbak` archive, sealed under the backup password.'
+                  : 'Download a full backup of your database and uploaded audio files as a single `.tar` archive.'}
               </Text>
               <Separator my="4" size="4" />
               {/* Import */}
@@ -317,7 +471,7 @@ export function SettingsPage() {
               <Flex gap="3" align="center">
                 <input
                   type="file"
-                  accept=".tar,application/x-tar"
+                  accept=".tar,application/x-tar,.tvbak,application/octet-stream"
                   onChange={handleFileChange}
                   style={{ flexGrow: 1 }}
                   className="text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-[var(--accent-a3)] file:text-[var(--accent-a11)] hover:file:bg-[var(--accent-a4)]"
@@ -331,6 +485,17 @@ export function SettingsPage() {
                   <Text ml="1">Import</Text>
                 </Button>
               </Flex>
+              {importFile?.name.endsWith('.tvbak') && (
+                <Box mt="2" maxWidth="360px">
+                  <TextField.Root
+                    type="password"
+                    placeholder="Backup password for .tvbak"
+                    autoComplete="current-password"
+                    value={importPassword}
+                    onChange={(e) => setImportPassword(e.target.value)}
+                  />
+                </Box>
+              )}
               <Callout.Root color="amber" size="1" mt="3">
                 <Callout.Icon>
                   <ExclamationTriangleIcon />

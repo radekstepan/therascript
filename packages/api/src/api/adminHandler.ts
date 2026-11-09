@@ -9,7 +9,14 @@ import {
   type MessageSource,
 } from '@therascript/elasticsearch-client';
 import config from '@therascript/config';
-import { db, SYSTEM_PROMPT_TEMPLATES } from '@therascript/db';
+import {
+  db,
+  SYSTEM_PROMPT_TEMPLATES,
+  rebuildAllSearchIndexes,
+  rebuildTranscriptSearch,
+  rebuildMessageSearch,
+  type SQLiteDatabase,
+} from '@therascript/db';
 import {
   sessionRepository,
   transcriptRepository,
@@ -25,19 +32,38 @@ import {
   verifiedStatementSchema,
   statementReviewSchema,
 } from '@therascript/domain';
-import { InternalServerError } from '../errors.js';
+import {
+  BadRequestError,
+  InternalServerError,
+  UnauthorizedError,
+} from '../errors.js';
 import type {
   BackendSession,
   TranscriptParagraphData,
   BackendChatMessage,
 } from '@therascript/domain';
 import { deleteAllUploads, getUploadsDir } from '@therascript/services';
+import {
+  encryptBackupStream,
+  decryptBackupStream,
+  isEncryptedBackup,
+  validateArchiveEntry,
+  resolveArchiveEntryPath,
+  encryptRecording,
+  decryptRecording,
+  VaultAuthError,
+  VaultFormatError,
+  VaultLockedError,
+  type VaultKdfParams,
+} from '@therascript/vault';
+import { getVaultManager } from '../services/vaultManager.js';
 import tar from 'tar-stream';
 import { z } from 'zod';
 import { Readable } from 'stream';
-import { createReadStream } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
 import path from 'node:path';
 import fs from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import os from 'node:os';
 import { pipeline } from 'node:stream/promises';
 
@@ -53,6 +79,29 @@ export interface ReindexResult {
 }
 
 export async function reindexElasticsearchService(): Promise<ReindexResult> {
+  // Vault mode has no Elasticsearch index: rebuild the in-database FTS
+  // indexes instead (same response contract for the admin UI).
+  if (getVaultManager().isProtectionActive()) {
+    console.log('[Service] Rebuilding FTS search indexes...');
+    try {
+      rebuildAllSearchIndexes();
+      const transcripts = transcriptRepository.findAll();
+      const messages = messageRepository.findAll();
+      return {
+        message: `Re-indexing complete. Transcripts: ${transcripts.length}, Messages: ${messages.length}.`,
+        transcriptsIndexed: transcripts.length,
+        messagesIndexed: messages.length,
+        errors: [],
+      };
+    } catch (error: any) {
+      return {
+        message: 'Re-indexing failed critically.',
+        transcriptsIndexed: 0,
+        messagesIndexed: 0,
+        errors: [error.message],
+      };
+    }
+  }
   console.log('[Service] Re-indexing Elasticsearch data...');
   const errors: string[] = [];
   let transcriptsIndexed = 0;
@@ -175,12 +224,16 @@ export interface ResetResult {
 
 export async function resetAllDataService(): Promise<ResetResult> {
   const errors: string[] = [];
-  try {
-    await deleteIndex(esClient, TRANSCRIPTS_INDEX).catch(() => {});
-    await deleteIndex(esClient, MESSAGES_INDEX).catch(() => {});
-    await initializeIndices(esClient);
-  } catch (e: any) {
-    errors.push(`Error resetting Elasticsearch: ${e.message || String(e)}`);
+  // Vault mode keeps no Elasticsearch index; the FTS triggers clean the
+  // in-database indexes automatically as rows are deleted below.
+  if (!getVaultManager().isProtectionActive()) {
+    try {
+      await deleteIndex(esClient, TRANSCRIPTS_INDEX).catch(() => {});
+      await deleteIndex(esClient, MESSAGES_INDEX).catch(() => {});
+      await initializeIndices(esClient);
+    } catch (e: any) {
+      errors.push(`Error resetting Elasticsearch: ${e.message || String(e)}`);
+    }
   }
   try {
     db.transaction(() => {
@@ -218,7 +271,22 @@ export async function resetAllDataService(): Promise<ResetResult> {
     errors.push(`Error resetting SQLite database: ${e.message || String(e)}`);
   }
   try {
-    await deleteAllUploads();
+    // Vault recordings live in the active generation, not the legacy
+    // uploads dir: clear the encrypted payloads in place.
+    if (getVaultManager().isProtectionActive()) {
+      const generation = getVaultManager().getActiveGenerationPaths();
+      if (generation) {
+        const entries = await fs.readdir(generation.recordingsDir);
+        for (const entry of entries) {
+          await fs.rm(path.join(generation.recordingsDir, entry), {
+            recursive: true,
+            force: true,
+          });
+        }
+      }
+    } else {
+      await deleteAllUploads();
+    }
   } catch (e: any) {
     errors.push(`Error deleting uploaded files: ${e.message || String(e)}`);
   }
@@ -231,36 +299,49 @@ export async function resetAllDataService(): Promise<ResetResult> {
   };
 }
 
+/**
+ * Logical database snapshot shared by the plaintext and encrypted
+ * exporters: table name → pretty-printed JSON payload.
+ */
+const buildDbSnapshotJson = (): Record<string, string> => {
+  const dbData = {
+    sessions: sessionRepository.findAll(),
+    chats: [
+      ...chatRepository.findStandaloneChats(),
+      ...sessionRepository
+        .findAll()
+        .flatMap((s) => chatRepository.findChatsBySessionId(s.id)),
+    ],
+    messages: messageRepository.findAll(),
+    templates: templateRepository.findAll(),
+    transcript_paragraphs: transcriptRepository.findAll(),
+    analysis_jobs: analysisRepository.listJobs(),
+    analysis_job_sessions: analysisRepository.findAllJobSessions(),
+    intermediate_summaries: analysisRepository.findAllIntermediateSummaries(),
+    verification_jobs: verificationRepository.findAllJobsForBackup(),
+    message_verifications:
+      verificationRepository.findAllMessageVerificationsForBackup(),
+    verified_statements:
+      verificationRepository.findAllVerifiedStatementsForBackup(),
+    verification_statement_reviews:
+      verificationRepository.findAllStatementReviewsForBackup(),
+  };
+  return Object.fromEntries(
+    Object.entries(dbData).map(([key, value]) => [
+      `${key}.json`,
+      JSON.stringify(value, null, 2),
+    ])
+  );
+};
+
 export const exportDataService = async (): Promise<Readable> => {
   const pack = tar.pack();
   const readable = Readable.from(pack);
   const createTarballPromise = async () => {
     try {
-      const dbData = {
-        sessions: sessionRepository.findAll(),
-        chats: [
-          ...chatRepository.findStandaloneChats(),
-          ...sessionRepository
-            .findAll()
-            .flatMap((s) => chatRepository.findChatsBySessionId(s.id)),
-        ],
-        messages: messageRepository.findAll(),
-        templates: templateRepository.findAll(),
-        transcript_paragraphs: transcriptRepository.findAll(),
-        analysis_jobs: analysisRepository.listJobs(),
-        analysis_job_sessions: analysisRepository.findAllJobSessions(),
-        intermediate_summaries:
-          analysisRepository.findAllIntermediateSummaries(),
-        verification_jobs: verificationRepository.findAllJobsForBackup(),
-        message_verifications:
-          verificationRepository.findAllMessageVerificationsForBackup(),
-        verified_statements:
-          verificationRepository.findAllVerifiedStatementsForBackup(),
-        verification_statement_reviews:
-          verificationRepository.findAllStatementReviewsForBackup(),
-      };
-      for (const [key, value] of Object.entries(dbData)) {
-        pack.entry({ name: `${key}.json` }, JSON.stringify(value, null, 2));
+      const snapshotJson = buildDbSnapshotJson();
+      for (const [name, json] of Object.entries(snapshotJson)) {
+        pack.entry({ name }, json);
       }
       const uploadsDir = getUploadsDir();
       const files = await fs.readdir(uploadsDir);
@@ -292,9 +373,15 @@ const SessionSchema = z.object({
   sessionType: z.string(),
   therapy: z.string(),
   audioPath: z.string().nullable(),
-  status: z.enum(['pending', 'transcribing', 'completed', 'failed']),
+  status: z.enum(['pending', 'queued', 'transcribing', 'completed', 'failed']),
   whisperJobId: z.string().nullable(),
   transcriptTokenCount: z.number().nullable().optional(),
+  duration: z.number().nullable().optional(),
+  errorMessage: z.string().nullable().optional(),
+  showSpeakers: z.number().nullable().optional(),
+  numSpeakers: z.number().nullable().optional(),
+  therapistNote: z.string().nullable().optional(),
+  therapistNoteUpdatedAt: z.number().nullable().optional(),
 });
 const ChatSchema = z.object({
   id: z.number(),
@@ -306,7 +393,7 @@ const ChatSchema = z.object({
 const MessageSchema = z.object({
   id: z.number(),
   chatId: z.number(),
-  sender: z.enum(['user', 'ai']),
+  sender: z.enum(['user', 'ai', 'system']),
   text: z.string(),
   timestamp: z.number(),
   promptTokens: z.number().nullable().optional(),
@@ -314,6 +401,10 @@ const MessageSchema = z.object({
   // Author-model attribution (messages.model). Optional so backups taken
   // before the field existed still import cleanly.
   model: z.string().nullable().optional(),
+  duration: z.number().nullable().optional(),
+  // The repository maps the column to boolean on read; legacy backups
+  // may carry the raw number. Normalized back to 0/1 on insert.
+  isTruncated: z.union([z.number(), z.boolean()]).nullable().optional(),
 });
 const TemplateSchema = z.object({
   id: z.number(),
@@ -347,6 +438,15 @@ const AnalysisJobSchema = z.object({
   completed_at: z.number().nullable(),
   model_name: z.string().nullable(),
   context_size: z.number().nullable(),
+  short_prompt: z.string().nullable().optional(),
+  strategy_json: z.string().nullable().optional(),
+  thinking_budget: z.number().nullable().optional(),
+  temperature: z.number().nullable().optional(),
+  top_p: z.number().nullable().optional(),
+  repeat_penalty: z.number().nullable().optional(),
+  num_gpu_layers: z.number().nullable().optional(),
+  map_phase_system_prompt: z.string().nullable().optional(),
+  llm_base_url: z.string().nullable().optional(),
 });
 
 const AnalysisJobSessionSchema = z.object({
@@ -397,358 +497,424 @@ const remapSessionIdsJson = (
   }
 };
 
-export const importDataService = async (
-  backupFile: File
-): Promise<{ message: string }> => {
-  const tempDir = await fs.mkdtemp(
-    path.join(os.tmpdir(), 'therascript-import-')
-  );
-  try {
-    const extract = tar.extract();
-    const dataFiles: Record<string, any> = {};
-    const audioFilesToWrite: Promise<void>[] = [];
-    extract.on('entry', (header, stream, next) => {
-      const chunks: Buffer[] = [];
-      stream.on('data', (chunk) => chunks.push(chunk));
-      stream.on('end', () => {
-        if (header.name.endsWith('.json')) {
-          try {
-            dataFiles[header.name] = JSON.parse(
-              Buffer.concat(chunks).toString('utf8')
-            );
-          } catch (e) {
-            console.error(`Error parsing JSON from ${header.name}:`, e);
-          }
-        } else if (header.name.startsWith('uploads/')) {
-          const uploadsDir = path.join(tempDir, 'uploads');
-          const filePath = path.join(tempDir, header.name);
-          audioFilesToWrite.push(
-            fs
-              .mkdir(uploadsDir, { recursive: true })
-              .then(() => fs.writeFile(filePath, Buffer.concat(chunks)))
-          );
-        }
-        next();
-      });
-      stream.resume();
+// --- BACKUP SNAPSHOT (shared by the legacy and staged import paths) ---
+
+interface BackupSnapshot {
+  sessions: z.infer<typeof SessionSchema>[];
+  chats: z.infer<typeof ChatSchema>[];
+  messages: z.infer<typeof MessageSchema>[];
+  templates: z.infer<typeof TemplateSchema>[];
+  transcript_paragraphs: z.infer<typeof TranscriptParagraphSchema>[];
+  analysis_jobs: z.infer<typeof AnalysisJobSchema>[];
+  analysis_job_sessions: z.infer<typeof AnalysisJobSessionSchema>[];
+  intermediate_summaries: z.infer<typeof IntermediateSummarySchema>[];
+  verification_jobs: z.infer<typeof verificationJobSchema>[];
+  message_verifications: z.infer<typeof messageVerificationSchema>[];
+  verified_statements: z.infer<typeof verifiedStatementSchema>[];
+  verification_statement_reviews: z.infer<typeof statementReviewSchema>[];
+}
+
+export interface RestoreIdMaps {
+  sessions: Record<number, number>;
+  chats: Record<number, number>;
+  messages: Record<number, number>;
+  analysisJobs: Record<number, number>;
+  verificationJobs: Record<number, number>;
+  messageVerifications: Record<number, number>;
+  statements: Record<number, number>;
+}
+
+const parseBackupDataFiles = (
+  dataFiles: Record<string, any>
+): BackupSnapshot => {
+  const sessions = z.array(SessionSchema).parse(dataFiles['sessions.json']);
+  const chats = z.array(ChatSchema).parse(dataFiles['chats.json']);
+  const messages = z.array(MessageSchema).parse(dataFiles['messages.json']);
+  const templates = z.array(TemplateSchema).parse(dataFiles['templates.json']);
+  const transcript_paragraphs = z
+    .array(TranscriptParagraphSchema)
+    .parse(dataFiles['transcript_paragraphs.json']);
+  const analysis_jobs = z
+    .array(AnalysisJobSchema)
+    .parse(dataFiles['analysis_jobs.json']);
+  const analysis_job_sessions = z
+    .array(AnalysisJobSessionSchema)
+    .parse(dataFiles['analysis_job_sessions.json']);
+  const intermediate_summaries = z
+    .array(IntermediateSummarySchema)
+    .parse(dataFiles['intermediate_summaries.json']);
+  // Verification files are optional so backups created before the audit
+  // feature still import cleanly.
+  const verification_jobs = z
+    .array(verificationJobSchema)
+    .optional()
+    .default([])
+    .parse(dataFiles['verification_jobs.json']);
+  const message_verifications = z
+    .array(messageVerificationSchema)
+    .optional()
+    .default([])
+    .parse(dataFiles['message_verifications.json']);
+  const verified_statements = z
+    .array(verifiedStatementSchema)
+    .optional()
+    .default([])
+    .parse(dataFiles['verified_statements.json']);
+  // Human confirmations are optional: legacy backups predate reviews and
+  // import as an empty set.
+  const verification_statement_reviews = z
+    .array(statementReviewSchema)
+    .optional()
+    .default([])
+    .parse(dataFiles['verification_statement_reviews.json']);
+
+  return {
+    sessions,
+    chats,
+    messages,
+    templates,
+    transcript_paragraphs,
+    analysis_jobs,
+    analysis_job_sessions,
+    intermediate_summaries,
+    verification_jobs,
+    message_verifications,
+    verified_statements,
+    verification_statement_reviews,
+  };
+};
+
+/**
+ * Restores a validated snapshot into `target` (the live database for the
+ * legacy path, a staged generation database for the vault path) with
+ * old-to-new id remapping. Audio references are normalized for the
+ * target: vault rows always end in `.enc`, legacy rows never do.
+ */
+const restoreSnapshotToDb = (
+  target: SQLiteDatabase,
+  snapshot: BackupSnapshot,
+  options: { audioPathSuffix: '.enc' | '' }
+): RestoreIdMaps => {
+  const {
+    sessions,
+    chats,
+    messages,
+    templates,
+    transcript_paragraphs,
+    analysis_jobs,
+    analysis_job_sessions,
+    intermediate_summaries,
+    verification_jobs,
+    message_verifications,
+    verified_statements,
+    verification_statement_reviews,
+  } = snapshot;
+  const mapAudioPath = (audioPath: string | null): string | null => {
+    if (audioPath === null) return null;
+    if (options.audioPathSuffix === '.enc') {
+      return audioPath.endsWith('.enc') ? audioPath : `${audioPath}.enc`;
+    }
+    return audioPath.endsWith('.enc')
+      ? audioPath.slice(0, -'.enc'.length)
+      : audioPath;
+  };
+  const oldToNewSessionIdMap: Record<number, number> = {};
+  const oldToNewChatIdMap: Record<number, number> = {};
+  const oldToNewMessageIdMap: Record<number, number> = {};
+  const oldToNewAnalysisJobIdMap: Record<number, number> = {};
+  const oldToNewVerificationJobIdMap: Record<number, number> = {};
+  const oldToNewMessageVerificationIdMap: Record<number, number> = {};
+  const oldToNewStatementIdMap: Record<number, number> = {};
+  target.transaction(() => {
+    sessions.forEach((s) => {
+      const { id, ...rest } = s;
+      const res = target
+        .prepare(
+          'INSERT INTO sessions (fileName, clientName, sessionName, date, sessionType, therapy, audioPath, status, whisperJobId, transcriptTokenCount, duration, errorMessage, showSpeakers, numSpeakers, therapistNote, therapistNoteUpdatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        )
+        .run(
+          rest.fileName,
+          rest.clientName,
+          rest.sessionName,
+          rest.date,
+          rest.sessionType,
+          rest.therapy,
+          mapAudioPath(rest.audioPath),
+          rest.status,
+          rest.whisperJobId,
+          rest.transcriptTokenCount ?? null,
+          rest.duration ?? null,
+          rest.errorMessage ?? null,
+          rest.showSpeakers ?? 1,
+          rest.numSpeakers ?? null,
+          rest.therapistNote ?? null,
+          rest.therapistNoteUpdatedAt ?? null
+        );
+      oldToNewSessionIdMap[id] = res.lastInsertRowid as number;
     });
-    await pipeline(Readable.fromWeb(backupFile.stream() as any), extract);
-    await Promise.all(audioFilesToWrite);
-
-    const sessions = z.array(SessionSchema).parse(dataFiles['sessions.json']);
-    const chats = z.array(ChatSchema).parse(dataFiles['chats.json']);
-    const messages = z.array(MessageSchema).parse(dataFiles['messages.json']);
-    const templates = z
-      .array(TemplateSchema)
-      .parse(dataFiles['templates.json']);
-    const transcript_paragraphs = z
-      .array(TranscriptParagraphSchema)
-      .parse(dataFiles['transcript_paragraphs.json']);
-    const analysis_jobs = z
-      .array(AnalysisJobSchema)
-      .parse(dataFiles['analysis_jobs.json']);
-    const analysis_job_sessions = z
-      .array(AnalysisJobSessionSchema)
-      .parse(dataFiles['analysis_job_sessions.json']);
-    const intermediate_summaries = z
-      .array(IntermediateSummarySchema)
-      .parse(dataFiles['intermediate_summaries.json']);
-    // Verification files are optional so backups created before the audit
-    // feature still import cleanly.
-    const verification_jobs = z
-      .array(verificationJobSchema)
-      .optional()
-      .default([])
-      .parse(dataFiles['verification_jobs.json']);
-    const message_verifications = z
-      .array(messageVerificationSchema)
-      .optional()
-      .default([])
-      .parse(dataFiles['message_verifications.json']);
-    const verified_statements = z
-      .array(verifiedStatementSchema)
-      .optional()
-      .default([])
-      .parse(dataFiles['verified_statements.json']);
-    // Human confirmations are optional: legacy backups predate reviews and
-    // import as an empty set.
-    const verification_statement_reviews = z
-      .array(statementReviewSchema)
-      .optional()
-      .default([])
-      .parse(dataFiles['verification_statement_reviews.json']);
-
-    await resetAllDataService();
-
-    const oldToNewSessionIdMap: Record<number, number> = {};
-    const oldToNewChatIdMap: Record<number, number> = {};
-    const oldToNewMessageIdMap: Record<number, number> = {};
-    const oldToNewAnalysisJobIdMap: Record<number, number> = {};
-    const oldToNewVerificationJobIdMap: Record<number, number> = {};
-    const oldToNewMessageVerificationIdMap: Record<number, number> = {};
-    const oldToNewStatementIdMap: Record<number, number> = {};
-    db.transaction(() => {
-      sessions.forEach((s) => {
-        const { id, ...rest } = s;
-        const res = db
+    analysis_jobs.forEach((job) => {
+      const { id, ...rest } = job;
+      const res = target
+        .prepare(
+          'INSERT INTO analysis_jobs (original_prompt, status, final_result, error_message, created_at, completed_at, model_name, context_size, short_prompt, strategy_json, thinking_budget, temperature, top_p, repeat_penalty, num_gpu_layers, map_phase_system_prompt, llm_base_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        )
+        .run(
+          rest.original_prompt,
+          rest.status,
+          rest.final_result,
+          rest.error_message,
+          rest.created_at,
+          rest.completed_at,
+          rest.model_name,
+          rest.context_size,
+          rest.short_prompt ?? 'Analysis Job',
+          rest.strategy_json ?? null,
+          rest.thinking_budget ?? null,
+          rest.temperature ?? null,
+          rest.top_p ?? null,
+          rest.repeat_penalty ?? null,
+          rest.num_gpu_layers ?? null,
+          rest.map_phase_system_prompt ?? null,
+          rest.llm_base_url ?? null
+        );
+      oldToNewAnalysisJobIdMap[id] = res.lastInsertRowid as number;
+    });
+    analysis_job_sessions.forEach((ajs) => {
+      const newJobId = oldToNewAnalysisJobIdMap[ajs.analysis_job_id];
+      const newSessionId = oldToNewSessionIdMap[ajs.session_id];
+      if (newJobId && newSessionId) {
+        target
           .prepare(
-            'INSERT INTO sessions (fileName, clientName, sessionName, date, sessionType, therapy, audioPath, status, whisperJobId, transcriptTokenCount) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-          )
-          .run(
-            rest.fileName,
-            rest.clientName,
-            rest.sessionName,
-            rest.date,
-            rest.sessionType,
-            rest.therapy,
-            rest.audioPath,
-            rest.status,
-            rest.whisperJobId,
-            rest.transcriptTokenCount
-          );
-        oldToNewSessionIdMap[id] = res.lastInsertRowid as number;
-      });
-      analysis_jobs.forEach((job) => {
-        const { id, ...rest } = job;
-        const res = db
-          .prepare(
-            'INSERT INTO analysis_jobs (original_prompt, status, final_result, error_message, created_at, completed_at, model_name, context_size) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-          )
-          .run(
-            rest.original_prompt,
-            rest.status,
-            rest.final_result,
-            rest.error_message,
-            rest.created_at,
-            rest.completed_at,
-            rest.model_name,
-            rest.context_size
-          );
-        oldToNewAnalysisJobIdMap[id] = res.lastInsertRowid as number;
-      });
-      analysis_job_sessions.forEach((ajs) => {
-        const newJobId = oldToNewAnalysisJobIdMap[ajs.analysis_job_id];
-        const newSessionId = oldToNewSessionIdMap[ajs.session_id];
-        if (newJobId && newSessionId) {
-          db.prepare(
             'INSERT INTO analysis_job_sessions (analysis_job_id, session_id) VALUES (?, ?)'
-          ).run(newJobId, newSessionId);
-        }
-      });
-      intermediate_summaries.forEach((is) => {
-        const { id, ...rest } = is;
-        const newJobId = oldToNewAnalysisJobIdMap[rest.analysis_job_id];
-        const newSessionId = oldToNewSessionIdMap[rest.session_id];
-        if (newJobId && newSessionId) {
-          db.prepare(
+          )
+          .run(newJobId, newSessionId);
+      }
+    });
+    intermediate_summaries.forEach((is) => {
+      const { id, ...rest } = is;
+      const newJobId = oldToNewAnalysisJobIdMap[rest.analysis_job_id];
+      const newSessionId = oldToNewSessionIdMap[rest.session_id];
+      if (newJobId && newSessionId) {
+        target
+          .prepare(
             'INSERT INTO intermediate_summaries (analysis_job_id, session_id, summary_text, status, error_message) VALUES (?, ?, ?, ?, ?)'
-          ).run(
+          )
+          .run(
             newJobId,
             newSessionId,
             rest.summary_text,
             rest.status,
             rest.error_message
           );
-        }
-      });
-      chats.forEach((c) => {
-        const { id, ...rest } = c;
-        const newSid = rest.sessionId
-          ? oldToNewSessionIdMap[rest.sessionId]
-          : null;
-        if (rest.sessionId && !newSid) return;
-        const tagsJson = rest.tags ? JSON.stringify(rest.tags) : null;
-        const res = db
-          .prepare(
-            'INSERT INTO chats (sessionId, timestamp, name, tags) VALUES (?, ?, ?, ?)'
-          )
-          .run(newSid, rest.timestamp, rest.name, tagsJson);
-        oldToNewChatIdMap[id] = res.lastInsertRowid as number;
-      });
-      messages.forEach((m) => {
-        const newCid = oldToNewChatIdMap[m.chatId];
-        if (newCid) {
-          const res = db
-            .prepare(
-              'INSERT INTO messages (chatId, sender, text, timestamp, promptTokens, completionTokens, model) VALUES (?, ?, ?, ?, ?, ?, ?)'
-            )
-            .run(
-              newCid,
-              m.sender,
-              m.text,
-              m.timestamp,
-              m.promptTokens ?? null,
-              m.completionTokens ?? null,
-              m.model ?? null
-            );
-          oldToNewMessageIdMap[m.id] = res.lastInsertRowid as number;
-        }
-      });
-      transcript_paragraphs.forEach((p) => {
-        const newSid = oldToNewSessionIdMap[p.sessionId];
-        if (newSid)
-          db.prepare(
-            'INSERT INTO transcript_paragraphs (sessionId, paragraphIndex, timestampMs, text) VALUES (?, ?, ?, ?)'
-          ).run(newSid, p.paragraphIndex, p.timestampMs, p.text);
-      });
-
-      // --- FIX: Use UPSERT for templates to handle system prompts ---
-      const upsertTemplateStmt = db.prepare(
-        `INSERT INTO templates (title, text, createdAt) 
-         VALUES (?, ?, ?) 
-         ON CONFLICT(title) DO UPDATE SET 
-           text=excluded.text, 
-           createdAt=excluded.createdAt`
-      );
-      for (const t of templates) {
-        upsertTemplateStmt.run(t.title, t.text, t.createdAt);
       }
-      // --- END FIX ---
+    });
+    chats.forEach((c) => {
+      const { id, ...rest } = c;
+      const newSid = rest.sessionId
+        ? oldToNewSessionIdMap[rest.sessionId]
+        : null;
+      if (rest.sessionId && !newSid) return;
+      const tagsJson = rest.tags ? JSON.stringify(rest.tags) : null;
+      const res = target
+        .prepare(
+          'INSERT INTO chats (sessionId, timestamp, name, tags) VALUES (?, ?, ?, ?)'
+        )
+        .run(newSid, rest.timestamp, rest.name, tagsJson);
+      oldToNewChatIdMap[id] = res.lastInsertRowid as number;
+    });
+    messages.forEach((m) => {
+      const newCid = oldToNewChatIdMap[m.chatId];
+      if (newCid) {
+        const res = target
+          .prepare(
+            'INSERT INTO messages (chatId, sender, text, timestamp, promptTokens, completionTokens, model, duration, isTruncated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+          )
+          .run(
+            newCid,
+            m.sender,
+            m.text,
+            m.timestamp,
+            m.promptTokens ?? null,
+            m.completionTokens ?? null,
+            m.model ?? null,
+            m.duration ?? null,
+            m.isTruncated == null ? null : m.isTruncated ? 1 : 0
+          );
+        oldToNewMessageIdMap[m.id] = res.lastInsertRowid as number;
+      }
+    });
+    transcript_paragraphs.forEach((p) => {
+      const newSid = oldToNewSessionIdMap[p.sessionId];
+      if (newSid)
+        target
+          .prepare(
+            'INSERT INTO transcript_paragraphs (sessionId, paragraphIndex, timestampMs, text, speaker) VALUES (?, ?, ?, ?, ?)'
+          )
+          .run(
+            newSid,
+            p.paragraphIndex,
+            p.timestampMs,
+            p.text,
+            p.speaker ?? null
+          );
+    });
 
-      verification_jobs.forEach((job) => {
-        const { id, ...rest } = job;
-        const newChatId =
-          rest.chat_id != null
-            ? (oldToNewChatIdMap[rest.chat_id] ?? null)
-            : null;
-        // Active rows have no corresponding queue work after a restore,
-        // so reconciling them to failed keeps hasActiveVerificationJobs()
-        // from blocking new audits forever. Terminal rows keep their
-        // original status and completion metadata verbatim.
-        const wasInterrupted = INTERRUPTED_VERIFICATION_JOB_STATUSES.has(
-          rest.status
+    // --- FIX: Use UPSERT for templates to handle system prompts ---
+    const upsertTemplateStmt = target.prepare(
+      `INSERT INTO templates (title, text, createdAt) 
+       VALUES (?, ?, ?) 
+       ON CONFLICT(title) DO UPDATE SET 
+         text=excluded.text, 
+         createdAt=excluded.createdAt`
+    );
+    for (const t of templates) {
+      upsertTemplateStmt.run(t.title, t.text, t.createdAt);
+    }
+    // --- END FIX ---
+
+    verification_jobs.forEach((job) => {
+      const { id, ...rest } = job;
+      const newChatId =
+        rest.chat_id != null ? (oldToNewChatIdMap[rest.chat_id] ?? null) : null;
+      // Active rows have no corresponding queue work after a restore,
+      // so reconciling them to failed keeps hasActiveVerificationJobs()
+      // from blocking new audits forever. Terminal rows keep their
+      // original status and completion metadata verbatim.
+      const wasInterrupted = INTERRUPTED_VERIFICATION_JOB_STATUSES.has(
+        rest.status
+      );
+      const res = target
+        .prepare(
+          'INSERT INTO verification_jobs (status, scope, session_ids_json, chat_id, skip_verified, total_messages, processed_messages, succeeded_messages, failed_messages, skipped_messages, total_statements, flagged_statements, omissions_count, created_at, completed_at, error_message, model_name, context_size, thinking_budget, temperature, top_p, repeat_penalty, num_gpu_layers, llm_base_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        )
+        .run(
+          wasInterrupted ? 'failed' : rest.status,
+          rest.scope,
+          remapSessionIdsJson(rest.session_ids_json, oldToNewSessionIdMap),
+          newChatId,
+          rest.skip_verified ? 1 : 0,
+          rest.total_messages,
+          rest.processed_messages,
+          // Pre-V21 backups lack outcome counters; inactive rows keep
+          // whatever was backed up while interrupted rows are already
+          // terminal `failed` with their attempts preserved.
+          (rest as { succeeded_messages?: number }).succeeded_messages ?? 0,
+          (rest as { failed_messages?: number }).failed_messages ?? 0,
+          (rest as { skipped_messages?: number }).skipped_messages ?? 0,
+          rest.total_statements,
+          rest.flagged_statements,
+          rest.omissions_count,
+          rest.created_at,
+          wasInterrupted
+            ? (rest.completed_at ?? Date.now())
+            : rest.completed_at,
+          wasInterrupted
+            ? INTERRUPTED_RESTORE_ERROR_MESSAGE
+            : rest.error_message,
+          rest.model_name,
+          rest.context_size,
+          rest.thinking_budget,
+          rest.temperature,
+          rest.top_p,
+          rest.repeat_penalty,
+          rest.num_gpu_layers,
+          rest.llm_base_url
         );
-        const res = db
-          .prepare(
-            'INSERT INTO verification_jobs (status, scope, session_ids_json, chat_id, skip_verified, total_messages, processed_messages, succeeded_messages, failed_messages, skipped_messages, total_statements, flagged_statements, omissions_count, created_at, completed_at, error_message, model_name, context_size, thinking_budget, temperature, top_p, repeat_penalty, num_gpu_layers, llm_base_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-          )
-          .run(
-            wasInterrupted ? 'failed' : rest.status,
-            rest.scope,
-            remapSessionIdsJson(rest.session_ids_json, oldToNewSessionIdMap),
-            newChatId,
-            rest.skip_verified ? 1 : 0,
-            rest.total_messages,
-            rest.processed_messages,
-            // Pre-V21 backups lack outcome counters; inactive rows keep
-            // whatever was backed up while interrupted rows are already
-            // terminal `failed` with their attempts preserved.
-            (rest as { succeeded_messages?: number }).succeeded_messages ?? 0,
-            (rest as { failed_messages?: number }).failed_messages ?? 0,
-            (rest as { skipped_messages?: number }).skipped_messages ?? 0,
-            rest.total_statements,
-            rest.flagged_statements,
-            rest.omissions_count,
-            rest.created_at,
-            wasInterrupted
-              ? (rest.completed_at ?? Date.now())
-              : rest.completed_at,
-            wasInterrupted
-              ? INTERRUPTED_RESTORE_ERROR_MESSAGE
-              : rest.error_message,
-            rest.model_name,
-            rest.context_size,
-            rest.thinking_budget,
-            rest.temperature,
-            rest.top_p,
-            rest.repeat_penalty,
-            rest.num_gpu_layers,
-            rest.llm_base_url
-          );
-        oldToNewVerificationJobIdMap[id] = res.lastInsertRowid as number;
-      });
-      message_verifications.forEach((mv) => {
-        const newMessageId = oldToNewMessageIdMap[mv.message_id];
-        const newChatId = oldToNewChatIdMap[mv.chat_id];
-        const newSessionId = oldToNewSessionIdMap[mv.session_id];
-        if (!newMessageId || !newChatId || !newSessionId) return;
-        const newJobId =
-          mv.verification_job_id != null
-            ? (oldToNewVerificationJobIdMap[mv.verification_job_id] ?? null)
-            : null;
-        const res = db
-          .prepare(
-            'INSERT INTO message_verifications (message_id, chat_id, session_id, verification_job_id, authored_model, judge_model, status, total_claims, supported_claims, partial_claims, contradicted_claims, fabricated_claims, omissions_count, accuracy_score, summary_assessment, prompt_tokens, completion_tokens, duration_ms, verified_at, error_message, error_code, material_revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-          )
-          .run(
-            newMessageId,
-            newChatId,
-            newSessionId,
-            newJobId,
-            mv.authored_model,
-            mv.judge_model,
-            mv.status,
-            mv.total_claims,
-            mv.supported_claims,
-            mv.partial_claims,
-            mv.contradicted_claims,
-            mv.fabricated_claims,
-            mv.omissions_count,
-            mv.accuracy_score,
-            mv.summary_assessment,
-            mv.prompt_tokens,
-            mv.completion_tokens,
-            mv.duration_ms,
-            mv.verified_at,
-            mv.error_message,
-            // Pre-V21 backups lack failure codes.
-            (mv as { error_code?: string | null }).error_code ?? null,
-            // Pre-V22 backups lack material revisions; recompute backfills.
-            (mv as { material_revision?: string | null }).material_revision ??
-              null
-          );
-        oldToNewMessageVerificationIdMap[mv.id] = res.lastInsertRowid as number;
-      });
-      verified_statements.forEach((st) => {
-        const newVerificationId =
-          oldToNewMessageVerificationIdMap[st.message_verification_id];
-        const newMessageId = oldToNewMessageIdMap[st.message_id];
-        const newSessionId = oldToNewSessionIdMap[st.session_id];
-        if (!newVerificationId || !newMessageId || !newSessionId) return;
-        const res = db
-          .prepare(
-            'INSERT INTO verified_statements (message_verification_id, message_id, session_id, statement_index, kind, exact_quote, normalized_claim, start_char, end_char, verdict, severity, confidence, reasoning, transcript_evidence_json, created_at, finding_key, context_revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-          )
-          .run(
-            newVerificationId,
-            newMessageId,
-            newSessionId,
-            st.statement_index,
-            st.kind,
-            st.exact_quote,
-            st.normalized_claim,
-            st.start_char,
-            st.end_char,
-            st.verdict,
-            st.severity,
-            st.confidence,
-            st.reasoning,
-            st.transcript_evidence_json,
-            st.created_at,
-            // Pre-V22 backups lack finding identity; recompute below
-            // backfills from content.
-            (st as { finding_key?: string | null }).finding_key ?? null,
-            (st as { context_revision?: string | null }).context_revision ??
-              null
-          );
-        oldToNewStatementIdMap[st.id] = res.lastInsertRowid as number;
-      });
-      verification_statement_reviews.forEach((review) => {
-        const newMessageId = oldToNewMessageIdMap[review.message_id];
-        const newSessionId = oldToNewSessionIdMap[review.session_id];
-        if (!newMessageId || !newSessionId) return;
-        // Content fingerprints (context_revision/finding_key) survive
-        // remapping verbatim; only message/session/statement associations
-        // are remapped. Snapshots import without requiring an extant old
-        // statement row; ambiguous row associations that cannot be remapped
-        // become inert history (NULL) rather than pointing at a wrong row.
-        const newStatementId =
-          review.confirmed_statement_id != null
-            ? (oldToNewStatementIdMap[review.confirmed_statement_id] ?? null)
-            : null;
-        db.prepare(
+      oldToNewVerificationJobIdMap[id] = res.lastInsertRowid as number;
+    });
+    message_verifications.forEach((mv) => {
+      const newMessageId = oldToNewMessageIdMap[mv.message_id];
+      const newChatId = oldToNewChatIdMap[mv.chat_id];
+      const newSessionId = oldToNewSessionIdMap[mv.session_id];
+      if (!newMessageId || !newChatId || !newSessionId) return;
+      const newJobId =
+        mv.verification_job_id != null
+          ? (oldToNewVerificationJobIdMap[mv.verification_job_id] ?? null)
+          : null;
+      const res = target
+        .prepare(
+          'INSERT INTO message_verifications (message_id, chat_id, session_id, verification_job_id, authored_model, judge_model, status, total_claims, supported_claims, partial_claims, contradicted_claims, fabricated_claims, omissions_count, accuracy_score, summary_assessment, prompt_tokens, completion_tokens, duration_ms, verified_at, error_message, error_code, material_revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        )
+        .run(
+          newMessageId,
+          newChatId,
+          newSessionId,
+          newJobId,
+          mv.authored_model,
+          mv.judge_model,
+          mv.status,
+          mv.total_claims,
+          mv.supported_claims,
+          mv.partial_claims,
+          mv.contradicted_claims,
+          mv.fabricated_claims,
+          mv.omissions_count,
+          mv.accuracy_score,
+          mv.summary_assessment,
+          mv.prompt_tokens,
+          mv.completion_tokens,
+          mv.duration_ms,
+          mv.verified_at,
+          mv.error_message,
+          // Pre-V21 backups lack failure codes.
+          (mv as { error_code?: string | null }).error_code ?? null,
+          // Pre-V22 backups lack material revisions; recompute backfills.
+          (mv as { material_revision?: string | null }).material_revision ??
+            null
+        );
+      oldToNewMessageVerificationIdMap[mv.id] = res.lastInsertRowid as number;
+    });
+    verified_statements.forEach((st) => {
+      const newVerificationId =
+        oldToNewMessageVerificationIdMap[st.message_verification_id];
+      const newMessageId = oldToNewMessageIdMap[st.message_id];
+      const newSessionId = oldToNewSessionIdMap[st.session_id];
+      if (!newVerificationId || !newMessageId || !newSessionId) return;
+      const res = target
+        .prepare(
+          'INSERT INTO verified_statements (message_verification_id, message_id, session_id, statement_index, kind, exact_quote, normalized_claim, start_char, end_char, verdict, severity, confidence, reasoning, transcript_evidence_json, created_at, finding_key, context_revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        )
+        .run(
+          newVerificationId,
+          newMessageId,
+          newSessionId,
+          st.statement_index,
+          st.kind,
+          st.exact_quote,
+          st.normalized_claim,
+          st.start_char,
+          st.end_char,
+          st.verdict,
+          st.severity,
+          st.confidence,
+          st.reasoning,
+          st.transcript_evidence_json,
+          st.created_at,
+          // Pre-V22 backups lack finding identity; recompute below
+          // backfills from content.
+          (st as { finding_key?: string | null }).finding_key ?? null,
+          (st as { context_revision?: string | null }).context_revision ?? null
+        );
+      oldToNewStatementIdMap[st.id] = res.lastInsertRowid as number;
+    });
+    verification_statement_reviews.forEach((review) => {
+      const newMessageId = oldToNewMessageIdMap[review.message_id];
+      const newSessionId = oldToNewSessionIdMap[review.session_id];
+      if (!newMessageId || !newSessionId) return;
+      // Content fingerprints (context_revision/finding_key) survive
+      // remapping verbatim; only message/session/statement associations
+      // are remapped. Snapshots import without requiring an extant old
+      // statement row; ambiguous row associations that cannot be remapped
+      // become inert history (NULL) rather than pointing at a wrong row.
+      const newStatementId =
+        review.confirmed_statement_id != null
+          ? (oldToNewStatementIdMap[review.confirmed_statement_id] ?? null)
+          : null;
+      target
+        .prepare(
           'INSERT INTO verification_statement_reviews (message_id, session_id, identity_version, context_revision, finding_key, reusable, confirmed_statement_id, confirmed_at, kind, exact_quote, normalized_claim, start_char, end_char, verdict, severity, confidence, reasoning, transcript_evidence_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-        ).run(
+        )
+        .run(
           newMessageId,
           newSessionId,
           review.identity_version,
@@ -768,14 +934,49 @@ export const importDataService = async (
           review.reasoning,
           review.transcript_evidence_json
         );
-      });
-    })();
+    });
+  })();
+
+  return {
+    sessions: oldToNewSessionIdMap,
+    chats: oldToNewChatIdMap,
+    messages: oldToNewMessageIdMap,
+    analysisJobs: oldToNewAnalysisJobIdMap,
+    verificationJobs: oldToNewVerificationJobIdMap,
+    messageVerifications: oldToNewMessageVerificationIdMap,
+    statements: oldToNewStatementIdMap,
+  };
+};
+
+export const importDataService = async (
+  backupFile: File,
+  options: { backupPassword?: string } = {}
+): Promise<{ message: string }> => {
+  const tempDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), 'therascript-import-')
+  );
+  try {
+    const source = await readBackupFileStream(
+      backupFile,
+      options.backupPassword
+    );
+    const { dataFiles, uploadsDir } = await extractBackupArchive(source, {
+      stagingDir: tempDir,
+    });
+    const snapshot = parseBackupDataFiles(dataFiles);
+
+    if (getVaultManager().isProtectionActive()) {
+      return await importSnapshotIntoVault(snapshot, uploadsDir);
+    }
+
+    await resetAllDataService();
+    const maps = restoreSnapshotToDb(db, snapshot, { audioPathSuffix: '' });
 
     // Restored effective aggregates are recomputed (not trusted blindly):
     // matching reviews re-apply through content fingerprints, so confirmed
     // findings stay confirmed with correct counts after remapping.
-    for (const mv of message_verifications) {
-      const newMessageId = oldToNewMessageIdMap[mv.message_id];
+    for (const mv of snapshot.message_verifications) {
+      const newMessageId = maps.messages[mv.message_id];
       if (newMessageId) {
         verificationRepository.recomputeEffectiveVerificationForMessage(
           newMessageId
@@ -783,12 +984,11 @@ export const importDataService = async (
       }
     }
 
-    const uploadsSrcDir = path.join(tempDir, 'uploads');
     const uploadsDestDir = getUploadsDir();
-    const audioFiles = await fs.readdir(uploadsSrcDir).catch(() => []);
+    const audioFiles = await fs.readdir(uploadsDir).catch(() => []);
     for (const file of audioFiles) {
       await fs.copyFile(
-        path.join(uploadsSrcDir, file),
+        path.join(uploadsDir, file),
         path.join(uploadsDestDir, file)
       );
     }
@@ -796,6 +996,26 @@ export const importDataService = async (
 
     return { message: 'Import successful. Data has been restored.' };
   } catch (error) {
+    // Vault path: staged generations are already discarded by the import
+    // orchestration, so the live vault is untouched — just map the error.
+    if (getVaultManager().isProtectionActive()) {
+      if (error instanceof VaultAuthError) {
+        throw new UnauthorizedError('Incorrect backup password');
+      }
+      if (error instanceof VaultFormatError) {
+        throw new BadRequestError(error.message);
+      }
+      if (error instanceof z.ZodError) {
+        throw new BadRequestError(
+          'Invalid backup archive contents',
+          JSON.stringify(error.issues.slice(0, 5))
+        );
+      }
+      throw new InternalServerError(
+        `Failed to import backup: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        error instanceof Error ? error : undefined
+      );
+    }
     console.error('[Import] FATAL ERROR during import:', error);
     await resetAllDataService().catch((e) => {});
     throw new InternalServerError(
@@ -805,4 +1025,404 @@ export const importDataService = async (
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true }).catch((e) => {});
   }
+};
+
+// --- ENCRYPTED BACKUP ---
+
+const TOP_LEVEL_JSON_PATTERN = /^[^/]+\.json$/;
+const MAX_BACKUP_ENTRIES = 100_000;
+const MAX_BACKUP_TOTAL_BYTES = 4 * 1024 * 1024 * 1024; // 4 GiB
+
+/**
+ * Reads an uploaded backup file as a plaintext tar stream, decrypting
+ * encrypted (`.tvbak`) archives with the backup password first. The
+ * authenticated end-of-stream is verified as the stream is consumed, so
+ * import commits only after the whole archive authenticated.
+ */
+const readBackupFileStream = async (
+  backupFile: File,
+  backupPassword?: string
+): Promise<Readable> => {
+  const webStream = Readable.fromWeb(backupFile.stream() as any);
+  const reader = webStream[Symbol.asyncIterator]();
+  let head = Buffer.alloc(0);
+  while (head.length < 6) {
+    const next = await reader.next();
+    if (next.done) break;
+    head = Buffer.concat([head, Buffer.from(next.value as Buffer)]);
+  }
+  async function* full(): AsyncGenerator<Buffer> {
+    if (head.length > 0) yield head;
+    for (;;) {
+      const next = await reader.next();
+      if (next.done) break;
+      yield Buffer.from(next.value as Buffer);
+    }
+  }
+  if (isEncryptedBackup(head)) {
+    if (!backupPassword) {
+      throw new VaultAuthError('Backup password required');
+    }
+    return decryptBackupStream(full(), backupPassword);
+  }
+  return Readable.from(full());
+};
+
+export interface ExtractedBackup {
+  dataFiles: Record<string, any>;
+  uploadsDir: string;
+}
+
+/**
+ * Extracts a plaintext tar stream into `stagingDir`, validating every
+ * entry (path, type, size) before it touches disk. Only top-level
+ * `*.json` tables and `uploads/*` payloads are accepted.
+ */
+export const extractBackupArchive = async (
+  source: Readable,
+  options: {
+    stagingDir: string;
+    maxEntryBytes?: number;
+    maxTotalBytes?: number;
+    maxEntries?: number;
+  }
+): Promise<ExtractedBackup> => {
+  const maxEntryBytes = options.maxEntryBytes ?? 1024 * 1024 * 1024;
+  const maxTotalBytes = options.maxTotalBytes ?? MAX_BACKUP_TOTAL_BYTES;
+  const maxEntries = options.maxEntries ?? MAX_BACKUP_ENTRIES;
+  const uploadsDir = path.join(options.stagingDir, 'uploads');
+  const dataFiles: Record<string, any> = {};
+  let totalBytes = 0;
+  let entryCount = 0;
+  let failed: Error | null = null;
+
+  const extract = tar.extract();
+  const pendingWrites: Promise<void>[] = [];
+  // NOTE: failures are recorded and thrown after the pipeline drains.
+  // Destroying the extractor from inside its own 'entry' emit throws
+  // synchronously out of the emitter (uncaught) instead of rejecting
+  // the pipeline — so hostile entries are skipped here and fail below.
+  const skipEntry = (stream: NodeJS.ReadableStream, next: () => void): void => {
+    stream.resume();
+    next();
+  };
+  extract.on('entry', (header, stream, next) => {
+    if (failed) {
+      skipEntry(stream, next);
+      return;
+    }
+    entryCount += 1;
+    if (entryCount > maxEntries) {
+      failed = new VaultFormatError('Backup has too many entries');
+      skipEntry(stream, next);
+      return;
+    }
+    try {
+      validateArchiveEntry(
+        header.name,
+        header.size ?? 0,
+        header.type ?? undefined,
+        {
+          maxEntryBytes,
+        }
+      );
+    } catch (error) {
+      failed = error as Error;
+      skipEntry(stream, next);
+      return;
+    }
+    totalBytes += header.size ?? 0;
+    if (totalBytes > maxTotalBytes) {
+      failed = new VaultFormatError('Backup exceeds the size limit');
+      skipEntry(stream, next);
+      return;
+    }
+    if (header.type === 'directory' || header.name.endsWith('/')) {
+      pendingWrites.push(
+        fs
+          .mkdir(resolveArchiveEntryPath(options.stagingDir, header.name), {
+            recursive: true,
+          })
+          .then(() => undefined)
+      );
+      stream.resume();
+      next();
+      return;
+    }
+    if (TOP_LEVEL_JSON_PATTERN.test(header.name)) {
+      const chunks: Buffer[] = [];
+      let size = 0;
+      stream.on('data', (chunk: Buffer) => {
+        chunks.push(chunk);
+        size += chunk.length;
+        if (size > maxEntryBytes && !failed) {
+          failed = new VaultFormatError(
+            `Backup entry ${JSON.stringify(header.name)} exceeds the size limit`
+          );
+        }
+      });
+      stream.on('end', () => {
+        if (!failed) {
+          try {
+            dataFiles[header.name] = JSON.parse(
+              Buffer.concat(chunks).toString('utf8')
+            );
+          } catch (e) {
+            console.error(`Error parsing JSON from ${header.name}:`, e);
+          }
+        }
+        next();
+      });
+      stream.on('error', (error: Error) => {
+        if (!failed) failed = error;
+      });
+      stream.resume();
+      return;
+    }
+    if (header.name.startsWith('uploads/')) {
+      const target = resolveArchiveEntryPath(options.stagingDir, header.name);
+      const write = (async () => {
+        await fs.mkdir(path.dirname(target), { recursive: true });
+        await pipeline(stream, createWriteStream(target));
+      })().then(
+        () => next(),
+        (error: Error) => {
+          if (!failed) failed = error;
+          next();
+        }
+      );
+      pendingWrites.push(write);
+      return;
+    }
+    failed = new VaultFormatError(
+      `Unexpected backup entry ${JSON.stringify(header.name)}`
+    );
+    skipEntry(stream, next);
+  });
+  await pipeline(source, extract);
+  await Promise.all(pendingWrites);
+  if (failed) throw failed;
+  return { dataFiles, uploadsDir };
+};
+
+/** Encrypts staged uploads into the staged generation's recordings dir. */
+const restoreRecordingsIntoEncryptedStorage = async (
+  staged: {
+    id: string;
+    dir: string;
+    dbPath: string;
+    keysPath: string;
+    sealedPath: string;
+    recordingsDir: string;
+  },
+  uploadsDir: string,
+  recordingsKey: Buffer
+): Promise<void> => {
+  const files = await fs.readdir(uploadsDir).catch(() => []);
+  for (const file of files) {
+    const source = path.join(uploadsDir, file);
+    const stat = await fs.stat(source);
+    if (!stat.isFile()) continue;
+    const plaintext = await fs.readFile(source);
+    if (plaintext.length === 0) {
+      throw new VaultFormatError(
+        `Backup recording ${JSON.stringify(file)} is empty`
+      );
+    }
+    const encrypted = encryptRecording(plaintext, recordingsKey);
+    const target = path.join(staged.recordingsDir, `${file}.enc`);
+    await fs.writeFile(target, encrypted, { mode: 0o600 });
+    await fs.chmod(target, 0o600);
+  }
+};
+
+/**
+ * Content verification before the staged import commits: integrity +
+ * foreign keys, per-table counts against the snapshot, and every audio
+ * reference resolving to an encrypted payload.
+ */
+const verifyRestoredStaged = (
+  stagedDb: SQLiteDatabase,
+  staged: { recordingsDir: string },
+  snapshot: BackupSnapshot
+): void => {
+  const integrity = stagedDb.prepare('PRAGMA integrity_check').all() as {
+    integrity_check: string;
+  }[];
+  if (
+    integrity.length === 0 ||
+    integrity.some((row) => row.integrity_check !== 'ok')
+  ) {
+    throw new VaultFormatError('Staged import failed integrity_check');
+  }
+  const foreignKeys = stagedDb.prepare('PRAGMA foreign_key_check').all();
+  if (foreignKeys.length > 0) {
+    throw new VaultFormatError(
+      `Staged import has ${foreignKeys.length} foreign-key violation(s)`
+    );
+  }
+  const expectCount = (table: string, expected: number): void => {
+    const row = stagedDb
+      .prepare(`SELECT COUNT(*) AS total FROM "${table}"`)
+      .get() as { total: number };
+    if (row.total !== expected) {
+      throw new VaultFormatError(
+        `Staged import count mismatch on ${table}: expected=${expected} actual=${row.total}`
+      );
+    }
+  };
+  expectCount('sessions', snapshot.sessions.length);
+  expectCount('chats', snapshot.chats.length);
+  expectCount('messages', snapshot.messages.length);
+  expectCount('transcript_paragraphs', snapshot.transcript_paragraphs.length);
+  expectCount('analysis_jobs', snapshot.analysis_jobs.length);
+  expectCount('analysis_job_sessions', snapshot.analysis_job_sessions.length);
+  expectCount('intermediate_summaries', snapshot.intermediate_summaries.length);
+  expectCount('verification_jobs', snapshot.verification_jobs.length);
+  expectCount('message_verifications', snapshot.message_verifications.length);
+  expectCount('verified_statements', snapshot.verified_statements.length);
+  expectCount(
+    'verification_statement_reviews',
+    snapshot.verification_statement_reviews.length
+  );
+  // Templates upsert (system rows merge), so every snapshot title must
+  // exist rather than counts matching exactly.
+  const titles = (
+    stagedDb.prepare('SELECT title FROM templates').all() as {
+      title: string;
+    }[]
+  ).map((row) => row.title);
+  for (const template of snapshot.templates) {
+    if (!titles.includes(template.title)) {
+      throw new VaultFormatError(
+        `Staged import lost template ${JSON.stringify(template.title)}`
+      );
+    }
+  }
+  const sessions = stagedDb
+    .prepare('SELECT audioPath FROM sessions WHERE audioPath IS NOT NULL')
+    .all() as { audioPath: string | null }[];
+  for (const row of sessions) {
+    const base = row.audioPath ? path.basename(row.audioPath) : '';
+    if (
+      !base.endsWith('.enc') ||
+      !existsSync(path.join(staged.recordingsDir, base))
+    ) {
+      throw new VaultFormatError(
+        `Staged import is missing recording for ${JSON.stringify(row.audioPath)}`
+      );
+    }
+  }
+};
+
+const importSnapshotIntoVault = async (
+  snapshot: BackupSnapshot,
+  uploadsDir: string
+): Promise<{ message: string }> => {
+  const manager = getVaultManager();
+  const maps = await manager.importIntoStagedGeneration(
+    async (staged, stagedDb) => {
+      const restored = restoreSnapshotToDb(stagedDb, snapshot, {
+        audioPathSuffix: '.enc',
+      });
+      await restoreRecordingsIntoEncryptedStorage(
+        staged,
+        uploadsDir,
+        manager.getRecordingsKey()
+      );
+      rebuildTranscriptSearch(stagedDb);
+      rebuildMessageSearch(stagedDb);
+      verifyRestoredStaged(stagedDb, staged, snapshot);
+      return restored;
+    }
+  );
+  // Aggregates recompute against the now-live database: the existing
+  // inserts, ID remapping, and verification recomputation run against
+  // staging, then go live on cutover.
+  for (const mv of snapshot.message_verifications) {
+    const newMessageId = maps.messages[mv.message_id];
+    if (newMessageId) {
+      verificationRepository.recomputeEffectiveVerificationForMessage(
+        newMessageId
+      );
+    }
+  }
+  return { message: 'Import successful. Data has been restored.' };
+};
+
+const stripEncSuffix = (name: string): string =>
+  name.endsWith('.enc') ? name.slice(0, -'.enc'.length) : name;
+
+/**
+ * Encrypted backup export: the same logical snapshot as
+ * the plaintext exporter, with recordings decrypted from vault storage
+ * (or read from legacy uploads), then sealed under the backup password.
+ * Fails when any referenced recording is missing — the export promises
+ * a restorable archive.
+ */
+export const exportVaultBackupService = async (
+  backupPassword: string,
+  kdfParams?: VaultKdfParams
+): Promise<Readable> => {
+  if (typeof backupPassword !== 'string' || backupPassword.length === 0) {
+    throw new BadRequestError('Backup password is required');
+  }
+  const manager = getVaultManager();
+  const vaultActive = manager.isProtectionActive();
+  const pack = tar.pack();
+  const readable = Readable.from(pack);
+  const produceTarball = async () => {
+    try {
+      const snapshotJson = buildDbSnapshotJson();
+      for (const [name, json] of Object.entries(snapshotJson)) {
+        pack.entry({ name }, json);
+      }
+      const sessions = sessionRepository.findAll() as BackendSession[];
+      const missing: string[] = [];
+      for (const session of sessions) {
+        if (!session.audioPath) continue;
+        const base = path.basename(session.audioPath);
+        if (vaultActive) {
+          const generation = manager.getActiveGenerationPaths();
+          if (!generation) throw new VaultLockedError();
+          let encrypted: Buffer;
+          try {
+            encrypted = await fs.readFile(
+              path.join(generation.recordingsDir, base)
+            );
+          } catch {
+            missing.push(session.audioPath);
+            continue;
+          }
+          const plaintext = decryptRecording(
+            encrypted,
+            manager.getRecordingsKey()
+          );
+          pack.entry({ name: `uploads/${stripEncSuffix(base)}` }, plaintext);
+        } else {
+          let bytes: Buffer;
+          try {
+            bytes = await fs.readFile(path.join(getUploadsDir(), base));
+          } catch {
+            missing.push(session.audioPath);
+            continue;
+          }
+          pack.entry({ name: `uploads/${base}` }, bytes);
+        }
+      }
+      if (missing.length > 0) {
+        throw new InternalServerError(
+          `Backup incomplete: ${missing.length} recording(s) missing (${missing.slice(0, 5).join(', ')})`
+        );
+      }
+    } catch (error) {
+      pack.destroy(
+        error instanceof Error ? error : new Error('Backup export failed')
+      );
+      return;
+    }
+    pack.finalize();
+  };
+  produceTarball();
+  return encryptBackupStream(readable, backupPassword, kdfParams);
 };

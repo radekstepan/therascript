@@ -29,3 +29,35 @@ export interface DbStatement {
   // Note: Other methods like `iterate` or `bind` could be added here if needed
   // by consumer packages, but are omitted for now to keep the abstraction minimal.
 }
+
+/**
+ * A generic interface representing an open database connection.
+ * This abstracts the underlying driver (better-sqlite3-multiple-ciphers)
+ * so consumer packages never resolve the binding's module specifier —
+ * only the method surface the codebase actually uses is exposed.
+ */
+export interface DbDatabase {
+  /** False once the connection is closed. */
+  readonly open: boolean;
+
+  /** Compiles a statement; throws on invalid SQL or an unreadable (wrong-key) database. */
+  prepare(source: string): DbStatement;
+
+  /** Executes one or more semicolon-separated statements. */
+  exec(source: string): void;
+
+  /** Reads or sets a pragma. */
+  pragma(source: string, options?: { simple?: boolean }): unknown;
+
+  /** Wraps a function in a transaction; the wrapper keeps the input signature. */
+  transaction(fn: (...args: any[]) => any): (...args: any[]) => any;
+
+  /** Presents the raw database key. Absent on the stock better-sqlite3 binding. */
+  key(key: Buffer): void;
+
+  /** Re-keys the database in place (also encrypts a plaintext database). */
+  rekey(key: Buffer): void;
+
+  /** Closes the connection. */
+  close(): void;
+}

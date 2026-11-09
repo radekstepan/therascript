@@ -12,8 +12,8 @@
 // `migrations.test.ts`), simulating a restart by calling
 // `initializeDatabase` a second time on the same DB.
 import { describe, it, expect, beforeEach } from 'vitest';
-import Database from 'better-sqlite3';
-import type { Database as DB } from 'better-sqlite3';
+import Database from 'better-sqlite3-multiple-ciphers';
+import type { Database as DB } from 'better-sqlite3-multiple-ciphers';
 import {
   initializeDatabase,
   SYSTEM_PROMPT_TEMPLATES,

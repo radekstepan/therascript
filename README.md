@@ -6,68 +6,71 @@ Therascript is a comprehensive application designed to assist therapists by stre
 
 ## Key Features
 
-*   **Session Management:** Upload audio files, manage session metadata (client details, date, type, therapy modality), and view a history of all sessions.
-*   **Audio Transcription & Diarization:** Utilizes **WhisperX** (transcription + forced alignment + speaker diarization) to accurately transcribe session audio and automatically identify multiple speakers (e.g. `SPEAKER_00`, `SPEAKER_01`).
-*   **AI-Powered Chat Analysis:**
-    *   Interact with an AI (powered by local LLMs via LM Studio) to ask questions about specific session transcripts.
-    *   Engage in standalone AI chat sessions not tied to a specific therapy session.
-    *   **Message Templates:** Save useful prompts as templates for quick reuse.
-*   **Multi-Session Analysis:** Select multiple sessions and run a single high-level query across all of them. The system performs a MapReduce-style analysis to generate a synthesized answer.
-*   **Full-Text Search:** Search across all chat messages and transcript paragraphs to quickly find relevant information using Elasticsearch.
-*   **LLM Management:**
-    *   View locally available LM Studio models.
-    *   Change the active model for analysis.
-    *   Unload models from memory to free up resources.
-*   **System Monitoring:**
-    *   **GPU Monitoring:** A sidebar indicator shows real-time GPU and VRAM utilization. A detailed modal provides in-depth statistics for NVIDIA GPUs, including temperature, power draw, and per-process VRAM usage.
-    *   **Background Job Monitoring:** View the status of active background jobs (transcription and analysis) in a queue modal.
-*   **Advanced Data Management:**
-    *   **Export/Import:** Create a full backup of the database and uploaded files as a `.tar` archive, and restore from it.
-    *   **Re-index:** Rebuild the Elasticsearch search index from the database.
-    *   **Full Reset:** A "danger zone" function to wipe all application data.
-*   **User Interface:** A modern, responsive web UI built with React and Radix UI Themes for intuitive interaction.
-*   **Dockerized Services:** Whisper, Elasticsearch, and Redis are containerized for easy setup and management.
-*   **Customizable Experience:** Includes theme selection (light, dark, system), customizable UI accent color, and options for rendering AI responses (Markdown or plain text).
+- **Session Management:** Upload audio files, manage session metadata (client details, date, type, therapy modality), and view a history of all sessions.
+- **Audio Transcription & Diarization:** Utilizes **Parakeet TDT 0.6B v2** (ASR) plus **pyannote Community-1** (diarization) and word-level speaker attribution to accurately transcribe session audio and identify multiple speakers (e.g. `SPEAKER_00`, `SPEAKER_01`).
+- **AI-Powered Chat Analysis:**
+  - Interact with an AI (powered by local LLMs via LM Studio) to ask questions about specific session transcripts.
+  - Engage in standalone AI chat sessions not tied to a specific therapy session.
+  - **Message Templates:** Save useful prompts as templates for quick reuse.
+- **Multi-Session Analysis:** Select multiple sessions and run a single high-level query across all of them. The system performs a MapReduce-style analysis to generate a synthesized answer.
+- **Full-Text Search:** Search across all chat messages and transcript paragraphs — Elasticsearch in legacy mode, or the in-database SQLite FTS5 index in vault mode.
+- **Encrypted Vault:** Protect the database, recordings, and chat history behind one password. The password is also the encryption key, so it is required on every app/API boot. Shutdown locks the vault automatically; a browser reload does not re-prompt while the API keeps running.
+- **LLM Management:**
+  - View locally available LM Studio models.
+  - Change the active model for analysis.
+  - Unload models from memory to free up resources.
+- **System Monitoring:**
+  - **GPU Monitoring:** A sidebar indicator shows real-time GPU and VRAM utilization. A detailed modal provides in-depth statistics for NVIDIA GPUs, including temperature, power draw, and per-process VRAM usage.
+  - **Background Job Monitoring:** View the status of active background jobs (transcription and analysis) in a queue modal.
+- **Advanced Data Management:**
+  - **Export/Import:** Create a full backup of the database and uploaded files as a `.tar` archive (legacy mode) or a password-sealed `.tvbak` archive (vault mode), and restore from either.
+  - **Re-index:** Rebuild the search index from the database (SQLite FTS5 in vault mode; Elasticsearch in legacy mode).
+  - **Full Reset:** A "danger zone" function to wipe all application data.
+- **User Interface:** A modern, responsive web UI built with React and Radix UI Themes for intuitive interaction.
+- **Dockerized Services:** Whisper, Elasticsearch, and Redis are containerized for easy setup and management.
+- **Customizable Experience:** Includes theme selection (light, dark, system), customizable UI accent color, and options for rendering AI responses (Markdown or plain text).
 
 ## Technology Stack
 
-*   **Frontend:**
-    *   React 19, TypeScript
-    *   Radix UI Themes & Primitives
-    *   Tailwind CSS
-    *   Tanstack Query (Server State Management)
-    *   Jotai (UI State Management)
-    *   React Router DOM (Routing)
-    *   Webpack (Build Tool)
-    *   Axios (API Client)
-    *   Lucide React (Icons)
-*   **Backend (API & Worker):**
-    *   ElysiaJS (Node.js Framework)
-    *   TypeScript
-    *   SQLite (via `better-sqlite3`)
-    *   **BullMQ & Redis:** For background job queuing.
-    *   `@dqbd/tiktoken` (Token counting)
-*   **AI Services:**
-    *   **LM Studio:** For running local Large Language Models (LLMs) natively.
-    *   **Whisper (OpenAI):** For audio transcription (via a Python FastAPI service).
-*   **Search Service:** Elasticsearch
-*   **Database:** SQLite
-*   **Containerization:** Docker, Docker Compose
-*   **Monorepo Management:** Turborepo, Yarn Workspaces
+- **Frontend:**
+  - React 19, TypeScript
+  - Radix UI Themes & Primitives
+  - Tailwind CSS
+  - Tanstack Query (Server State Management)
+  - Jotai (UI State Management)
+  - React Router DOM (Routing)
+  - Webpack (Build Tool)
+  - Axios (API Client)
+  - Lucide React (Icons)
+- **Backend (API & Worker):**
+  - ElysiaJS (Node.js Framework)
+  - TypeScript
+  - SQLite (via `better-sqlite3`; `better-sqlite3-multiple-ciphers` supplies the encrypted vault binding)
+  - **BullMQ & Redis:** For background job queuing.
+  - `@dqbd/tiktoken` (Token counting)
+  - **Vault crypto:** Argon2id key wrapping + AES-256-GCM (via `@therascript/vault`)
+- **AI Services:**
+  - **LM Studio:** For running local Large Language Models (LLMs) natively.
+  - **Whisper:** Community transcription service (Parakeet ASR + Community-1 diarization) via a Python FastAPI service.
+- **Search Service:** SQLite FTS5 (vault mode) / Elasticsearch (legacy mode)
+- **Database:** SQLite
+- **Containerization:** Docker, Docker Compose
+- **Monorepo Management:** Turborepo, Yarn Workspaces
 
 ## Project Structure
 
 Therascript is a monorepo organized into several packages:
 
-*   `packages/api`: The backend ElysiaJS server. Handles business logic, database interactions, and communication with other services.
-*   `packages/worker`: A separate Node.js process that consumes jobs from the Redis queue (e.g., transcription, analysis).
-*   `packages/ui`: The React-based frontend application that users interact with.
-*   `packages/llama`: LM Studio native inference backend setup and configuration (requires `lms` CLI).
-*   `packages/whisper`: Contains the Python service for Whisper, its Dockerfile, and management scripts.
-*   `packages/gpu-utils`: A shared utility for querying NVIDIA GPU stats via `nvidia-smi`.
-*   `packages/elasticsearch-client`: A shared client for interacting with Elasticsearch.
-*   `packages/docker-utils`: Shared utilities for managing Docker containers.
-*   `scripts/`: Root-level scripts for running the application in different modes (e.g., `run-dev.js`).
+- `packages/api`: The backend ElysiaJS server. Handles business logic, database interactions, vault unlock/lock, and communication with other services.
+- `packages/worker`: A Node.js process that consumes jobs from the Redis queue (e.g., transcription, analysis). In vault mode the API supervises it and hands it the data keys after unlock; in legacy-fallback mode it runs standalone.
+- `packages/ui`: The React-based frontend application that users interact with.
+- `packages/vault`: Password-protected vault primitives: Argon2id key wrapping, encrypted database/recording helpers, generations, browser sessions, and encrypted backups.
+- `packages/llama`: LM Studio native inference backend setup and configuration (requires `lms` CLI).
+- `packages/whisper`: Contains the Python service for Whisper, its Dockerfile, and management scripts.
+- `packages/gpu-utils`: A shared utility for querying NVIDIA GPU stats via `nvidia-smi`.
+- `packages/elasticsearch-client`: A shared client for interacting with Elasticsearch.
+- `packages/docker-utils`: Shared utilities for managing Docker containers.
+- `scripts/`: Root-level scripts for running the application in different modes (e.g., `run-dev.js`).
 
 ## Further documentation
 
@@ -78,68 +81,73 @@ Therascript is a monorepo organized into several packages:
 - **[Component Map](docs/COMPONENT_MAP.md)**: Detailed package breakdown and libraries
 - **[API Reference](docs/API_REFERENCE.md)**: Complete REST API endpoint documentation
 - **[Data Flows](docs/DATA_FLOWS.md)**: Step-by-step operational workflows
-- **[Schema Reference](docs/SCHEMA_REFERENCE.md)**: SQLite tables and Elasticsearch indices
+- **[Schema Reference](docs/SCHEMA_REFERENCE.md)**: SQLite tables, FTS5 indexes, and Elasticsearch indices
+- **[Vault README](packages/vault/README.md)**: Vault formats, worker supervision, migration, and security notes
 
 ## Prerequisites
 
 Before you begin, ensure you have the following installed:
 
 1.  **Node.js and Yarn:**
-    *   It's recommended to use NVM (Node Version Manager). The required Node.js version is in `.nvmrc`.
-        ```bash
-        nvm install
-        nvm use
-        ```
-    *   Yarn (Classic v1.x) is used as the package manager.
+    - It's recommended to use NVM (Node Version Manager). The required Node.js version is in `.nvmrc`.
+      ```bash
+      nvm install
+      nvm use
+      ```
+    - Yarn (Classic v1.x) is used as the package manager.
 2.  **LM Studio CLI (`lms`) — required on all platforms:**
     ```bash
     curl -fsSL https://lmstudio.ai/install.sh | bash
     ```
     Installs the `lms` binary to `~/.lmstudio/bin/lms`. The Therascript API will automatically start the daemon and server on first use.
 3.  **Docker and Docker Compose:**
-    *   Required for Whisper, Elasticsearch, and Redis services.
-    *   Docker Desktop for Windows/macOS or Docker Engine + Docker Compose plugin for Linux.
-    *   Ensure the Docker daemon is running.
-    *   Make sure current user is in the Docker group:
-        ```bash
-        sudo usermod -aG docker $USER
-        ```
+    - Required for Whisper, Elasticsearch, and Redis services.
+    - Docker Desktop for Windows/macOS or Docker Engine + Docker Compose plugin for Linux.
+    - Ensure the Docker daemon is running.
+    - Make sure current user is in the Docker group:
+      ```bash
+      sudo usermod -aG docker $USER
+      ```
 4.  **NVIDIA GPU with CUDA (Recommended for Whisper on Linux):**
-    *   For optimal Whisper performance, an NVIDIA GPU with CUDA drivers and the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) is recommended.
-    *   LM Studio auto-detects Metal on macOS and CUDA on Linux natively.
-    *   Whisper *can* run on CPU, but performance will be significantly slower.
+    - For optimal Whisper performance, an NVIDIA GPU with CUDA drivers and the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) is recommended.
+    - LM Studio auto-detects Metal on macOS and CUDA on Linux natively.
+    - Whisper _can_ run on CPU, but performance will be significantly slower.
 
 ## Setup and Installation
 
 1.  **Install Node.js Version:**
+
     ```bash
     nvm use
     ```
 
 2.  **Install Dependencies:**
+
     ```bash
     yarn install
     ```
 
 3.  **Configure Environment Variables:**
-    *   Copy the example environment file `.env.example` to:
-        *   `.env.api.dev` (for the API in development)
-        *   `.env.worker.dev` (for the background worker in development)
-        *   And optionally `.env.api.prod`.
-    *   Adjust the variables as needed for your setup (e.g., `LM_STUDIO_BASE_URL`, `DB_PATH`).
+
+    - Copy the example environment file `.env.example` to:
+      - `.env.api.dev` (for the API in development)
+      - `.env.worker.dev` (for the background worker in development)
+      - And optionally `.env.api.prod`.
+    - Adjust the variables as needed for your setup (e.g., `LM_STUDIO_BASE_URL`, `DB_PATH`, `VAULT_DIR`). Keep `VAULT_DIR` distinct per environment — one vault holds exactly one database.
 
 4.  **Build All Packages:**
     This compiles TypeScript code for all packages.
+
     ```bash
     yarn build
     ```
 
-3.  **Hugging Face Account & Token (for Diarization):**
-    *   Create an account at [huggingface.co](https://huggingface.co).
-    *   Explicitly accept the user conditions for [`pyannote/speaker-diarization-community-1`](https://huggingface.co/pyannote/speaker-diarization-community-1) (contact-info prompt, auto-accept — no manual approval).
-    *   Generate a Hugging Face Access Token (`HF_TOKEN`) with `read` permissions.
-    *   Add `HF_TOKEN=hf_xxxxx` to the root `.env` file used by Docker Compose (this is what the transcription container reads).
-    *   If you also keep `HF_TOKEN` in `.env.api.*` / `.env.worker.*`, keep the value identical to avoid environment drift during debugging.
+5.  **Hugging Face Account & Token (for Diarization):**
+    - Create an account at [huggingface.co](https://huggingface.co).
+    - Explicitly accept the user conditions for [`pyannote/speaker-diarization-community-1`](https://huggingface.co/pyannote/speaker-diarization-community-1) (contact-info prompt, auto-accept — no manual approval).
+    - Generate a Hugging Face Access Token (`HF_TOKEN`) with `read` permissions.
+    - Add `HF_TOKEN=hf_xxxxx` to the root `.env` file used by Docker Compose (this is what the transcription container reads).
+    - If you also keep `HF_TOKEN` in `.env.api.*` / `.env.worker.*`, keep the value identical to avoid environment drift during debugging.
 
 ## Upgrading from WhisperX
 
@@ -157,16 +165,16 @@ transcription container changes).
     yarn build:whisper
     ```
 2.  **Accept the new diarization model conditions:**
-    *   Visit [`pyannote/speaker-diarization-community-1`](https://huggingface.co/pyannote/speaker-diarization-community-1) while logged in and accept the user conditions. Your existing `HF_TOKEN` works as long as it has `read` permission — no new token needed.
-    *   The old 3.1 / `segmentation-3.0` agreements are no longer required.
+    - Visit [`pyannote/speaker-diarization-community-1`](https://huggingface.co/pyannote/speaker-diarization-community-1) while logged in and accept the user conditions. Your existing `HF_TOKEN` works as long as it has `read` permission — no new token needed.
+    - The old 3.1 / `segmentation-3.0` agreements are no longer required.
 3.  **Update environment (root `.env` used by Docker Compose):**
-    *   Remove `ASR_BACKEND` / `DIARIZATION_BACKEND` if you added them during the transition — they no longer exist.
-    *   `WHISPER_MODEL` is retired (the service always uses Parakeet); you can remove it. `model_name` sent by older worker code is accepted but ignored.
-    *   Optional tuning (defaults shown):
-        ```
-        PARAKEET_MODEL_ID=nvidia/parakeet-tdt-0.6b-v2
-        PARAKEET_CHUNK_SEC=600
-        ```
+    - Remove `ASR_BACKEND` / `DIARIZATION_BACKEND` if you added them during the transition — they no longer exist.
+    - `WHISPER_MODEL` is retired (the service always uses Parakeet); you can remove it. `model_name` sent by older worker code is accepted but ignored.
+    - Optional tuning (defaults shown):
+      ```
+      PARAKEET_MODEL_ID=nvidia/parakeet-tdt-0.6b-v2
+      PARAKEET_CHUNK_SEC=600
+      ```
 4.  **Rebuild the transcription image from scratch** (Python 3.11, torch 2.8,
     CUDA 12.6 base — a `--build` alone may reuse stale layers, so prune the old image):
     ```bash
@@ -195,11 +203,40 @@ transcription container changes).
     (speaker-count dropdown behavior is unchanged).
 
     Troubleshooting:
-    *   `401/403` or "gated" errors → you skipped step 2 (accept conditions on the model page with the same account that owns `HF_TOKEN`).
-    *   CUDA OOM on first job → the service unloads the LLM automatically before transcribing; if it persists, your GPU is too small to co-host — transcribe while no chat/analysis job is running.
-    *   Route-level 404s after rebuild → `packages/whisper/dist` is stale; rerun `yarn build:whisper` on the host and rebuild with `--force-recreate`.
 
-## Running the Application
+    - `401/403` or "gated" errors → you skipped step 2 (accept conditions on the model page with the same account that owns `HF_TOKEN`).
+    - CUDA OOM on first job → the service unloads the LLM automatically before transcribing; if it persists, your GPU is too small to co-host — transcribe while no chat/analysis job is running.
+    - Route-level 404s after rebuild → `packages/whisper/dist` is stale; rerun `yarn build:whisper` on the host and rebuild with `--force-recreate`.
+
+## Encrypted Vault
+
+Therascript stores the database and recordings inside a password-protected vault:
+
+- The password is entered on **every app/API boot**. It is also the encryption key; it is never written to disk, logs, environment files, or Redis.
+- Shutdown locks the vault automatically: in-flight requests are drained, the supervised worker is stopped, the database is closed, keys are cleared, and all browser sessions are revoked.
+- A browser reload or reopen does **not** re-prompt while the API is still running. The session cookie is `HttpOnly` and memory-backed on the server, so an API restart always requires the password again.
+- Search uses the in-database SQLite FTS5 index in vault mode; Elasticsearch is not required or contacted.
+- Backups are sealed as `.tvbak` archives under a separate backup password.
+
+`VAULT_DIR` (see `.env.api.dev` / `.env.api.prod`) selects the vault directory. Each environment needs its own vault; dev and prod must not share one.
+
+### Upgrading an existing plaintext install
+
+The migration is automated and leaves the legacy install usable until setup succeeds:
+
+```bash
+# 1. Stop the API and worker, then prepare (dry-run first if unsure)
+yarn build
+node ./scripts/prepare-vault-migration.mjs --dry-run
+yarn vault:prepare-migration
+
+# 2. Boot the app and set the vault password in the UI.
+#    setup() migrates into a staged generation, verifies it, then deletes
+#    the legacy files. Repeat for prod with the prod env.
+yarn dev
+```
+
+If sessions reference recordings that no longer exist, prep aborts and lists them. Restore the files, or re-run with `--repair-missing-audio` after taking the backup. See [`packages/vault/README.md`](packages/vault/README.md) for the full safety properties and formats.
 
 Therascript can be configured to start automatically on system start:
 
@@ -209,7 +246,7 @@ cat ~/.config/autostart/therascript.desktop
 
 ### Development Mode
 
-This mode starts the API, the background worker, the UI (with hot-reloading), and service managers for dependent Docker containers. It uses settings from `.env.api.dev` and `.env.worker.dev`.
+This mode starts the API, the UI (with hot-reloading), and service managers for dependent Docker containers. It uses settings from `.env.api.dev` and `.env.worker.dev`. On a vault-capable install the API supervises the background worker; the standalone worker script only runs the plaintext legacy fallback.
 
 1.  **Start Docker Services:**
     The root `docker-compose.yml` manages the core background services. Start them first.
@@ -221,12 +258,14 @@ This mode starts the API, the background worker, the UI (with hot-reloading), an
     ```
 
     **macOS or Linux without GPU (CPU-only, default):**
+
     ```bash
     # Run from the project root directory
     docker compose up -d --build
     ```
 
     **Linux with NVIDIA GPU (uses GPU for Whisper):**
+
     ```bash
     # Run from the project root directory
     docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
@@ -242,23 +281,26 @@ This mode starts the API, the background worker, the UI (with hot-reloading), an
     This will start Whisper, Elasticsearch, and Redis. Kibana is also available for exploring search data.
 
     The upload route now always checks Whisper's `GET /diarization/check` readiness directly, so behavior should match between `yarn dev` and `yarn start` as long as the Whisper container has the correct `HF_TOKEN` and model cache.
-    
+
     > **Note:** When using `yarn dev`, the platform is automatically detected and the correct compose files are used. Linux with NVIDIA GPU will automatically use GPU mode.
 
 2.  **Start the Development Environment:**
     The `yarn dev` script orchestrates all the Node.js processes.
+
     ```bash
     # Run from project root
     yarn dev
     ```
+
     This command will:
-    *   Start the **API** server.
-    *   Start the **UI** development server (usually at `http://localhost:3002`).
-    *   Start the background **Worker** process.
-    *   Ensure the **Whisper** and **Elasticsearch** Docker containers are running and healthy.
+
+    - Start the **API** server.
+    - Start the **UI** development server (usually at `http://localhost:3002`).
+    - Start the background **Worker** process (legacy fallback only; vault mode's worker is spawned by the API after unlock).
+    - Ensure the **Whisper** and **Elasticsearch** Docker containers are running and healthy.
 
 3.  **Access the Application:**
-    Open your browser and navigate to `http://localhost:3002`. From another machine on your Tailscale network, see [Accessing over Tailscale](#accessing-over-tailscale) below.
+    Open your browser and navigate to `http://localhost:3002`. The first vault-capable boot asks you to create a vault password; later API starts ask you to unlock it. From another machine on your Tailscale network, see [Accessing over Tailscale](#accessing-over-tailscale) below.
 
 ### Accessing over Tailscale
 
@@ -274,44 +316,48 @@ Therascript binds its app-facing services (UI, API, shutdown) to `0.0.0.0` by de
 All API and shutdown calls go through the UI dev server (`localhost:3002`), which proxies them to the backend — the browser only ever sees same-origin requests.
 
 **Optional: Tailscale HTTPS via `tailscale serve`:**
+
 ```bash
 tailscale serve https / http://localhost:3002
 tailscale serve https /api http://localhost:3001
 ```
+
 This gives you a valid TLS cert at `https://<machine>.<tailnet>.ts.net` and the browser stops complaining about the dev-server certificate. No code change required.
 
 **Tighter security:** if you don't want the services exposed to every Tailscale peer, override the bind hosts in the env files:
+
 ```bash
 HOST=127.0.0.1              # in .env.api.dev / .env.api.prod
 SHUTDOWN_HOST=127.0.0.1      # passed to the run-dev / run-prod wrapper
 UI_HOST=127.0.0.1            # for the webpack dev server
 ```
+
 …and put a reverse proxy (Tailscale `serve` or any other) in front.
 
 ### Stopping the Application
 
-*   Press `Ctrl+C` in the terminal where `yarn dev` is running. The shutdown script will attempt to gracefully stop all processes and Docker containers it manages.
-*   To stop the services managed by the root `docker-compose.yml` (like Elasticsearch), run:
-    ```bash
-    docker compose down
-    ```
+- Press `Ctrl+C` in the terminal where `yarn dev` is running. The shutdown script will attempt to gracefully stop all processes and Docker containers it manages. The API locks the vault as part of the same shutdown (draining requests, stopping the supervised worker, closing the database, and revoking browser sessions) before the wrapper escalates to `SIGKILL` after its 25-second grace window.
+- To stop the services managed by the root `docker-compose.yml` (like Elasticsearch), run:
+  ```bash
+  docker compose down
+  ```
 
 ## Testing
 
-All unit tests are written with Vitest and focus on backend packages (no UI tests).
+All unit tests are written with Vitest, with backend coverage plus jsdom component tests for the UI. Playwright e2e specs live under `packages/ui/tests/e2e/`.
 
 1. Ensure you're using the Node version from `.nvmrc` in any new terminal:
-    ```bash
-    nvm use
-    ```
+   ```bash
+   nvm use
+   ```
 2. Run the test suite from the repo root:
-    ```bash
-    yarn test
-    ```
+   ```bash
+   yarn test
+   ```
 3. Watch mode and coverage:
-    ```bash
-    yarn test:watch
-    yarn coverage
-    ```
+   ```bash
+   yarn test:watch
+   yarn coverage
+   ```
 
 Tests live alongside sources as `*.test.ts` under `packages/**/src/`.

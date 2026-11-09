@@ -2,6 +2,47 @@
 
 This document details the step-by-step data flows for the core operations of the application. It maps logical steps to specific files and functions.
 
+> **Vault mode:** when the encrypted vault is active, every SQLite write goes to the encrypted generation database, recordings are stored as encrypted `.enc` containers (`vaultAudioService.ts`), and search indexing uses the in-database FTS5 tables instead of Elasticsearch. The Elasticsearch steps in the flows below apply to legacy-fallback boots; vault mode skips Elasticsearch entirely. Vault boot/unlock/lock is covered in §0.
+
+## 0. Vault Lifecycle (Boot → Unlock → Shutdown)
+
+**Goal:** Keep the database and recordings encrypted at rest, require the password on every API boot, and never persist the password or keys.
+
+1.  **Boot selection (API start)**
+
+    - `initializeServices()` calls `getVaultManager().enable()` before `configureDb()`.
+    - `enable()` recovers the generation layout, resumes interrupted cleanup, and probes cipher support.
+    - Cipher support present → **vault mode**: `bootMode = 'vault'`, status `locked`, HTTP starts, the database stays detached, Elasticsearch is skipped.
+    - Cipher support missing and no vault → **legacy-fallback**: plaintext SQLite + Elasticsearch boot (historical behavior).
+    - Cipher support missing but a vault exists → fail closed (refuse to open plaintext).
+    - **File:** `packages/api/src/services/vaultManager.ts` (`enable`), `packages/api/src/server.ts`.
+
+2.  **First-run setup**
+
+    - UI posts the password to `POST /api/vault/setup`; `setupVaultService` enforces origin + rate limits.
+    - `VaultManager.setup()` generates the database/recordings keys, wraps them with Argon2id(password), migrates the legacy install into a **staged generation**, verifies it, then atomically replaces `CURRENT`.
+    - The API opens the staged database, spawns the supervised worker with the keys over fd 3, and issues a browser session token.
+    - **Files:** `packages/api/src/api/vaultHandler.ts`, `packages/api/src/services/vaultManager.ts`, `packages/vault/src/keys.ts`, `packages/vault/src/generations.ts`.
+
+3.  **Unlock**
+
+    - UI posts to `POST /api/vault/unlock`; the password unwraps `keys.json` into memory.
+    - The active generation's `vault.db` is opened, the worker is spawned/reused with the data keys (`workerPipe.ts`), and BullMQ consumers start only after the worker signals readiness.
+    - A `therascript_vault_session` `HttpOnly` cookie is issued. Server-side tokens are memory-only; the cookie lives 30 days so reloads do not re-prompt while the API runs.
+    - **Files:** `packages/api/src/services/vaultManager.ts` (`unlock`, `NodeWorkerLauncher`), `packages/vault/src/sessions.ts`, `packages/vault/src/workerPipe.ts`.
+
+4.  **Steady state**
+
+    - Every non-public API route passes through `middleware/vaultGuard.ts`; requests are tracked so a lock can drain them.
+    - Search is served from SQLite FTS5 (`ftsSearchService.ts`); encrypted recording ranges are decrypted on demand (`vaultAudioService.ts`).
+    - Exports use `POST /api/admin/export-data` with a backup password and produce a sealed `.tvbak`.
+
+5.  **Lock / shutdown**
+
+    - `prepareShutdown()` (server shutdown only) drains in-flight requests and aborts registered SSE streams while keeping the DB/keys open for model unload.
+    - `shutdown()` calls `lock({ ifBusy: 'queue' })`: revoke all sessions, drain again, stop the supervised worker, close the database, clear keys, status `locked`.
+    - A second `SIGTERM` or the 25s backstop force-exits; keys only ever existed in process memory.
+
 ## 1. Transcription Pipeline
 
 **Goal:** Convert uploaded audio into searchable text and initialize a chat session.
@@ -223,38 +264,45 @@ Every successful `POST /api/v1/models/load` (in either the API process or the an
 
 Successful unloads remove the entry. The registry is the source of truth for "which URLs is this process keeping models loaded on right now?" — needed because a remote URL used for a per-request analysis job is not the "active" base URL the API normally tracks, so the active-URL unload alone would miss it.
 
-### 8.2 API Shutdown (`server.ts:242`)
+### 8.2 API Shutdown (`server.ts`)
 
 On `SIGINT` / `SIGTERM` the API runs `shutdown(signal)`:
 
-1. Close the HTTP listener (`server.close`).
-2. `unloadActiveModel()` — unloads the active base URL.
-3. For each remaining URL in the loaded-models tracker, call `unloadModelAtUrl(url)`. This catches per-request remote URLs.
-4. `runtime.stop()` — only meaningful for the local `lms` daemon (remote hosts are intentionally not killed).
-5. Close BullMQ queues, SQLite, Elasticsearch client.
-6. `process.exit(...)`.
+1. Start closing the HTTP listener (`server.close`) and close idle connections.
+2. `VaultManager.prepareShutdown()` — in vault mode, drain in-flight requests and abort active SSE streams so `server.close()` cannot hang. The database and keys stay open.
+3. Wait for the HTTP listener to finish closing.
+4. `unloadActiveModel()` — unloads the active base URL (this reads LLM settings, which is why the vault must still be open here).
+5. For each remaining URL in the loaded-models tracker, call `unloadModelAtUrl(url)`. This catches per-request remote URLs.
+6. `runtime.stop()` — only meaningful for the local `lms` daemon (remote hosts are intentionally not killed).
+7. Close BullMQ queues.
+8. `VaultManager.shutdown()` — stops the supervised worker, closes the vault database, clears the in-memory keys, and revokes every browser session. The plaintext legacy fallback is closed by the following `closeDb()`.
+9. Close the Elasticsearch client.
+10. `process.exit(...)`.
 
-For a remote URL the unload path is identical to local: `GET /api/v1/models` to enumerate, then `POST /api/v1/models/unload { instance_id }` per instance. The LM Studio REST API is symmetric for local and remote.
+A 25-second backstop timer force-exits if any step wedges; a second signal also force-exits immediately. For a remote URL the unload path is identical to local: `GET /api/v1/models` to enumerate, then `POST /api/v1/models/unload { instance_id }` per instance. The LM Studio REST API is symmetric for local and remote.
 
-### 8.3 Worker Shutdown (`packages/worker/src/index.ts:90`)
+### 8.3 Worker Shutdown (`packages/worker/src/index.ts`)
 
 On `SIGINT` / `SIGTERM` the worker:
 
-1. Closes all three BullMQ workers (`transcriptionWorker.close()`, `analysisWorker.close()`, `verificationWorker.close()`).
-2. For each URL in its own loaded-models tracker, calls `unloadModelAtUrlForWorker(url)`. This is what unloads a per-job remote URL the API process never knew about.
-3. Closes the SQLite, Elasticsearch, and Redis-publisher connections.
-4. `process.exit(0)`.
+1. Waits for the boot promise so shutdown never races consumer creation.
+2. Closes all three BullMQ workers (`transcriptionWorker.close()`, `analysisWorker.close()`, `verificationWorker.close()`).
+3. For each URL in its own loaded-models tracker, calls `unloadModelAtUrlForWorker(url)`. This is what unloads a per-job remote URL the API process never knew about.
+4. Closes the SQLite, Elasticsearch, and Redis-publisher connections.
+5. `process.exit(0)`.
+
+In vault mode the API stops the supervised worker as part of the lock, so the worker and database close together. A standalone worker only exists in the plaintext legacy fallback; on a vault-capable install it exits 0 immediately with a notice because it has no keys.
 
 ### 8.4 Wrapper Scripts (`scripts/run-dev.js`, `scripts/run-prod.js`)
 
 The wrapper scripts (which spawn `concurrently` for the API, UI, worker, whisper-manager, and ES-manager) used to `SIGKILL` the entire process group on shutdown, which bypassed the graceful handlers above. The current behavior is:
 
 1. **SIGTERM** the concurrently process group (negative PID, so all children receive the signal).
-2. **Wait up to 5 seconds** for the group to exit (`waitForProcessExit` polls the `exit` event).
+2. **Wait up to 25 seconds** for the group to exit (`waitForProcessExit` polls the `exit` event). The window covers request drain, SSE abort, model unload, and the vault lock.
 3. If still alive, escalate to **SIGKILL** as a hard fallback.
 4. Run the local-only `cleanupLmsDaemon()` (`lms daemon down`) and Docker/UI cleanup as belt-and-suspenders.
 
-The 5-second grace period is the window in which the API and worker run their `unloadActiveModel` / `unloadModelAtUrl` / `runtime.stop` calls. On the UI **Shutdown App** path (which posts to the wrapper's port-9999 service) and on terminal **Ctrl+C** (which concurrently forwards), both paths now produce the same outcome: local + remote models get freed, the `lms` daemon is taken down, and the process tree exits cleanly.
+The grace period is the window in which the API and worker run their `unloadActiveModel` / `unloadModelAtUrl` / `runtime.stop` calls and the API locks the vault. On the UI **Shutdown App** path (which posts to the wrapper's port-9999 service) and on terminal **Ctrl+C** (which concurrently forwards), both paths now produce the same outcome: local + remote models get freed, the lms daemon is taken down, keys are cleared, and the process tree exits cleanly.
 
 The Windows path (`taskkill /T /F`) is unchanged — Windows does not have a graceful signal equivalent and the wrapper falls back to force kill there.
 
@@ -266,9 +314,9 @@ Flow:
 
 1. The UI's sidebar split-button posts to `/restart` (proxied to the wrapper by webpack during dev, or by the production front-end server).
 2. The wrapper's request handler calls `handleShutdown('API_RESTART_REQUEST', isRestart=true)`.
-3. `handleShutdown` runs the **exact same teardown** as a shutdown: SIGTERM the concurrently group, wait 5s, SIGKILL fallback, `cleanupLmsDaemon`, Docker container stop+remove, UI-port cleanup. This is the same code path that gives `/shutdown` a clean exit, so all model-unload and connection-close guarantees from §8.1–§8.4 carry over.
+3. `handleShutdown` runs the **exact same teardown** as a shutdown: SIGTERM the concurrently group, wait up to 25s, SIGKILL fallback, `cleanupLmsDaemon`, Docker container stop+remove, UI-port cleanup. This is the same code path that gives `/shutdown` a clean exit, so all model-unload, vault-lock, and connection-close guarantees from §8.1–§8.4 carry over.
 4. Instead of `process.exit(0)`, the handler then sets `devProcess = null`, flips `isShuttingDown` back to `false`, and invokes `main()` again. The new `main()` first closes any leftover `shutdownHttpServer` from the previous lifecycle (avoids `EADDRINUSE` on port 9999), then re-runs Redis health, respawns the concurrently group, and re-registers the shutdown service.
-5. The UI's `ReadinessOverlay` (`App.tsx:50`) appears the moment `/api/status/readiness` starts failing, and disappears once the new API comes back healthy. There is no separate "Restarting" screen — the existing "System Initializing" overlay is reused.
+5. Because every API restart revokes the in-memory vault sessions, the UI returns to the vault screen and asks for the password again. The `ReadinessOverlay` (`App.tsx:50`) appears the moment `/api/status/readiness` starts failing, and disappears once the new API comes back healthy. There is no separate "Restarting" screen — the existing "System Initializing" overlay is reused.
 
 The `currentProcess !== devProcess` guard in the concurrently event handlers is the safety net that prevents a stale `close` event from the old process from triggering cleanup during the restart window.
 
@@ -295,12 +343,12 @@ The `currentProcess !== devProcess` guard in the concurrently event handlers is 
     - Worker picks up the job in `processVerificationJob` (`packages/worker/src/jobs/verificationProcessor.ts`), wrapped in `runWithLlmWorkerLock` (`llmWorkerMutex.ts`) so it never loads/unloads models concurrently with an analysis job.
     - Loads the snapshotted Judge model via `loadLlmModelForWorker` (thinking budget passed through uncapped via `resolveJudgeThinkingBudget`, default `-1` = unrestricted; a previous/differing model is evicted at load time, like Session Chat). Once the model is confirmed loaded, the worker adopts its config into the global `app_settings` (best-effort, range-guarded via `buildJudgeActiveSettingsUpdate`), so chat and the next Fact Check start with settings preset and reuse the warm model instead of evicting it — including mid-audit.
     - Iterates candidate AI messages newest-first (skipping already-verified unless `skipVerified` is false), polling job status before each message for cooperative cancellation:
-        - **Greeting fast-path:** trivial conversational messages (`isTrivialConversationalMessage`) complete with zero LLM calls.
-        - **Judge call:** transcript context is budgeted per message (`selectJudgeTranscriptContext`, `showSpeakers`-aware `[P#<index> MM:SS]` formatting) and sent with the therapist question + visible AI answer to the Judge LLM under the `system_verification_judge` prompt. The Judge returns atomic claims (`supported` / `partially_supported` / `contradicted` / `fabricated`), omissions, severity, and transcript evidence.
-        - **JSON repair:** raw output is parsed with control-character/trailing-comma sanitization (`sanitizeJsonForParse`); on failure the worker retries once at `temperature: 0.1` with thinking unchanged. Runaway first attempts (filled the completion cap, or ≥16k unparseable completion tokens per `detectJudgeRunaway`) get a compact-verdict reminder under a fail-fast cap (`resolveJudgeRetryCompletionBudget` = `min(original, 8k)`); attempts that demonstrably stopped at the cap persist as `truncated_output` with cap numbers instead of `malformed_json`. Usage logs and token counts are persisted even when parsing fails.
-        - **Span resolution:** each `exact_quote` is mapped to `start_char`/`end_char` in the message (`locateQuoteSpan`) for inline highlighting.
-        - **Evidence hydration:** LLM-guessed `timestampMs`/`speaker` are overwritten with ground-truth `transcript_paragraphs` values (`hydrateEvidenceItem`); unresolvable citations are nulled.
-        - **Persistence:** a `message_verifications` row (review-aware effective counts via the shared `reduceEffectiveVerificationCounts` / `applyConfirmedReviewsToCounts` core in `@therascript/domain`, accuracy via `computeVerificationAccuracyScore`) plus `verified_statements` rows carrying stored finding identity (`finding_key`, `context_revision`); the save transaction first recomputes the live material revision (visible answer + therapist question + full transcript content) and discards the result (`StaleVerificationMaterialError`, reported as skipped) when the material changed mid-audit. Durable human confirmations are read inside the same transaction and reconciled before aggregates are calculated; new-audit job counters (`processed_messages`, `flagged_statements`, ...) describe these effective results, while old run counters are never retroactively decremented by later human review. Published `message_verified` events carry the persisted effective accuracy/counts from the returned save result.
+      - **Greeting fast-path:** trivial conversational messages (`isTrivialConversationalMessage`) complete with zero LLM calls.
+      - **Judge call:** transcript context is budgeted per message (`selectJudgeTranscriptContext`, `showSpeakers`-aware `[P#<index> MM:SS]` formatting) and sent with the therapist question + visible AI answer to the Judge LLM under the `system_verification_judge` prompt. The Judge returns atomic claims (`supported` / `partially_supported` / `contradicted` / `fabricated`), omissions, severity, and transcript evidence.
+      - **JSON repair:** raw output is parsed with control-character/trailing-comma sanitization (`sanitizeJsonForParse`); on failure the worker retries once at `temperature: 0.1` with thinking unchanged. Runaway first attempts (filled the completion cap, or ≥16k unparseable completion tokens per `detectJudgeRunaway`) get a compact-verdict reminder under a fail-fast cap (`resolveJudgeRetryCompletionBudget` = `min(original, 8k)`); attempts that demonstrably stopped at the cap persist as `truncated_output` with cap numbers instead of `malformed_json`. Usage logs and token counts are persisted even when parsing fails.
+      - **Span resolution:** each `exact_quote` is mapped to `start_char`/`end_char` in the message (`locateQuoteSpan`) for inline highlighting.
+      - **Evidence hydration:** LLM-guessed `timestampMs`/`speaker` are overwritten with ground-truth `transcript_paragraphs` values (`hydrateEvidenceItem`); unresolvable citations are nulled.
+      - **Persistence:** a `message_verifications` row (review-aware effective counts via the shared `reduceEffectiveVerificationCounts` / `applyConfirmedReviewsToCounts` core in `@therascript/domain`, accuracy via `computeVerificationAccuracyScore`) plus `verified_statements` rows carrying stored finding identity (`finding_key`, `context_revision`); the save transaction first recomputes the live material revision (visible answer + therapist question + full transcript content) and discards the result (`StaleVerificationMaterialError`, reported as skipped) when the material changed mid-audit. Durable human confirmations are read inside the same transaction and reconciled before aggregates are calculated; new-audit job counters (`processed_messages`, `flagged_statements`, ...) describe these effective results, while old run counters are never retroactively decremented by later human review. Published `message_verified` events carry the persisted effective accuracy/counts from the returned save result.
     - **Outcome semantics:** every finished attempt is tallied as `succeeded` or `failed` (`succeeded_messages` / `failed_messages` / `skipped_messages` on the job row, migration V21). A run where every attempted assessment fails lands on `failed`; a mixed run stays `completed` but persists a "Completed with errors: X of Y checked, Z failed" summary plus the split counts (the UI renders the mixed label from `failed_messages > 0`, never unqualified success); canceled runs persist `skipped_messages` for unattempted candidates; zero-candidate runs complete cleanly with no error summary. Per-message failures persist a bounded `error_message` (job/message IDs, Judge model, phase/attempt, duration, token usage — never transcripts or raw reasoning) plus a machine-readable `error_code` (`empty_output` / `malformed_json` / `truncated_output` / `invalid_structure` / `provider_error` / `context_budget` / `missing_transcript`).
     - Keeps the Judge model loaded with its context on every terminal path (no `finally` unload); marks the job `completed` / `failed` / `canceled`. The retained model is evicted only by worker shutdown (`loadedModelsTracker`), an explicit unload, or a later job/chat that loads a different model.
 

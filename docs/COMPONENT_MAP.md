@@ -3,58 +3,72 @@
 This document provides a detailed breakdown of the monorepo's package structure, the libraries used within each, and their specific responsibilities. Use this as a reference for understanding the tech stack and locating implementation details.
 
 ## 1. Backend API (`packages/api`)
+
 **Type:** Node.js HTTP Server (ElysiaJS)
 **Location:** `packages/api`
 **Entry Point:** `src/server.ts`
 
 ### Responsibilities
+
 - **REST API:** Exposes endpoints for the UI to manage sessions, chats, analysis jobs, and fact-verification audits.
 - **Orchestration:** Coordinators interactions between the Database, Search Engine, Redis Queue, and AI Services (LM Studio, Whisper).
 - **Transcription Gating:** Verifies Whisper diarization readiness (`/diarization/check`) before upload/job enqueue and can trigger prefetch (`/diarization/prefetch`).
-- **Transcript Speaker Operations:** Supports session-level speaker label rename and propagates updates to SQLite and Elasticsearch.
+- **Transcript Speaker Operations:** Supports session-level speaker label rename and propagates updates to SQLite and the active search index (Elasticsearch legacy, FTS5 vault).
 - **Context Management:** Calculates token usage and manages LLM context windows (`src/services/contextUsageService.ts`).
 - **Verification Orchestration:** Creates/guards fact-verification jobs, snapshots Judge LLM config, streams Redis progress over SSE, and serves per-finding human confirmations (dismiss endpoint) (`src/api/verificationHandler.ts`, `src/routes/verificationRoutes.ts`).
+- **Vault Gate & Supervision:** Boots locked in vault mode, serves setup/unlock/lock/change-password (`src/routes/vaultRoutes.ts`, `src/api/vaultHandler.ts`), gates every other route via `src/middleware/vaultGuard.ts`, and supervises the worker after unlock (`src/services/vaultManager.ts`).
+- **Encrypted Storage & Search:** Encrypts/streams recordings (`src/services/vaultAudioService.ts`), serves SQLite FTS5 search in vault mode (`src/services/ftsSearchService.ts`), and seals/restores `.tvbak` backups (`src/api/adminHandler.ts`).
 - **Service Management:** Monitors and manages Docker containers for AI services (`src/services/dockerManagementService.ts`).
 
 ### Key Libraries
+
 - **`elysia`**: High-performance TypeScript web framework. Used for routing and handling requests.
 - **`@sinclair/typebox`**: Runtime type validation for API request bodies and parameters.
-- **`better-sqlite3`** (via `@therascript/db`): Synchronous SQLite driver.
+- **`better-sqlite3`** (via `@therascript/db`): Synchronous SQLite driver; the multiple-ciphers fork opens the encrypted vault database.
 - **`bullmq`**: Redis-based message queue for offloading heavy tasks (transcription, analysis) to the Worker.
-- **`@elastic/elasticsearch`**: Client for full-text search operations.
+- **`@elastic/elasticsearch`**: Client for full-text search operations (legacy mode only).
 - **`dockerode`**: Docker API client for monitoring and managing containers.
 - **`@dqbd/tiktoken`**: Tokenizer for OpenAI-compatible token counting (used for context estimation).
+- **`@therascript/vault`**: Argon2id key wrapping, generation/keys handling, encrypted recordings/backups, browser sessions, and the worker key pipe.
 
 ## 2. Background Worker (`packages/worker`)
+
 **Type:** Node.js Background Processor
 **Location:** `packages/worker`
 **Entry Point:** `src/index.ts`
 
 ### Responsibilities
+
+- **Boot & supervision:** Runs standalone only for plaintext legacy fallback. In vault mode the API spawns this process after unlock/setup and sends the data keys over an inherited fd 3 pipe (`src/index.ts`, `src/standaloneBoot.ts`, `src/vaultContext.ts`); a standalone start exits 0 when a vault exists or vault support is available.
 - **Job Consumption:** Consumes jobs from Redis queues (`transcription-jobs`, `analysis-jobs`, `verification-jobs`).
-- **Transcription Processing:** Coordinates file handling and status polling with the transcription service, validates diarization readiness, and enforces speaker-labeled output (`src/jobs/transcriptionProcessor.ts`).
+- **Transcription Processing:** Coordinates file handling and status polling with the transcription service, validates diarization readiness, enforces speaker-labeled output, and decrypts vault recordings through its in-memory vault context (`src/jobs/transcriptionProcessor.ts`).
 - **Analysis Execution:** Executes MapReduce strategies using LM Studio to analyze multiple sessions (`src/jobs/analysisProcessor.ts`).
 - **Fact Verification:** Audits AI chat responses against ground-truth transcripts with a Judge LLM — claims extraction, quote span resolution, evidence hydration, review-aware effective scoring with material-revision staleness checks — and streams progress over Redis (`src/jobs/verificationProcessor.ts`, serialized against analysis jobs via `src/llmWorkerMutex.ts`).
-- **Data Indexing:** Pushes processed transcripts (including `speaker`) and analysis results to Elasticsearch.
+- **Data Indexing:** Pushes processed transcripts (including `speaker`) and analysis results to Elasticsearch in legacy mode; vault mode writes to the in-database FTS5 tables instead.
 
 ### Key Libraries
+
 - **`bullmq`**: For defining and processing job workers.
 - **`axios`**: For communicating with the Whisper and LM Studio HTTP APIs.
 - **`ioredis`**: Low-level Redis client used by BullMQ.
 
 ## 3. Frontend UI (`packages/ui`)
+
 **Type:** React Single Page Application (SPA)
 **Location:** `packages/ui`
 **Entry Point:** `src/index.tsx`
 
 ### Responsibilities
+
 - **User Interaction:** Provides interfaces for uploading audio, chatting with AI, and viewing results.
+- **Vault Gate:** `VaultScreen.tsx` handles first-run setup and per-boot unlock; `useVaultStatus` polls `/api/vault/status`, clears cached queries while locked, and refreshes on any 401 (`src/api/vault.ts`). Settings exposes password change plus encrypted export/import.
 - **Hallucination Audit Hub:** `/verification` page with live job banner, accuracy analytics, and Issues/Coverage/Job History tabs (`src/components/Verification/`), plus inline verdict highlighting in chat bubbles (`src/utils/highlightVerifiedStatements.ts`) and per-finding dismissal ("Confirmed by you") via `StatementVerdictModal.tsx` — a modeless panel docked left of the transcript with a draggable header (drop position persisted in `localStorage`, restored on open, no entrance animation) and a Dismiss-left / Prev-Next-right footer; stepping Prev/Next flashes the matching inline highlight in the note once — a single background-only pulse in its verdict color (no persistent ring) (e2e: `tests/e2e/fact-check.spec.ts`). Stored model ids render through the shared display override `formatModelDisplayName` (`src/utils/modelDisplay.ts`: `gemma3:12b-it-qat` → `gemma3-12b`, `qwen/qwen3.5-9b` → `qwen3.5-9b`, missing → `Unknown Model`); raw ids stay as filter values, keys, and API params. Accuracy by Authoring LLM merges rows sharing a display name via `mergeModelAccuracyStatsByDisplayName` (counts summed, pooled rates recomputed).
 - **Speaker-Aware Transcripts:** Renders speaker labels, supports in-place speaker rename modal, and accepts upload-time `numSpeakers` input.
 - **State Management:** Manages local UI state (theme, sidebar) and server state (caching, optimistic updates).
 - **Streaming:** Handles Server-Sent Events (SSE) for real-time chat responses (`src/hooks/useMessageStream.ts`).
 
 ### Key Libraries
+
 - **`react` / `react-dom`**: v19. Core UI library.
 - **`@radix-ui/themes` & Primitives**: Accessible, unstyled component primitives and pre-styled theme components.
 - **`tailwindcss`**: Utility-first CSS framework for styling.
@@ -64,17 +78,20 @@ This document provides a detailed breakdown of the monorepo's package structure,
 - **`react-router-dom`**: Client-side routing.
 
 ## 4. Whisper Service (`packages/whisper`)
+
 **Type:** Python FastAPI Service (Dockerized)
 **Location:** `packages/whisper`
 **Entry Point:** `src/server.ts` (Node wrapper) -> `whisper_api.py` (Python API + orchestration)
 
 ### Responsibilities
+
 - **Audio Transcoding:** Accepts audio files via HTTP.
 - **Inference Pipeline:** Runs Parakeet ASR (native word timestamps) + Community-1 diarization + word→speaker attribution (`pipeline/`).
 - **Readiness/Prefetch:** Exposes diarization readiness and prefetch endpoints (`GET /diarization/check`, `POST /diarization/prefetch`).
 - **Status Reporting:** Exposes endpoints to poll job status and retrieve speaker-labeled JSON results.
 
 ### Key Libraries
+
 - **`fastapi` / `uvicorn`**: Python web server.
 - **`nemo_toolkit[asr]`**: Parakeet TDT 0.6B v2 ASR.
 - **`pyannote.audio`**: Community-1 speaker diarization.
@@ -83,31 +100,44 @@ This document provides a detailed breakdown of the monorepo's package structure,
 - **`ffmpeg`**: System dependency for audio processing.
 
 ## 5. Shared Utilities
+
 ### Database (`packages/db`)
-- **Lib:** `better-sqlite3`
-- **Role:** Singleton database connection, migration runner (`src/sqliteService.ts`), and type definitions.
+
+- **Lib:** `better-sqlite3` / `better-sqlite3-multiple-ciphers`
+- **Role:** Singleton database connection, migration runner (`src/sqliteService.ts`), FTS5 search tables, vault DB open/attach/close handshake, and type definitions.
+
+### Vault (`packages/vault`)
+
+- **Lib:** `node:crypto` + `hash-wasm` (Argon2id)
+- **Role:** Password-protected vault primitives: key wrapping/rewrapping (`src/keys.ts`), generation layout and atomic cutover (`src/generations.ts`), encrypted recording chunks + range decryption (`src/recordings.ts`), sealed `.tvbak` backups (`src/backup.ts`), memory-only browser sessions/rate limiting (`src/sessions.ts`), worker key pipe (`src/workerPipe.ts`), and exclusive unlock/lock transitions (`src/mutex.ts`).
 
 ### Elasticsearch Client (`packages/elasticsearch-client`)
+
 - **Lib:** `@elastic/elasticsearch`
 - **Role:** Centralized client configuration, index mappings (`src/mappings.ts`), and helper functions for bulk indexing/searching.
 
 ### Docker Utilities (`packages/docker-utils`)
+
 - **Lib:** `dockerode`
 - **Role:** Helpers to ensure containers are running, healthy, and to stop them gracefully.
 
 ### GPU Utilities (`packages/gpu-utils`)
+
 - **Role:** Parses `nvidia-smi` XML output to provide real-time GPU stats to the API/UI.
 - **Exports:** GPU utilization, VRAM usage, temperature, power draw, per-process stats.
 
 ### Elasticsearch Manager (`packages/elasticsearch-manager`)
+
 - **Lib:** `@therascript/docker-utils`
 - **Role:** Manages the Elasticsearch Docker container lifecycle (start, stop, health checks).
 - **Entry Point:** `src/index.ts`
 
 ## 6. LM Studio Service (`packages/llama`)
+
 **Type:** External Service Wrapper
 **Location:** `packages/llama`
 
 ### Responsibilities
+
 - **LLM Hosting:** Uses local language models (Llama 3, Mistral, Gemma, etc.) via LM Studio.
 - **Model Management:** Load and unload models and parse instances locally using the headless lms engine.

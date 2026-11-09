@@ -1,4 +1,4 @@
-import { Database } from 'better-sqlite3';
+import type { DbDatabase } from './types.js';
 import type { z } from 'zod';
 import {
   sessionSchema,
@@ -26,7 +26,7 @@ interface TableSchema {
   columns: SchemaColumn[];
 }
 
-const getTableSchema = (db: Database, tableName: string): TableSchema => {
+const getTableSchema = (db: DbDatabase, tableName: string): TableSchema => {
   const pragmaResult = db.pragma(`table_info(${tableName})`, {
     simple: false,
   }) as any[];
@@ -91,7 +91,7 @@ const validateSchemaAgainstZod = (
 };
 
 export const validateDatabaseSchema = (
-  db: Database
+  db: DbDatabase
 ): {
   valid: boolean;
   warnings: string[];
