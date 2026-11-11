@@ -6,7 +6,8 @@
 // nothing (a missing green check was the only signal, which read as
 // "still connected" after an unload or remote eviction).
 import React from 'react';
-import { Badge, Flex, Spinner, Tooltip } from '@radix-ui/themes';
+import { Flex, Spinner, Tooltip } from '@radix-ui/themes';
+import { AppBadge } from './AppBadge';
 import {
   CheckCircledIcon,
   ExclamationTriangleIcon,
@@ -104,9 +105,9 @@ export function LlmStatusBadge({
     }
     if (isSettledNotLoaded) {
       return (
-        <Badge variant="soft" color="gray" size="1">
+        <AppBadge variant="soft" color="gray" size="1">
           Not loaded
-        </Badge>
+        </AppBadge>
       );
     }
     return null;

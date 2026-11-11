@@ -7,9 +7,9 @@ import {
   Text,
   Spinner,
   Callout,
-  Badge,
   Button,
 } from '@radix-ui/themes';
+import { AppBadge } from '../../Shared/AppBadge';
 import {
   StarIcon,
   CopyIcon,
@@ -685,7 +685,7 @@ export function ChatMessageBubble({
                   wrap="wrap"
                   data-testid="failed-verification-footer"
                 >
-                  <Badge
+                  <AppBadge
                     color="red"
                     variant="soft"
                     size="1"
@@ -693,7 +693,7 @@ export function ChatMessageBubble({
                     style={{ flexShrink: 0 }}
                   >
                     {failedBadgeLabel ?? 'Fact-check failed'}
-                  </Badge>
+                  </AppBadge>
                   <Button
                     size="1"
                     variant="soft"

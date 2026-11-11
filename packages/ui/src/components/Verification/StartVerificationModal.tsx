@@ -17,9 +17,9 @@ import {
   ScrollArea,
   Checkbox,
   Switch,
-  Badge,
   RadioGroup,
 } from '@radix-ui/themes';
+import { AppBadge } from '../Shared/AppBadge';
 import {
   InfoCircledIcon,
   Cross2Icon,
@@ -460,19 +460,19 @@ export function StartVerificationModal({
                           </Text>
                         </Box>
                         {session.isFullyVerified ? (
-                          <Badge color="green" variant="soft" size="1">
+                          <AppBadge color="green" variant="soft" size="1">
                             Verified ({session.verifiedAiMessages}/
                             {session.totalAiMessages} msgs)
-                          </Badge>
+                          </AppBadge>
                         ) : session.verifiedAiMessages > 0 ? (
-                          <Badge color="amber" variant="soft" size="1">
+                          <AppBadge color="amber" variant="soft" size="1">
                             Partial ({session.verifiedAiMessages}/
                             {session.totalAiMessages} msgs)
-                          </Badge>
+                          </AppBadge>
                         ) : (
-                          <Badge color="gray" variant="soft" size="1">
+                          <AppBadge color="gray" variant="soft" size="1">
                             Unverified ({session.totalAiMessages} msgs)
-                          </Badge>
+                          </AppBadge>
                         )}
                       </Text>
                     ))}

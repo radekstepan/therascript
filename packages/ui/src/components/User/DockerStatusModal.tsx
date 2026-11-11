@@ -9,9 +9,9 @@ import {
   Box,
   Spinner,
   Callout,
-  Badge,
   ScrollArea,
 } from '@radix-ui/themes';
+import { AppBadge } from '../Shared/AppBadge';
 import {
   Cross2Icon,
   CheckCircledIcon,
@@ -32,7 +32,7 @@ interface DockerStatusModalProps {
 const getStatusVisuals = (
   state: string
 ): {
-  color: React.ComponentProps<typeof Badge>['color'];
+  color: React.ComponentProps<typeof AppBadge>['color'];
   Icon: React.ElementType;
 } => {
   const lowerState = state.toLowerCase();
@@ -144,14 +144,14 @@ export function DockerStatusModal({
                                 {container.name}
                               </Text>
                             </AppTooltip>
-                            <Badge color={color} variant="soft" size="1">
+                            <AppBadge color={color} variant="soft" size="1">
                               <Icon
                                 width="12"
                                 height="12"
                                 style={{ marginRight: '3px' }}
                               />
                               {container.state}
-                            </Badge>
+                            </AppBadge>
                           </Flex>
                           <AppTooltip content={container.image}>
                             <Text size="1" color="gray" truncate>

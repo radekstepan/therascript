@@ -4,8 +4,8 @@
 // Regression test: the sidebar "Active Jobs" count badge must use the
 // app's standard subtly-rounded rectangle (theme default radius), not a
 // full-radius oval/pill. Radix Badge renders its `radius` prop as a
-// `data-radius` attribute; badges elsewhere in the app (Fact Check,
-// Analysis) omit `radius` and inherit the theme default, so this badge
+// `data-radius` attribute; all labels use the shared AppBadge, which omits
+// `radius` and inherits the theme default, so this badge
 // must not set `data-radius="full"`.
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';

@@ -9,14 +9,8 @@ import {
   ChevronUpIcon,
   ChevronDownIcon,
 } from '@radix-ui/react-icons';
-import {
-  Table,
-  Text,
-  Flex,
-  IconButton,
-  DropdownMenu,
-  Badge,
-} from '@radix-ui/themes';
+import { Table, Text, Flex, IconButton, DropdownMenu } from '@radix-ui/themes';
+import { AppBadge } from '../Shared/AppBadge';
 import { TableVirtuoso } from 'react-virtuoso';
 import type { StandaloneChatListItem } from '../../types';
 import type { StandaloneChatSortCriteria, SortDirection } from '../../store';
@@ -69,15 +63,9 @@ const ChatRowCells = React.memo(function ChatRowCells({
         <Flex gap="1" wrap="wrap">
           {chat.tags && chat.tags.length > 0 ? (
             chat.tags.slice(0, 3).map((tag: string) => (
-              <Badge
-                key={tag}
-                color="gray"
-                variant="soft"
-                radius="full"
-                size="1"
-              >
+              <AppBadge key={tag} color="gray" variant="soft" size="1">
                 {tag}
-              </Badge>
+              </AppBadge>
             ))
           ) : (
             <Text
@@ -89,9 +77,9 @@ const ChatRowCells = React.memo(function ChatRowCells({
             ></Text>
           )}
           {chat.tags && chat.tags.length > 3 && (
-            <Badge color="gray" variant="soft" radius="full" size="1">
+            <AppBadge color="gray" variant="soft" size="1">
               ...
-            </Badge>
+            </AppBadge>
           )}
         </Flex>
       </Table.Cell>

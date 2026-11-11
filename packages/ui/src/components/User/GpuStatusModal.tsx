@@ -9,13 +9,13 @@ import {
   Spinner,
   Callout,
   ScrollArea,
-  Badge,
   Table,
   Heading,
   Progress,
   Card,
   Separator,
 } from '@radix-ui/themes';
+import { AppBadge } from '../Shared/AppBadge';
 import {
   Cross2Icon,
   InfoCircledIcon,
@@ -241,22 +241,22 @@ const ActiveModelCard: React.FC<{ status: LlmStatus }> = ({ status }) => {
 
         <Flex direction="column" gap="2">
           <Flex align="center" gap="2">
-            <Badge color="blue" variant="soft">
+            <AppBadge color="blue" variant="soft">
               <LightningBoltIcon />
               VRAM Usage: {prettyBytes(sizeVram)}
-            </Badge>
+            </AppBadge>
             {isFullyOffloaded && (
-              <Badge color="green" variant="outline">
+              <AppBadge color="green" variant="outline">
                 100% Offloaded
-              </Badge>
+              </AppBadge>
             )}
           </Flex>
           {sizeSystem > 0 && (
             <Flex align="center" gap="2">
-              <Badge color="orange" variant="soft">
+              <AppBadge color="orange" variant="soft">
                 <DesktopIcon />
                 System RAM: {prettyBytes(sizeSystem)}
-              </Badge>
+              </AppBadge>
               <Text size="1" color="gray">
                 (Estimated weights on CPU)
               </Text>
@@ -295,9 +295,9 @@ const RemoteModelCard: React.FC<{ status: LlmStatus }> = ({ status }) => {
             <Text size="2" truncate style={{ maxWidth: 260 }}>
               {status.activeModel}
             </Text>
-            <Badge color="blue" variant="soft">
+            <AppBadge color="blue" variant="soft">
               Remote
-            </Badge>
+            </AppBadge>
           </Flex>
         </Flex>
         <Flex direction="column" gap="1">
@@ -384,7 +384,7 @@ export function GpuStatusModal({
         ? 'Metal'
         : 'CPU'
     : 'Unknown';
-  const runtimeBadgeColor: React.ComponentProps<typeof Badge>['color'] =
+  const runtimeBadgeColor: React.ComponentProps<typeof AppBadge>['color'] =
     runtimeKey === 'gpu' ? 'green' : runtimeKey === 'metal' ? 'cyan' : 'gray';
   const runtimeDescription = runtimeKey
     ? runtimeKey === 'gpu'
@@ -404,9 +404,9 @@ export function GpuStatusModal({
           {runtimeDescription}
         </Dialog.Description>
         <Flex mb="3">
-          <Badge color={runtimeBadgeColor} variant="soft">
+          <AppBadge color={runtimeBadgeColor} variant="soft">
             Runtime: {runtimeLabel}
-          </Badge>
+          </AppBadge>
         </Flex>
         <ScrollArea
           type="auto"
@@ -472,14 +472,14 @@ export function GpuStatusModal({
                         style={{ flexWrap: 'wrap' }}
                       >
                         {gpuStats.driverVersion && (
-                          <Badge color="gray" variant="soft">
+                          <AppBadge color="gray" variant="soft">
                             Driver: {gpuStats.driverVersion}
-                          </Badge>
+                          </AppBadge>
                         )}
                         {gpuStats.cudaVersion && (
-                          <Badge color="gray" variant="soft">
+                          <AppBadge color="gray" variant="soft">
                             CUDA: {gpuStats.cudaVersion}
-                          </Badge>
+                          </AppBadge>
                         )}
                       </Flex>
                     )}

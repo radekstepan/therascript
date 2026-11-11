@@ -1,13 +1,7 @@
 /* packages/ui/src/components/StandaloneChatView/EditStandaloneChatModal.tsx */
 import React, { useState, useCallback, useRef } from 'react';
-import {
-  Text,
-  TextField,
-  Box,
-  Badge,
-  IconButton,
-  Flex,
-} from '@radix-ui/themes';
+import { Text, TextField, Box, IconButton, Flex } from '@radix-ui/themes';
+import { AppBadge } from '../Shared/AppBadge';
 import { PlusIcon, Cross2Icon } from '@radix-ui/react-icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { StandaloneChatListItem } from '../../types';
@@ -227,12 +221,7 @@ export function EditStandaloneChatModal({
               style={{ minHeight: formState.tags.length > 0 ? 'auto' : '0px' }}
             >
               {formState.tags.map((tag, index) => (
-                <Badge
-                  key={`${tag}-${index}`}
-                  color="gray"
-                  variant="soft"
-                  radius="full"
-                >
+                <AppBadge key={`${tag}-${index}`} color="gray" variant="soft">
                   {tag}
                   <IconButton
                     size="1"
@@ -256,7 +245,7 @@ export function EditStandaloneChatModal({
                   >
                     <Cross2Icon width="10" height="10" />
                   </IconButton>
-                </Badge>
+                </AppBadge>
               ))}
             </Flex>
             <Flex gap="2" align="center">

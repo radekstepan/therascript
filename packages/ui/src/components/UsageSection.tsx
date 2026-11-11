@@ -6,13 +6,13 @@ import {
   Flex,
   Card,
   Separator,
-  Badge,
   Select,
   Spinner,
   Callout,
   Button,
   Tooltip,
 } from '@radix-ui/themes';
+import { AppBadge } from './Shared/AppBadge';
 import { InfoCircledIcon } from '@radix-ui/react-icons';
 import { formatDistanceToNow } from 'date-fns';
 import {
@@ -335,12 +335,12 @@ export function UsageSection() {
         )}
 
         <Flex gap="2" mb="2" align="center">
-          <Badge variant="solid" color="blue">
+          <AppBadge variant="solid" color="blue">
             LLM
-          </Badge>
-          <Badge variant="solid" color="purple">
+          </AppBadge>
+          <AppBadge variant="solid" color="purple">
             Whisper
-          </Badge>
+          </AppBadge>
         </Flex>
       </Flex>
 
@@ -505,7 +505,7 @@ export function UsageSection() {
                     justifyContent: 'center',
                   }}
                 >
-                  <Badge
+                  <AppBadge
                     variant="soft"
                     color={log.type === 'llm' ? 'blue' : 'purple'}
                     style={{
@@ -518,7 +518,7 @@ export function UsageSection() {
                     }}
                   >
                     {log.type.toUpperCase()}
-                  </Badge>
+                  </AppBadge>
                 </Box>
                 <Box style={{ width: '110px', paddingRight: '12px' }}>
                   <Text size="2">{log.source}</Text>

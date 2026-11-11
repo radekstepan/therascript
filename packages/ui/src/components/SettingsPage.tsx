@@ -14,7 +14,6 @@ import {
   Container,
   Grid,
   Tooltip,
-  Badge,
   AlertDialog,
   Spinner,
   Callout,

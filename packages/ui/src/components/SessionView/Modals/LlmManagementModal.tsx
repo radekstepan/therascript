@@ -10,7 +10,6 @@ import {
   Spinner,
   Callout,
   ScrollArea,
-  Badge,
   Tooltip,
   TextField,
   Separator,
@@ -20,6 +19,7 @@ import {
   IconButton,
   AlertDialog,
 } from '@radix-ui/themes';
+import { AppBadge } from '../../Shared/AppBadge';
 import {
   InfoCircledIcon,
   Cross2Icon,
@@ -455,29 +455,29 @@ export function LlmManagementModal({
               style={{ minWidth: 0, maxWidth: '100%' }}
             >
               {model.details?.family && (
-                <Badge variant="outline" color="gray" radius="full" size="1">
+                <AppBadge variant="outline" color="gray" size="1">
                   {model.details.family}
-                </Badge>
+                </AppBadge>
               )}
               {model.details?.parameter_size && (
-                <Badge variant="outline" color="gray" radius="full" size="1">
+                <AppBadge variant="outline" color="gray" size="1">
                   {model.details.parameter_size}
-                </Badge>
+                </AppBadge>
               )}
               {model.details?.quantization_level && (
-                <Badge variant="outline" color="gray" radius="full" size="1">
+                <AppBadge variant="outline" color="gray" size="1">
                   {model.details.quantization_level}
-                </Badge>
+                </AppBadge>
               )}
               {/* --- UPDATED BADGE FOR CONTEXT SIZE --- */}
               {model.defaultContextSize && model.defaultContextSize > 0 && (
                 <Tooltip
                   content={`Default Max Context Size: ${model.defaultContextSize.toLocaleString()} Tokens`}
                 >
-                  <Badge variant="outline" color="blue" radius="full" size="1">
+                  <AppBadge variant="outline" color="blue" size="1">
                     <LightningBoltIcon style={{ marginRight: '2px' }} />
                     {prettyBytes(model.defaultContextSize).replace(' ', '')}
-                  </Badge>
+                  </AppBadge>
                 </Tooltip>
               )}
               {/* --- END UPDATED BADGE --- */}
@@ -486,13 +486,13 @@ export function LlmManagementModal({
           {/* Right Block: Size Badge + Status/Actions */}
           <Flex align="center" gap="2" flexShrink="0" style={{ flexShrink: 0 }}>
             {/* Size Badge - Use prettyBytes */}
-            <Badge variant="soft" color="gray" style={{ flexShrink: 0 }}>
+            <AppBadge variant="soft" color="gray" style={{ flexShrink: 0 }}>
               {prettyBytes(model.size)}
-            </Badge>
+            </AppBadge>
 
             {/* Status Badge or Actions Menu */}
             {isCurrentlyLoadingThis ? (
-              <Badge
+              <AppBadge
                 variant="soft"
                 color="gray"
                 size="1"
@@ -504,9 +504,9 @@ export function LlmManagementModal({
                 }}
               >
                 <Spinner size="1" /> Deleting...
-              </Badge>
+              </AppBadge>
             ) : isCurrentlyActiveAndLoaded ? (
-              <Badge
+              <AppBadge
                 color="green"
                 variant="soft"
                 size="1"
@@ -518,7 +518,7 @@ export function LlmManagementModal({
                 }}
               >
                 <CheckCircledIcon /> Active
-              </Badge>
+              </AppBadge>
             ) : (
               <DropdownMenu.Root>
                 <AppTooltip content="Model Actions">

@@ -16,7 +16,6 @@ import {
   Flex,
   Card,
   Table,
-  Badge,
   Callout,
   Button,
   Progress,
@@ -26,6 +25,7 @@ import {
   Grid,
   Tooltip,
 } from '@radix-ui/themes';
+import { AppBadge } from '../Shared/AppBadge';
 import {
   ExclamationTriangleIcon,
   ArrowLeftIcon,
@@ -131,7 +131,7 @@ const WaitingIndicator: React.FC<{ label: string }> = ({ label }) => (
 // Helper function to get badge color based on status
 const getStatusBadgeColor = (
   status: AnalysisJob['status'] | IntermediateSummaryWithSessionName['status']
-): React.ComponentProps<typeof Badge>['color'] => {
+): React.ComponentProps<typeof AppBadge>['color'] => {
   switch (status) {
     case 'completed':
       return 'green';
@@ -231,14 +231,14 @@ const IntermediateSummaryItem: React.FC<{
               </Text>
             </Flex>
           </Flex>
-          <Badge
+          <AppBadge
             color={getStatusBadgeColor(summary.status)}
             variant="soft"
             style={{ flexShrink: 0 }}
           >
             {isProcessing && <Spinner size="1" />}
             <Text ml={isProcessing ? '1' : '0'}>{summary.status}</Text>
-          </Badge>
+          </AppBadge>
         </Flex>
 
         <Box mt="auto">
@@ -469,7 +469,7 @@ const JobDetailView: React.FC<{
               <Text as="div" size="2" color="gray" mb="1">
                 Status
               </Text>
-              <Badge
+              <AppBadge
                 color={getStatusBadgeColor(job.status)}
                 size="2"
                 variant="soft"
@@ -478,7 +478,7 @@ const JobDetailView: React.FC<{
                 <Text ml={isFetching && !isDeletable ? '1' : '0'}>
                   {job.status}
                 </Text>
-              </Badge>
+              </AppBadge>
             </Box>
             <Box>
               <Text as="div" size="2" color="gray" mb="1">
@@ -788,16 +788,16 @@ const JobList: React.FC<{
                   <Table.Cell>
                     {job.status === 'canceling' ? (
                       <Tooltip content="Waiting for current step to finish before stopping.">
-                        <Badge
+                        <AppBadge
                           color={getStatusBadgeColor(job.status)}
                           variant="soft"
                         >
                           <LapTimerIcon width="12" height="12" />
                           <Text ml="1">{job.status}</Text>
-                        </Badge>
+                        </AppBadge>
                       </Tooltip>
                     ) : (
-                      <Badge
+                      <AppBadge
                         color={getStatusBadgeColor(job.status)}
                         variant="soft"
                       >
@@ -812,7 +812,7 @@ const JobList: React.FC<{
                           <CrossCircledIcon width="12" height="12" />
                         )}
                         <Text ml="1">{job.status}</Text>
-                      </Badge>
+                      </AppBadge>
                     )}
                   </Table.Cell>
                   <Table.Cell style={{ maxWidth: 0 }}>

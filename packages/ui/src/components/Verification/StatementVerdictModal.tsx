@@ -12,7 +12,6 @@ import React, {
   useState,
 } from 'react';
 import {
-  Badge,
   Box,
   Button,
   Callout,
@@ -24,6 +23,7 @@ import {
   Text,
   Theme,
 } from '@radix-ui/themes';
+import { AppBadge } from '../Shared/AppBadge';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import {
   ChevronLeftIcon,
@@ -497,32 +497,32 @@ export function StatementVerdictModal({
                 <Flex direction="column" gap="4" pr="4" pb="2">
                   {/* Header badges */}
                   <Flex align="center" gap="2" wrap="wrap">
-                    <Badge
+                    <AppBadge
                       color={getVerdictBadgeColor(current.verdict)}
                       variant="solid"
                       size="2"
                     >
                       {getVerdictLabel(current.verdict).toUpperCase()}
-                    </Badge>
+                    </AppBadge>
                     {current.severity !== 'none' && (
-                      <Badge
+                      <AppBadge
                         color={getSeverityBadgeColor(current.severity)}
                         variant="soft"
                         size="1"
                       >
                         {capitalize(current.severity)} severity
-                      </Badge>
+                      </AppBadge>
                     )}
-                    <Badge color="gray" variant="soft" size="1">
+                    <AppBadge color="gray" variant="soft" size="1">
                       {Math.round(current.confidence * 100)}% confidence
-                    </Badge>
+                    </AppBadge>
                     {current.kind === 'omission' && (
-                      <Badge color="amber" variant="outline" size="1">
+                      <AppBadge color="amber" variant="outline" size="1">
                         Omitted from response
-                      </Badge>
+                      </AppBadge>
                     )}
                     {current.review_status === 'confirmed' && (
-                      <Badge color="green" variant="solid" size="1">
+                      <AppBadge color="green" variant="solid" size="1">
                         Confirmed by you
                         {current.confirmed_at != null
                           ? ` · ${new Date(current.confirmed_at).toLocaleString(
@@ -530,7 +530,7 @@ export function StatementVerdictModal({
                               { dateStyle: 'medium', timeStyle: 'short' }
                             )}`
                           : ''}
-                      </Badge>
+                      </AppBadge>
                     )}
                   </Flex>
 
@@ -646,12 +646,12 @@ export function StatementVerdictModal({
                               item.speaker.trim() !== '' &&
                               item.speaker.trim().toUpperCase() !==
                                 'UNKNOWN' && (
-                                <Badge color="blue" variant="soft" size="1">
+                                <AppBadge color="blue" variant="soft" size="1">
                                   <PersonIcon />
                                   {item.speaker}
-                                </Badge>
+                                </AppBadge>
                               )}
-                            <Badge
+                            <AppBadge
                               color="gray"
                               variant="soft"
                               size="1"
@@ -663,7 +663,7 @@ export function StatementVerdictModal({
                             >
                               <ClockIcon />
                               {formatEvidenceTimestamp(item.timestampMs)}
-                            </Badge>
+                            </AppBadge>
                             {item.paragraphIndex != null && (
                               <Text size="1" as="span">
                                 <Link

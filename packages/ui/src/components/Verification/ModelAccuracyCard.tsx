@@ -2,7 +2,8 @@
 //
 // Per-authoring-LLM accuracy comparison: stacked proportion bars + table.
 import React from 'react';
-import { Card, Flex, Heading, Text, Table, Badge } from '@radix-ui/themes';
+import { Card, Flex, Heading, Text, Table } from '@radix-ui/themes';
+import { AppBadge } from '../Shared/AppBadge';
 import { Cpu } from 'lucide-react';
 import type { ModelAccuracyStat } from '../../api/verification';
 import { AppTooltip } from '../Shared/AppTooltip';
@@ -173,13 +174,13 @@ export function ModelAccuracyCard({ stats }: { stats: ModelAccuracyStat[] }) {
                     </Table.Cell>
                     <Table.Cell justify="end">{stat.totalClaims}</Table.Cell>
                     <Table.Cell justify="end">
-                      <Badge
+                      <AppBadge
                         color={accuracyColor(stat.accuracyPercent)}
                         variant="soft"
                         size="1"
                       >
                         {stat.accuracyPercent.toFixed(1)}%
-                      </Badge>
+                      </AppBadge>
                     </Table.Cell>
                     <Table.Cell justify="end">
                       <Text

@@ -11,7 +11,6 @@ import {
 } from '@radix-ui/react-icons';
 import {
   Table,
-  Badge,
   Text,
   Flex,
   IconButton,
@@ -19,6 +18,7 @@ import {
   Checkbox,
   Tooltip,
 } from '@radix-ui/themes';
+import { AppBadge } from '../Shared/AppBadge';
 import { ShieldCheck } from 'lucide-react';
 import { TableVirtuoso } from 'react-virtuoso';
 import type { Session } from '../../types';
@@ -44,14 +44,14 @@ type AriaSort = 'none' | 'ascending' | 'descending' | 'other' | undefined;
 const getBadgeColor = (
   type: string | undefined,
   category: 'session' | 'therapy'
-): React.ComponentProps<typeof Badge>['color'] => {
+): React.ComponentProps<typeof AppBadge>['color'] => {
   const map = category === 'session' ? sessionColorMap : therapyColorMap;
   return type ? map[type.toLowerCase()] || map['default'] : map['default'];
 };
 
 const getStatusBadgeColor = (
   status: Session['status']
-): React.ComponentProps<typeof Badge>['color'] => {
+): React.ComponentProps<typeof AppBadge>['color'] => {
   switch (status) {
     case 'failed':
       return 'red';
@@ -152,17 +152,16 @@ const SessionRowCells = React.memo(function SessionRowCells({
                       : `Status: ${session.status}`
                   }
                 >
-                  <Badge
+                  <AppBadge
                     color={getStatusBadgeColor(session.status)}
                     variant="soft"
-                    radius="full"
                     size="1"
                     className={
                       session.status === 'failed' ? 'cursor-help' : undefined
                     }
                   >
                     {session.status}
-                  </Badge>
+                  </AppBadge>
                 </Tooltip>
               </div>
             )}
@@ -180,13 +179,12 @@ const SessionRowCells = React.memo(function SessionRowCells({
       </Table.Cell>
       <Table.Cell style={cellStyle}>
         {session.sessionType ? (
-          <Badge
+          <AppBadge
             color={getBadgeColor(session.sessionType, 'session')}
             variant="surface"
-            radius="full"
           >
             {session.sessionType}
-          </Badge>
+          </AppBadge>
         ) : (
           <Text color="gray" size="2">
             -
@@ -195,13 +193,12 @@ const SessionRowCells = React.memo(function SessionRowCells({
       </Table.Cell>
       <Table.Cell style={cellStyle}>
         {session.therapy ? (
-          <Badge
+          <AppBadge
             color={getBadgeColor(session.therapy, 'therapy')}
             variant="outline"
-            radius="full"
           >
             {session.therapy}
-          </Badge>
+          </AppBadge>
         ) : (
           <Text color="gray" size="2">
             -

@@ -26,11 +26,11 @@ import {
   Select,
   TextField,
   SegmentedControl,
-  Badge,
   Spinner,
   Tooltip,
   Button,
 } from '@radix-ui/themes';
+import { AppBadge } from './AppBadge';
 import {
   GlobeIcon,
   LightningBoltIcon,
@@ -464,10 +464,9 @@ export const LlmEndpointModelPicker: React.FC<LlmEndpointModelPickerProps> = ({
                         <Tooltip
                           content={`Default Max Context: ${model.defaultContextSize.toLocaleString()} Tokens`}
                         >
-                          <Badge
+                          <AppBadge
                             variant="soft"
                             color="blue"
-                            radius="full"
                             size="1"
                             style={{ flexShrink: 0 }}
                           >
@@ -476,7 +475,7 @@ export const LlmEndpointModelPicker: React.FC<LlmEndpointModelPickerProps> = ({
                               ' ',
                               ''
                             )}
-                          </Badge>
+                          </AppBadge>
                         </Tooltip>
                       )}
                   </Flex>

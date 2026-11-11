@@ -9,7 +9,6 @@ import {
   Spinner,
   Box,
   Card,
-  Badge,
   Callout,
 } from '@radix-ui/themes';
 import * as Toast from '@radix-ui/react-toast';

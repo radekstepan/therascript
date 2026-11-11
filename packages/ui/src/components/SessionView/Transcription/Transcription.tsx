@@ -19,7 +19,6 @@ import {
   Text,
   Flex,
   Button,
-  Badge,
   Spinner,
   Tooltip,
   IconButton,
@@ -27,6 +26,7 @@ import {
   AlertDialog,
   Callout,
 } from '@radix-ui/themes';
+import { AppBadge } from '../../Shared/AppBadge';
 import {
   BookmarkIcon,
   CalendarIcon,
@@ -66,7 +66,7 @@ type BadgeCategory = 'session' | 'therapy';
 const getBadgeColor = (
   type: string | undefined,
   category: BadgeCategory
-): React.ComponentProps<typeof Badge>['color'] => {
+): React.ComponentProps<typeof AppBadge>['color'] => {
   const map = category === 'session' ? sessionColorMap : therapyColorMap;
   return type ? map[type.toLowerCase()] || map['default'] : map['default'];
 };
@@ -116,9 +116,9 @@ const renderHeaderDetail = (
           height="14"
         />
         {isBadge && badgeColor ? (
-          <Badge color={badgeColor} variant="soft" radius="full" size="1">
+          <AppBadge color={badgeColor} variant="soft" size="1">
             {value}
-          </Badge>
+          </AppBadge>
         ) : isTokenValue || isDurationValue ? (
           <Text size="1" color="gray" weight="medium">
             {displayValue}
@@ -868,17 +868,16 @@ export function Transcription({
             )}
             {session.therapistNote?.trim() ? (
               <Tooltip content="View therapist notes">
-                <Badge
+                <AppBadge
                   color="blue"
                   variant="soft"
-                  radius="full"
                   size="1"
                   style={{ cursor: 'pointer' }}
                   onClick={() => setIsTherapistNotesModalOpen(true)}
                 >
                   <FileTextIcon width="12" height="12" />
                   Notes
-                </Badge>
+                </AppBadge>
               </Tooltip>
             ) : null}
             {typeof transcriptTokenCount === 'number' &&

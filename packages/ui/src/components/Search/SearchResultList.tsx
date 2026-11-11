@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom'; // Added useLocation
-import { Box, Card, Flex, Text, Badge, Tooltip } from '@radix-ui/themes';
+import { Box, Card, Flex, Text, Tooltip } from '@radix-ui/themes';
+import { AppBadge } from '../Shared/AppBadge';
 import {
   ChatBubbleIcon,
   FileTextIcon,
@@ -173,9 +174,9 @@ export function SearchResultList({
                   <Tooltip
                     content={`Relevance Score: ${item.score.toFixed(2)}`}
                   >
-                    <Badge variant="soft" color="gray" size="1">
+                    <AppBadge variant="soft" color="gray" size="1">
                       Score {item.score.toFixed(2)}
-                    </Badge>
+                    </AppBadge>
                   </Tooltip>
                 )}
               </Flex>

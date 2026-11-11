@@ -24,10 +24,10 @@ import {
   Slider,
   Callout,
   Strong,
-  Badge,
   Button,
   Spinner,
 } from '@radix-ui/themes';
+import { AppBadge } from './AppBadge';
 import {
   LightningBoltIcon,
   InfoCircledIcon,
@@ -427,7 +427,7 @@ export function LlmSettingsForm({
             <Box>
               <Flex align="center" justify="between" mb="2">
                 <Text size="1">GPU Layers</Text>
-                <Badge variant="outline" size="1">
+                <AppBadge variant="outline" size="1">
                   {state.numGpuLayers == null ||
                   state.numGpuLayers >=
                     selectedModelDetails.architecture.num_layers!
@@ -435,7 +435,7 @@ export function LlmSettingsForm({
                     : state.numGpuLayers === 0
                       ? 'CPU Only'
                       : `${state.numGpuLayers} / ${selectedModelDetails.architecture.num_layers}`}
-                </Badge>
+                </AppBadge>
               </Flex>
               <Slider
                 value={[
@@ -484,9 +484,9 @@ export function LlmSettingsForm({
           <Box>
             <Flex align="center" justify="between" mb="2">
               <Text size="1">Temperature</Text>
-              <Badge variant="outline" size="1">
+              <AppBadge variant="outline" size="1">
                 {state.temperature.toFixed(1)}
-              </Badge>
+              </AppBadge>
             </Flex>
             <Slider
               value={[state.temperature]}
@@ -503,9 +503,9 @@ export function LlmSettingsForm({
           <Box>
             <Flex align="center" justify="between" mb="2">
               <Text size="1">Top-P</Text>
-              <Badge variant="outline" size="1">
+              <AppBadge variant="outline" size="1">
                 {state.topP.toFixed(2)}
-              </Badge>
+              </AppBadge>
             </Flex>
             <Slider
               value={[state.topP]}
@@ -522,9 +522,9 @@ export function LlmSettingsForm({
           <Box>
             <Flex align="center" justify="between" mb="2">
               <Text size="1">Repeat Penalty</Text>
-              <Badge variant="outline" size="1">
+              <AppBadge variant="outline" size="1">
                 {state.repeatPenalty.toFixed(1)}
-              </Badge>
+              </AppBadge>
             </Flex>
             <Slider
               value={[state.repeatPenalty]}
@@ -541,13 +541,13 @@ export function LlmSettingsForm({
           <Box>
             <Flex align="center" justify="between" mb="2">
               <Text size="1">Thinking Budget</Text>
-              <Badge variant="outline" size="1">
+              <AppBadge variant="outline" size="1">
                 {state.thinkingBudget === -1
                   ? 'Unrestricted (-1)'
                   : state.thinkingBudget === 0
                     ? 'Disabled (0)'
                     : state.thinkingBudget}
-              </Badge>
+              </AppBadge>
             </Flex>
             <Slider
               value={[

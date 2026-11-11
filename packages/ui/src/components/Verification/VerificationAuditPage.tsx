@@ -12,7 +12,6 @@ import {
   Heading,
   Text,
   Button,
-  Badge,
   Card,
   Tabs,
   Progress,
@@ -21,6 +20,7 @@ import {
   AlertDialog,
   Spinner,
 } from '@radix-ui/themes';
+import { AppBadge } from '../Shared/AppBadge';
 import { ExclamationTriangleIcon, Cross2Icon } from '@radix-ui/react-icons';
 import { ShieldCheck, Play, Trash2 } from 'lucide-react';
 import {
@@ -167,31 +167,31 @@ function LiveJobBanner({ job }: { job: VerificationJob }) {
         </Flex>
 
         <Flex gap="2" wrap="wrap" align="center">
-          <Badge color="green" variant="soft" size="1">
+          <AppBadge color="green" variant="soft" size="1">
             {succeeded} checked
-          </Badge>
+          </AppBadge>
           {failed > 0 && (
-            <Badge color="red" variant="soft" size="1">
+            <AppBadge color="red" variant="soft" size="1">
               {failed} failed
-            </Badge>
+            </AppBadge>
           )}
-          <Badge color="blue" variant="soft" size="1">
+          <AppBadge color="blue" variant="soft" size="1">
             {display.total_statements} claims verified
-          </Badge>
-          <Badge
+          </AppBadge>
+          <AppBadge
             color={display.flagged_statements > 0 ? 'red' : 'gray'}
             variant="soft"
             size="1"
           >
             {display.flagged_statements} issues flagged
-          </Badge>
-          <Badge
+          </AppBadge>
+          <AppBadge
             color={display.omissions_count > 0 ? 'amber' : 'gray'}
             variant="soft"
             size="1"
           >
             {display.omissions_count} omissions
-          </Badge>
+          </AppBadge>
         </Flex>
 
         {streamError && (
@@ -430,7 +430,7 @@ export function VerificationAuditPage() {
             data-testid="fact-check-header-labels"
           >
             {failedCount > 0 && (
-              <Badge
+              <AppBadge
                 color="red"
                 variant="soft"
                 size="2"
@@ -438,9 +438,9 @@ export function VerificationAuditPage() {
                 title={`${failedCount} message${failedCount === 1 ? '' : 's'} failed verification with LLM errors`}
               >
                 {failedCount} verification{failedCount === 1 ? '' : 's'} failed
-              </Badge>
+              </AppBadge>
             )}
-            <Badge
+            <AppBadge
               color={unverifiedCount > 0 ? 'amber' : 'green'}
               variant="soft"
               size="2"
@@ -449,7 +449,7 @@ export function VerificationAuditPage() {
               {unverifiedCount === 0
                 ? 'Everything verified'
                 : `${unverifiedCount} unverified message${unverifiedCount === 1 ? '' : 's'} across ${unverifiedTranscripts} transcript${unverifiedTranscripts === 1 ? '' : 's'}`}
-            </Badge>
+            </AppBadge>
           </Flex>
         )}
         <Text size="2" color="gray" as="p" mt="-2">

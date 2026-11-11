@@ -12,11 +12,11 @@ import {
   Box,
   Spinner,
   Callout,
-  Badge,
   ScrollArea,
   Heading,
   Card,
 } from '@radix-ui/themes';
+import { AppBadge } from '../Shared/AppBadge';
 import {
   Cross2Icon,
   InfoCircledIcon,
@@ -51,7 +51,7 @@ interface JobsQueueModalProps {
 
 const getStatusBadgeColor = (
   status: AnalysisJob['status'] | Session['status'] | VerificationJob['status']
-): React.ComponentProps<typeof Badge>['color'] => {
+): React.ComponentProps<typeof AppBadge>['color'] => {
   switch (status) {
     case 'completed':
       return 'green';
@@ -242,14 +242,14 @@ export function JobsQueueModal({ isOpen, onOpenChange }: JobsQueueModalProps) {
                               </Text>
                             </Flex>
                             <Flex align="center" gap="2" flexShrink="0">
-                              <Badge
+                              <AppBadge
                                 color={
                                   job.status === 'canceling' ? 'orange' : 'blue'
                                 }
                                 variant="soft"
                               >
                                 {job.status}
-                              </Badge>
+                              </AppBadge>
                               <ChevronRightIcon className="text-[--gray-a9]" />
                             </Flex>
                           </Flex>
@@ -294,12 +294,12 @@ export function JobsQueueModal({ isOpen, onOpenChange }: JobsQueueModalProps) {
                               </Text>
                             </Flex>
                             <Flex align="center" gap="2" flexShrink="0">
-                              <Badge
+                              <AppBadge
                                 color={getStatusBadgeColor(job.status)}
                                 variant="soft"
                               >
                                 {job.status}
-                              </Badge>
+                              </AppBadge>
                               <ChevronRightIcon className="text-[--gray-a9]" />
                             </Flex>
                           </Flex>
@@ -347,12 +347,12 @@ export function JobsQueueModal({ isOpen, onOpenChange }: JobsQueueModalProps) {
                               </Text>
                             </Flex>
                             <Flex align="center" gap="2" flexShrink="0">
-                              <Badge
+                              <AppBadge
                                 color={getStatusBadgeColor(job.status)}
                                 variant="soft"
                               >
                                 {job.status}
-                              </Badge>
+                              </AppBadge>
                               <Button
                                 size="1"
                                 variant="soft"
@@ -411,12 +411,12 @@ export function JobsQueueModal({ isOpen, onOpenChange }: JobsQueueModalProps) {
                               </Text>
                             </Flex>
                             <Flex align="center" gap="2" flexShrink="0">
-                              <Badge
+                              <AppBadge
                                 color={getStatusBadgeColor(session.status)}
                                 variant="soft"
                               >
                                 {session.status}
-                              </Badge>
+                              </AppBadge>
                               <ChevronRightIcon className="text-[--gray-a9]" />
                             </Flex>
                           </Flex>

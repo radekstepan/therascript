@@ -33,10 +33,10 @@ import {
   Flex,
   Spinner,
   Text,
-  Badge,
   Select,
   DropdownMenu,
 } from '@radix-ui/themes';
+import { AppBadge } from '../Shared/AppBadge';
 import { themeAtom, Theme } from '../../store/ui/themeAtom';
 import { effectiveThemeAtom } from '../../store';
 import { isPersistentSidebarOpenAtom } from '../../store/ui/isPersistentSidebarOpenAtom';
@@ -504,9 +504,9 @@ export function PersistentSidebar() {
                 <Flex align="center" justify="between" width="100%">
                   <span className="text-[var(--gray-12)]">Active Jobs</span>
                   {totalActiveJobs > 0 && (
-                    <Badge color="blue" variant="solid" size="1">
+                    <AppBadge color="blue" variant="solid" size="1">
                       {totalActiveJobs}
-                    </Badge>
+                    </AppBadge>
                   )}
                 </Flex>
               )}

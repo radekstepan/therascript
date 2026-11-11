@@ -12,11 +12,11 @@ import {
   Text,
   Spinner,
   Callout,
-  Badge,
   Tooltip,
   Box,
   Progress,
 } from '@radix-ui/themes';
+import { AppBadge } from '../Shared/AppBadge';
 import {
   DotsHorizontalIcon,
   Pencil1Icon,
@@ -301,7 +301,7 @@ export function StandaloneChatHeader({
                     : '')
                 }
               >
-                <Badge
+                <AppBadge
                   variant="soft"
                   color={configuredContextSize ? 'blue' : 'gray'}
                   size="1"
@@ -317,7 +317,7 @@ export function StandaloneChatHeader({
                     : configuredContextSize
                       ? configuredContextSize.toLocaleString()
                       : 'Default'}
-                </Badge>
+                </AppBadge>
               </Tooltip>
             )}
 
@@ -378,14 +378,14 @@ export function StandaloneChatHeader({
               <Tooltip
                 content={`Last Interaction: ${latestPromptTokens?.toLocaleString() ?? '?'} Input + ${latestCompletionTokens?.toLocaleString() ?? '?'} Output Tokens`}
               >
-                <Badge variant="soft" color="gray" highContrast>
+                <AppBadge variant="soft" color="gray" highContrast>
                   <ArchiveIcon
                     width="14"
                     height="14"
                     style={{ marginRight: '4px', opacity: 0.8 }}
                   />
                   <Text size="1">{totalTokens.toLocaleString()} Tokens</Text>
-                </Badge>
+                </AppBadge>
               </Tooltip>
             )}
             {llmStatus?.activeModel &&

@@ -9,13 +9,13 @@ import {
   Flex,
   Text,
   Table,
-  Badge,
   Button,
   Card,
   Skeleton,
   Callout,
   Progress,
 } from '@radix-ui/themes';
+import { AppBadge } from '../Shared/AppBadge';
 import { ExclamationTriangleIcon, Cross2Icon } from '@radix-ui/react-icons';
 import { History } from 'lucide-react';
 import {
@@ -193,7 +193,7 @@ export function JobHistoryTab() {
               <Table.Row key={job.id}>
                 <Table.RowHeaderCell>#{job.id}</Table.RowHeaderCell>
                 <Table.Cell>
-                  <Badge
+                  <AppBadge
                     color={statusBadgeColor(job)}
                     variant="soft"
                     size="1"
@@ -207,7 +207,7 @@ export function JobHistoryTab() {
                     }
                   >
                     {verificationJobOutcomeLabel(job)}
-                  </Badge>
+                  </AppBadge>
                   {job.error_message && (
                     <Text
                       size="1"

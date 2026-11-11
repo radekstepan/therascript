@@ -9,7 +9,6 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
-  Badge,
   Button,
   Callout,
   Dialog,
@@ -17,6 +16,7 @@ import {
   Skeleton,
   Text,
 } from '@radix-ui/themes';
+import { AppBadge } from '../Shared/AppBadge';
 import { ExclamationTriangleIcon } from '@radix-ui/react-icons';
 import {
   fetchVerificationJobFailures,
@@ -50,9 +50,9 @@ function FailureRow({ failure }: { failure: FailedVerificationItem }) {
       style={{ borderTop: '1px solid var(--gray-a5)' }}
     >
       <Flex gap="2" wrap="wrap" align="center">
-        <Badge color="red" variant="soft" size="1">
+        <AppBadge color="red" variant="soft" size="1">
           {verificationFailureCodeLabel(failure.errorCode)}
-        </Badge>
+        </AppBadge>
         <Link
           to={`/sessions/${failure.sessionId}/chats/${failure.chatId}?highlightMsg=${failure.messageId}`}
           title="Open the affected note in its chat"

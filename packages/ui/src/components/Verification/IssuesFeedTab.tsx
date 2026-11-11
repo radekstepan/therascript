@@ -13,12 +13,12 @@ import {
   Select,
   Checkbox,
   Button,
-  Badge,
   Card,
   Spinner,
   Callout,
   Skeleton,
 } from '@radix-ui/themes';
+import { AppBadge } from '../Shared/AppBadge';
 import {
   MagnifyingGlassIcon,
   ExclamationTriangleIcon,
@@ -273,9 +273,9 @@ export function IssuesFeedTab({
                 }
                 className="cursor-pointer"
               />
-              <Badge color={opt.color} variant="soft" size="1">
+              <AppBadge color={opt.color} variant="soft" size="1">
                 {opt.label}
-              </Badge>
+              </AppBadge>
             </Flex>
           </Text>
         ))}
@@ -361,20 +361,20 @@ export function IssuesFeedTab({
                 }}
               >
                 <Flex gap="2" wrap="wrap" align="center" mb="2">
-                  <Badge
+                  <AppBadge
                     color={verdictBadgeColor(item.verdict)}
                     variant="solid"
                     size="1"
                   >
                     {verdictLabel(item.verdict).toUpperCase()}
-                  </Badge>
-                  <Badge
+                  </AppBadge>
+                  <AppBadge
                     color={severityBadgeColor(item.severity)}
                     variant="soft"
                     size="1"
                   >
                     {item.severity}
-                  </Badge>
+                  </AppBadge>
                   <Text size="1" color="gray">
                     {Math.round(item.confidence * 100)}% confident
                   </Text>

@@ -3,13 +3,13 @@ import React from 'react';
 import {
   Flex,
   Text,
-  Badge,
   Spinner,
   Tooltip,
   Button,
   Box,
   Progress,
 } from '@radix-ui/themes';
+import { AppBadge } from '../../Shared/AppBadge';
 import {
   MixerVerticalIcon,
   LightningBoltIcon,
@@ -207,7 +207,7 @@ export function ChatPanelHeader({
                     : '')
               }
             >
-              <Badge
+              <AppBadge
                 variant="soft"
                 color={configuredContextSize ? 'blue' : 'gray'}
                 size="1"
@@ -223,7 +223,7 @@ export function ChatPanelHeader({
                   : configuredContextSize
                     ? configuredContextSize.toLocaleString()
                     : 'Default'}
-              </Badge>
+              </AppBadge>
             </Tooltip>
           )}
 
@@ -293,14 +293,14 @@ export function ChatPanelHeader({
             <Tooltip
               content={`Last Interaction: ${latestPromptTokens?.toLocaleString() ?? '?'} Input + ${latestCompletionTokens?.toLocaleString() ?? '?'} Output Tokens`}
             >
-              <Badge variant="soft" color="gray" highContrast>
+              <AppBadge variant="soft" color="gray" highContrast>
                 <ArchiveIcon
                   width="14"
                   height="14"
                   style={{ marginRight: '4px', opacity: 0.8 }}
                 />
                 <Text size="1">{totalTokens.toLocaleString()} Tokens</Text>
-              </Badge>
+              </AppBadge>
             </Tooltip>
           )}
         </Flex>

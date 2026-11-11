@@ -3,7 +3,8 @@
 // Per-transcript verification coverage with 1-click audit / re-audit.
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Flex, Text, Table, Badge, Button, Card } from '@radix-ui/themes';
+import { Flex, Text, Table, Button, Card } from '@radix-ui/themes';
+import { AppBadge } from '../Shared/AppBadge';
 import { ShieldCheck, RotateCcw, FolderSearch } from 'lucide-react';
 import type { SessionVerificationSummary } from '../../api/verification';
 import { formatIsoDateToYMD } from '../../helpers';
@@ -126,17 +127,17 @@ export function CoverageTab({
                 </Table.Cell>
                 <Table.Cell>
                   {status === 'verified' ? (
-                    <Badge color="green" variant="soft" size="1">
+                    <AppBadge color="green" variant="soft" size="1">
                       Verified
-                    </Badge>
+                    </AppBadge>
                   ) : status === 'partial' ? (
-                    <Badge color="amber" variant="soft" size="1">
+                    <AppBadge color="amber" variant="soft" size="1">
                       Partially verified
-                    </Badge>
+                    </AppBadge>
                   ) : (
-                    <Badge color="gray" variant="soft" size="1">
+                    <AppBadge color="gray" variant="soft" size="1">
                       Unverified
-                    </Badge>
+                    </AppBadge>
                   )}
                 </Table.Cell>
                 <Table.Cell justify="end">
@@ -156,7 +157,7 @@ export function CoverageTab({
                       msgs
                     </Text>
                     {(session.failedAiMessages ?? 0) > 0 && (
-                      <Badge
+                      <AppBadge
                         color="red"
                         variant="soft"
                         size="1"
@@ -164,7 +165,7 @@ export function CoverageTab({
                         title={`${session.failedAiMessages} message${session.failedAiMessages === 1 ? '' : 's'} failed verification (LLM error). Retry to re-audit ${session.failedAiMessages === 1 ? 'it' : 'them'}.`}
                       >
                         {session.failedAiMessages} failed
-                      </Badge>
+                      </AppBadge>
                     )}
                   </Flex>
                 </Table.Cell>
@@ -174,7 +175,7 @@ export function CoverageTab({
                       —
                     </Text>
                   ) : (
-                    <Badge
+                    <AppBadge
                       color={
                         session.averageAccuracy >= 92
                           ? 'green'
@@ -187,7 +188,7 @@ export function CoverageTab({
                       title={`Mean fact accuracy across ${session.verifiedAiMessages} verified AI response${session.verifiedAiMessages === 1 ? '' : 's'} — per response: supported claims plus half credit for partials, over extracted claims plus omissions`}
                     >
                       {session.averageAccuracy.toFixed(1)}%
-                    </Badge>
+                    </AppBadge>
                   )}
                 </Table.Cell>
                 <Table.Cell justify="end">
