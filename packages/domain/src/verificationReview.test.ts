@@ -69,6 +69,45 @@ describe('verificationReview identity', () => {
     expect(computeMaterialRevision(renamedSpeaker)).not.toBe(base);
   });
 
+  it('invalidates the revision when the therapist note changes', () => {
+    const base = computeMaterialRevision(baseMaterial());
+    const withNote = { ...baseMaterial(), therapistNote: 'Headaches noted.' };
+    expect(computeMaterialRevision(withNote)).not.toBe(base);
+    const editedNote = {
+      ...baseMaterial(),
+      therapistNote: 'Headaches resolved.',
+    };
+    expect(computeMaterialRevision(editedNote)).not.toBe(
+      computeMaterialRevision(withNote)
+    );
+  });
+
+  it('keeps the legacy revision when the therapist note is absent or blank', () => {
+    // Backward compatible: sessions without notes keep byte-identical
+    // revisions, so existing human confirmations stay reusable.
+    const base = computeMaterialRevision(baseMaterial());
+    expect(
+      computeMaterialRevision({ ...baseMaterial(), therapistNote: undefined })
+    ).toBe(base);
+    expect(
+      computeMaterialRevision({ ...baseMaterial(), therapistNote: null })
+    ).toBe(base);
+    expect(
+      computeMaterialRevision({ ...baseMaterial(), therapistNote: '   ' })
+    ).toBe(base);
+    expect(
+      computeMaterialRevision({
+        ...baseMaterial(),
+        therapistNote: '  Headaches noted.  ',
+      })
+    ).toBe(
+      computeMaterialRevision({
+        ...baseMaterial(),
+        therapistNote: 'Headaches noted.',
+      })
+    );
+  });
+
   it('ignores UNKNOWN/blank speaker labels (not meaningful speaker info)', () => {
     const a = baseMaterial();
     a.transcript[0] = { ...a.transcript[0]!, speaker: 'UNKNOWN' };

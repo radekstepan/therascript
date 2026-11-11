@@ -38,6 +38,7 @@ import {
   extractVisibleAnswer,
   prepareLlmChatMessages,
   buildTranscriptSessionNote,
+  buildTherapistNotesBlock,
   type StreamResult,
   type LlmChatChunk,
 } from '@therascript/services';
@@ -55,10 +56,11 @@ export const VERIFICATION_USAGE_SOURCE = 'verification_judge';
 /** Fallback judge prompt when the `system_verification_judge` template row is
  *  missing (fresh/legacy DBs seed it on startup, so this is defense-in-depth).
  *  Mirrors the seeded template's JSON contract. */
-export const DEFAULT_VERIFICATION_JUDGE_PROMPT = `You are an expert fact-verification judge auditing an AI-generated therapy chat response against the ground-truth session transcript. You will be given:
+export const DEFAULT_VERIFICATION_JUDGE_PROMPT = `You are an expert fact-verification judge auditing an AI-generated therapy chat response against the ground-truth session transcript and therapist notes. You will be given:
 1. GROUND-TRUTH SESSION TRANSCRIPT: Paragraphs formatted as [P#<index> MM:SS] <SPEAKER>: <text>. Some transcripts have no speaker diarization; those paragraphs are formatted as [P#<index> MM:SS] <text> with no speaker label.
-2. THERAPIST'S PROMPT / QUESTION: The instructions that were given to the AI (it may be a long template). It is context only — never extract claims from it.
-3. AI RESPONSE TO AUDIT: The visible text of the AI message to verify. Extract claims ONLY from this text.
+2. THERAPIST NOTES (optional): When the therapist wrote session notes, they appear in a THERAPIST NOTES block before the transcript. Treat these notes as additional ground truth, co-equal with the transcript: a claim corroborated by the notes is supported even when the transcript alone does not mention it.
+3. THERAPIST'S PROMPT / QUESTION: The instructions that were given to the AI (it may be a long template). It is context only — never extract claims from it.
+4. AI RESPONSE TO AUDIT: The visible text of the AI message to verify. Extract claims ONLY from this text.
 
 REASONING GUIDANCE (for models that think before answering):
 - If you use <think> reasoning, keep your internal thinking brief and focused — do not draft full JSON or convert timestamps in <think>.
@@ -67,16 +69,17 @@ REASONING GUIDANCE (for models that think before answering):
 EVIDENCE CITATION RULES (must follow exactly):
 - "paragraphIndex" MUST be the exact integer <index> copied from the cited paragraph's [P#<index> MM:SS] label. Never invent or guess an index.
 - Each "evidence" item needs ONLY "paragraphIndex" and "quote". Do NOT include "timestampMs" or "speaker" — they are looked up automatically from the cited paragraph.
+- For claims supported by the THERAPIST NOTES block, set "paragraphIndex" to null and quote the supporting note sentence verbatim in "quote". Never invent a paragraph index for note evidence.
 
 Your tasks:
 1. Extract the key factual or clinical statements/claims made in the AI Response about the session, client, therapist, symptoms, events, quotes, or interventions. Group related clauses from one sentence or bullet into a single claim (at most ~15-25 claims for long structured notes).
 2. For each claim, copy the VERBATIM substring ("exact_quote") exactly as it appears in the AI Response so it can be highlighted in the UI. Do not paraphrase.
-3. Verify each claim strictly against the Ground-Truth Session Transcript and assign one verdict:
-   - "supported": Directly corroborated by the transcript.
-   - "partially_supported": Contains a kernel of truth from the transcript but exaggerates, overgeneralizes, or adds unsupported detail.
-   - "contradicted": Directly conflicts with what the transcript says (e.g., wrong speaker attribution, opposite clinical fact, wrong timeline).
-   - "fabricated": Completely made up / hallucinated; not mentioned anywhere in the transcript.
-4. Check for OMISSIONS: Did the AI fail to mention a major, explicit point from the transcript that directly answers the Therapist's Prompt? If so, include entries in the "omissions" array.
+3. Verify each claim strictly against the Ground-Truth Session Transcript and Therapist Notes and assign one verdict:
+   - "supported": Directly corroborated by the transcript or the therapist notes.
+   - "partially_supported": Contains a kernel of truth from the transcript or notes but exaggerates, overgeneralizes, or adds unsupported detail.
+   - "contradicted": Directly conflicts with what the transcript or notes say (e.g., wrong speaker attribution, opposite clinical fact, wrong timeline).
+   - "fabricated": Completely made up / hallucinated; not mentioned anywhere in the transcript or the therapist notes.
+4. Check for OMISSIONS: Did the AI fail to mention a major, explicit point from the transcript or therapist notes that directly answers the Therapist's Prompt? If so, include entries in the "omissions" array.
 
 Respond with ONLY a valid JSON object (no markdown fences, no commentary) matching this schema:
 {
@@ -513,15 +516,17 @@ export function computeVerificationAccuracy(
 
 /**
  * Material revision for one Judge evaluation: visible answer + therapist
- * question + full transcript content (see `computeMaterialRevision`). The
- * save transaction recomputes this from live rows and discards the result
- * (`StaleVerificationMaterialError`) when they diverge, so a transcript
- * edit landing mid-audit is never misattributed.
+ * question + full transcript content + session therapist note (see
+ * `computeMaterialRevision`). The save transaction recomputes this from
+ * live rows and discards the result (`StaleVerificationMaterialError`)
+ * when they diverge, so a transcript or note edit landing mid-audit is
+ * never misattributed.
  */
 export function computeJudgeMaterialRevision(
   visibleAnswer: string,
   userQuestion: string | null,
-  paragraphs: StructuredTranscript
+  paragraphs: StructuredTranscript,
+  therapistNote?: string | null
 ): string {
   return computeMaterialRevision({
     visibleAnswer,
@@ -532,6 +537,7 @@ export function computeJudgeMaterialRevision(
       speaker: p.speaker ?? null,
       text: p.text,
     })),
+    therapistNote,
   });
 }
 
@@ -1749,19 +1755,24 @@ export function buildJudgeActiveSettingsUpdate(
 }
 
 /**
- * Judge system prompt with the per-session transcript context note and the
- * ground-truth transcript appended, mirroring Session Chat
- * (`sessionChatHandler.ts` injects the transcript into the system prefix
- * so the static prefix stays KV-cache-friendly across calls).
+ * Judge system prompt with the per-session transcript context note, the
+ * optional therapist notes block, and the ground-truth transcript
+ * appended, mirroring Session Chat (`sessionChatHandler.ts` injects the
+ * note + transcript into the system prefix so the static prefix stays
+ * KV-cache-friendly across calls). The notes block leads, ahead of the
+ * transcript, so it reads as the therapist's framing for the session;
+ * pass '' when the session has no note.
  */
 function buildJudgeSystemPrompt(
   basePrompt: string,
   transcriptText: string,
-  numSpeakers?: number | null
+  numSpeakers?: number | null,
+  therapistNotesBlock = ''
 ): string {
   const sessionNote = buildTranscriptSessionNote(numSpeakers ?? null);
+  const notesSection = therapistNotesBlock ? `\n\n${therapistNotesBlock}` : '';
   return (
-    `${basePrompt}\n\n${sessionNote}\n\n--- GROUND-TRUTH SESSION TRANSCRIPT ---\n` +
+    `${basePrompt}\n\n${sessionNote}${notesSection}\n\n--- GROUND-TRUTH SESSION TRANSCRIPT ---\n` +
     `"""\n${transcriptText}\n"""\n--- END TRANSCRIPT ---`
   );
 }
@@ -1778,7 +1789,7 @@ function buildJudgeUserMessage(
   return (
     `THERAPIST'S PROMPT / QUESTION (the instructions given to the AI — context only, never extract claims from this):\n"""${userQuestion?.trim() || '(no therapist question found — audit the response on its own merits)'}"""\n\n` +
     `AI RESPONSE TO AUDIT (extract claims ONLY from this text):\n"""${visibleAnswer}"""\n\n` +
-    `YOUR TASK: Extract the key factual/clinical claims, verify each strictly against the transcript, ` +
+    `YOUR TASK: Extract the key factual/clinical claims, verify each strictly against the transcript and therapist notes, ` +
     `check for omissions relative to the therapist's question, and respond with ONLY the JSON object.`
   );
 }
@@ -2652,6 +2663,31 @@ export async function processVerificationJob(
       return num;
     };
 
+    // Per-session therapist note (sessions.therapistNote): the Judge audits
+    // against the transcript AND the note (Session Chat parity), so the
+    // note rides in the system prefix and joins the material revision.
+    const therapistNoteCache = new Map<number, string | null>();
+    const getSessionTherapistNote = (sessionId: number): string | null => {
+      if (therapistNoteCache.has(sessionId)) {
+        return therapistNoteCache.get(sessionId) ?? null;
+      }
+      let note: string | null = null;
+      try {
+        const session = sessionRepository.findById(sessionId);
+        note =
+          typeof session?.therapistNote === 'string'
+            ? session.therapistNote
+            : null;
+      } catch (err) {
+        console.warn(
+          `[Verification Worker ${jobId}] Failed to load session ${sessionId}; assuming no therapist note:`,
+          err
+        );
+      }
+      therapistNoteCache.set(sessionId, note);
+      return note;
+    };
+
     let processed = 0;
 
     const publishProgress = (extra?: {
@@ -2734,12 +2770,17 @@ export async function processVerificationJob(
       try {
         const visibleAnswer = extractVisibleAnswer(candidate.text ?? '').trim();
         const paragraphs = getSessionParagraphs(sessionId);
+        const therapistNote = getSessionTherapistNote(sessionId);
         const candidateUserQuestion = candidate.userQuestion ?? null;
         materialRevisionForSave = computeJudgeMaterialRevision(
           visibleAnswer,
           candidateUserQuestion,
-          paragraphs
+          paragraphs,
+          therapistNote
         );
+        // Built once: the same block is measured in the context budget
+        // below and injected into the Judge system prefix at assembly.
+        const therapistNotesBlock = buildTherapistNotesBlock(therapistNote);
 
         // Nothing verifiable (conversational acknowledgement / thinking-only):
         // record a clean completed row without spending a Judge call.
@@ -2872,8 +2913,8 @@ export async function processVerificationJob(
         // it. When the fixed prompt/answer cannot fit, record a failed
         // assessment instead of sending a request known to overflow.
         // The per-session transcript context note (speaker count + pure-text
-        // disclaimer) rides in the system prompt, so it counts toward the
-        // fixed system overhead.
+        // disclaimer) and the optional therapist notes block ride in the
+        // system prompt, so both count toward the fixed system overhead.
         const userQuestion = candidate.userQuestion ?? null;
         const sessionNoteForBudget = buildTranscriptSessionNote(
           getSessionNumSpeakers(sessionId)
@@ -2885,7 +2926,8 @@ export async function processVerificationJob(
         const allocation = allocateJudgeContextBudget({
           contextSize,
           systemPromptTokens: estimateTokens(
-            `${judgeSystemPrompt}\n\n${sessionNoteForBudget}`
+            `${judgeSystemPrompt}\n\n${sessionNoteForBudget}` +
+              (therapistNotesBlock ? `\n\n${therapistNotesBlock}` : '')
           ),
           skeletonTokens: estimateTokens(judgeUserSkeleton),
         });
@@ -2969,7 +3011,8 @@ export async function processVerificationJob(
             text: buildJudgeSystemPrompt(
               judgeSystemPrompt,
               transcriptContext.text,
-              getSessionNumSpeakers(sessionId)
+              getSessionNumSpeakers(sessionId),
+              therapistNotesBlock
             ),
             timestamp: Date.now(),
           },

@@ -57,6 +57,13 @@ export interface MaterialRevisionInput {
   userQuestion: string | null;
   /** Full relevant transcript content in any order (sorted internally). */
   transcript: MaterialTranscriptParagraph[];
+  /**
+   * Session therapist note (`sessions.therapistNote`). The Judge audits
+   * against the transcript AND the note, so note edits invalidate the
+   * revision. Absent/blank notes contribute nothing (the `n` key is
+   * omitted), keeping byte-identical revisions for note-less sessions.
+   */
+  therapistNote?: string | null;
 }
 
 export interface ClaimKeyInput {
@@ -289,13 +296,15 @@ export function canonicalizeSpeakerLabel(speaker: string | null): string {
 
 /**
  * Fingerprint of the material actually evaluated: visible answer, therapist
- * question, and full transcript content in deterministic
- * paragraphIndex order with meaningful speaker labels.
+ * question, full transcript content in deterministic paragraphIndex order
+ * with meaningful speaker labels, and the session therapist note.
  *
  * Deliberately excludes audit date, Judge model, run id, statement ordering,
  * and the truncated transcript window sent to the LLM, so changing the Judge
  * or context size alone never erases a human decision. Uses paragraphIndex
  * (content identity, stable across backup remaps) — never DB row ids.
+ * Absent/blank notes are omitted from the canonical form (not hashed as
+ * empty) so note-less sessions keep their legacy revisions.
  */
 export function computeMaterialRevision(input: MaterialRevisionInput): string {
   const answer = (input.visibleAnswer ?? '').trim();
@@ -311,11 +320,13 @@ export function computeMaterialRevision(input: MaterialRevisionInput): string {
       s: canonicalizeSpeakerLabel(p.speaker),
       x: p.text,
     }));
+  const note = (input.therapistNote ?? '').trim();
   const canonical = JSON.stringify({
     v: VERIFICATION_REVIEW_IDENTITY_VERSION,
     a: answer,
     q: question,
     p: paragraphs,
+    ...(note.length > 0 ? { n: note } : {}),
   });
   return `v${VERIFICATION_REVIEW_IDENTITY_VERSION}.${sha256Hex(canonical)}`;
 }

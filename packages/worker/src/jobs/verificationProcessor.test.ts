@@ -64,6 +64,14 @@ vi.mock('@therascript/services', () => ({
   // layout assertions check for.
   buildTranscriptSessionNote: (numSpeakers?: number | null) =>
     `SESSION CONTEXT mock note (speakers: ${numSpeakers ?? 'unknown'}; pure text transcription).`,
+  // Plain passthrough (not a vi.fn): same resetAllMocks rationale as above.
+  // Mirrors the real helper's contract ('' when there is no note) with a
+  // distinctive marker so injection assertions cannot match prompt prose.
+  buildTherapistNotesBlock: (note?: string | null) => {
+    const trimmed = note?.trim() ?? '';
+    if (!trimmed) return '';
+    return `MOCK THERAPIST NOTES BLOCK:\n"""\n${trimmed}\n"""`;
+  },
   // Plain passthrough (not a vi.fn): the job-running describes call
   // `vi.resetAllMocks()` in `beforeEach`, which would wipe a mock
   // implementation. The [system, user] fixtures are already well-formed,
@@ -444,6 +452,27 @@ describe('evidence hydration against ground-truth paragraphs', () => {
     ]);
   });
 
+  it('keeps therapist-note evidence (null paragraphIndex) with its quote intact', () => {
+    // Note-backed claims cite paragraphIndex null (notes have no transcript
+    // paragraphs); the quote must survive hydration so the UI can show what
+    // the verdict rests on, with paragraph/timestamp/speaker nulled.
+    const result = normalizeJudgeOutput(
+      judgeClaim({
+        paragraphIndex: null,
+        quote: 'Client reports headaches since Tuesday.',
+      }),
+      { paragraphsById, showSpeakers: true }
+    );
+    expect(result.claims[0].evidence).toEqual([
+      {
+        paragraphIndex: null,
+        timestampMs: null,
+        speaker: null,
+        quote: 'Client reports headaches since Tuesday.',
+      },
+    ]);
+  });
+
   it('nulls speaker when showSpeakers is false', () => {
     const result = normalizeJudgeOutput(
       judgeClaim({
@@ -645,6 +674,20 @@ describe('DEFAULT_VERIFICATION_JUDGE_PROMPT', () => {
     expect(DEFAULT_VERIFICATION_JUDGE_PROMPT).toMatch(/15-25/);
     expect(DEFAULT_VERIFICATION_JUDGE_PROMPT).toMatch(
       /one short sentence explaining the verdict/i
+    );
+  });
+
+  it('treats therapist notes as additional ground truth with null-index evidence', () => {
+    // Session Chat answers from the transcript AND the therapist note, so
+    // the Judge must too — otherwise note-backed claims misfire as
+    // fabricated. Note evidence cites paragraphIndex null (notes have no
+    // transcript paragraphs); hydration keeps the quote, provenance nulled.
+    expect(DEFAULT_VERIFICATION_JUDGE_PROMPT).toContain('THERAPIST NOTES');
+    expect(DEFAULT_VERIFICATION_JUDGE_PROMPT).toMatch(
+      /additional ground truth/i
+    );
+    expect(DEFAULT_VERIFICATION_JUDGE_PROMPT).toContain(
+      '"paragraphIndex" to null'
     );
   });
 });
@@ -3671,6 +3714,168 @@ describe('processVerificationJob — live token-speed telemetry', () => {
   });
 });
 
+describe('processVerificationJob — therapist notes as ground truth', () => {
+  const paragraphs: TranscriptParagraphData[] = [
+    {
+      id: 0,
+      timestamp: 866,
+      text: 'I take Sertraline every morning.',
+      speaker: 'SPEAKER_00',
+    },
+  ];
+  const NOTE = 'Client reports headaches since Tuesday.';
+
+  const baseRecord = {
+    id: 1,
+    status: 'pending',
+    scope: 'all_unverified',
+    session_ids_json: null,
+    chat_id: null,
+    skip_verified: true,
+    total_messages: 0,
+    processed_messages: 0,
+    total_statements: 0,
+    flagged_statements: 0,
+    omissions_count: 0,
+    created_at: Date.now(),
+    completed_at: null,
+    error_message: null,
+    model_name: 'default',
+    context_size: 32768,
+    thinking_budget: -1,
+    temperature: 0.3,
+    top_p: null,
+    repeat_penalty: null,
+    num_gpu_layers: null,
+    llm_base_url: null,
+  };
+
+  const candidateFor = (id: number, text: string) => ({
+    id,
+    chatId: 5,
+    sessionId: 2,
+    sender: 'ai',
+    text,
+    timestamp: Date.now(),
+    model: 'author-model',
+    userQuestion: 'What did the client say?',
+  });
+
+  async function* fakeStream(
+    chunks: Array<{ content?: string; thinking?: string }>,
+    result: { promptTokens?: number; completionTokens?: number }
+  ): AsyncGenerator<{ content?: string; thinking?: string }, unknown> {
+    for (const chunk of chunks) yield chunk;
+    return result;
+  }
+
+  const supportedVerdict = {
+    summary_assessment: 'Supported by the therapist note.',
+    claims: [
+      {
+        exact_quote: 'The client reports headaches since Tuesday.',
+        normalized_claim: 'Client reports headaches since Tuesday.',
+        verdict: 'supported',
+        severity: 'none',
+        confidence: 0.9,
+        reasoning: 'Stated verbatim in the therapist note.',
+        evidence: [],
+      },
+    ],
+    omissions: [],
+  };
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    extractVisibleAnswerMock.mockImplementation((text: string) => text);
+    calculateTokenCountMock.mockImplementation(() => 10);
+    resolveBudgetStub.mockReturnValue(512);
+    findJobMock.mockReturnValue({ ...baseRecord });
+    findParagraphsMock.mockReturnValue(paragraphs);
+    findTemplateMock.mockReturnValue(null);
+    findSessionMock.mockReturnValue({ showSpeakers: 1 });
+    updateJobStatusMock.mockReturnValue(true);
+    transitionToProcessingMock.mockReturnValue(true);
+    saveResultMock.mockReturnValue({});
+    streamWithRetryMock.mockImplementation(async function* (factory: any) {
+      return yield* factory();
+    });
+    streamLlmMock.mockImplementationOnce(() =>
+      fakeStream([{ content: '{"summary_assessment": "ok"}' }], {
+        promptTokens: 90,
+        completionTokens: 40,
+      })
+    );
+    parseJsonMock.mockReturnValue(supportedVerdict);
+  });
+
+  const runJob = () =>
+    processVerificationJob({
+      data: { jobId: 1 },
+      updateProgress: vi.fn(),
+    } as any);
+
+  it('injects the session therapist note into the Judge system prefix', async () => {
+    findSessionMock.mockReturnValue({ showSpeakers: 1, therapistNote: NOTE });
+    findCandidatesMock.mockReturnValue([
+      candidateFor(22, 'The client reports headaches since Tuesday.'),
+    ]);
+
+    await runJob();
+
+    expect(streamLlmMock).toHaveBeenCalledTimes(1);
+    const judgeMessages = streamLlmMock.mock.calls[0][0];
+    expect(judgeMessages).toHaveLength(2);
+    expect(judgeMessages[0].sender).toBe('system');
+    expect(judgeMessages[0].text).toContain('MOCK THERAPIST NOTES BLOCK');
+    expect(judgeMessages[0].text).toContain(NOTE);
+    // Session Chat layout: the note leads, ahead of the transcript.
+    expect(
+      judgeMessages[0].text.indexOf('MOCK THERAPIST NOTES BLOCK')
+    ).toBeLessThan(
+      judgeMessages[0].text.indexOf('--- GROUND-TRUTH SESSION TRANSCRIPT ---')
+    );
+  });
+
+  it('omits the notes block when the session has no note', async () => {
+    findCandidatesMock.mockReturnValue([
+      candidateFor(22, 'The client takes Sertraline every morning.'),
+    ]);
+
+    await runJob();
+
+    expect(streamLlmMock).toHaveBeenCalledTimes(1);
+    const judgeMessages = streamLlmMock.mock.calls[0][0];
+    expect(judgeMessages[0].text).not.toContain('MOCK THERAPIST NOTES BLOCK');
+  });
+
+  it('fingerprints the note into the saved material revision', async () => {
+    findSessionMock.mockReturnValue({ showSpeakers: 1, therapistNote: NOTE });
+    const answer = 'The client reports headaches since Tuesday.';
+    findCandidatesMock.mockReturnValue([candidateFor(22, answer)]);
+
+    await runJob();
+
+    expect(saveResultMock).toHaveBeenCalledTimes(1);
+    const savedRevision = saveResultMock.mock.calls[0][0].materialRevision;
+    expect(savedRevision).toBe(
+      computeJudgeMaterialRevision(
+        answer,
+        'What did the client say?',
+        paragraphs,
+        NOTE
+      )
+    );
+    expect(savedRevision).not.toBe(
+      computeJudgeMaterialRevision(
+        answer,
+        'What did the client say?',
+        paragraphs
+      )
+    );
+  });
+});
+
 describe('computeJudgeMaterialRevision', () => {
   const paragraphs: TranscriptParagraphData[] = [
     { id: 0, timestamp: 0, text: 'First paragraph.', speaker: 'SPEAKER_00' },
@@ -3710,6 +3915,53 @@ describe('computeJudgeMaterialRevision', () => {
         ...paragraphs.slice(0, 1),
       ])
     ).not.toBe(base);
+  });
+
+  it('changes when the therapist note changes; absent/blank notes keep the legacy revision', () => {
+    const base = computeJudgeMaterialRevision(
+      'Answer.',
+      'Question?',
+      paragraphs
+    );
+    expect(
+      computeJudgeMaterialRevision(
+        'Answer.',
+        'Question?',
+        paragraphs,
+        'Client reports headaches.'
+      )
+    ).not.toBe(base);
+    // Backward compatible: sessions without notes keep byte-identical
+    // revisions, so existing human confirmations stay reusable.
+    expect(
+      computeJudgeMaterialRevision(
+        'Answer.',
+        'Question?',
+        paragraphs,
+        undefined
+      )
+    ).toBe(base);
+    expect(
+      computeJudgeMaterialRevision('Answer.', 'Question?', paragraphs, null)
+    ).toBe(base);
+    expect(
+      computeJudgeMaterialRevision('Answer.', 'Question?', paragraphs, '   ')
+    ).toBe(base);
+    expect(
+      computeJudgeMaterialRevision(
+        'Answer.',
+        'Question?',
+        paragraphs,
+        '  Client reports headaches.  '
+      )
+    ).toBe(
+      computeJudgeMaterialRevision(
+        'Answer.',
+        'Question?',
+        paragraphs,
+        'Client reports headaches.'
+      )
+    );
   });
 });
 

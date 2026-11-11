@@ -90,6 +90,7 @@ describe('seedSystemTemplates — insert-only seeding', () => {
     initializeDatabase(db);
 
     const target = SYSTEM_PROMPT_TEMPLATES.VERIFICATION_JUDGE;
+    expect(target.text).toContain('THERAPIST NOTES');
     expect(LEGACY_VERIFICATION_JUDGE_PROMPT_TEXTS.length).toBeGreaterThan(0);
     for (const legacyText of LEGACY_VERIFICATION_JUDGE_PROMPT_TEXTS) {
       // Sanity: the legacy fixture must differ from the current default,

@@ -912,6 +912,34 @@ describe('review reuse across reruns', () => {
     expect(after.material_revision).toBe(before.material_revision);
     expect(after.fabricated_claims).toBe(1);
   });
+
+  it('rejects saves evaluated before a therapist-note edit (note is fingerprinted material)', () => {
+    const { chatId, messageId, sessionId } = seedFixture();
+    const before = get<any>(
+      'SELECT material_revision FROM message_verifications WHERE message_id = ?',
+      messageId
+    )!;
+    run(
+      'UPDATE sessions SET therapistNote = ? WHERE id = ?',
+      'Note added.',
+      sessionId
+    );
+    expect(() =>
+      verificationRepository.saveMessageVerificationResult({
+        messageId,
+        chatId,
+        sessionId,
+        judgeModel: 'judge-1',
+        materialRevision: before.material_revision,
+        statements: [],
+      })
+    ).toThrow(StaleVerificationMaterialError);
+    const after = get<any>(
+      'SELECT material_revision FROM message_verifications WHERE message_id = ?',
+      messageId
+    )!;
+    expect(after.material_revision).toBe(before.material_revision);
+  });
 });
 
 describe('effective job counters on audited saves', () => {

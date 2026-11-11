@@ -495,7 +495,7 @@ interface LiveVerificationMaterial {
 }
 
 /**
- * Recompute the material revision from live message + transcript rows.
+ * Recompute the material revision from live message + transcript + note rows.
  * Must run INSIDE the caller's write transaction so the revision, the
  * review match, and the aggregate update commit atomically.
  */
@@ -527,11 +527,19 @@ const computeLiveMaterialRevision = (
      FROM transcript_paragraphs WHERE sessionId = ? ORDER BY paragraphIndex ASC`,
     sessionId
   );
+  // The Judge audits against the transcript AND the therapist note, so the
+  // note joins the fingerprint (mirrors the worker's
+  // `computeJudgeMaterialRevision` call — both sides must agree exactly).
+  const sessionRow = get<{ therapistNote: string | null }>(
+    'SELECT therapistNote FROM sessions WHERE id = ?',
+    sessionId
+  );
   return {
     revision: computeMaterialRevision({
       visibleAnswer,
       userQuestion,
       transcript: paragraphs,
+      therapistNote: sessionRow?.therapistNote ?? null,
     }),
     visibleAnswer,
     userQuestion,
