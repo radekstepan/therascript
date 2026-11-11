@@ -308,86 +308,90 @@ export function PersistentSidebar() {
           {isSidebarOpen && (
             <>
               {/* Recent Sessions */}
-              <div className="mt-6">
-                <button
-                  onClick={() => setIsSessionsExpanded(!isSessionsExpanded)}
-                  className={cn(
-                    'flex items-center w-full px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-[0.1em] text-[var(--gray-11)] hover:text-[var(--gray-12)] transition-colors'
+              {recentSessions.length > 0 && (
+                <div className="mt-6">
+                  <button
+                    onClick={() => setIsSessionsExpanded(!isSessionsExpanded)}
+                    className={cn(
+                      'flex items-center w-full px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-[0.1em] text-[var(--gray-11)] hover:text-[var(--gray-12)] transition-colors'
+                    )}
+                  >
+                    {isSessionsExpanded ? (
+                      <ChevronDown size={14} className="mr-1" />
+                    ) : (
+                      <ChevronRight size={14} className="mr-1" />
+                    )}
+                    RECENT SESSIONS
+                  </button>
+                  {isSessionsExpanded && (
+                    <ul className="mt-2 space-y-1">
+                      {recentSessions.map((session) => (
+                        <li key={session.id}>
+                          <Link
+                            to={`/sessions/${session.id}`}
+                            className={cn(
+                              'block py-1.5 px-2 text-[var(--gray-11)] hover:bg-[var(--gray-a3)] hover:text-[var(--gray-12)] rounded-lg transition-colors',
+                              isPathActive(`/sessions/${session.id}`)
+                                ? 'bg-[var(--gray-a4)] text-[var(--gray-12)]'
+                                : ''
+                            )}
+                          >
+                            <div className="truncate text-xs font-medium text-[var(--gray-12)]">
+                              {session.sessionName || session.fileName}
+                            </div>
+                            <div className="text-[11px] text-[var(--gray-11)]">
+                              {formatTimeAgo(session.date)}
+                            </div>
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
                   )}
-                >
-                  {isSessionsExpanded ? (
-                    <ChevronDown size={14} className="mr-1" />
-                  ) : (
-                    <ChevronRight size={14} className="mr-1" />
-                  )}
-                  RECENT SESSIONS
-                </button>
-                {isSessionsExpanded && (
-                  <ul className="mt-2 space-y-1">
-                    {recentSessions.map((session) => (
-                      <li key={session.id}>
-                        <Link
-                          to={`/sessions/${session.id}`}
-                          className={cn(
-                            'block py-1.5 px-2 text-[var(--gray-11)] hover:bg-[var(--gray-a3)] hover:text-[var(--gray-12)] rounded-lg transition-colors',
-                            isPathActive(`/sessions/${session.id}`)
-                              ? 'bg-[var(--gray-a4)] text-[var(--gray-12)]'
-                              : ''
-                          )}
-                        >
-                          <div className="truncate text-xs font-medium text-[var(--gray-12)]">
-                            {session.sessionName || session.fileName}
-                          </div>
-                          <div className="text-[11px] text-[var(--gray-11)]">
-                            {formatTimeAgo(session.date)}
-                          </div>
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
+                </div>
+              )}
 
               {/* Recent Chats */}
-              <div className="mt-4">
-                <button
-                  onClick={() => setIsChatsExpanded(!isChatsExpanded)}
-                  className={cn(
-                    'flex items-center w-full px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-[0.1em] text-[var(--gray-11)] hover:text-[var(--gray-12)] transition-colors'
+              {recentChats.length > 0 && (
+                <div className="mt-4">
+                  <button
+                    onClick={() => setIsChatsExpanded(!isChatsExpanded)}
+                    className={cn(
+                      'flex items-center w-full px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-[0.1em] text-[var(--gray-11)] hover:text-[var(--gray-12)] transition-colors'
+                    )}
+                  >
+                    {isChatsExpanded ? (
+                      <ChevronDown size={14} className="mr-1" />
+                    ) : (
+                      <ChevronRight size={14} className="mr-1" />
+                    )}
+                    RECENT CHATS
+                  </button>
+                  {isChatsExpanded && (
+                    <ul className="mt-2 space-y-1">
+                      {recentChats.map((chat) => (
+                        <li key={chat.id}>
+                          <Link
+                            to={`/chats/${chat.id}`}
+                            className={cn(
+                              'block py-1.5 px-2 text-[var(--gray-11)] hover:bg-[var(--gray-a3)] hover:text-[var(--gray-12)] rounded-lg transition-colors',
+                              isPathActive(`/chats/${chat.id}`)
+                                ? 'bg-[var(--gray-a4)] text-[var(--gray-12)]'
+                                : ''
+                            )}
+                          >
+                            <div className="truncate text-xs font-medium text-[var(--gray-12)]">
+                              {chat.name || `Chat ${chat.id}`}
+                            </div>
+                            <div className="text-[11px] text-[var(--gray-11)]">
+                              {formatTimeAgo(chat.timestamp)}
+                            </div>
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
                   )}
-                >
-                  {isChatsExpanded ? (
-                    <ChevronDown size={14} className="mr-1" />
-                  ) : (
-                    <ChevronRight size={14} className="mr-1" />
-                  )}
-                  RECENT CHATS
-                </button>
-                {isChatsExpanded && (
-                  <ul className="mt-2 space-y-1">
-                    {recentChats.map((chat) => (
-                      <li key={chat.id}>
-                        <Link
-                          to={`/chats/${chat.id}`}
-                          className={cn(
-                            'block py-1.5 px-2 text-[var(--gray-11)] hover:bg-[var(--gray-a3)] hover:text-[var(--gray-12)] rounded-lg transition-colors',
-                            isPathActive(`/chats/${chat.id}`)
-                              ? 'bg-[var(--gray-a4)] text-[var(--gray-12)]'
-                              : ''
-                          )}
-                        >
-                          <div className="truncate text-xs font-medium text-[var(--gray-12)]">
-                            {chat.name || `Chat ${chat.id}`}
-                          </div>
-                          <div className="text-[11px] text-[var(--gray-11)]">
-                            {formatTimeAgo(chat.timestamp)}
-                          </div>
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
+                </div>
+              )}
             </>
           )}
         </nav>
