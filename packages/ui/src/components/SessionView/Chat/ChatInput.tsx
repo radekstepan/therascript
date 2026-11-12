@@ -1,19 +1,14 @@
 // packages/ui/src/components/SessionView/Chat/ChatInput.tsx
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { useAtom, useAtomValue, useSetAtom } from 'jotai';
-import {
-  UseMutationResult,
-  useQuery,
-  useQueryClient,
-  useMutation,
-} from '@tanstack/react-query';
+import React, { useState, useRef, useEffect } from 'react';
+import { useAtom, useAtomValue } from 'jotai';
+import { UseMutationResult, useQuery } from '@tanstack/react-query';
 import {
   StarIcon,
   PaperPlaneIcon,
   Cross2Icon,
-  // ReloadIcon, // No longer needed for inline prompt
-  // ExclamationTriangleIcon, // No longer needed for inline prompt
+  ExclamationTriangleIcon,
   InfoCircledIcon,
+  MixerVerticalIcon,
 } from '@radix-ui/react-icons';
 import {
   TextField,
@@ -22,8 +17,7 @@ import {
   Text,
   IconButton,
   Spinner,
-  // Button, // No longer needed for inline prompt
-  // Callout, // No longer needed for inline prompt
+  Button,
 } from '@radix-ui/themes';
 import { StarredTemplatesList } from './StarredTemplatesList';
 import { AppTooltip } from '../../Shared/AppTooltip';
@@ -31,14 +25,9 @@ import {
   currentQueryAtom,
   activeChatIdAtom,
   activeSessionIdAtom,
-  toastMessageAtom,
 } from '../../../store';
-import type {
-  ChatMessage,
-  LlmStatus,
-  UIContextUsageResponse,
-} from '../../../types';
-import { fetchLlmStatus, setLlmModel } from '../../../api/api';
+import type { LlmStatus, UIContextUsageResponse } from '../../../types';
+import { fetchLlmStatus } from '../../../api/api';
 import { SelectActiveModelModal } from '../Modals/SelectActiveModelModal';
 import {
   fetchSessionContextUsage,
@@ -77,17 +66,11 @@ export function ChatInput({
   const activeChatId = useAtomValue(activeChatIdAtom);
   const activeSessionId = useAtomValue(activeSessionIdAtom);
   const [inputError, setInputError] = useState('');
-  const setToastMessageAtom = useSetAtom(toastMessageAtom);
-  const queryClient = useQueryClient();
 
   const inputRef = useRef<HTMLInputElement>(null);
   const [showTemplates, setShowTemplates] = useState(false);
 
   const [isSelectModelModalOpen, setIsSelectModelModalOpen] = useState(false);
-  const [pendingMessage, setPendingMessage] = useState<string | null>(null);
-  // Remove state related to inline prompt and inline loading
-  // const [showInlineLoadPrompt, setShowInlineLoadPrompt] = useState(false);
-  // const [isInlineLoadingModel, setIsInlineLoadingModel] = useState(false);
 
   const { data: llmStatus, isLoading: isLoadingLlmStatusForInput } = useQuery<
     LlmStatus,
@@ -108,26 +91,25 @@ export function ChatInput({
     loadError,
     isServerUnreachable,
     modelMismatch,
-    actualLoadedModel,
     isSettledNotLoaded,
   } = useLlmModelState(llmStatus);
 
-  // No longer need setModelAndLoadMutation as SelectActiveModelModal handles setting/loading
-  // const setModelAndLoadMutation = useMutation(...);
-
   const isEffectivelyDisabled =
-    disabled ||
-    isAiResponding ||
-    !activeChatId ||
-    isSelectModelModalOpen ||
-    isLoadingLlmStatusForInput ||
-    !isModelReady;
+    disabled || isAiResponding || !activeChatId || isSelectModelModalOpen;
+
+  // Until the model is ready, the input row is replaced by a state panel
+  // (status + action). The input fades back in once loading completes.
+  const showStatePanel =
+    !disabled &&
+    !isAiResponding &&
+    activeChatId !== null &&
+    (!llmStatus || !isModelReady);
 
   useEffect(() => {
-    if (activeChatId !== null && !isEffectivelyDisabled) {
+    if (activeChatId !== null && !isEffectivelyDisabled && isModelReady) {
       inputRef.current?.focus();
     }
-  }, [activeChatId, isEffectivelyDisabled]);
+  }, [activeChatId, isEffectivelyDisabled, isModelReady]);
 
   useEffect(() => {
     if ((inputError || addMessageMutation.isError) && currentQuery !== '') {
@@ -135,27 +117,6 @@ export function ChatInput({
       if (addMessageMutation.isError) addMessageMutation.reset();
     }
   }, [currentQuery, inputError, addMessageMutation]);
-
-  // Effect to send pending message after model is confirmed loaded via llmStatus
-  // This is now primarily triggered after SelectActiveModelModal succeeds
-  useEffect(() => {
-    if (
-      pendingMessage &&
-      llmStatus?.activeModel &&
-      llmStatus.modelChecked === llmStatus.activeModel &&
-      llmStatus.loaded
-    ) {
-      console.log(
-        '[ChatInput] Model confirmed loaded. Sending pending message:',
-        pendingMessage
-      );
-      addMessageMutation.mutate({
-        text: pendingMessage,
-        tempAiMessageId: -Math.floor(Math.random() * 1000000),
-      });
-      setPendingMessage(null);
-    }
-  }, [llmStatus, pendingMessage, addMessageMutation]);
 
   const handleSelectTemplate = (text: string) => {
     setCurrentQuery((prev) => (prev ? `${prev} ${text}` : text));
@@ -175,49 +136,13 @@ export function ChatInput({
       setInputError('Please select a chat first.');
       return false;
     }
+    // Defensive: the input only renders when the model is ready (the
+    // state panel replaces it otherwise), but guard the race anyway.
+    if (!isModelReady) return false;
 
     setInputError('');
-    const queryToSend = currentQuery;
-
-    if (!llmStatus) {
-      setToastMessageAtom('Waiting for AI model status...');
-      queryClient.refetchQueries({ queryKey: ['llmStatus'] });
-      return false;
-    }
-
-    // Defensive: if the model is still loading (button should already be
-    // disabled, but guard against race conditions), surface a toast and
-    // do NOT open the modal — the user already initiated the load.
-    if (isModelLoading) {
-      setToastMessageAtom('Model is still loading, please wait…');
-      return false;
-    }
-
-    // The load finished but failed: surface the backend's reason instead
-    // of falling through to the send path below.
-    if (loadFailed) {
-      setToastMessageAtom(
-        `Model failed to load: ${loadError ?? 'unknown error'}`
-      );
-      return false;
-    }
-
-    const { activeModel: currentActiveModel } = llmStatus;
-
-    if (!currentActiveModel || currentActiveModel === 'default') {
-      // No active model configured. Open the SelectActiveModelModal so the
-      // user can pick + load one; queue the current message.
-      console.log(
-        `[ChatInput] No active model. Opening SelectActiveModelModal.`
-      );
-      setPendingMessage(queryToSend);
-      setIsSelectModelModalOpen(true);
-      return false;
-    }
-
-    // Model is active and loaded — send.
     addMessageMutation.mutate({
-      text: queryToSend,
+      text: currentQuery,
       tempAiMessageId: -Math.floor(Math.random() * 1000000),
     });
     return true;
@@ -225,16 +150,12 @@ export function ChatInput({
 
   const handleModelSuccessfullySet = () => {
     setIsSelectModelModalOpen(false);
-    // The useEffect watching llmStatus and pendingMessage will now handle sending
-    // once the status updates to reflect the model is loaded.
-    // We don't immediately send here, we wait for confirmation of load.
+    // The status poll picks up the load from here: loading panel first,
+    // then the input fades back in once the model is ready.
     console.log(
       '[ChatInput] Model selection/setting process initiated from modal. Waiting for load confirmation.'
     );
-    // If `pendingMessage` is still set, the useEffect will pick it up.
   };
-
-  // handleInlineLoadAndSend and handleCancelInlineLoad are removed
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -253,29 +174,14 @@ export function ChatInput({
     onCancelStream();
   };
 
-  const showCancelButton = isAiResponding && !disabled; // Removed isInlineLoadingModel check
+  const showCancelButton = isAiResponding && !disabled;
   const sendButtonDisabled = isEffectivelyDisabled || !currentQuery.trim();
   const starredButtonDisabled = isEffectivelyDisabled;
   const inputFieldDisabled = isEffectivelyDisabled;
 
-  // Name the disabled reason in the placeholder: a disabled input with
-  // the normal "Ask about the session..." prompt reads as broken, not
-  // as "no model loaded".
-  const placeholderText = isModelLoading
-    ? 'Model is loading, please wait…'
-    : loadFailed
-      ? `Model failed to load — ${loadError ?? 'unknown error'}`
-      : isServerUnreachable
-        ? 'LLM server unreachable — check that it is running…'
-        : modelMismatch
-          ? `Server holds "${actualLoadedModel}" — load "${llmStatus?.activeModel}" to switch…`
-          : isSettledNotLoaded
-            ? 'Model not loaded — open Configure AI Model to load it…'
-            : !hasActiveModel
-              ? 'No model selected — open Configure AI Model…'
-              : isStandalone
-                ? 'Ask anything...'
-                : 'Ask about the session...';
+  const placeholderText = isStandalone
+    ? 'Ask anything...'
+    : 'Ask about the session...';
 
   // --- Live Context Usage Preview (debounced) ---
   const [debouncedInput, setDebouncedInput] = useState<string>('');
@@ -342,118 +248,191 @@ export function ChatInput({
       : false;
   const shouldShowPreviewHint = willOverflow || isWarn || isDanger;
 
+  const openModelPicker = () => setIsSelectModelModalOpen(true);
+
+  const renderStatePanel = () => {
+    let title: string | null;
+    let detail: string | null = null;
+    // Every action opens the same model picker, so every button shares
+    // the header's "Configure AI Model" verbiage and mixer icon.
+    let showAction = false;
+    let icon: React.ReactNode = null;
+
+    if (!llmStatus || isLoadingLlmStatusForInput) {
+      title = 'Checking model status…';
+      icon = <Spinner size="2" />;
+    } else if (isModelLoading) {
+      title = 'Loading model…';
+      detail =
+        'First load can take a minute — the input appears when it’s ready.';
+      icon = <Spinner size="2" />;
+    } else if (!hasActiveModel) {
+      title = 'No model selected';
+      detail = 'Pick a model to start chatting.';
+      icon = <InfoCircledIcon width="18" height="18" color="gray" />;
+      showAction = true;
+    } else if (loadFailed) {
+      title = 'Model failed to load';
+      detail = loadError ?? 'Unknown error.';
+      icon = (
+        <ExclamationTriangleIcon
+          width="18"
+          height="18"
+          className="text-red-600"
+        />
+      );
+      showAction = true;
+    } else if (isServerUnreachable) {
+      title = 'LLM server unreachable';
+      detail = llmStatus.isRemoteBaseUrl
+        ? 'Check that the remote server is running and the URL is correct.'
+        : 'Check that LM Studio is running.';
+      icon = (
+        <ExclamationTriangleIcon
+          width="18"
+          height="18"
+          className="text-red-600"
+        />
+      );
+      showAction = true;
+    } else if (modelMismatch) {
+      title = 'Wrong model loaded';
+      detail = 'The server is running a different model.';
+      icon = <InfoCircledIcon width="18" height="18" color="gray" />;
+      showAction = true;
+    } else if (isSettledNotLoaded) {
+      // The state is obvious — just offer the action.
+      title = null;
+      showAction = true;
+    } else {
+      return null;
+    }
+
+    return (
+      <Box
+        data-testid="model-state-panel"
+        px="4"
+        py="4"
+        style={{
+          border: '1px dashed var(--gray-a6)',
+          borderRadius: 'var(--radius-3)',
+          backgroundColor: 'var(--gray-a2)',
+        }}
+      >
+        <Flex direction="column" align="center" gap="2">
+          {title && (
+            <Flex align="center" gap="2">
+              {icon}
+              <Text size="3" weight="medium" align="center">
+                {title}
+              </Text>
+            </Flex>
+          )}
+          {detail && (
+            <Text size="2" color="gray" align="center">
+              {detail}
+            </Text>
+          )}
+          {showAction && (
+            <Button size="2" variant="solid" onClick={openModelPicker}>
+              <MixerVerticalIcon width="14" height="14" />
+              Configure AI Model
+            </Button>
+          )}
+        </Flex>
+      </Box>
+    );
+  };
+
+  const statePanel = showStatePanel ? renderStatePanel() : null;
+
   return (
     <>
       <Flex direction="column" gap="1">
-        {/* Inline prompt and loading state elements removed */}
-
-        <Flex align="start" gap="2" width="100%">
-          <Box position="relative" flexShrink="0">
-            <AppTooltip content="Show Templates">
-              <IconButton
-                type="button"
-                variant="soft"
-                size="2"
-                onClick={() => setShowTemplates((prev) => !prev)}
-                aria-label="Show templates"
-                disabled={starredButtonDisabled}
-              >
-                <StarIcon width={16} height={16} />
-              </IconButton>
-            </AppTooltip>
-            {showTemplates && (
-              <StarredTemplatesList
-                onSelectTemplate={handleSelectTemplate}
-                onClose={() => setShowTemplates(false)}
-              />
-            )}
-          </Box>
-          <TextField.Root
-            ref={inputRef}
-            size="2"
-            data-testid="chat-input"
-            style={{ flexGrow: 1 }}
-            placeholder={
-              isAiResponding ? 'AI is responding...' : placeholderText
-            }
-            value={currentQuery}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-              setCurrentQuery(e.target.value)
-            }
-            disabled={inputFieldDisabled}
-            aria-label="Chat input message"
-            onKeyDown={handleKeyDown}
-          />
-          {showCancelButton ? (
-            <AppTooltip content="Cancel response">
-              <IconButton
-                type="button"
-                color="red"
-                variant="solid"
-                size="2"
-                onClick={handleCancelStreamClick}
-                aria-label="Cancel AI response"
-                // disabled={!isAiResponding || isInlineLoadingModel} // Removed isInlineLoadingModel
-                disabled={!isAiResponding}
-              >
-                <Cross2Icon />
-              </IconButton>
-            </AppTooltip>
-          ) : (
-            <AppTooltip
-              content={
-                isModelLoading
-                  ? 'Model is loading…'
-                  : loadFailed
-                    ? `Model failed to load: ${loadError ?? 'unknown error'}`
-                    : isServerUnreachable
-                      ? 'LLM server unreachable'
-                      : modelMismatch
-                        ? `Server holds "${actualLoadedModel}" instead of "${llmStatus?.activeModel}"`
-                        : isSettledNotLoaded
-                          ? 'Model not loaded'
-                          : isAiResponding
-                            ? 'AI is responding...'
-                            : 'Send message'
+        {statePanel ?? (
+          <Flex
+            align="start"
+            gap="2"
+            width="100%"
+            className="chat-input-fade-in"
+            data-testid="chat-input-row"
+          >
+            <Box position="relative" flexShrink="0">
+              <AppTooltip content="Show Templates">
+                <IconButton
+                  type="button"
+                  variant="soft"
+                  size="2"
+                  onClick={() => setShowTemplates((prev) => !prev)}
+                  aria-label="Show templates"
+                  disabled={starredButtonDisabled}
+                >
+                  <StarIcon width={16} height={16} />
+                </IconButton>
+              </AppTooltip>
+              {showTemplates && (
+                <StarredTemplatesList
+                  onSelectTemplate={handleSelectTemplate}
+                  onClose={() => setShowTemplates(false)}
+                />
+              )}
+            </Box>
+            <TextField.Root
+              ref={inputRef}
+              size="2"
+              data-testid="chat-input"
+              style={{ flexGrow: 1 }}
+              placeholder={
+                isAiResponding
+                  ? 'AI is responding...'
+                  : !activeChatId
+                    ? 'Start or select a chat first…'
+                    : disabled
+                      ? 'Loading…'
+                      : placeholderText
               }
-            >
-              <IconButton
-                type="button"
-                variant="solid"
-                size="2"
-                onClick={handleSubmitClick}
-                disabled={sendButtonDisabled}
-                aria-label={
-                  isModelLoading
-                    ? 'Model is loading'
-                    : loadFailed
-                      ? 'Model failed to load'
-                      : isServerUnreachable
-                        ? 'LLM server unreachable'
-                        : modelMismatch
-                          ? 'Server holds a different model'
-                          : isSettledNotLoaded
-                            ? 'Model not loaded'
-                            : isAiResponding
-                              ? 'AI is responding'
-                              : 'Send message'
+              value={currentQuery}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                setCurrentQuery(e.target.value)
+              }
+              disabled={inputFieldDisabled}
+              aria-label="Chat input message"
+              onKeyDown={handleKeyDown}
+            />
+            {showCancelButton ? (
+              <AppTooltip content="Cancel response">
+                <IconButton
+                  type="button"
+                  color="red"
+                  variant="solid"
+                  size="2"
+                  onClick={handleCancelStreamClick}
+                  aria-label="Cancel AI response"
+                  disabled={!isAiResponding}
+                >
+                  <Cross2Icon />
+                </IconButton>
+              </AppTooltip>
+            ) : (
+              <AppTooltip
+                content={
+                  isAiResponding ? 'AI is responding...' : 'Send message'
                 }
               >
-                {isAiResponding || isModelLoading ? (
-                  <Spinner size="1" />
-                ) : (
-                  <PaperPlaneIcon />
-                )}
-              </IconButton>
-            </AppTooltip>
-          )}
-        </Flex>
-        {isModelLoading && (
-          <Flex align="center" justify="center" gap="1" mt="1">
-            <Spinner size="1" />
-            <Text size="1" color="gray">
-              {`Loading model${llmStatus?.activeModel && llmStatus.activeModel !== 'default' ? `: ${llmStatus.activeModel}` : ''}…`}
-            </Text>
+                <IconButton
+                  type="button"
+                  variant="solid"
+                  size="2"
+                  onClick={handleSubmitClick}
+                  disabled={sendButtonDisabled}
+                  aria-label={
+                    isAiResponding ? 'AI is responding' : 'Send message'
+                  }
+                >
+                  {isAiResponding ? <Spinner size="1" /> : <PaperPlaneIcon />}
+                </IconButton>
+              </AppTooltip>
+            )}
           </Flex>
         )}
         {inputError && (

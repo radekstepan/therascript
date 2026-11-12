@@ -257,7 +257,9 @@ button[class*='rt-IconButton'] {
   font-weight: 600;
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.15);
 }
-[class*='rt-Button']:where(.rt-variant-solid):where(:active:not([data-disabled])) {
+[class*='rt-Button']:where(.rt-variant-solid):where(
+    :active:not([data-disabled])
+  ) {
   transform: scale(0.985);
 }
 [class*='rt-IconButton'] {
@@ -525,7 +527,10 @@ button[class*='rt-IconButton']:not(:disabled):hover {
 
 /* --- Radix ScrollArea overflow prevention --- */
 /* Prevent ScrollArea content from expanding horizontally beyond the viewport in vertical-only scroll areas */
-.rt-ScrollAreaViewport:not(:has(.rt-ScrollAreaScrollbar[data-orientation='horizontal'])) > * {
+.rt-ScrollAreaViewport:not(
+    :has(.rt-ScrollAreaScrollbar[data-orientation='horizontal'])
+  )
+  > * {
   max-width: 100%;
   width: 100% !important;
 }
@@ -606,3 +611,21 @@ button[class*='rt-IconButton']:not(:disabled):hover {
 }
 /* --- End verified statement highlights --- */
 
+/* Chat input fade-in: the input row replaces the model state panel once
+   the model is ready; a short rise keeps the swap from snapping. */
+.chat-input-fade-in {
+  animation: chat-input-fade-in 0.2s ease-out 1;
+}
+
+@keyframes chat-input-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-input-fade-in {
+    animation: none;
+  }
+}
