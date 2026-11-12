@@ -79,14 +79,14 @@ test.describe('Jobs queue modal verification jobs', () => {
     await expect(
       dialog.getByRole('heading', { name: 'Verification Jobs (1)' })
     ).toBeVisible();
-    const card = dialog.locator('.rt-Card', {
-      has: dialog.getByText('Audit #7: all unverified'),
-    });
-    await expect(card).toBeVisible();
-    await expect(card.getByText('processing', { exact: true })).toBeVisible();
-    await expect(card.getByText(/Processed: 4 \/ 10 messages/)).toBeVisible();
+    // The audit row is a clickable Card; locate by its title text rather
+    // than a CSS class so Radix internals can't silently break this.
+    const auditRow = dialog.getByText('Audit #7: all unverified');
+    await expect(auditRow).toBeVisible();
+    await expect(dialog.getByText('processing', { exact: true })).toBeVisible();
+    await expect(dialog.getByText(/Processed: 4 \/ 10 messages/)).toBeVisible();
 
-    await card.click();
+    await auditRow.click();
     await expect(page).toHaveURL(/\/verification$/);
   });
 });

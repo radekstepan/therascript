@@ -223,6 +223,10 @@ test.describe.serial('/api/llm/status response contract', () => {
     await expect(unloadButton).toBeVisible();
     await unloadButton.click();
 
+    // Dismiss the dialog: Radix hides the background app (aria-hidden)
+    // while modal, so role queries can't reach the state panel beneath.
+    await page.keyboard.press('Escape');
+
     // ---- 3. The next status poll must be 200 with loaded: false -------
     const status = await waitForStatusOk(page);
     expect(status.loaded).toBe(false);
@@ -236,14 +240,24 @@ test.describe.serial('/api/llm/status response contract', () => {
     expect(status.details).toBeNull();
 
     // The Unload mutation invalidates the status query, the callout
-    // disappears, and the form re-enables. Verify the chat input
-    // is now disabled (no model loaded).
-    await expect(chatInput).toBeDisabled();
+    // disappears, and the form re-enables. The chat input is replaced
+    // by the model state panel until a model is loaded again. Both the
+    // side-by-side and tabbed-layout ChatInterface copies render — pin
+    // the visible one like the chat-input assertions do.
+    const statePanel = page
+      .locator('[data-testid="model-state-panel"]:visible')
+      .first();
+    await expect(statePanel).toBeVisible();
+    await expect(
+      statePanel.getByRole('button', { name: 'Configure AI Model' })
+    ).toBeVisible();
 
     // ---- 4. The header says so outright -------------------------------
-    // The configured name is still shown, but with an explicit
-    // "Not loaded" badge — never the calm loaded display.
-    await expect(page.getByText(SELECTED_LOCAL_MODEL).first()).toBeVisible();
+    // The header only shows the model name while actually loaded
+    // (honest loaded tracking), so after unload the name is gone and
+    // the LlmStatusBadge shows "Not loaded" — never the calm loaded
+    // display.
+    await expect(page.getByText(SELECTED_LOCAL_MODEL)).toHaveCount(0);
     await expect(page.getByText('Not loaded').first()).toBeVisible();
   });
 
@@ -292,14 +306,18 @@ test.describe.serial('/api/llm/status response contract', () => {
     expect(status.activeModel).toBe(SELECTED_LOCAL_MODEL);
     expect(status.actualLoadedModel).toBe('mistral-7b-local');
 
-    // User-visible: the mismatch names the stranger, and the input
-    // stays disabled until the configured model is actually loaded.
+    // User-visible: the mismatch names the stranger, and the state
+    // panel replaces the input until the configured model is loaded.
     await expect(
       page.getByRole('img', {
         name: `Server holds mistral-7b-local instead of ${SELECTED_LOCAL_MODEL}`,
       })
     ).toBeVisible();
-    await expect(chatInput).toBeDisabled();
+    const mismatchPanel = page
+      .locator('[data-testid="model-state-panel"]:visible')
+      .first();
+    await expect(mismatchPanel).toBeVisible();
+    await expect(mismatchPanel.getByText('Wrong model loaded')).toBeVisible();
   });
 
   test('status reports unreachable when the server stops responding', async ({
@@ -345,6 +363,12 @@ test.describe.serial('/api/llm/status response contract', () => {
     await expect(
       page.getByRole('img', { name: 'LLM server unreachable' })
     ).toBeVisible();
-    await expect(chatInput).toBeDisabled();
+    const unreachablePanel = page
+      .locator('[data-testid="model-state-panel"]:visible')
+      .first();
+    await expect(unreachablePanel).toBeVisible();
+    await expect(
+      unreachablePanel.getByText('LLM server unreachable')
+    ).toBeVisible();
   });
 });

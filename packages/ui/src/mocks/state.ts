@@ -474,10 +474,37 @@ export interface E2EVerificationJob {
   llm_base_url: string | null;
 }
 
+// Injected per-spec via POST /api/__e2e/set-verification-jobs. Like the
+// fact-check fixtures above, the list lives in `localStorage`: MSW v2
+// resolves handlers in the page realm, so a full document load
+// (`page.goto`) wipes module state seeded before the navigation.
+// `localStorage` survives navigations and is cleared by `e2eMockSeed`
+// (POST /api/__e2e/reset). Defaults to empty.
+const E2E_VERIFICATION_JOBS_KEY = 'e2e:verification-jobs';
+
 export let e2eVerificationJobs: E2EVerificationJob[] = [];
+
+export const readE2eVerificationJobs = (): E2EVerificationJob[] => {
+  try {
+    if (typeof localStorage === 'undefined') return [...e2eVerificationJobs];
+    const raw = localStorage.getItem(E2E_VERIFICATION_JOBS_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as E2EVerificationJob[]) : [];
+  } catch {
+    return [];
+  }
+};
 
 export const setE2eVerificationJobs = (next: E2EVerificationJob[]) => {
   e2eVerificationJobs = next;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(E2E_VERIFICATION_JOBS_KEY, JSON.stringify(next));
+    }
+  } catch {
+    // Ignore — unavailable storage keeps the in-memory default.
+  }
 };
 
 export type E2EAnalysisJobStatus =

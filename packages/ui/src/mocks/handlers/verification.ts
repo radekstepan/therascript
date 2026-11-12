@@ -16,7 +16,7 @@
 import { http, HttpResponse } from 'msw';
 import type { VerificationGlobalStats } from '../../api/verification';
 import {
-  e2eVerificationJobs,
+  readE2eVerificationJobs,
   readFactCheckStatements,
   readFactCheckVerifications,
   writeFactCheckVerifications,
@@ -114,7 +114,7 @@ const STATS_FIXTURE: VerificationGlobalStats = {
 
 export const verificationHandlers = [
   http.get('/api/verification/jobs', () =>
-    HttpResponse.json(e2eVerificationJobs)
+    HttpResponse.json(readE2eVerificationJobs())
   ),
   http.get('/api/verification/jobs/:jobId/failures', ({ params }) =>
     HttpResponse.json({

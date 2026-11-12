@@ -17,6 +17,7 @@ import { systemHandlers } from './system';
 import { templatesHandlers } from './templates';
 import { transcriptionHandlers } from './transcription';
 import { usageHandlers } from './usage';
+import { vaultHandlers } from './vault';
 import { verificationHandlers } from './verification';
 
 export const handlers = [
@@ -47,6 +48,9 @@ export const handlers = [
   ...verificationHandlers,
   // 12. Readiness: must be late because most pages fire it on mount.
   ...readinessHandlers,
+  // 12b. Vault status: the App gate blocks all routes until the first
+  //     fetch succeeds — mock legacy-fallback so E2E skips the gate.
+  ...vaultHandlers,
   // 13. e2e test hooks: register last so production code never hits
   //     them; if a real /api/__e2e/* path is added to production,
   //     these no-op endpoints would shadow it.

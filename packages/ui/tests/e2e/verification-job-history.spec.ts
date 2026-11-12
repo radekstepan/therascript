@@ -75,7 +75,9 @@ test.describe('Verification job history failures', () => {
     await page.getByRole('tab', { name: 'Job history' }).click();
 
     // Mixed outcome: never unqualified success.
-    await expect(page.getByText('Completed with errors')).toBeVisible();
+    await expect(
+      page.getByText('Completed with errors', { exact: true })
+    ).toBeVisible();
     await expect(page.getByText('2 checked · 1 failed')).toBeVisible();
 
     // The banner's "View details" button also contains "View" — match

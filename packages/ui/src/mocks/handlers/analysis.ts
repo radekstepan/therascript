@@ -217,6 +217,26 @@ export const analysisHandlers = [
     });
   }),
 
+  // GET /api/analysis-jobs/:jobId — generic detail for jobs served
+  // from `e2eAnalysisJobs` (e.g. id 100 used by cancel-icons.spec.ts).
+  // Registered after the hardcoded /1 handlers above so job 1 keeps
+  // its streaming-flow fixture. Returns the JobDetail shape with the
+  // parsed strategy and no per-session summaries.
+  http.get('/api/analysis-jobs/:jobId', ({ params }) => {
+    const id = parseInt(params.jobId as string, 10);
+    const job = e2eAnalysisJobs.find((j) => j.id === id);
+    if (!job) {
+      return HttpResponse.json({ error: 'Job not found' }, { status: 404 });
+    }
+    let strategy: unknown = null;
+    try {
+      strategy = JSON.parse(job.strategy_json);
+    } catch {
+      strategy = null;
+    }
+    return HttpResponse.json({ ...job, summaries: [], strategy });
+  }),
+
   // GET /api/analysis-jobs — list view. The union of
   // `e2eAnalysisJobs` (analysis-jobs.spec.ts) and `mockAnalysisJob`
   // (the deep-analysis spec) is served here. The deep-analysis

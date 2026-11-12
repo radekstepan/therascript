@@ -42,14 +42,16 @@ test.describe('Verification accuracy chart tooltips', () => {
     await chart.locator('g[data-date="2026-06-20"]').hover();
     const tooltip = page.getByRole('tooltip');
     await expect(tooltip).toBeVisible();
-    await expect(tooltip).toContainText([
+    for (const text of [
       '2026-06-20',
       '83.3% accuracy',
       '3 messages audited',
       '0 fabricated',
       '1 contradicted',
       '0 omitted',
-    ]);
+    ]) {
+      await expect(tooltip).toContainText(text);
+    }
     await expect(tooltip).not.toContainText('2026-06-19');
   });
 
@@ -60,14 +62,16 @@ test.describe('Verification accuracy chart tooltips', () => {
     await chart.locator('g[data-date="2026-06-22"]').hover();
     const tooltip = page.getByRole('tooltip');
     await expect(tooltip).toBeVisible();
-    await expect(tooltip).toContainText([
+    for (const text of [
       '2026-06-22',
       '90.0% accuracy',
       '5 messages audited',
       '1 fabricated',
       '1 contradicted',
       '0 omitted',
-    ]);
+    ]) {
+      await expect(tooltip).toContainText(text);
+    }
     await expect(tooltip).not.toContainText('2026-06-20');
   });
 
@@ -78,10 +82,12 @@ test.describe('Verification accuracy chart tooltips', () => {
     await chart.locator('g[data-date="2026-06-21"]').focus();
     const tooltip = page.getByRole('tooltip');
     await expect(tooltip).toBeVisible();
-    await expect(tooltip).toContainText([
+    for (const text of [
       '2026-06-21',
       '100.0% accuracy',
       '1 messages audited',
-    ]);
+    ]) {
+      await expect(tooltip).toContainText(text);
+    }
   });
 });

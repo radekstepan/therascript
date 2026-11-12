@@ -455,7 +455,10 @@ export function LandingPage() {
                 </Button>
                 {/* --- END FIX --- */}
               </Flex>
-              <Box className="flex-grow flex flex-col overflow-hidden">
+              <Box
+                className="flex-grow flex flex-col overflow-hidden"
+                style={{ minHeight: '200px' }}
+              >
                 {sortedSessions.length === 0 ? (
                   <Flex flexGrow="1" align="center" justify="center" p="6">
                     <Text color="gray">
